@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { App, Dispose, OpInput, Plugin, PluginHost, SettingValue } from "../../src/web/plugin-api.ts";
-import { createPluginHost, type Host, type HostOptions } from "../../src/web/pluginHost.ts";
+import { createPluginHost, type Host, type HostOptions, type Installed } from "../../src/web/pluginHost.ts";
 import { onPlatform } from "../../src/web/keybindings.ts";
 import { html as htmlPlugin } from "../../src/web/plugins/html/index.ts";
 import { todos } from "../../src/web/plugins/todos/index.tsx";
@@ -222,7 +222,7 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.toggle.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, installed: false, inPage: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
   });
 
   it("says which plugins came with the app, and no others", () => {
@@ -851,6 +851,25 @@ describe("what is the host's and the required plugins' to have", () => {
     expect(ids()).toEqual(["settings.open", "note.new", "go.todos", "plugins.toggle.notes"]);
     expect(errorOf(host, "notes")).toBeNull();
   });
+
+  it("lets only a plugin that is Common Ink's own add the page shown at /, and leaves out any other that tries", () => {
+    const dashboard: Plugin = { id: "dashboard", name: "Dashboard", activate: (h) => void h.views.register("page", { id: "dashboard", path: "/dashboard", label: "Dashboard", home: true, component: View }) };
+    const usurper: Plugin = {
+      id: "usurper",
+      name: "Usurper",
+      activate(h) {
+        h.commands.register({ id: "usurper.fine", title: "Fine", run: () => {} });
+        h.views.register("page", { id: "mine", path: "/mine", label: "Mine", home: true, component: View });
+      },
+    };
+    const { host, ids } = hostWith([usurper, dashboard, pages], { required: ["pages"], trusted: [dashboard, pages] });
+
+    expect(host.contributions().views.page.filter((p) => p.home).map((p) => p.id)).toEqual(["dashboard"]);
+    expect(errorOf(host, "usurper")).toBe("Only Common Ink's own plugins add the page shown at /, and Usurper asked to with /mine");
+    expect(errorOf(host, "dashboard")).toBeNull();
+    expect(ids()).not.toContain("usurper.fine");
+    expect(ids()).not.toContain("go.mine");
+  });
 });
 
 describe("keybindings, as settings", () => {
@@ -1130,6 +1149,282 @@ describe("what the host says of each plugin", () => {
       ["keybindings.commands.show", false],
       ["keybindings.plugins.toggle.reader", false],
       ["keybindings.plugins.toggle.palette", false],
+    ]);
+  });
+});
+
+describe("the plugins a workspace installed, which change while the app runs", () => {
+  const View = () => null;
+  const stopped: string[] = [];
+  const third = (id: string, name: string, version = "1"): Installed => ({
+    version,
+    plugin: {
+      id,
+      name,
+      enabledByDefault: false,
+      settings: { unit: { type: "string", default: "words", title: "Unit" } },
+      activate(host) {
+        host.commands.register({ id: `${id}.count`, title: `${name}: Count (${version})`, run: () => {} });
+        host.views.register("inspector", { id: `${id}.panel`, for: ["note"], label: name, icon: "info", component: View });
+        host.embeds.register({ name: `x-${id}`, title: name, render: () => {} });
+        return () => void stopped.push(`${name} ${version}`);
+      },
+    },
+  });
+  const core: Plugin = { id: "core", name: "Core", activate: (host) => void host.commands.register({ id: "note.new", title: "New note", run: () => {} }) };
+  const last: Plugin = { id: "pages", name: "Pages", activate: (host) => void host.views.register("inspector", { id: "info", for: ["note"], label: "Info", icon: "info", component: View }) };
+  const on = (...ids: string[]) => Object.fromEntries(ids.map((id) => [`${id}.enabled`, true]));
+
+  it("leaves an installed plugin off until the member turns it on, and lists it as installed with its options", () => {
+    const { host, ids, wrote } = hostWith([core, last], { required: ["core"] });
+    host.setInstalled([third("aaaaaaaaaaaa", "Counter")]);
+
+    expect(ids()).toEqual(["note.new", "inspector.info", "plugins.toggle.pages", "plugins.toggle.aaaaaaaaaaaa"]);
+    expect(host.contributions().plugins.map((p) => [p.id, p.enabled, p.installed])).toEqual([
+      ["core", true, false],
+      ["pages", true, false],
+      ["aaaaaaaaaaaa", false, true],
+    ]);
+    expect(host.contributions().settings.declared.filter((d) => d.group.id === "aaaaaaaaaaaa").map((d) => [d.key, d.active])).toEqual([
+      ["aaaaaaaaaaaa.enabled", true],
+      ["aaaaaaaaaaaa.unit", false],
+    ]);
+
+    wrote(on("aaaaaaaaaaaa"));
+    expect(ids()).toEqual(["note.new", "inspector.info", "aaaaaaaaaaaa.count", "inspector.aaaaaaaaaaaa.panel", "plugins.toggle.pages", "plugins.toggle.aaaaaaaaaaaa"]);
+  });
+
+  it("puts what installed plugins add after everything that comes with the app, in the order they were installed", () => {
+    const { host } = hostWith([core, last], { settings: on("aaaaaaaaaaaa", "bbbbbbbbbbbb") });
+    host.settingsChanged(on("aaaaaaaaaaaa", "bbbbbbbbbbbb"));
+    host.setInstalled([third("aaaaaaaaaaaa", "Counter"), third("bbbbbbbbbbbb", "Gauge")]);
+
+    expect(host.contributions().views.inspector.map((v) => v.id)).toEqual(["info", "aaaaaaaaaaaa.panel", "bbbbbbbbbbbb.panel"]);
+    expect(host.contributions().embeds.map((e) => e.name)).toEqual(["x-aaaaaaaaaaaa", "x-bbbbbbbbbbbb"]);
+  });
+
+  it("stops a plugin that is no longer installed and takes out all it added, and leaves the others running as they were", () => {
+    stopped.length = 0;
+    const { host, ids } = hostWith([core, last]);
+    host.settingsChanged(on("aaaaaaaaaaaa", "bbbbbbbbbbbb"));
+    const weather = third("bbbbbbbbbbbb", "Gauge");
+    host.setInstalled([third("aaaaaaaaaaaa", "Counter"), weather]);
+    const before = host.contributions().views.inspector.find((v) => v.id === "bbbbbbbbbbbb.panel");
+
+    // The record read again says the same of Gauge, in a value made anew.
+    host.setInstalled([third("bbbbbbbbbbbb", "Gauge")]);
+
+    expect(stopped).toEqual(["Counter 1"]);
+    expect(ids()).toEqual(["note.new", "inspector.info", "bbbbbbbbbbbb.count", "inspector.bbbbbbbbbbbb.panel", "plugins.toggle.core", "plugins.toggle.pages", "plugins.toggle.bbbbbbbbbbbb"]);
+    expect(host.contributions().views.inspector.map((v) => v.id)).toEqual(["info", "bbbbbbbbbbbb.panel"]);
+    expect(host.contributions().views.inspector.find((v) => v.id === "bbbbbbbbbbbb.panel"), "the same view, not one made again").toBe(before);
+    expect(host.contributions().embeds.map((e) => e.name)).toEqual(["x-bbbbbbbbbbbb"]);
+    expect(host.run("aaaaaaaaaaaa.count")).toBe(false);
+    expect(host.contributions().plugins.map((p) => p.id)).toEqual(["core", "pages", "bbbbbbbbbbbb"]);
+  });
+
+  it("starts a plugin again when its version changed, and tells whoever is listening", () => {
+    stopped.length = 0;
+    const { host } = hostWith([core, last]);
+    host.settingsChanged(on("aaaaaaaaaaaa"));
+    host.setInstalled([third("aaaaaaaaaaaa", "Counter")]);
+    let told = 0;
+    host.subscribe(() => told++);
+
+    host.setInstalled([third("aaaaaaaaaaaa", "Counter", "2")]);
+
+    expect(stopped).toEqual(["Counter 1"]);
+    expect(host.contributions().commands.find((c) => c.id === "aaaaaaaaaaaa.count")?.title).toBe("Counter: Count (2)");
+    expect(told).toBeGreaterThan(0);
+    told = 0;
+    host.setInstalled([third("aaaaaaaaaaaa", "Counter", "2")]);
+    expect(told, "nothing changed, so nothing is said").toBe(0);
+    expect(stopped).toEqual(["Counter 1"]);
+  });
+
+  /** One of the app's own that runs shut off, as the app says of it: nothing in the plugin itself says so. */
+  const own = (id: string, name: string, after?: string): Installed => ({
+    version: "1",
+    origin: "own",
+    after,
+    plugin: {
+      id,
+      name,
+      activate(host) {
+        host.commands.register({ id: `${id}.go`, title: `${name}: go`, run: () => {} });
+        host.views.register("bar", { id, component: View });
+      },
+    },
+  });
+
+  it("runs one of the app's own that is shut off as a built-in in its old place, on from the start, and hands it no more than a workspace's plugin", async () => {
+    const first: Plugin = { id: "sharing", name: "Sharing", activate: (host) => void host.commands.register({ id: "sharing.share", title: "Share", run: () => {} }) };
+    const { host, ids, performed } = hostWith([core, first, last], { required: ["core"], builtIn: ["core", "sharing", "pages"] });
+    let handed: PluginHost | undefined;
+    const backlinks = own("backlinks", "Backlinks", "sharing");
+    host.setInstalled([{ ...backlinks, plugin: { ...backlinks.plugin, activate: (h) => (backlinks.plugin.activate(h), void (handed = h)) } }, third("aaaaaaaaaaaa", "Counter")]);
+
+    const states = host.contributions().plugins;
+    expect(states.map((p) => [p.id, p.builtIn, p.installed, p.enabled, p.error])).toEqual([
+      ["core", true, false, true, null],
+      ["sharing", true, false, true, null],
+      ["backlinks", true, false, true, null],
+      ["pages", true, false, true, null],
+      ["aaaaaaaaaaaa", false, true, false, null],
+    ]);
+    // Its command is where Backlinks' was: after Sharing's and before the next plugin's.
+    expect(ids().filter((id) => !id.startsWith("plugins."))).toEqual(["note.new", "sharing.share", "backlinks.go", "inspector.info"]);
+    // The name is one of the app's own, which stops a workspace's plugin and not the app's.
+    expect(states.find((p) => p.id === "backlinks")!.adds?.views).toEqual([{ slot: "bar", id: "backlinks", label: null }]);
+    await expect(handed!.members.invite("mallory@example.com", "admin")).rejects.toThrow("Backlinks isn't given host.members.invite");
+    await expect(handed!.agents.connect("Robot", {})).rejects.toThrow("isn't given host.agents.connect");
+    await expect(handed!.sharing.link({ noteId: "n" }, "public")).rejects.toThrow("isn't given host.sharing.link");
+    await expect(handed!.perform({ type: "plugin.list" })).rejects.toThrow("a workspace's record of its plugins is read only by Common Ink's own plugins");
+    await expect(handed!.perform({ type: "upload.list" } as never)).rejects.toThrow("only by Common Ink's own plugins");
+    await expect(handed!.perform({ type: "settings.read" } as never)).rejects.toThrow("can't read or change the member's settings");
+    expect(() => handed!.views.register("page", { id: "home", path: "/home", label: "Home", home: true, component: View })).toThrow("Only Common Ink's own plugins add the page shown at /");
+    expect(performed).toEqual([]);
+  });
+
+  it("says a plugin came with the app only when the app said so: a workspace's plugin is never a built-in by its id, its name, or being listed twice", () => {
+    const { host } = hostWith([core, last], { required: ["core"], builtIn: ["core", "pages"] });
+    host.settingsChanged(on("backlinks", "word-count", "quick-timer"));
+    // What a record could be made to say: plugins with the ids and names of the app's own, with no origin the app gave.
+    host.setInstalled([own("backlinks", "Backlinks"), third("backlinks", "Backlinks"), third("word-count", "Word count"), third("quick-timer", "Quick Timer")]);
+
+    const states = host.contributions().plugins.filter((p) => p.id !== "core" && p.id !== "pages");
+    expect(states.map((p) => [p.id, p.builtIn, p.installed, p.error])).toEqual([
+      ["backlinks", true, false, null],
+      ["word-count", false, true, "Its name is one of Common Ink's own, or reads as one"],
+      ["quick-timer", false, true, "Its name is one of Common Ink's own, or reads as one"],
+    ]);
+    expect(host.contributions().commands.map((c) => c.id).filter((id) => /count|timer/.test(id))).toEqual([]);
+  });
+
+  it("never lets an installed plugin take the place of one that comes with the app, by taking its id", () => {
+    const { host, ids } = hostWith([core, last], { required: ["core"] });
+    host.settingsChanged(on("core", "pages"));
+    host.setInstalled([third("core", "Impostor"), third("pages", "Second impostor")]);
+
+    expect(host.contributions().plugins.map((p) => p.name)).toEqual(["Core", "Pages"]);
+    expect(ids()).toEqual(["note.new", "inspector.info", "plugins.toggle.pages"]);
+  });
+
+  it("won't start an installed plugin named as one of Common Ink's own is, whatever its case and the space around it, and says why whether it is on or off", () => {
+    const TAKEN = "Its name is one of Common Ink's own, or reads as one";
+    const offByDefault: Plugin = { id: "vim", name: "Vim", enabledByDefault: false, activate: () => {} };
+    const { host, ids, wrote } = hostWith([core, last, offByDefault], { required: ["core"] });
+    const named = ["Pages", "  pAGES ", "vim", "Core", "common ink", "PLUGINS", "Pages 2", "Counter"];
+    host.setInstalled(named.map((name, index) => third(`${"abcdefgh"[index]}aaaaaaaaaaa`, name)));
+    const errors = () => host.contributions().plugins.filter((p) => p.installed).map((p) => [p.name, p.error]);
+    const expected = [
+      ["Pages", TAKEN],
+      ["  pAGES ", TAKEN],
+      ["vim", TAKEN],
+      ["Core", TAKEN],
+      ["common ink", TAKEN],
+      ["PLUGINS", TAKEN],
+      ["Pages 2", null],
+      ["Counter", null],
+    ];
+
+    expect(errors(), "while they are off").toEqual(expected);
+    wrote(on(..."abcdefgh".split("").map((letter) => `${letter}aaaaaaaaaaa`)));
+    expect(errors(), "once they are on").toEqual(expected);
+    expect(ids().filter((id) => id.endsWith(".count"))).toEqual(["gaaaaaaaaaaa.count", "haaaaaaaaaaa.count"]);
+
+
+    expect(host.contributions().embeds.map((e) => e.name)).toEqual(["x-gaaaaaaaaaaa", "x-haaaaaaaaaaa"]);
+    // Nor is there a command that reads as turning one of the app's own on or off.
+    expect(host.contributions().commands.map((c) => c.title).filter((title) => /plugin: /.test(title))).toEqual(["Disable plugin: Pages", "Enable plugin: Vim", "Disable plugin: Pages 2", "Disable plugin: Counter"]);
+
+    // Letters of another alphabet that are drawn as these are, and a digit for a letter, are no way around it: Cyrillic Р and а, Greek Ρ, a zero.
+    host.setInstalled(["Раges", "Ρages", "C0re", "V\u200Bim"].map((name, index) => third(`${"jkmn"[index]}aaaaaaaaaaa`, name)));
+    expect(host.contributions().plugins.filter((p) => p.installed).map((p) => p.error)).toEqual([TAKEN, TAKEN, TAKEN, TAKEN]);
+  });
+
+  it("keeps embed names apart: an installed plugin's start with x-, and none that comes with the app does", () => {
+    const timer: Plugin = { id: "timer", name: "Timer", activate: (h) => void h.embeds.register({ name: "timer", title: "Timer", render: () => {} }) };
+    const reaching: Plugin = { id: "reaching", name: "Reaching", activate: (h) => void h.embeds.register({ name: "x-counter", title: "Reaching", render: () => {} }) };
+    const squatter = (name: string): Installed => ({ version: "1", plugin: { id: "aaaaaaaaaaaa", name: "Squatter", enabledByDefault: false, activate: (h) => void h.embeds.register({ name, title: "Timer", render: () => {} }) } });
+    // The built-in Timer is off, so nothing else holds the name.
+    const { host } = hostWith([timer, reaching], { trusted: [timer, reaching], settings: { "timer.enabled": false, ...on("aaaaaaaaaaaa") } });
+    host.settingsChanged({ "timer.enabled": false, ...on("aaaaaaaaaaaa") });
+    const errorOf = (id: string) => host.contributions().plugins.find((p) => p.id === id)!.error;
+
+    host.setInstalled([squatter("timer")]);
+    expect(errorOf("aaaaaaaaaaaa")).toBe("An installed plugin's embed has a name that starts with x-, and this one is timer");
+    expect(host.contributions().embeds).toEqual([]);
+
+    host.setInstalled([{ ...squatter("x-timer"), version: "2" }]);
+    expect(errorOf("aaaaaaaaaaaa")).toBeNull();
+    expect(host.contributions().embeds.map((e) => e.name)).toEqual(["x-timer"]);
+    expect(errorOf("reaching")).toBe("Only an installed plugin's embed has a name that starts with x-, and this one is x-counter");
+  });
+
+  it("hands a workspace's plugin what the app's own are only when the app's runtime says it runs in the page, and never by anything the plugin says of itself", async () => {
+    const hosts = new Map<string, PluginHost>();
+    const { host, performed } = hostWith([], { settings: { ...on("aaaaaaaaaaaa"), ...on("bbbbbbbbbbbb") } });
+    host.settingsChanged({ ...on("aaaaaaaaaaaa"), ...on("bbbbbbbbbbbb") });
+    const atItsAddress: OpInput[] = [];
+    const claims = { inPage: { perform: async () => ({}) }, runs: "full-trust", origin: "own", trusted: true };
+    host.setInstalled([
+      { version: "1", plugin: { id: "aaaaaaaaaaaa", name: "Deep", enabledByDefault: false, activate: (h) => void hosts.set("deep", h) }, inPage: { perform: async (op) => (atItsAddress.push(op as OpInput), {}) as never } },
+      { version: "1", plugin: { id: "bbbbbbbbbbbb", name: "Pretender", enabledByDefault: false, ...claims, activate: (h: PluginHost) => void hosts.set("pretender", h) } as never },
+    ]);
+    expect(host.contributions().plugins.map((p) => [p.id, p.installed, p.builtIn, p.inPage])).toEqual([
+      ["aaaaaaaaaaaa", true, false, true],
+      ["bbbbbbbbbbbb", true, false, false],
+    ]);
+    const deep = hosts.get("deep")!;
+    const pretender = hosts.get("pretender")!;
+    // The one in the page performs at its own address, uploads and the record included, and is handed the members, sharing and agents the app's own are.
+    await deep.perform({ type: "upload.list" } as never);
+    await deep.perform({ type: "plugin.list" });
+    expect(atItsAddress.map((op) => op.type)).toEqual(["upload.list", "plugin.list"]);
+    await expect(deep.members.invite("grace@example.com", "editor")).resolves.toEqual({});
+    expect(deep.uploads.address("u1")).toBe("/files/u1");
+    expect(performed, "nothing of its own choosing went as the member's own").toEqual([]);
+    // What is every plugin's to be refused, it is refused too, and whose it is said to be doesn't change.
+    await expect(deep.perform({ type: "settings.read" } as never)).rejects.toThrow("can't read or change the member's settings");
+    await expect(deep.perform({ type: "plugin.permit", id: "aaaaaaaaaaaa", capability: "full-trust", allowed: true } as never)).rejects.toThrow("is decided on the Plugins page");
+    expect(() => deep.views.register("page", { id: "home", path: "/home", label: "Home", home: true, component: () => null })).toThrow("Only Common Ink's own plugins add the page shown at /");
+    expect(() => deep.embeds.register({ name: "timer", title: "Timer", component: () => null } as never)).toThrow("An installed plugin's embed has a name that starts with x-");
+    // One that only says so is handed what any workspace's plugin is.
+    await expect(pretender.members.invite("mallory@example.com", "admin")).rejects.toThrow("Pretender isn't given host.members.invite");
+    await expect(pretender.perform({ type: "upload.list" } as never)).rejects.toThrow("only by Common Ink's own plugins");
+    expect(pretender.uploads.address("u1")).toBe("about:blank");
+    expect(performed).toEqual([]);
+  });
+
+  it("refuses an installed plugin the record of plugins whole, and every plugin the operations that change it", async () => {
+    const hosts = new Map<string, PluginHost>();
+    const own: Plugin = { id: "html", name: "HTML embeds", activate: (h) => void hosts.set("own", h) };
+    const { host, performed } = hostWith([own], { trusted: [own], settings: on("aaaaaaaaaaaa") });
+    host.settingsChanged(on("aaaaaaaaaaaa"));
+    host.setInstalled([{ version: "1", plugin: { id: "aaaaaaaaaaaa", name: "Greedy", enabledByDefault: false, activate: (h) => void hosts.set("theirs", h) } }]);
+    const as = (who: string) => hosts.get(who)!.perform as unknown as (op: OpInput) => Promise<unknown>;
+    const changing: OpInput[] = [
+      { type: "plugin.install", manifest: "{}", code: "" },
+      { type: "plugin.uninstall", id: "aaaaaaaaaaaa" },
+      { type: "plugin.permit", id: "aaaaaaaaaaaa", capability: "notes.write", allowed: true },
+      { type: "plugin.request", id: "aaaaaaaaaaaa", capability: "notes.write" },
+      { type: "plugin.read", id: "bbbbbbbbbbbb" },
+    ];
+
+    for (const op of changing) {
+      await expect(as("theirs")(op), `theirs ${op.type}`).rejects.toThrow(`Greedy can't ${op.type}: which plugins a workspace has, and what they are permitted, is decided on the Plugins page`);
+      await expect(as("own")(op), `own ${op.type}`).rejects.toThrow(`HTML embeds can't ${op.type}: which plugins a workspace has, and what they are permitted, is decided on the Plugins page`);
+    }
+    for (const op of [{ type: "plugin.list" }, { type: "plugin.frame", id: "html" }] as OpInput[])
+      await expect(as("theirs")(op)).rejects.toThrow(`Greedy can't ${op.type}: a workspace's record of its plugins is read only by Common Ink's own plugins`);
+    expect(performed).toEqual([]);
+
+    await as("own")({ type: "plugin.list" });
+    await as("own")({ type: "plugin.frame", id: "html" });
+    expect(performed).toEqual([
+      ["html", "plugin.list"],
+      ["html", "plugin.frame"],
     ]);
   });
 });

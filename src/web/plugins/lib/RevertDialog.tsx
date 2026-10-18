@@ -36,7 +36,7 @@ type Picked = Choice | "edit";
 /** The lines a choice leaves, each without its line end. Typed text is read as the server reads it, so lines joined by line ends come back as the same lines. */
 const leaves = (conflict: RevertConflict, choice: Choice) => (choice === "keep" ? conflict.kept : choice === "back" ? conflict.before : choice.text ? choice.text.split("\n") : []);
 
-const nameOf = (author: Author) => (author.kind === "agent" ? `${author.name} (agent)` : author.name);
+const nameOf = (author: Author) => (author.kind !== "member" ? `${author.name} (${author.kind})` : author.name);
 
 function Lines({ lines }: { lines: string[] }) {
   if (!lines.length) return <span className="conflict-none">No line here</span>;

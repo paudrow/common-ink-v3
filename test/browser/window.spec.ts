@@ -337,7 +337,7 @@ test("the tab row has its tabs and Focus and no button for either side, whose co
   await expect(sidebar(page)).toHaveCount(0);
   await toggleInspector(page);
   await expect(inspector(page)).toHaveCount(0);
-  await expect.poll(() => controls(page.getByRole("navigation", { name: "Inspector bar" }))).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(() => controls(page.getByRole("navigation", { name: "Inspector bar" }))).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await toggleInspector(page);
   await expect(inspector(page)).toBeVisible();
 });
@@ -631,7 +631,7 @@ test("a closed sidebar leaves a bar with an icon for each thing the sidebar list
 
   // More lists the rest in the bar as it does in the sidebar, between Calendar and Folders.
   await bar.getByRole("button", { name: "More" }).click();
-  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "Less", "Contacts", "Uploads", "History", "Trash", "Plugins", "Folders", "Tags"]);
+  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "Less", "Contacts", "Uploads", "History", "Trash", "Dice", "Plugins", "Folders", "Tags"]);
   await bar.getByRole("button", { name: "Less" }).click();
 
   // Folders shows the folder tree over the page, and the sidebar stays closed.
@@ -657,8 +657,8 @@ test("the inspector's bar has an icon for each panel whatever is in front, with 
   const barAt = await bar.boundingBox();
   await toggleInspector(page);
   await expect(inspector(page)).toHaveCount(0);
-  await expect(bar.getByRole("button")).toHaveCount(3);
-  expect((await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Backlinks", "Info"]);
+  await expect(bar.getByRole("button")).toHaveCount(4);
+  expect((await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await expect(bar.getByRole("button", { name: "Backlinks" })).toHaveAttribute("title", "Backlinks");
   expect(await bar.boundingBox()).toEqual(barAt);
   expect(await widthOf(bar)).toBe(44);
@@ -670,7 +670,7 @@ test("the inspector's bar has an icon for each panel whatever is in front, with 
   await expect(inspector(page).locator(".inspector-body").getByRole("listbox", { name: "Changes" }).getByRole("option")).toHaveCount(1);
   expect(await bar.boundingBox()).toEqual(barAt);
 
-  // A folder's list and a mode have the same three, in the same places.
+  // A folder's list and a mode have the same four, in the same places.
   const icons = await listedIn(bar, "button");
   await page.getByRole("treeitem", { name: "Unsorted" }).click();
   await expect(page.getByRole("tab", { name: "Unsorted" })).toHaveAttribute("aria-selected", "true");

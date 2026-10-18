@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, noteCard, openAllNotes, panelIcons, perform, pinPanel, runCommand, showPanel, shownPanel, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
+import { folderRow, noteCard, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, runCommand, showPanel, shownPanel, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
 
 const tabBar = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group);
 const tabs = (page: Page, group = 0) => tabBar(page, group).getByRole("tab");
@@ -347,7 +347,7 @@ test("the inspector shows the panel last picked on whatever is in front, and say
   await tab(page, "All notes").click();
   await expect(shown()).toHaveText("Backlinks");
   await expect(inspector.locator(".inspector-body")).toHaveText("Nothing to show for this view");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await tab(page, "Beta").click();
   await expect(shown()).toHaveText("Backlinks");
   await tab(page, "Alpha").click();
@@ -615,7 +615,7 @@ for (const [name, splits, panes] of [
     const others = await Promise.all(Array.from({ length: panes }, (_, i) => tabs(page, i).allInnerTexts()));
 
     const pages = await modes(page).getByRole("link").allInnerTexts();
-    expect(pages).toEqual(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Plugins"]);
+    expect(pages).toEqual(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Dice", "Plugins"]);
     const opensThere = async (label: string) => {
       for (let i = 0; i < panes; i++) await expect(tabs(page, i)).toHaveText(i === there ? [label] : others[i]!);
       await expect(group(page, there + 1)).toHaveAttribute("data-focused", "true");
@@ -623,13 +623,18 @@ for (const [name, splits, panes] of [
       await expect.poll(() => previews(page)).toEqual([label]);
       await expect.poll(() => placed(page)).toEqual(before);
     };
-    // Today opens the member's daily note, a note and not a page.
-    for (const label of pages.filter((label) => label !== "Today")) {
+    // Today opens the member's daily note, a note and not a page. Dice is a plugin's page, drawn in a frame, with no heading of the app's.
+    for (const label of pages.filter((label) => label !== "Today" && label !== "Dice")) {
       await modes(page).getByRole("link", { name: label, exact: true }).click();
       await opensThere(label);
       await front();
       await expect.poll(() => placed(page)).toEqual(before);
     }
+    await modes(page).getByRole("link", { name: "Dice", exact: true }).click();
+    await expect(group(page, there + 1)).toHaveAttribute("data-focused", "true");
+    await expect(ownPlugin(page, "Dice").getByRole("button", { name: "Roll" })).toBeVisible();
+    await expect.poll(() => placed(page)).toEqual(before);
+    await front();
 
     // From the command palette, and from a link to the page's address.
     await page.keyboard.press("ControlOrMeta+Shift+P");

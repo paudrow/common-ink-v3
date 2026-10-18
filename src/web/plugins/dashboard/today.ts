@@ -62,7 +62,7 @@ export interface ChangedNote {
   authors: { key: string; author: Author; changes: number }[];
 }
 
-export const authorKey = (author: Author) => (author.kind === "agent" ? `agent:${author.agentId}` : `member:${author.personId}`);
+export const authorKey = (author: Author) => (author.kind === "agent" ? `agent:${author.agentId}` : author.kind === "plugin" ? `plugin:${author.pluginId}` : `member:${author.personId}`);
 
 /** Changes as `history.list` answers them, newest first, summed up by note and by who made them. The note changed latest comes first. */
 export function summarize(changes: readonly HistoryEntry[]): ChangedNote[] {

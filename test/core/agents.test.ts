@@ -188,6 +188,18 @@ describe("MCP protocol", () => {
       "refer_record",
       "read_record",
       "notes_about_record",
+      "list_plugins",
+      "scaffold_plugin",
+      "validate_plugin",
+      "read_plugin",
+      "install_plugin",
+      "uninstall_plugin",
+      "permit_plugin",
+      "request_plugin_permission",
+      "list_drafts",
+      "read_draft",
+      "save_draft",
+      "discard_draft",
       "list_members",
     ]);
     for (const t of list.result.tools) expect(t.inputSchema.type).toBe("object");

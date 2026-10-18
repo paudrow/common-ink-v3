@@ -2,9 +2,9 @@ import { syntaxTree } from "@codemirror/language";
 import { Annotation, EditorState, Facet, Prec, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { aloneIn, aloneOn, boxOf, keptBelow } from "./below.ts";
-import { closeOptions, refreshOptions, toggleOptions, type Options } from "./embedOptions.ts";
+import { closeOptions, declared, refreshOptions, toggleOptions, type Options } from "./embedOptions.ts";
 import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "./embedSyntax.ts";
-import type { AddressEmbed, Drawn, Embed, Embedded } from "./plugin-api.ts";
+import type { AddressEmbed, Drawn, Embed, EmbedOptions, Embedded } from "./plugin-api.ts";
 import { isReading } from "./readOnly.ts";
 
 type ByName = ReadonlyMap<string, Embed>;
@@ -33,11 +33,21 @@ function writtenAt(view: EditorView, el: HTMLElement, block: boolean): Written |
   return inlineIn(line.text, line.from).find((w) => w.from === pos);
 }
 
+/** An embed's options as the host works them: declared ones are read and written by the host, as `id=value` words of the config. */
+const optionsFrom = (embed: Embed): EmbedOptions | undefined => (Array.isArray(embed.options) ? declared(embed.options) : (embed.options as EmbedOptions | undefined));
+
 /** How each options button reads its embed's options now. */
 const optionsOf = new WeakMap<HTMLElement, () => Options | null>();
 
 /** The element an embed draws in, inside the card the host draws around it. */
 const drawingIn = (frame: HTMLElement) => frame.querySelector<HTMLElement>(".embed")!;
+/** The room an embed keeps below its line, where what it shows is, as a third-party plugin's frame is: what its options open beneath. */
+function roomOf(frame: HTMLElement): HTMLElement | null {
+  const next = frame.closest(".cm-line")?.nextElementSibling;
+  // The room's box is the size of what is drawn over it; the room around it has the gaps.
+  return next instanceof HTMLElement && next.classList.contains("embed-below-room") ? (next.querySelector<HTMLElement>("[data-below]") ?? next) : null;
+}
+
 const optionsIn = (frame: HTMLElement) => frame.querySelector<HTMLButtonElement>(".embed-options");
 
 /**
@@ -160,7 +170,7 @@ class EmbedWidget extends WidgetType {
     const { embed, written } = this;
     const fieldsOf = (now: Written) => {
       try {
-        return embed.options?.fields({ config: now.config, body: now.body }) ?? [];
+        return optionsFrom(embed)?.fields({ config: now.config, body: now.body }) ?? [];
       } catch {
         return [];
       }
@@ -177,7 +187,7 @@ class EmbedWidget extends WidgetType {
       made.className = "embed-options";
       made.setAttribute("aria-haspopup", "dialog");
       made.setAttribute("aria-expanded", "false");
-      made.addEventListener("click", () => toggleOptions(made, frame.querySelector<HTMLElement>(".embed-card") ?? frame, () => optionsOf.get(made)?.() ?? null));
+      made.addEventListener("click", () => toggleOptions(made, roomOf(frame) ?? frame.querySelector<HTMLElement>(".embed-card") ?? frame, () => optionsOf.get(made)?.() ?? null));
     }
     button.title = `Options for ${embed.title}`;
     button.setAttribute("aria-label", button.title);
@@ -188,7 +198,7 @@ class EmbedWidget extends WidgetType {
             fields: fieldsOf(now),
             set(id, value) {
               try {
-                const next = embed.options!.set({ config: now.config, body: now.body }, id, value);
+                const next = optionsFrom(embed)!.set({ config: now.config, body: now.body }, id, value);
                 if (typeof next === "string") return next;
                 rewrite(next);
               } catch (err) {

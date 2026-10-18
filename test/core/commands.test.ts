@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advance, bind, chordFor, chordLabel, chordOf, onPlatform, overlap, pressing, typed } from "../../src/web/keybindings.ts";
+import { advance, bind, chordFor, chordLabel, chordOf, chordsForFrames, frameCommand, onPlatform, overlap, pressing, typed } from "../../src/web/keybindings.ts";
 import { matching, starting } from "../../src/web/plugins/lib/match.ts";
 
 describe("keybindings", () => {
@@ -104,6 +104,29 @@ describe("keybindings", () => {
     expect(chordLabel("shift+g", false)).toBe("Shift+G");
     expect(chordLabel("mod+shift+.", true)).toBe("⇧⌘.");
     expect([chordLabel("alt+arrowup", true), chordLabel("shift+tab", false), chordLabel("alt+enter", true), chordLabel("escape", false), chordLabel("f1", true)]).toEqual(["⌥↑", "Shift+Tab", "⌥Enter", "Esc", "F1"]);
+  });
+
+  it("gives a plugin frame the chords that run wherever focus is, and leaves a text field the ones that type or that a field keeps", () => {
+    const commands = [
+      { id: "open" },
+      { id: "undo", leaveToFields: true },
+      { id: "shortcuts" },
+      { id: "down", when: () => true },
+      { id: "back", when: () => true, escapesFrames: true },
+    ];
+    const keybindings = { "mod+p": "open", "mod+z": "undo", "shift+?": "shortcuts", j: "down", "ctrl+o": "back" };
+
+    expect(chordsForFrames(commands, keybindings)).toEqual([
+      { chord: "mod+p", field: false },
+      { chord: "mod+z", field: true },
+      { chord: "shift+?", field: true },
+      { chord: "ctrl+o", field: false },
+    ]);
+    expect(frameCommand("mod+p", commands, keybindings)).toBe("open");
+    expect(frameCommand("mod+z", commands, keybindings)).toBe("undo");
+    expect(frameCommand("j", commands, keybindings)).toBeNull();
+    expect(frameCommand("ctrl+o", commands, keybindings)).toBe("back");
+    expect(frameCommand("mod+q", commands, keybindings)).toBeNull();
   });
 
   it("runs a sequence on its last key, and takes the keys that begin one only while a command that can run goes on from them", () => {

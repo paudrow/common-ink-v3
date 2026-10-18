@@ -1,6 +1,7 @@
-import { bind, chordLabel, onPlatform } from "./keybindings.ts";
+import { bind, chordLabel, chordsForFrames, frameCommand, onPlatform, rememberFrameKeys } from "./keybindings.ts";
 import type { AddressEmbed, App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, Setting, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
+import { OWN_NAMES, takenName } from "../core/plugins.ts";
 
 export interface PluginState {
   id: string;
@@ -17,6 +18,10 @@ export interface PluginState {
   screenshots: readonly Screenshot[];
   /** What it has registered: as it stands while the plugin is on, and as it last stood once it is off. Null for one that hasn't been on since the app loaded. */
   adds: Added | null;
+  /** Whether it is one a workspace's admin installed, and not one that comes with Common Ink. */
+  installed: boolean;
+  /** Whether it is a workspace's plugin running inside the app with full trust, for this member, now. */
+  inPage: boolean;
 }
 
 /** What one plugin has registered, read from the host's own tables and never from what the plugin says of itself. */
@@ -27,6 +32,29 @@ export interface Added {
   embeds: readonly { name: string; title: string; block: boolean; address?: true }[];
   completions: readonly { id: string; trigger: string }[];
   editorExtensions: readonly string[];
+}
+
+/**
+ * A plugin that isn't compiled into the app and runs shut off from it, as the app's own code made a
+ * plugin of it: one a workspace installed, or one of Common Ink's own. What the host lets it do
+ * follows from what is said of it here, by the app, and from nothing the plugin says of itself.
+ * Neither kind is among `trusted`: both are handed the host a third-party plugin is.
+ */
+export interface Installed {
+  plugin: Plugin;
+  /** Changes when the plugin is to start again: other code, another manifest, other permissions. */
+  version: string;
+  /** Whose it is. One that is `installed`, which it is unless said, can't go by a name of the app's own, and its embeds are written `::x-name{}`. */
+  origin?: "own" | "installed";
+  /** For one of the app's own: the built-in plugin its contributions come after. Any other comes after them all. */
+  after?: string;
+  /**
+   * Set for code that runs in the page: a workspace's plugin an admin granted full trust for exactly
+   * this code, which this member turned on. The app says so, of code it hashed itself, and only then
+   * is the plugin handed what the app's own plugins are. `perform` is how its operations reach the
+   * server: at the plugin's address, so each is the plugin's in History and is checked there again.
+   */
+  inPage?: { perform: Provided["perform"] };
 }
 
 /** Everything the plugins that are on have added, in the order of the plugins and then of their registering. */
@@ -57,9 +85,9 @@ export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agent
 
 export interface HostOptions {
   /**
-   * Every installed plugin, in the order their contributions are shown. One whose id an earlier one
+   * Every plugin that comes with the app, in the order their contributions are shown. One whose id an earlier one
    * has is left out: the id is what a plugin's settings and switch are kept under, so a second one
-   * would read and change the first one's.
+   * would read and change the first one's. The ones a workspace installed come after, through `setInstalled`.
    */
   plugins: readonly Plugin[];
   required?: readonly string[];
@@ -106,6 +134,13 @@ export interface Host {
   navigated(): void;
   /** Tells the host the notes the member can see have changed. */
   notesChanged(): void;
+  /**
+   * Tells the host which plugins run shut off now: the app's own, and the third-party ones the
+   * workspace has installed. One that is new starts if the member has it on, one that is gone stops
+   * and takes what it added with it, and one whose version changed stops and starts again. None is
+   * ever among the plugins the host was made with, or is handed what they are.
+   */
+  setInstalled(installed: readonly Installed[]): void;
 }
 
 /** The setting that turns a plugin on and off. */
@@ -117,13 +152,18 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "dashboard", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
 
 /** The most a plugin may keep in one remembered setting, in characters of JSON: the member's settings are small, and theirs. */
 const MAX_REMEMBERED = 10_000;
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
 const RESERVED = ["plugins.", "go.", "settings.", "inspector."];
+
+/** How the name of an installed plugin's embed starts, and no other's: so it can never be the name of one that comes with the app, on or off. */
+export const INSTALLED_EMBED = "x-";
+
+/** Names that are the app's own beside its plugins', which an installed plugin can't go by. */
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
@@ -158,6 +198,7 @@ function keptFromPerform(type: string): string | null {
   if (type === "upload.setPrivate") return "who an upload is shared with is read and changed through host.sharing, by a plugin that is given it";
   if (["upload.create", "upload.open", "upload.start", "upload.resume", "upload.part", "upload.finish", "upload.abort"].includes(type)) return "an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it";
   if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
+  if (/^plugin\.(install|uninstall|permit|request|read)$/.test(type)) return "which plugins a workspace has, and what they are permitted, is decided on the Plugins page";
   return null;
 }
 
@@ -169,10 +210,30 @@ const ownOnly = (type: string): string | null =>
       ? "a workspace's uploads are read and changed only by Common Ink's own plugins"
       : /^(pin|visit)\./.test(type)
         ? "a member's pins and how far they have read the changes are theirs, and are read and changed only by Common Ink's own plugins"
-        : null;
+        : type.startsWith("plugin.")
+          ? "a workspace's record of its plugins is read only by Common Ink's own plugins"
+          : null;
 
-export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
-  const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
+export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn: cameWith = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
+  const builtIn = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
+  /** The plugins that run shut off: the app's own, and the third-party ones the workspace has installed. */
+  let installed: readonly Installed[] = [];
+  let plugins: readonly Plugin[] = builtIn;
+  /** Where each plugin's contributions go among the others'. An installed plugin keeps its place while it is installed. */
+  const places = new Map<string, number>(builtIn.map((p, index) => [p.id, index]));
+  let nextPlace = builtIn.length;
+  const ownNames = [...builtIn.map((p) => p.name), ...OWN_NAMES];
+  /** Why an installed plugin can't start under the name it gives itself, or null when it can. Names are compared by how they read, so a look-alike letter is no way around it. */
+  const about = (plugin: Plugin) => installed.find((i) => i.plugin === plugin);
+  /** Whether a plugin is one a workspace installed. Everything a third-party plugin is refused by its name keys on this. */
+  const theirs = (plugin: Plugin) => {
+    const told = about(plugin);
+    return told !== undefined && told.origin !== "own";
+  };
+  /** Whether a plugin is handed what the app's own are: one of them, or code the app vouches was granted full trust and turned on. */
+  const trusts = (plugin: Plugin) => trusted.includes(plugin) || about(plugin)?.inPage !== undefined;
+  const misnamed = (plugin: Plugin) => (theirs(plugin) ? takenName(plugin.name, ownNames) : null);
+  const placeOf = (plugin: Plugin) => places.get(plugin.id)!;
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed | AddressEmbed>>();
   const completions = new Map<string, Owned<Completion>>();
@@ -231,7 +292,8 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
 
   function hostFor(plugin: Plugin, index: number, mine: Set<Dispose>): PluginHost {
     const given = provide({ id: plugin.id, name: plugin.name });
-    const provided = trusted.includes(plugin) ? given : { ...given, ...withheld(plugin, given), uploads: noUploads(plugin) };
+    const reach = { ...given, perform: about(plugin)?.inPage?.perform ?? given.perform };
+    const provided = trusts(plugin) ? reach : { ...reach, ...withheld(plugin, given), uploads: noUploads(plugin) };
     const keep = (dispose: Dispose) => {
       mine.add(dispose);
       return dispose;
@@ -246,7 +308,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       perform(op) {
         const sent = { ...(op as OpInput) };
         const type: unknown = sent.type;
-        const why = typeof type === "string" ? (keptFromPerform(type) ?? (trusted.includes(plugin) ? null : ownOnly(type))) : "a plugin can't read or change the member's settings";
+        const why = typeof type === "string" ? (keptFromPerform(type) ?? (trusts(plugin) ? null : ownOnly(type))) : "a plugin can't read or change the member's settings";
         return why ? Promise.reject(new Error(`${plugin.name} can't ${String(type)}: ${why}`)) : provided.perform(sent as typeof op);
       },
       settings: {
@@ -286,8 +348,12 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         run,
       },
       views: {
+        in(slot) {
+          return contributions().views[slot];
+        },
         register(slot, view) {
           const table = views.get(slot) as Map<string, Owned<typeof view>>;
+          if (slot === "page" && (view as Slots["page"]).home && !trusted.includes(plugin)) throw new Error(`Only Common Ink's own plugins add the page shown at /, and ${plugin.name} asked to with ${(view as Slots["page"]).path}`);
           if (slot === "page" && /^\/folder(\/|$)/.test((view as Slots["page"]).path)) throw new Error(`${(view as Slots["page"]).path} is where a folder's notes are listed, so no page can be there`);
           if (slot === "page" && [...table.values()].some((o) => (o.value as Slots["page"]).path === (view as Slots["page"]).path)) throw new Error(`There's already a page at ${(view as Slots["page"]).path}`);
           const dispose = keep(add(table, view.id, view, index, `a ${slot} view with the id`));
@@ -305,6 +371,8 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       },
       embeds: {
         register(embed) {
+          const marked = theirs(plugin);
+          if (embed.name.startsWith(INSTALLED_EMBED) !== marked) throw new Error(`${marked ? "An" : "Only an"} installed plugin's embed has a name that starts with ${INSTALLED_EMBED}, and this one is ${embed.name}`);
           const address = "claims" in embed;
           // An address embed is in no note by its name, so it is no clash with an embed a note writes by the same one: a video by its address, and `::video{}`.
           const dispose = keep(add(embeds, address ? `address ${embed.name}` : embed.name, embed, index, address ? "an address embed named" : "an embed named"));
@@ -352,6 +420,8 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     const mine = new Set<Dispose>();
     errors.delete(plugin.id);
     try {
+      const named = misnamed(plugin);
+      if (named) throw new Error(named);
       if (plugin.settings && Object.hasOwn(plugin.settings, "enabled")) throw new Error("A plugin can't declare a setting named enabled, which turns it on and off");
       const stopping = plugin.activate(hostFor(plugin, index, mine));
       if (stopping) mine.add(stopping);
@@ -398,9 +468,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     started = starting = true;
     // A required plugin starts first, so no other can take an id it needs. Where its contributions are shown is still its place in the list.
     for (const first of [true, false]) {
-      plugins.forEach((plugin, index) => {
-        if (required.includes(plugin.id) === first && !off.has(plugin.id)) start(plugin, index);
-      });
+      for (const plugin of plugins) if (required.includes(plugin.id) === first && !off.has(plugin.id)) start(plugin, placeOf(plugin));
     }
     starting = false;
   }
@@ -441,17 +509,51 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
 
   function settingsChanged(next: SettingsDocument) {
     document = next;
-    plugins.forEach((plugin, index) => {
-      if (isOff(plugin) === off.has(plugin.id)) return;
+    for (const plugin of plugins) {
+      if (isOff(plugin) === off.has(plugin.id)) continue;
       if (off.delete(plugin.id)) {
-        if (started) start(plugin, index);
+        if (started) start(plugin, placeOf(plugin));
       } else {
         off.add(plugin.id);
         stop(plugin);
       }
-    });
+    }
     changed();
+    // The frames are told the chords as they are after this change, which means working them out before the telling.
+    contributions();
     for (const heard of [...watching]) heard();
+  }
+
+  /** A place right after a built-in plugin's and before the next one's, or after everything for one that names none. */
+  function placeAfter(after: string | undefined): number {
+    const base = after === undefined ? undefined : places.get(after);
+    if (base === undefined) return nextPlace++;
+    const next = Math.min(base + 1, ...[...places.values()].filter((place) => place > base));
+    return (base + next) / 2;
+  }
+
+  function setInstalled(next: readonly Installed[]) {
+    // An id that is one of the app's own plugins' is never taken by an installed one.
+    const usable = next.filter((now, index) => !builtIn.some((p) => p.id === now.plugin.id) && next.findIndex((other) => other.plugin.id === now.plugin.id) === index);
+    const kept = (now: Installed) => installed.find((was) => was.plugin.id === now.plugin.id && was.version === now.version);
+    if (usable.length === installed.length && usable.every((now, index) => installed[index] === kept(now))) return;
+    for (const was of installed) {
+      if (usable.some((now) => kept(now) === was)) continue;
+      stop(was.plugin);
+      off.delete(was.plugin.id);
+      if (!usable.some((now) => now.plugin.id === was.plugin.id)) places.delete(was.plugin.id);
+    }
+    const before = installed;
+    installed = usable.map((now) => kept(now) ?? now);
+    for (const now of installed) if (!places.has(now.plugin.id)) places.set(now.plugin.id, placeAfter(now.after));
+    // In the order of their places, so one of the app's own that runs shut off is listed, and starts, where it was when it ran in the page.
+    plugins = [...builtIn, ...installed.map((i) => i.plugin)].sort((a, b) => placeOf(a) - placeOf(b));
+    for (const now of installed) {
+      if (before.includes(now)) continue;
+      if (isOff(now.plugin)) off.add(now.plugin.id);
+      else if (started) start(now.plugin, placeOf(now.plugin));
+    }
+    changed();
   }
 
   /** The schema: each plugin's switch and options, then a keybinding for each command that is on. */
@@ -489,11 +591,10 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
   function contributions(): Contributions {
     startAll();
     if (snapshot) return snapshot;
-    plugins.forEach((p, place) => {
-      if (running.has(p.id)) added.set(p.id, addedBy(place));
-    });
+    for (const p of plugins) if (running.has(p.id)) added.set(p.id, addedBy(placeOf(p)));
     const toggles = plugins
-      .filter((p) => !required.includes(p.id))
+      // One that can't start under its name gets no command either, which would read as turning one of the app's own on or off.
+      .filter((p) => !required.includes(p.id) && !misnamed(p))
       .map((p): Command => {
         const enable = off.has(p.id);
         // One id whichever way it goes, so a key given to it turns the plugin off and then on again. Only its title says which.
@@ -503,6 +604,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     const declared = declare(all);
     const { values, problems, chosen } = resolve(declared, document);
     const { keybindings, conflicts } = bind(all.map((c) => ({ id: c.id, title: c.title, chords: [...new Set((values[KEYBINDING + c.id] as readonly string[]).map((chord) => onPlatform(chord, mac)))], chosen: chosen.has(KEYBINDING + c.id) })));
+    rememberFrameKeys({ chords: chordsForFrames(all, keybindings), commandId: (chord) => frameCommand(chord, all, keybindings) });
     return (snapshot = {
       commands: all,
       keybindings,
@@ -516,8 +618,10 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         name: p.name,
         enabled: !off.has(p.id),
         required: required.includes(p.id),
-        builtIn: builtIn.includes(p.id),
-        error: errors.get(p.id) ?? null,
+        builtIn: cameWith.includes(p.id) || about(p)?.origin === "own",
+        installed: theirs(p),
+        inPage: about(p)?.inPage !== undefined,
+        error: errors.get(p.id) ?? misnamed(p),
         description: p.description ?? null,
         icon: p.icon ?? null,
         screenshots: p.screenshots ?? [],
@@ -546,5 +650,6 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     notesChanged() {
       for (const heard of [...listing]) heard();
     },
+    setInstalled,
   };
 }

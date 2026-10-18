@@ -10,12 +10,12 @@ export function Stat({ added, removed }: { added: number; removed: number }) {
   );
 }
 
-/** Who made a change, as a picture: a person's initials in a circle, an agent's mark in a rounded square of its own hue. */
+/** Who made a change, as a picture: a person's initials in a circle, an agent's or a plugin's mark in a rounded square of its own hue. */
 export function Avatar({ author }: { author: Author }) {
-  const agent = author.kind === "agent";
+  const agent = author.kind !== "member";
   return (
-    <span className={agent ? "avatar agent" : "avatar"} style={{ "--hue": agent ? hueOf(author.name) : 150 } as React.CSSProperties} title={agent ? `${author.name}, an agent` : author.name} aria-hidden="true">
-      {agent ? <Icon name="agent" /> : initials(author.name)}
+    <span className={agent ? "avatar agent" : "avatar"} data-kind={author.kind} style={{ "--hue": agent ? hueOf(author.name) : 150 } as React.CSSProperties} title={author.kind === "agent" ? `${author.name}, an agent` : author.kind === "plugin" ? `${author.name}, a plugin` : author.name} aria-hidden="true">
+      {agent ? <Icon name={author.kind === "plugin" ? "plugin" : "agent"} /> : initials(author.name)}
     </span>
   );
 }

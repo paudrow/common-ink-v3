@@ -1,17 +1,36 @@
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { CAPABILITIES, HTML_EMBEDS, type DraftSummary, type InstalledPlugin, type PluginRecord } from "../core/plugins.ts";
 import { Icon } from "./icons.tsx";
 import { chordFor, chordLabel } from "./keybindings.ts";
 import type { Slots } from "./plugin-api.ts";
-import type { Added, Contributions, Host } from "./pluginHost.ts";
-import { PLUGINS_PATH, within, type Listed } from "./pluginList.ts";
+import { INSTALLED_EMBED, type Added, type Contributions, type Host } from "./pluginHost.ts";
+import { MoreMenu } from "./MoreMenu.tsx";
+import { InstallForm } from "./PluginInstall.tsx";
+import { PLUGINS_PATH, asksTrust, kindLabel, within, type Listed } from "./pluginList.ts";
+import { FullTrustLead, FullTrustReason, FullTrustSwitch } from "./PluginTrust.tsx";
+import { byWhom, PermissionRow, sitesIn, useRecordChanges, type RecordChanges } from "./PluginPermissions.tsx";
+import { PluginSource } from "./PluginSource.tsx";
 import { SettingRow } from "./SettingRow.tsx";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
 
 export interface PluginsProps {
   host: Host;
+  /** Whether the member is an admin of a workspace other than this one, which the warning before full trust says the reach of. */
+  adminElsewhere: boolean;
   /** The member's settings as they are kept, for whether they have been read yet. */
   store: SettingsStore;
+  workspaceId: string;
+  /** The member, to tell their own request from another's. */
+  personId: string;
   mac: boolean;
+  /** The workspace's record of its plugins. Null until it has been read. */
+  record: PluginRecord | null;
+  /** Told what the record is now, after a change made here. */
+  onRecord: (record: PluginRecord) => void;
+  /** The member's own drafts of plugins, as last read. */
+  drafts: readonly DraftSummary[];
+  /** Told the member's drafts are now these, after one was saved, set running or not, or discarded. */
+  onDrafts: (drafts: readonly DraftSummary[]) => void;
   /** The address the app is at: `/plugins`, or `/plugins/<plugin id>` for one plugin's details. */
   path: string;
   go: (path: string) => void;
@@ -30,11 +49,21 @@ const SLOT_WORDS: Record<keyof Slots, string> = {
   folder: "A folder's list of notes",
   inspector: "An inspector panel",
   page: "A page",
+  dashboard: "A panel on the Dashboard",
   bar: "The bottom bar",
   overlay: "Something drawn over the app",
   mark: "A mark in a note's bar",
   notice: "A banner above a note's text",
 };
+
+/** What a third-party plugin adds, as its manifest lists it, which is known whether or not it is on. */
+const declaredBy = ({ manifest }: InstalledPlugin): Added => ({
+  commands: manifest.commands,
+  views: manifest.views,
+  embeds: manifest.embeds.map((embed) => ({ name: INSTALLED_EMBED + embed.name, title: embed.title, block: false })),
+  completions: [],
+  editorExtensions: [],
+});
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -45,15 +74,27 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** One plugin: what it is, what it adds, its pictures, its switch, and its options, which are changed here as they are in Settings. */
-export function PluginDetails({ plugin, contributed, host, store, mac, go }: Props) {
+/**
+ * One plugin: what it is, whose it is, what it is permitted, what it adds, its pictures, its
+ * options, which are changed here as they are in Settings, its source to read, and its switch. For a third-party plugin
+ * an admin decides its permissions here, and updates and uninstalls it.
+ */
+export function PluginDetails({ plugin, contributed, host, store, workspaceId, personId, adminElsewhere, mac, record, onRecord, drafts, onDrafts, go }: Props) {
+  const changes = useRecordChanges(workspaceId, onRecord);
+  const [updating, setUpdating] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const { id, name, state } = plugin;
-  const adds = state.adds;
+  const admin = record?.canManage ?? false;
+  const theirs = plugin.kind === "third-party" ? plugin.record : null;
+  /** A workspace's plugin that asks to run inside the app, which is turned on with a warning and not by the switch every other has. */
+  const trusting = asksTrust(plugin) ? theirs : null;
+  const adds = theirs ? declaredBy(theirs) : (state?.adds ?? null);
   const { settings } = contributed;
   const options = settings.declared.filter((d) => d.group.id === id && !d.switch);
   /** Until the member's settings have been read nothing can be set, here as in Settings. */
   const status = useSyncExternalStore(store.subscribe, store.status);
   const unread = status.kind === "loading" || status.kind === "unread";
+  const screenshots = state?.screenshots ?? [];
 
   return (
     <section className="mode-view plugins-page plugin-details">
@@ -66,29 +107,76 @@ export function PluginDetails({ plugin, contributed, host, store, mac, go }: Pro
         </span>
         <div className="plugin-text">
           <h1>{name}</h1>
-          {state.builtIn && (
+          {(theirs || state?.builtIn) && (
             <p className="plugin-meta">
-              <span className="badge">Built-in</span>
-              <span>Comes with Common Ink</span>
+              <span className="badge" data-kind={plugin.kind} data-trust={asksTrust(plugin) || undefined}>
+                {kindLabel(plugin)}
+              </span>
+              {drafts.some((draft) => draft.pluginId === id && draft.running) && (
+                <span className="badge" data-state="draft">
+                  Running your draft
+                </span>
+              )}
+              {theirs ? (
+                <>
+                  <span>version {theirs.manifest.version}</span>
+                  {theirs.installedBy && <span>installed by {byWhom(theirs.installedBy, theirs.installedVia)}</span>}
+                  {theirs.updatedBy && <span>updated by {byWhom(theirs.updatedBy, theirs.updatedVia)}</span>}
+                </>
+              ) : (
+                <span>Comes with Common Ink</span>
+              )}
             </p>
           )}
         </div>
-        <label className="plugin-switch">
-          <span>{state.enabled ? "On" : "Off"}</span>
-          <input type="checkbox" className="switch" aria-label={name} checked={state.enabled} onChange={(e) => host.setEnabled(id, e.target.checked)} />
-        </label>
+        {theirs && admin && (
+          <MoreMenu
+            label={`More for ${name}`}
+            title="Update or uninstall it"
+            items={[
+              { label: "Update…", action: () => setUpdating(true) },
+              { label: "Uninstall…", action: () => setRemoving(true), disabled: changes.busy, separated: true },
+            ]}
+          />
+        )}
+        {trusting ? (
+          <FullTrustSwitch plugin={trusting} host={host} workspaceId={workspaceId} enabled={state?.enabled ?? false} admin={admin} adminElsewhere={adminElsewhere} onRecord={onRecord} />
+        ) : (
+          <label className="plugin-switch">
+            <span>{state?.enabled ? "On" : "Off"}</span>
+            <input type="checkbox" className="switch" aria-label={name} checked={state?.enabled ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
+          </label>
+        )}
       </header>
       {plugin.description && <p className="plugin-lead">{plugin.description}</p>}
-      {state.error && (
+      {trusting && <FullTrustReason plugin={trusting} />}
+      {state?.error && (
         <p role="alert" className="error">
-          Failed: {state.error}
+          {theirs ? state.error : `Failed: ${state.error}`}
         </p>
       )}
+      {changes.error && (
+        <p role="alert" className="error">
+          {changes.error}
+        </p>
+      )}
+      {theirs && removing && (
+        <span className="confirm" role="group" aria-label={`Uninstall ${name}?`}>
+          <span>{name} stops for everyone in this workspace, and what it was permitted is forgotten. What it wrote stays, under its name in History.</span>
+          <button type="button" className="button small primary" autoFocus onClick={() => void changes.change({ type: "plugin.uninstall", id }).then((done) => (done ? go(PLUGINS_PATH) : setRemoving(false)))}>
+            Uninstall it
+          </button>
+          <button type="button" className="link" onClick={() => setRemoving(false)}>
+            Cancel
+          </button>
+        </span>
+      )}
+      {theirs && updating && <InstallForm workspaceId={workspaceId} replacing={theirs} onRecord={onRecord} onDone={() => setUpdating(false)} />}
 
-      {state.screenshots.length > 0 && (
+      {screenshots.length > 0 && (
         <Section title="Pictures">
           <div className="plugin-shots">
-            {state.screenshots.map((shot) => (
+            {screenshots.map((shot) => (
               <figure key={shot.src}>
                 <img className={shot.dark ? "shot-light" : undefined} src={shot.src} alt={shot.alt} loading="lazy" />
                 {shot.dark && <img className="shot-dark" src={shot.dark} alt={shot.alt} loading="lazy" />}
@@ -100,12 +188,55 @@ export function PluginDetails({ plugin, contributed, host, store, mac, go }: Pro
       )}
 
       <Section title="Permissions">
-        <p className="soon">{state.builtIn ? "It comes with Common Ink and runs" : "It runs"} inside the app as you, so it asks for nothing: it can do what you can, and no more. What it does with that is what it adds, below.</p>
+        {theirs ? (
+          <>
+            {trusting ? <FullTrustLead plugin={trusting} /> : <p className="soon">It runs shut off from the app, and does only what is allowed here. An admin decides each.</p>}
+            {theirs.permissions.length === 0 ? (
+              <p className="permission-detail">It asks for nothing: it can't read or change anything in the workspace.</p>
+            ) : (
+              <ul className="permissions" aria-label={`What ${name} may do`}>
+                {theirs.permissions.map((permission) => (
+                  <PermissionRow key={permission.capability} subject={theirs} permission={permission} admin={admin} personId={personId} changes={changes} />
+                ))}
+              </ul>
+            )}
+          </>
+        ) : plugin.own ? (
+          <>
+            <p className="soon">It comes with Common Ink and runs shut off from the app, through the same door a third-party plugin does. It does only what it declares here, and the server holds it to that.</p>
+            {plugin.own.capabilities.length === 0 ? (
+              <p className="permission-detail">It asks for nothing: it can't read or change anything in the workspace.</p>
+            ) : (
+              <ul className="permissions" aria-label={`What ${name} may do`}>
+                {plugin.own.capabilities.map((declared) => (
+                  <li key={declared.name} className="permission" aria-label={`${CAPABILITIES[declared.name].title} for ${name}`}>
+                    <div className="permission-head">
+                      <span className="permission-title">{CAPABILITIES[declared.name].title}</span>
+                      <span className="badge" data-state="allowed">
+                        Comes with the app
+                      </span>
+                    </div>
+                    <p className="permission-detail">{CAPABILITIES[declared.name].detail}</p>
+                    <p className="permission-reason">{declared.reason}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="soon">
+              {state?.builtIn ? "It comes with Common Ink and runs" : "It runs"} inside the app as you, so it asks for nothing: it can do what you can, and no more.
+              {state?.builtIn && " That is full access, which it has because what it does can\u2019t be done shut off from the app."} What it does with that is what it adds, below.
+            </p>
+            {plugin.record && id === HTML_EMBEDS && <HtmlNetwork subject={plugin.record} admin={admin} personId={personId} changes={changes} />}
+          </>
+        )}
       </Section>
 
       <Section title="What it adds">
         {adds ? (
-          <Adds adds={adds} options={options.length} off={!state.enabled} keys={(commandId) => chordFor(commandId, contributed.keybindings)} mac={mac} />
+          <Adds adds={adds} options={options.length} off={!state?.enabled} keys={(commandId) => chordFor(commandId, contributed.keybindings)} mac={mac} />
         ) : (
           <p className="soon">It hasn't been on since the app loaded, so what it adds isn't listed yet. Turn it on to see.</p>
         )}
@@ -143,6 +274,10 @@ export function PluginDetails({ plugin, contributed, host, store, mac, go }: Pro
           </>
         )}
       </Section>
+
+      <Section title="Source">
+        <PluginSource plugin={plugin} workspaceId={workspaceId} admin={admin} drafts={drafts} onDrafts={onDrafts} onRecord={onRecord} />
+      </Section>
     </section>
   );
 }
@@ -158,7 +293,7 @@ interface AddsProps {
   mac: boolean;
 }
 
-/** What a plugin has registered, kind by kind. It is read from the host's tables, and never written by hand. */
+/** What a plugin has registered, kind by kind. It is read from the host's tables, or for a third-party plugin from its manifest, and never written by hand. */
 function Adds({ adds, options, off, keys, mac }: AddsProps) {
   const kinds: { title: string; items: { key: string; text: string; code?: string; chord?: string }[] }[] = [
     { title: "Commands", items: adds.commands.map((c) => ({ key: c.id, text: c.title, code: c.id, chord: keys(c.id) })) },
@@ -199,6 +334,44 @@ function Adds({ adds, options, off, keys, mac }: AddsProps) {
           </div>
         )}
       </dl>
+    </>
+  );
+}
+
+/** The one permission a built-in has in the workspace's record: the sites HTML written in a note may reach, which an admin lists. */
+function HtmlNetwork({ subject, admin, personId, changes }: { subject: InstalledPlugin; admin: boolean; personId: string; changes: RecordChanges }) {
+  /** What the admin has typed in the field. Null until they type, when it shows the sites allowed. */
+  const [sites, setSites] = useState<string | null>(null);
+  const permission = subject.permissions[0];
+  if (!permission) return null;
+  const text = sites ?? permission.origins.join("\n");
+  const origins = () => {
+    const read = sitesIn(text);
+    if ("reason" in read) changes.say(read.reason);
+    return "origins" in read ? read.origins : null;
+  };
+  const asks = admin || (permission.state !== "allowed" && !permission.locked && !permission.requests.some((r) => r.by.id === personId));
+  return (
+    <>
+      <p className="soon">It has one permission, which is the workspace's: HTML in a note reaches no site unless an admin lists the site here.</p>
+      <ul className="permissions" aria-label="What HTML embeds may do">
+        <PermissionRow
+          subject={subject}
+          permission={permission}
+          admin={admin}
+          personId={personId}
+          changes={changes}
+          listed={{
+            origins,
+            field: asks && (
+              <label className="sites-field">
+                <span>Sites, one to a line</span>
+                <textarea aria-label="Sites HTML embeds may reach" rows={2} spellCheck={false} placeholder="https://api.example.com" value={text} onChange={(e) => setSites(e.target.value)} />
+              </label>
+            ),
+          }}
+        />
+      </ul>
     </>
   );
 }

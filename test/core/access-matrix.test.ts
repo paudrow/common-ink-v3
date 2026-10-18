@@ -5,6 +5,8 @@ import { connectAgent } from "../../src/core/agents.ts";
 import { IN_TRASH, type Covering, type NoteState, type Trashed } from "../../src/core/lifecycle.ts";
 import { newId } from "../../src/core/ids.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
+import { OWN_SANDBOXED, type OwnSandboxedId } from "../../src/core/ownPlugins.ts";
+import { codeHash, opsAllowedBy, type Capability } from "../../src/core/plugins.ts";
 import { UPLOAD_IN_TRASH } from "../../src/core/uploads.ts";
 import { Op, OpError, type CalendarEvent, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
 import type { Sources } from "../../src/core/sources.ts";
@@ -26,6 +28,9 @@ import { PNG, upload } from "./uploading.ts";
  * Beside every note is an upload of the same name: in the same folder, in the same state, private to
  * the same owner, under the same grants. An upload is decided as a note is, so the one table says
  * what each actor may do with both, and an operation on an upload is held to the row its note has.
+ *
+ * A plugin acting for an actor is written out as their agent is: by what it is permitted. It is
+ * answered what its member is for an operation one of its permissions names, and refused every other.
  */
 
 type Level = "-" | "V" | "E";
@@ -71,9 +76,53 @@ interface World {
   secretAgent: { id: string; name: string };
   /** A link an admin put on `secret` before its owner made it private, and how many grants went when she did. */
   before: { token: string; removed: number };
+  /** The plugin installed for each row of `PLUGINS`. */
+  plugins: Record<PluginName, string>;
   /** For each note and folder, everything that would give it away: its id, its title, a word of its text. */
   marks: Record<NoteName | FolderName, string[]>;
 }
+
+/**
+ * Each plugin an actor may be running, by what the workspace permits it. All three declare the same
+ * capabilities, so what tells them apart is what an admin decided. A guest runs none: they are
+ * told nothing of the workspace's plugins, and theirs is refused whatever it asks.
+ */
+const DECLARED: readonly Capability[] = ["notes.read", "notes.write"];
+const FULL: readonly Capability[] = ["full-trust"];
+const PLUGINS = {
+  "their plugin, permitted to read and write notes": { permitted: DECLARED, installed: true },
+  "their plugin, permitted nothing": { permitted: [], installed: true },
+  "their plugin, uninstalled after it was permitted to read and write notes": { permitted: DECLARED, installed: false },
+  "their plugin, granted full trust and turned on by them": { declares: FULL, permitted: FULL, installed: true, on: true },
+  "their plugin, granted full trust, which they have not turned on": { declares: FULL, permitted: FULL, installed: true },
+  "their plugin, asking for full trust that no admin granted, which they tried to turn on": { declares: FULL, permitted: [], installed: true, on: true },
+  "their plugin, granted full trust and turned on by them, whose code was changed after": { declares: FULL, permitted: FULL, installed: true, on: true, changed: true },
+  "their own draft of the plugin permitted to read and write notes, asking to read notes and todos": { permitted: DECLARED, installed: true, draft: ["notes.read", "todos.read"] },
+  "Common Ink's own Word count, run shut off, which declares reading notes": { permitted: ["notes.read"], installed: true, own: "word-count" },
+  "Common Ink's own Quick timer, run shut off, which declares nothing": { permitted: [], installed: true, own: "quick-timer" },
+  "their own draft of Common Ink's own Backlinks, asking to read and write notes and to read members": { permitted: ["notes.read"], installed: true, own: "backlinks", draft: ["notes.read", "notes.write", "members.read"] },
+} as const satisfies Record<string, PluginRow>;
+/**
+ * `draft` is the actor's own copy of the plugin, running, and what its manifest asks for: some of
+ * what the original was allowed, and something it was not. `own` is one of the plugins that come
+ * with the app and run shut off: nobody installs it, `permitted` is what its manifest declares, and
+ * a guest's app runs it too, as the guest. `declares` is what an installed one asks for, when that
+ * isn't reading and writing notes. `on` is for a plugin that asks for full trust: the actor turning
+ * it on for themself, which is kept only when an admin granted it. `changed` is its code being
+ * replaced after that, which ends the grant and the turning on alike.
+ */
+interface PluginRow {
+  declares?: readonly Capability[];
+  permitted: readonly Capability[];
+  installed: boolean;
+  on?: boolean;
+  changed?: boolean;
+  draft?: readonly Capability[];
+  own?: OwnSandboxedId;
+}
+const manifestOf = (capabilities: readonly Capability[]) => JSON.stringify({ name: "Matrix plugin", capabilities: capabilities.map((capability) => ({ name: capability, reason: "To be asked everything." })) });
+type PluginName = keyof typeof PLUGINS;
+const PLUGIN_NAMES = Object.keys(PLUGINS) as PluginName[];
 
 const address = () => `${crypto.randomUUID()}@example.com`;
 
@@ -139,6 +188,23 @@ async function world(more = ""): Promise<World> {
   const spareUpload = {} as World["spareUpload"];
   for (const name of NOTES) spareUpload[name] = (await perform(env.DB, name === "secret" ? eve : name === "vpriv" ? vera : ada, { type: "grant.set", uploadId: uploads[name], email: `spare-up-${name}-${address()}`, access: "view" })).id;
 
+  const plugins = {} as World["plugins"];
+  for (const name of PLUGIN_NAMES) {
+    const row: PluginRow = PLUGINS[name];
+    if (row.own) {
+      expect(OWN_SANDBOXED[row.own].capabilities.map((c) => c.name), `what ${row.own} declares is what its row says`).toEqual(row.permitted);
+      plugins[name] = row.own;
+      continue;
+    }
+    const manifest = manifestOf(row.declares ?? DECLARED);
+    const made = await perform(env.DB, ada, { type: "plugin.install", manifest, code: "" });
+    const { id } = made;
+    const codeHash = made.plugins.find((p) => p.id === id)!.codeHash!;
+    for (const capability of PLUGINS[name].permitted) await perform(env.DB, ada, { type: "plugin.permit", id, capability, allowed: true, codeHash });
+    if (!PLUGINS[name].installed) await perform(env.DB, ada, { type: "plugin.uninstall", id });
+    plugins[name] = id;
+  }
+
   const marks = {} as World["marks"];
   for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`, `who-${name}`, uploads[name], `File-${name}`, `spare-up-${name}-`];
   for (const name of FOLDERS) marks[name] = [folders[name], `${name}-folder`];
@@ -167,6 +233,7 @@ async function world(more = ""): Promise<World> {
     spareUpload,
     secretAgent: { id: zed.agent.id, name: "Zed-agent" },
     before,
+    plugins,
     marks,
   };
 }
@@ -337,6 +404,23 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "record.notes": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   // Every note here was made with words, so whoever is let through is refused it for that: see test/core/discard.test.ts.
   "note.discard": { on: "note", needs: "E", trashed: "refused", members: true, args: (id) => ({ id }) },
+  // The record of plugins is every member's to read and an admin's to change. Each change is asked of a plugin that isn't there, so the record the plugin actors are held to stays as the world made it.
+  "plugin.list": { on: "workspace", who: MEMBERS, args: () => ({}) },
+  "plugin.read": { on: "workspace", who: MEMBERS, args: (w) => ({ id: w.plugins["their plugin, permitted nothing"] }) },
+  "plugin.install": { on: "workspace", who: ADMINS, args: () => ({ manifest: "{}", code: "" }) },
+  "plugin.uninstall": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },
+  "plugin.permit": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa", capability: "notes.read", allowed: true }) },
+  // An admin is let through to be told that an admin decides, and asks nothing.
+  "plugin.request": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", capability: "notes.read" }) },
+  "plugin.frame": { on: "workspace", who: MEMBERS, args: () => ({ id: "html" }) },
+  "plugin.scaffold": { on: "workspace", who: MEMBERS, args: () => ({ name: "Greeter" }) },
+  "plugin.validate": { on: "workspace", who: MEMBERS, args: () => ({ manifest: "{}", code: "" }) },
+  // Turning a full-trust plugin on, and a draft, are each member's own. Each is asked of a plugin that isn't there.
+  "plugin.trust": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", on: false }) },
+  "draft.list": { on: "workspace", who: MEMBERS, args: () => ({}) },
+  "draft.read": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa" }) },
+  "draft.save": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", manifest: "{}", code: "", running: false }) },
+  "draft.discard": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa" }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
   "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
   "upload.purge": { on: "upload", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
@@ -379,7 +463,9 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer", "pin.set"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer", "pin.set", "plugin.install", "plugin.uninstall", "plugin.permit", "plugin.request", "draft.save", "draft.discard"];
+/** What is the member's, and their agent's in their role, over the workspace's plugins: never a plugin's, whatever it is permitted, and nothing an agent limited to folders sees. */
+const PLUGIN_WORK = (type: OpType) => (type.startsWith("plugin.") && type !== "plugin.list") || type.startsWith("draft.");
 /** What answers from what is the asker's own and in no folder: their data sources, and how far they have read. */
 const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "record.refer", "record.read", "record.notes", "visit.read"];
 const AGENTS = [
@@ -411,11 +497,12 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
   });
 
   for (const name of Object.keys(ACTORS) as ActorName[]) {
-    for (const as of ["themself", ...AGENTS] as const) {
+    for (const as of ["themself", ...AGENTS, ...PLUGIN_NAMES] as const) {
       it(`${name}, as ${as}`, async () => {
         const w = await world();
         const person = w.actors[name];
-        const within = as === "themself" ? undefined : LIMITED[as];
+        const plugin: PluginRow | null = (PLUGIN_NAMES as readonly string[]).includes(as) ? PLUGINS[as as PluginName] : null;
+        const within = as === "themself" || plugin ? undefined : LIMITED[as as (typeof AGENTS)[number]];
         const scope =
           as === "their read-only agent"
             ? { readOnly: true }
@@ -425,14 +512,40 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         // The table says what the person may do. An agent limited to a folder has that of what is inside it, and nothing of the rest.
         const levelOf = (who: ActorName, note: NoteName): Level => (within && !within.includes(FOLDER_OF[note]) ? "-" : personLevelOf(who, note));
         const folderLevelOf = (who: ActorName, folder: FolderName): Level => (within && !within.includes(folder) ? "-" : personFolderLevelOf(who, folder));
-        const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope };
-        const readOnly = as.includes("read-only");
+        const actor: Actor =
+          as === "themself"
+            ? person
+            : plugin
+              ? { kind: "plugin", pluginId: plugin.own ?? w.plugins[plugin.draft ? "their plugin, permitted to read and write notes" : (as as PluginName)], personId: person.personId, workspaceId: person.workspaceId, draft: !!plugin.draft }
+              : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope };
+        const agent = as !== "themself" && !plugin;
+        const readOnly = agent && as.includes("read-only");
         const role = roleOf(name);
+        /** Whether whoever asks is let as far as their member is. A plugin is for what its permissions name, when it is installed and its member is one. One of the app's own runs for a guest too, and a draft of it for no guest. */
+        const runs = plugin && plugin.installed && (role !== "guest" || (plugin.own !== undefined && !plugin.draft));
+        // A guest keeps no draft: they are refused it as they are refused the plugin.
+        if (plugin && runs && plugin.draft) await perform(env.DB, person, { type: "draft.save", id: actor.kind === "plugin" ? actor.pluginId : "", manifest: manifestOf(plugin.draft), code: "mine", running: true });
+        // A guest is refused it, as they are refused the plugin: turning one on is a member's. And a member is refused it for code no admin granted.
+        if (plugin?.on) {
+          const id = w.plugins[as as PluginName];
+          const turned = await ask(person, { type: "plugin.trust", id, on: true, codeHash: await codeHash("") });
+          expect(turned.outcome).toBe(role === "guest" ? "forbidden" : "done");
+          // Kept only when an admin granted the code: asked without that, it was refused for the grant and not for who asked.
+          if (role !== "guest") expect((await perform(env.DB, person, { type: "plugin.list" })).plugins.find((p) => p.id === id)!.fullTrust!.on).toBe(plugin.permitted === FULL);
+          if (plugin.changed) await perform(env.DB, w.actors["Ada, an admin"], { type: "plugin.install", manifest: manifestOf(FULL), code: "other", replaces: id });
+        }
+        /** A plugin with full trust that runs may ask what its member's agent may, as its member: everything that isn't the member's alone. */
+        const full = !!plugin && !!runs && plugin.permitted === FULL && !!plugin.on && !plugin.changed;
+        const permitted = plugin && !full && opsAllowedBy(runs && plugin.declares !== FULL ? plugin.permitted.filter((capability) => !plugin.draft || plugin.draft.includes(capability)) : []);
+        const mayAsk = (type: OpType) => (full ? NOT_FOR_AGENTS[type] === undefined && !PLUGIN_WORK(type) : !permitted || permitted.has(type));
         // What is told as a number gives a note away as surely as its title: a folder's count, and an author's changes by day.
-        const { folders: listed } = await perform(env.DB, actor, { type: "folder.list" });
-        const counted = (folder: FolderName) => NOTES.filter((note) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-" && STATE_OF[note] === "live").length;
-        expect(listed.map((f) => f.uploadCount)).toEqual(listed.map((f) => f.noteCount));
-        expect(Object.fromEntries(listed.map((f) => [f.name, f.noteCount]))).toEqual(Object.fromEntries(FOLDERS.filter((f) => folderLevelOf(name, f) !== "-").map((f) => [`${f}-folder`, counted(f)]).concat(role === "guest" || within ? [] : [["Unsorted", 0]])));
+        if (mayAsk("folder.list")) {
+          const { folders: listed } = await perform(env.DB, actor, { type: "folder.list" });
+          const counted = (folder: FolderName) => NOTES.filter((note) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-" && STATE_OF[note] === "live").length;
+          // A plugin is told of no upload, by a count either.
+          expect(listed.map((f) => f.uploadCount)).toEqual(listed.map((f) => (plugin && !full ? 0 : f.noteCount)));
+          expect(Object.fromEntries(listed.map((f) => [f.name, f.noteCount]))).toEqual(Object.fromEntries(FOLDERS.filter((f) => folderLevelOf(name, f) !== "-").map((f) => [`${f}-folder`, counted(f)]).concat(role === "guest" || within ? [] : [["Unsorted", 0]])));
+        }
 
         const answers: unknown[] = [];
         /** What each listing answered, to hold it to the states it covers. */
@@ -440,12 +553,12 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         const got: Record<string, Outcome> = {};
         const expected: Record<string, Outcome> = {};
         const run = async (key: string, type: OpType, args: object, expectation: Outcome, letThrough = false) => {
-          const kept = as !== "themself" && NOT_FOR_AGENTS[type] !== undefined;
+          const kept = agent && NOT_FOR_AGENTS[type] !== undefined;
           const { outcome, answer } = await ask(actor, { type, ...args } as OpInput);
           // An operation on the workspace is asked about a member, an invite or a folder that isn't there: finding none, it had let the actor through.
           got[key] = letThrough && outcome.startsWith("not_found") ? "done" : outcome;
           const changes = readOnly && (CHANGES.includes(type) || SENDING.includes(type) || ("needs" in PLANS[type] ? PLANS[type].needs === "E" : false));
-          expected[key] = kept || changes ? "forbidden" : expectation;
+          expected[key] = kept || changes || !mayAsk(type) ? "forbidden" : expectation;
           // A note that isn't there for the actor is answered with the id they asked by and nothing more, which is checked below against one that was never there.
           const told = () => (type === "history.previewRevert" ? (answer as { refused?: string; noteTitle: string }[]).filter((p) => !(p.refused === "No such note" && p.noteTitle === "")) : type === "history.revert" ? (answer as { skipped: { message: string; noteTitle: string }[] }).skipped.filter((s) => !(s.message === "No such note" && s.noteTitle === "")) : answer);
           if (answer !== undefined) answers.push(told());
@@ -499,11 +612,12 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
               await run(`${type} ${folder}`, type, plan.args(w.folders[folder], w), expectation);
             }
           } else if (plan.on === "everything") {
-            await run(type, type, plan.args(w), "done");
-            listings.push({ key: type, covers: plan.covers, said: JSON.stringify(answers.at(-1)) });
+            // A listing that was refused said nothing, and `got` says it was refused.
+            const listed = await run(type, type, plan.args(w), "done");
+            if (listed !== undefined) listings.push({ key: type, covers: plan.covers, said: JSON.stringify(listed) });
             if (plan.archived) {
-              await run(`${type} with archived`, type, { ...plan.args(w), includeArchived: true }, "done");
-              listings.push({ key: `${type} with archived`, covers: "kept", said: JSON.stringify(answers.at(-1)) });
+              const withArchived = await run(`${type} with archived`, type, { ...plan.args(w), includeArchived: true }, "done");
+              if (withArchived !== undefined) listings.push({ key: `${type} with archived`, covers: "kept", said: JSON.stringify(withArchived) });
             }
             if (plan.only) {
               const onlyArchived = await run(`${type} with archived only`, type, { ...plan.args(w), includeArchived: "only" }, "done");
@@ -516,7 +630,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             if (type === "member.leave") continue;
             // Who is in the workspace is told to whoever sees all of it.
             // A daily note is in a folder at the top of the workspace, or makes one there: a member's, and their agent's when it sees all of it.
-            if ((type === "member.list" || type === "daily.open" || type === "daily.find" || OWN.includes(type)) && within) allowed = false;
+            if ((type === "member.list" || type === "plugin.list" || PLUGIN_WORK(type) || type === "daily.open" || type === "daily.find" || OWN.includes(type)) && within) allowed = false;
             await run(type, type, plan.args(w), allowed ? "done" : "forbidden", true);
           } else {
             await run(type, type, plan.args(w), "forbidden");
@@ -528,11 +642,13 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         for (const [i, args] of narrowed.entries()) await run(`history.list narrowed ${i}`, "history.list", args, "done");
         for (const [i, { diffs: _, ...args }] of narrowed.entries()) await run(`history.summary narrowed ${i}`, "history.summary", args, "done");
         // A note's line totals and its count of changes are only ever of a note the actor can see.
-        const summed = await perform(env.DB, actor, { type: "history.summary", noteIds: every, limit: 100 });
-        // The admin removed the note in Trash for good above, which only a member can.
-        const there = new Set((await env.DB.prepare("SELECT id FROM notes WHERE workspace_id = ?").bind(actor.workspaceId).all<{ id: string }>()).results.map((r) => r.id));
-        expect(summed.notes.map((n) => n.noteId).sort()).toEqual(NOTES.filter((note) => levelOf(name, note) !== "-").map((note) => w.notes[note]).filter((id) => there.has(id)).sort());
-        expect((await perform(env.DB, actor, { type: "history.summary", authors: [{ kind: "agent", id: w.secretAgent.id }] })).notes.map((n) => [n.noteId, n.changes])).toEqual(levelOf(name, "secret") === "-" ? [] : [[w.notes.secret, 1]]);
+        if (mayAsk("history.summary")) {
+          const summed = await perform(env.DB, actor, { type: "history.summary", noteIds: every, limit: 100 });
+          // The admin removed the note in Trash for good above, which only a member can.
+          const there = new Set((await env.DB.prepare("SELECT id FROM notes WHERE workspace_id = ?").bind(actor.workspaceId).all<{ id: string }>()).results.map((r) => r.id));
+          expect(summed.notes.map((n) => n.noteId).sort()).toEqual(NOTES.filter((note) => levelOf(name, note) !== "-").map((note) => w.notes[note]).filter((id) => there.has(id)).sort());
+          expect((await perform(env.DB, actor, { type: "history.summary", authors: [{ kind: "agent", id: w.secretAgent.id }] })).notes.map((n) => [n.noteId, n.changes])).toEqual(levelOf(name, "secret") === "-" ? [] : [[w.notes.secret, 1]]);
+        }
         await run("history.revertAuthor narrowed", "history.revertAuthor", { author: { kind: "agent", id: "aaaaaaaaaaaa" }, noteIds: every }, role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")) ? "forbidden" : "done");
         await run("note.list in a hidden folder", "note.list", { folderId: w.folders.Open }, "done");
         // A search narrowed to a folder: one the actor can't see is no such folder, and one they can answers with only what they see in it, in the states asked for.
@@ -551,7 +667,8 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         for (const folder of FOLDERS) {
           const seen = folderLevelOf(name, folder) !== "-";
           await run(`todo.list in ${folder}`, "todo.list", { folderId: w.folders[folder], includeCompleted: true }, seen ? "done" : NO_FOLDER);
-          if (!seen) continue;
+          // A plugin no permission lets list todos was refused it above, whole.
+          if (!seen || !mayAsk("todo.list")) continue;
           const inside = NOTES.filter((note) => (FOLDER_OF[note] === folder || (folder === "Team" && FOLDER_OF[note] === "Deep")) && levelOf(name, note) !== "-");
           for (const [includeArchived, covers] of [[false, "live"], [true, "kept"]] as const) {
             expect((await perform(env.DB, actor, { type: "todo.list", folderId: w.folders[folder], includeArchived })).todos.map((t) => t.noteId).sort(), `todo.list in ${folder}, ${covers}`).toEqual(inside.filter((note) => COVERED[covers].includes(STATE_OF[note])).map((note) => w.notes[note]).sort());
@@ -562,12 +679,13 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         const asMissing = (answer: object, noteId: string) => ({ ...answer, noteId });
         const left = new Set((await env.DB.prepare("SELECT id FROM notes").all<{ id: string }>()).results.map((n) => n.id));
         const nowOf = (note: NoteName): Level => (left.has(w.notes[note]) ? levelOf(name, note) : "-");
-        const previews = await perform(env.DB, actor, { type: "history.previewRevert", ...everyNote(w, 1) });
-        for (const [i, note] of NOTES.entries()) {
+        // No permission names it, so a plugin is refused it whole, as the table above already held it to.
+        const previews = mayAsk("history.previewRevert") ? await perform(env.DB, actor, { type: "history.previewRevert", ...everyNote(w, 1) }) : [];
+        for (const [i, note] of previews.length ? NOTES.entries() : []) {
           if (nowOf(note) === "-") expect(previews[i], `history.previewRevert ${note}`).toEqual(asMissing(previews.at(-1)!, w.notes[note]));
           else expect(previews[i], `history.previewRevert ${note}`).toMatchObject({ noteId: w.notes[note], noteTitle: `Title-${note}`, revisions: [1] });
         }
-        expect(previews.at(-1)).toMatchObject({ noteTitle: "", refused: "No such note" });
+        if (mayAsk("history.previewRevert")) expect(previews.at(-1)).toMatchObject({ noteTitle: "", refused: "No such note" });
         if (got["history.revert"] === "done") {
           const { reverted, skipped } = await perform(env.DB, actor, { type: "history.revert", ...everyNote(w, 99) });
           expect(reverted).toEqual([]);
@@ -586,8 +704,12 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         const written = levelOf(name, "secret") === "-" ? [] : [`open: ${w.notes.open}`];
         expect(hidden.flatMap((item) => w.marks[item].filter((mark) => said.includes(mark)).map((mark) => `${item}: ${mark}`)).filter((found) => !written.includes(found))).toEqual([]);
         // And what they can see is there, so the check above isn't passing on an empty answer.
+        // A plugin is told of the notes when it may list them, and of the uploads never: no permission names an operation on one.
         const seen = NOTES.filter((note) => levelOf(name, note) !== "-");
-        expect(seen.filter((note) => !said.includes(`Title-${note}`) || !said.includes(`File-${note}`))).toEqual([]);
+        expect(seen.filter((note) => (mayAsk("note.list") && !said.includes(`Title-${note}`)) || (mayAsk("upload.list") && !said.includes(`File-${note}`)))).toEqual([]);
+        if (plugin && !full) expect(NOTES.flatMap((note) => [w.uploads[note], `File-${note}`].filter((mark) => said.includes(mark)))).toEqual([]);
+        // And a plugin that may ask nothing was told nothing at all.
+        if (permitted && !permitted.size) expect(answers).toEqual([]);
 
         // No listing says anything of a note in a state it doesn't cover, though the actor can see the note: not its title, a tag, a todo, or its id.
         const beyond = listings.flatMap(({ key, covers, said }) => seen.filter((note) => !COVERED[covers].includes(STATE_OF[note])).flatMap((note) => w.marks[note].filter((mark) => said.includes(mark)).map((mark) => `${key}: ${note}: ${mark}`)));

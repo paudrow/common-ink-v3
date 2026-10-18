@@ -63,8 +63,8 @@ export const vim: Plugin = {
          * app's history, where vim's own jumps in a note are stops between the notes and pages, so one list is walked as vim's is.
          */
         const when = () => !isField(document.activeElement) || editing.jumpsFrom(document.activeElement);
-        host.commands.register({ id: "vim.back", title: "Go back with vim's keys", keys: ["ctrl+o"], group: "Vim", when, run: () => void host.commands.run("nav.back") });
-        host.commands.register({ id: "vim.forward", title: "Go forward with vim's keys", keys: ["ctrl+i"], group: "Vim", when, run: () => void host.commands.run("nav.forward") });
+        host.commands.register({ id: "vim.back", title: "Go back with vim's keys", keys: ["ctrl+o"], group: "Vim", when, escapesFrames: true, run: () => void host.commands.run("nav.back") });
+        host.commands.register({ id: "vim.forward", title: "Go forward with vim's keys", keys: ["ctrl+i"], group: "Vim", when, escapesFrames: true, run: () => void host.commands.run("nav.forward") });
 
         const outside = (ui = surfaces({ normal: editing.jumpsFrom, dismissing }));
         calm = editing.toNormal;

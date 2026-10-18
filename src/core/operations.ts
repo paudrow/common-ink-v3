@@ -56,6 +56,9 @@ import {
   type Visit,
   type Written,
 } from "./protocol.ts";
+import { ownSandboxed } from "./ownPlugins.ts";
+import { codeHash, scaffold, validate } from "./plugins.ts";
+import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, listPlugins, permitPlugin, readDraft, readPlugin, requestPlugin, saveDraft, trustPlugin, uninstallPlugin } from "./pluginRecord.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
 import { NO_FILES, abortUpload, archiveUpload, createUpload, finishUpload, listUploads, moveUpload, openUpload, placeUpload, purgeUpload, putPart, readUpload, referred, restoreUpload, resumeUpload, startUpload, trashUpload, trashedUploads, uploadStorage, type Files } from "./uploads.ts";
@@ -75,7 +78,16 @@ export type Actor =
   /** A signed-in person, in a workspace they are a member of or a guest in. */
   | { kind: "member"; personId: string; workspaceId: string }
   /** An agent acts as `personId`: their role and grants in the workspace, so their access, and no more. */
-  | { kind: "agent"; agentId: string; personId: string; workspaceId: string; scope?: AgentScope };
+  | { kind: "agent"; agentId: string; personId: string; workspaceId: string; scope?: AgentScope }
+  /**
+   * A plugin installed in the workspace, running in `personId`'s browser. It acts as them and within
+   * what the workspace permits it, so it has no more than either. `pluginId` is the install the app
+   * made the plugin's frame for, and never anything the plugin said. With `draft` it is that
+   * person's own copy of the plugin, which runs for nobody else. One an admin granted full trust,
+   * and that this person turned on, runs inside the app: it may perform what the member may, as
+   * them, except what is the member's alone.
+   */
+  | { kind: "plugin"; pluginId: string; personId: string; workspaceId: string; draft?: boolean };
 
 /** Whoever holds a link, signed in or not. The link says which workspace, and what in it they can read. */
 export interface Visitor {
@@ -104,12 +116,16 @@ export const agentActor = (agent: ConnectedAgent, workspaceId: string): Extract<
   scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly, folderIds: agent.folderIds },
 });
 
-export const authorId = (ctx: Context) => (ctx.author.kind === "agent" ? ctx.author.agentId : ctx.author.personId);
+export const authorId = ({ author }: Context) => (author.kind === "agent" ? author.agentId : author.kind === "plugin" ? author.pluginId : author.personId);
+/** The member an agent or a plugin is acting for, which is kept beside what it wrote. A plugin acts for every member, so nothing else says. */
+const authorOwner = ({ author }: Context) => (author.kind === "member" ? null : author.onBehalfOf);
 
 export interface Context {
   db: D1Database;
   actor: Actor | Visitor;
   author: Author;
+  /** True for a plugin that runs shut off from the app, which is told only what its permissions name: nothing of uploads or of who a mention means. One running with full trust is told what its member is. */
+  shutOff: boolean;
   workspaceId: string;
   /** The person acting, or the person an agent acts for. Null for whoever opened a link. */
   personId: string | null;
@@ -140,9 +156,10 @@ type Handler<K extends OpType> = {
   needs: Access;
   /**
    * Who alone may ask. `member`: the person themself, signed in, and not an agent acting for them.
+   * `owner`: the person, or an agent of theirs acting in their role, and never a plugin.
    * `visitor`: whoever holds a link, who may ask nothing else.
    */
-  by?: "member" | "visitor";
+  by?: "member" | "owner" | "visitor";
   /** Set when only a member of the workspace may ask, and one who sees all of it: not a guest, and not an agent limited to folders. */
   members?: true;
   /** Set when it changes something though it needs no more than `view` of the workspace, so a read-only token is refused it. */
@@ -167,6 +184,16 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
   if (actor.kind === "agent" && actor.scope?.readOnly && (handler.needs !== "view" || handler.changes)) throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if ((handler.members || handler.own) && standing.sight.within) throw new OpError("forbidden", `An agent limited to folders can't ${op.type}`);
+  // A plugin is refused everything but what a permission it was given names. Members run plugins, so a guest's is refused whatever it asks, before anything is said of the plugin.
+  // The plugins that come with Common Ink are the app's, so a guest's app has them too: each acts as the guest, within what it declares. A draft is a member's.
+  const runsPlugins = standing.role !== null || (actor.kind === "plugin" && !actor.draft && ownSandboxed(actor.pluginId) !== null);
+  const plugin = actor.kind === "plugin" && runsPlugins ? await actingPlugin(db, standing.workspaceId, actor.pluginId, actor.personId, actor.draft) : null;
+  if (actor.kind === "plugin") {
+    if (!plugin) throw new OpError("forbidden", `A ${standing.as} runs no plugins: they are for the workspace's members`);
+    if ("refused" in plugin) throw new OpError("forbidden", plugin.refused);
+    // What is the member's alone is no plugin's, full trust or not: it is asked in the member's own name, where their role is what is checked.
+    if (handler.by === "member" || handler.by === "owner" || (plugin.allowed !== "all" && !plugin.allowed.has(op.type))) throw new OpError("forbidden", `${plugin.name} isn't permitted to ${op.type}`);
+  }
   if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
 
   let author: Author = { kind: "member", personId: standing.personId ?? "", name: standing.name };
@@ -174,8 +201,33 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
     const agent = await db.prepare("SELECT name FROM agents WHERE id = ?").bind(actor.agentId).first<{ name: string }>();
     author = { kind: "agent", agentId: actor.agentId, name: agent?.name ?? "An agent", onBehalfOf: actor.personId };
   }
-  const ctx: Context = { db, actor, author, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
+  if (actor.kind === "plugin") author = { kind: "plugin", pluginId: actor.pluginId, name: (plugin as { name: string }).name, onBehalfOf: actor.personId };
+  const shutOff = plugin !== null && "allowed" in plugin && plugin.allowed !== "all";
+  const ctx: Context = { db, actor, author, shutOff, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
   return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
+}
+
+/**
+ * A full-trust plugin's code, for the app's page to load as a module from its own address: the page's
+ * policy allows script only from there, and no `eval`. It is answered only to a member it runs for now,
+ * and only when `hash` is the code the admin's grant and their own turning on are both of. Null
+ * otherwise, which says nothing of why: the member reads the code as text by `plugin.read`.
+ */
+export async function trustedCode(db: D1Database, actor: Extract<Actor, { kind: "member" }>, pluginId: string, hash: string): Promise<string | null> {
+  // Asked as the member first, so a guest, a stranger or someone removed is answered as for no plugin.
+  if (!(await perform(db, actor, { type: "plugin.read", id: pluginId }).catch(() => null))) return null;
+  const acting = await actingPlugin(db, actor.workspaceId, pluginId, actor.personId);
+  if (!("allowed" in acting) || acting.allowed !== "all") return null;
+  // The code is read in one statement with the member's own row for that same code, which an update, a revocation or turning it off deletes.
+  const row = await db
+    .prepare(
+      `SELECT i.code FROM plugin_installs i JOIN plugin_trust t ON t.workspace_id = i.workspace_id AND t.plugin_id = i.id AND t.person_id = ?3 AND t.code_hash = i.code_hash
+       WHERE i.id = ?1 AND i.workspace_id = ?2 AND i.removed_at IS NULL AND i.code_hash = ?4`,
+    )
+    .bind(pluginId, actor.workspaceId, actor.personId, hash)
+    .first<{ code: string }>();
+  // What is served is the code of that hash as it is worked out here, not as it was stored.
+  return row && (await codeHash(row.code)) === hash ? row.code : null;
 }
 
 interface SummaryRow {
@@ -216,15 +268,29 @@ const MADE = 7;
 /** A note as it is made: live. */
 const NEW = { state: "live", state_at: null } as const;
 
-const SUMMARY_COLUMNS = `CASE WHEN n.indexed < ${MADE} THEN n.text END AS unmade, n.id, n.folder_id, n.revision, n.title, n.snippet, n.open_todos, n.created_at, n.updated_at, n.updated_by, n.updated_by_kind, n.private_owner, n.state, n.state_at,
-    COALESCE(p.name, a.name) AS updated_by_name, a.person_id AS updated_by_owner
-  FROM notes n
-  LEFT JOIN people p ON n.updated_by_kind = 'member' AND p.id = n.updated_by
-  LEFT JOIN agents a ON n.updated_by_kind = 'agent' AND a.id = n.updated_by`;
+/**
+ * Who an author is, for a row that names one by kind and id: `name` and `owner` from the joins that
+ * `named` writes. A plugin is named from its install, which outlasts its being uninstalled, and the
+ * member it acted for is whoever the row itself says, since a plugin acts for every member.
+ */
+const NAME = "COALESCE(p.name, a.name, json_extract(pi.manifest, '$.name'))";
+const named = (kind: string, id: string) =>
+  `LEFT JOIN people p ON ${kind} = 'member' AND p.id = ${id}
+   LEFT JOIN agents a ON ${kind} = 'agent' AND a.id = ${id}
+   LEFT JOIN plugin_installs pi ON ${kind} = 'plugin' AND pi.id = ${id}`;
 
-/** The member or agent a change or a note names by the kind and id stored with it. */
+const SUMMARY_COLUMNS = `CASE WHEN n.indexed < ${MADE} THEN n.text END AS unmade, n.id, n.folder_id, n.revision, n.title, n.snippet, n.open_todos, n.created_at, n.updated_at, n.updated_by, n.updated_by_kind, n.private_owner, n.state, n.state_at,
+    ${NAME} AS updated_by_name, COALESCE(a.person_id, n.updated_by_owner) AS updated_by_owner
+  FROM notes n
+  ${named("n.updated_by_kind", "n.updated_by")}`;
+
+/** The member, agent or plugin a change or a note names by the kind and id stored with it. */
 export const authorOf = (kind: string, id: string, name: string | null, owner: string | null): Author =>
-  kind === "agent" ? { kind: "agent", agentId: id, name: name ?? "An agent", onBehalfOf: owner ?? "" } : { kind: "member", personId: id, name: name ?? "Someone" };
+  kind === "agent"
+    ? { kind: "agent", agentId: id, name: name ?? "An agent", onBehalfOf: owner ?? "" }
+    : kind === "plugin"
+      ? { kind: "plugin", pluginId: id, name: name ?? "A plugin", onBehalfOf: owner ?? "" }
+      : { kind: "member", personId: id, name: name ?? "Someone" };
 
 /** A note as the one asking is told of it. Only a row they can see is ever handed here. */
 export const toSummary = (ctx: Context, stored: SummaryRow): NoteSummary => summaryOf(ctx, typeof stored.unmade === "string" ? { ...stored, ...made(stored.unmade) } : stored);
@@ -282,7 +348,7 @@ function written(ctx: Context, text: string) {
     updated_by: authorId(ctx),
     updated_by_kind: ctx.author.kind,
     updated_by_name: author.name,
-    updated_by_owner: author.kind === "agent" ? author.onBehalfOf : null,
+    updated_by_owner: authorOwner(ctx),
   };
 }
 
@@ -365,7 +431,7 @@ async function listFolders(ctx: Context): Promise<{ unsortedId: string | null; f
   const paths = pathsOf(folders);
   return {
     unsortedId: results.find((row) => row.unsorted)?.id ?? null,
-    folders: results.map((row, i) => ({ ...folders[i]!, noteCount: row.note_count, uploadCount: row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view", path: paths.get(row.id)! })),
+    folders: results.map((row, i) => ({ ...folders[i]!, noteCount: row.note_count, uploadCount: ctx.shutOff ? 0 : row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view", path: paths.get(row.id)! })),
   };
 }
 
@@ -466,11 +532,12 @@ type Member = { id: string; name: string };
 /**
  * The members of the workspace among `targets`, each a person's id or a name, ignoring case. None
  * for an asker who isn't told who is in the workspace, a guest or an agent limited to folders: not
- * by a name that came back as an id any more than by a list.
+ * by a name that came back as an id any more than by a list. None for a plugin either, whatever it was
+ * permitted: reading or writing notes is not being told who the members are.
  */
 async function membersMeant(ctx: Context, targets: readonly string[]): Promise<{ byId: Map<string, Member>; byName: Map<string, Member[]> }> {
   const asked = [...new Set(targets)];
-  if (!seesEveryFolder(ctx.sight) || !asked.length) return { byId: new Map(), byName: new Map() };
+  if (!seesEveryFolder(ctx.sight) || ctx.shutOff || !asked.length) return { byId: new Map(), byName: new Map() };
   // Each name as written and in lower case: the database folds case for unaccented letters only.
   const { results } = await ctx.db
     .prepare(
@@ -744,13 +811,14 @@ interface Recording {
 function insertChange(ctx: Context, noteId: string, revision: number, baseRevision: number, before: string, changes: ChangeSet, { writeId, reverts, resolution }: Recording = {}) {
   const { added, removed } = lineDiff(before, changes);
   return ctx.db
-    .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, write_id, reverts, resolution, added, removed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, author_owner, diff, created_at, write_id, reverts, resolution, added, removed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(
       noteId,
       revision,
       baseRevision,
       ctx.author.kind,
       authorId(ctx),
+      authorOwner(ctx),
       JSON.stringify(changes.toJSON()),
       ctx.now,
       writeId ?? null,
@@ -803,8 +871,8 @@ function recording(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision:
     statements: [
       insertChange(ctx, row.id, revision, baseRevision, row.text, changes, recorded),
       ctx.db
-        .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, indexed = ? WHERE id = ? AND revision = ?")
-        .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, MADE, row.id, row.revision),
+        .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, updated_by_owner = ?, indexed = ? WHERE id = ? AND revision = ?")
+        .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, next.updated_by_owner, MADE, row.id, row.revision),
       ...deriving(ctx, row.id, text, was),
     ],
   };
@@ -899,10 +967,10 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
       ...(folder ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, NULL, ?, ?)").bind(folderId, ctx.workspaceId, settings.folder, folderKey(settings.folder))]),
       ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, created_by_kind, private_owner, indexed)
-           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, private_owner, indexed)
+           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, ctx.author.kind, row.private_owner, row.indexed),
+        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.private_owner, row.indexed),
       insertChange(ctx, id, 1, 0, "", changesBetween("", text)),
       ...(stale ? [ctx.db.prepare("DELETE FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ? AND note_id = ?").bind(ctx.workspaceId, ctx.personId, day, stale)] : []),
       ctx.db.prepare("INSERT INTO daily_notes (workspace_id, person_id, day, note_id) VALUES (?, ?, ?, ?)").bind(ctx.workspaceId, ctx.personId, day, id),
@@ -1008,10 +1076,9 @@ async function completionsNow(ctx: Context, noteId: string): Promise<Followed<Co
   const [done, later] = await ctx.db.batch<Record<string, unknown>>([
     ctx.db
       .prepare(
-        `SELECT c.revision, c.at, c.done_on, c.daily_note_id, c.created_at, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner
+        `SELECT c.revision, c.at, c.done_on, c.daily_note_id, c.created_at, c.author_kind, c.author_id, ${NAME} AS name, COALESCE(a.person_id, CASE c.author_kind WHEN 'plugin' THEN c.person_id END) AS agent_owner
          FROM completions c
-         LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
-         LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
+         ${named("c.author_kind", "c.author_id")}
          WHERE c.note_id = ?1 ORDER BY c.revision, c.at`,
       )
       .bind(noteId),
@@ -1148,10 +1215,9 @@ interface ChangeRow {
   removed: number | null;
 }
 
-const CHANGE_COLUMNS = `c.note_id, c.revision, c.base_revision, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner, c.created_at, c.reverts, c.added, c.removed, l.name AS label
+const CHANGE_COLUMNS = `c.note_id, c.revision, c.base_revision, c.author_kind, c.author_id, ${NAME} AS name, COALESCE(a.person_id, c.author_owner) AS agent_owner, c.created_at, c.reverts, c.added, c.removed, l.name AS label
   FROM changes c
-  LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
-  LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
+  ${named("c.author_kind", "c.author_id")}
   LEFT JOIN labels l ON l.note_id = c.note_id AND l.revision = c.revision`;
 
 const revertsOf = (json: string | null) => (json ? (JSON.parse(json) as Reverts) : null);
@@ -1226,10 +1292,9 @@ interface TakingBack {
   resolution: Resolution | null;
 }
 
-const RECORDED_COLUMNS = `c.note_id, c.revision, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner, c.diff, c.reverts, c.resolution
+const RECORDED_COLUMNS = `c.note_id, c.revision, c.author_kind, c.author_id, ${NAME} AS name, COALESCE(a.person_id, c.author_owner) AS agent_owner, c.diff, c.reverts, c.resolution
        FROM changes c
-       LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
-       LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id`;
+       ${named("c.author_kind", "c.author_id")}`;
 
 async function takingBack(ctx: Context, id: string, need: GrantLevel, choose: Choose, resolve?: Resolve): Promise<TakingBack> {
   const row = await loadNote(ctx, id, need, need === "edit" ? "refused" : "opens");
@@ -1665,10 +1730,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, created_by_kind, indexed)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, indexed)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, ctx.author.kind, row.indexed);
+        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed);
       await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text)), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
       return linked(toNote(ctx, row), unresolved);
     },
@@ -1680,7 +1745,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row = await loadNote(ctx, op.id, "view", "opens");
       if (op.revision !== undefined && op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
       const note = op.revision === undefined || op.revision === row.revision ? toNote(ctx, row) : toNote(ctx, row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
-      return { ...note, links: await linksOf(ctx, note.text, "any"), mentions: await mentionsOf(ctx, note.text), uploads: await referred(ctx, note.text, "any") };
+      // Reading notes is not reading uploads: a plugin is told nothing of the ones a note refers to. Its mentions are as written, by `membersMeant`.
+      return { ...note, links: await linksOf(ctx, note.text, "any"), mentions: await mentionsOf(ctx, note.text), uploads: ctx.shutOff ? [] : await referred(ctx, note.text, "any") };
     },
   },
 
@@ -2105,11 +2171,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const last = results.length > op.limit ? page.at(-1)! : null;
       const { results: wrote } = await ctx.db
         .prepare(
-          `SELECT c.note_id, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner
+          `SELECT c.note_id, c.author_kind, c.author_id, ${NAME} AS name, a.person_id AS agent_owner
            FROM changes c
            JOIN notes n ON n.id = c.note_id
-           LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
-           LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
+           ${named("c.author_kind", "c.author_id")}
            WHERE ${narrowed} AND c.note_id IN (SELECT value FROM json_each(?8))
            GROUP BY c.note_id, c.author_kind, c.author_id
            ORDER BY MAX(c.created_at) DESC, c.author_id`,
@@ -2206,11 +2271,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx) {
       const { results } = await ctx.db
         .prepare(
-          `SELECT DISTINCT c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner
+          `SELECT DISTINCT c.author_kind, c.author_id, ${NAME} AS name, a.person_id AS agent_owner
            FROM changes c
            JOIN notes n ON n.id = c.note_id
-           LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
-           LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
+           ${named("c.author_kind", "c.author_id")}
            WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} ORDER BY name COLLATE NOCASE, c.author_id`,
         )
         .bind(ctx.workspaceId, ctx.sight.bind)
@@ -2471,9 +2535,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx) {
       const { results } = await ctx.db
         .prepare(
-          `SELECT n.state_by, n.state_by_kind, COALESCE(tp.name, ta.name) AS state_by_name, ta.person_id AS state_by_owner, ${SUMMARY_COLUMNS}
+          `SELECT n.state_by, n.state_by_kind, COALESCE(tp.name, ta.name, json_extract(tpi.manifest, '$.name')) AS state_by_name, ta.person_id AS state_by_owner, ${SUMMARY_COLUMNS}
            LEFT JOIN people tp ON n.state_by_kind = 'member' AND tp.id = n.state_by
            LEFT JOIN agents ta ON n.state_by_kind = 'agent' AND ta.id = n.state_by
+           LEFT JOIN plugin_installs tpi ON n.state_by_kind = 'plugin' AND tpi.id = n.state_by
            WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "trashed")} ORDER BY n.state_at DESC, n.id`,
         )
         .bind(ctx.workspaceId, ctx.sight.bind)
@@ -2860,4 +2925,32 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       return { notes: notes.map((n): NoteAbout => ({ id: n.id, title: n.title, updatedAt: n.updated_at, audience: n.audience })) };
     },
   },
+
+  "plugin.list": { needs: "view", members: true, run: (ctx) => listPlugins(ctx) },
+  // Making, installing and permitting plugins is the member's, and their agent's as it acts in their role: an admin's agent does what an admin does, and a member's what the member may. No plugin does any of it, and an agent limited to folders or to reading does none of what changes it.
+  "plugin.read": { needs: "view", by: "owner", members: true, run: (ctx, op) => readPlugin(ctx, op.id) },
+  "plugin.install": { needs: "manage", by: "owner", members: true, run: (ctx, op) => installPlugin(ctx, op) },
+  "plugin.uninstall": { needs: "manage", by: "owner", members: true, run: (ctx, op) => uninstallPlugin(ctx, op.id) },
+  "plugin.permit": { needs: "manage", by: "owner", members: true, run: (ctx, op) => permitPlugin(ctx, op) },
+  // A viewer asks too, so this needs no more than belonging to the workspace.
+  "plugin.request": { needs: "view", by: "owner", members: true, changes: true, run: (ctx, op) => requestPlugin(ctx, op) },
+  "plugin.scaffold": {
+    needs: "view",
+    by: "owner",
+    members: true,
+    run: async (_, op) => {
+      const made = scaffold(op.name);
+      if ("reason" in made) throw new OpError("invalid", made.reason);
+      return made;
+    },
+  },
+  "plugin.validate": { needs: "view", by: "owner", members: true, run: (_, op) => validate(op.manifest, op.code) },
+  "plugin.frame": { needs: "view", by: "member", members: true, run: (ctx, op) => framePlugin(ctx, op.id) },
+  // Running a plugin inside the app is each member's own decision, for their own session. Nobody makes it for them: not an admin, an agent, or a plugin.
+  "plugin.trust": { needs: "view", by: "member", members: true, run: (ctx, op) => trustPlugin(ctx, op) },
+  // A draft is its author's alone, beside their settings, and what it holds is code that runs in their browser, for them alone. The member and their agent read and write it; no plugin does.
+  "draft.list": { needs: "view", by: "owner", members: true, run: (ctx) => listDrafts(ctx) },
+  "draft.read": { needs: "view", by: "owner", members: true, run: (ctx, op) => readDraft(ctx, op.id) },
+  "draft.save": { needs: "view", by: "owner", members: true, changes: true, run: (ctx, op) => saveDraft(ctx, op) },
+  "draft.discard": { needs: "view", by: "owner", members: true, changes: true, run: (ctx, op) => discardDraft(ctx, op.id) },
 };

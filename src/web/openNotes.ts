@@ -143,6 +143,14 @@ function reading(state: EditorState): OpenNote {
  */
 export function useOpenNote(noteId: string | null): OpenNote | null {
   useSyncExternalStore(subscribe, () => version);
+  return readOpenNote(noteId);
+}
+
+/** The same, asked outside a drawing: by the app, for a plugin that runs shut off and is permitted to read notes. */
+export const readOpenNote = (noteId: string | null): OpenNote | null => {
   const state = noteId === null ? undefined : editors.get(noteId)?.at(-1)?.state;
   return state ? reading(state) : null;
-}
+};
+
+/** Calls `listener` when what {@link readOpenNote} answers may have changed for any note. */
+export const watchOpenNotes = subscribe;

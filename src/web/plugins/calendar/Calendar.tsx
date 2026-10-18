@@ -324,29 +324,33 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
           )}
         </span>
       </header>
-      {(connected || !sources) && (
-        <div className="cal-toolbar">
-          <button type="button" className="button small" onClick={() => go(0)} title="Today (T)">
-            Today
-          </button>
-          <div className="cal-nav" role="group" aria-label="Days on show">
-            <button type="button" className="button small" onClick={() => go(-1)} aria-label="Previous" title="Previous (K)">
-              ‹
-            </button>
-            <button type="button" className="button small" onClick={() => go(1)} aria-label="Next" title="Next (J)">
-              ›
-            </button>
-          </div>
-          <h2 aria-live="polite">{title}</h2>
-          <div className="cal-views" role="group" aria-label="View">
-            {(Object.keys(VIEWS) as View[]).map((each) => (
-              <button key={each} type="button" className="button small" aria-pressed={view === each} onClick={() => show(each)} title={`${VIEWS[each].label} (${VIEWS[each].key.toUpperCase()})`}>
-                {VIEWS[each].label}
+      <div className="cal-toolbar">
+          {(connected || !sources) && (
+            <>
+              <button type="button" className="button small" onClick={() => go(0)} title="Today (T)">
+                Today
               </button>
-            ))}
-          </div>
+              <div className="cal-nav" role="group" aria-label="Days on show">
+                <button type="button" className="button small" onClick={() => go(-1)} aria-label="Previous" title="Previous (K)">
+                  ‹
+                </button>
+                <button type="button" className="button small" onClick={() => go(1)} aria-label="Next" title="Next (J)">
+                  ›
+                </button>
+              </div>
+            </>
+          )}
+          <h2 aria-live="polite">{title}</h2>
+          {(connected || !sources) && (
+            <div className="cal-views" role="group" aria-label="View">
+              {(Object.keys(VIEWS) as View[]).map((each) => (
+                <button key={each} type="button" className="button small" aria-pressed={view === each} onClick={() => show(each)} title={`${VIEWS[each].label} (${VIEWS[each].key.toUpperCase()})`}>
+                  {VIEWS[each].label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      )}
       {problem && (
         <p role="alert" className="said failed">
           {problem}

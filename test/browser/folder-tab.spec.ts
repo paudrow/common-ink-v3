@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, listedNote, listedNotes, noteCard, openAllNotes, panelIcons, perform, pinPanel, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { folderRow, listedNote, listedNotes, noteCard, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const tabs = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group).getByRole("tab");
 const tab = (page: Page, title: string) => tabs(page).filter({ hasText: new RegExp(`^${title}$`) });
@@ -225,7 +225,7 @@ test("a card expands to its note drawn to be read, which nothing in it changes, 
 test("a card expanded beside its note's editor is only a reading of it: what follows the editor still does", async ({ page }) => {
   await withFolders(page);
   const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
-  const words = page.getByRole("group", { name: "Bottom bar" });
+  const words = ownPlugin(page, "Word count").locator("body");
   await folderRow(page, "Projects").dblclick();
   await listedNote(page, "Plan").click();
   await tab(page, "Projects").dragTo(group(1), { targetPosition: { x: 40, y: 300 } });
@@ -481,17 +481,17 @@ test("the inspector follows the tab in front: a note's Info, a folder tab's Info
   await expect(tabs(page)).toHaveText(["Projects", "Plan", "Calendar"]);
 
   await expect(inspector.locator(".inspector-body")).toHaveText("Nothing to show for this view");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   const place = await inspector.boundingBox();
 
   await tab(page, "Projects").click();
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await showPanel(page, "Info");
   await expect(inspector.getByRole("definition")).toHaveText(["Projects", "1 note", "just now by Ada Lovelace"]);
   expect(await inspector.boundingBox()).toEqual(place);
 
   await tab(page, "Plan").click();
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await showPanel(page, "Info");
   await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveValue(/\/note\/plan-[a-z0-9]{12}$/);
   expect(await inspector.boundingBox()).toEqual(place);
@@ -511,11 +511,11 @@ test("the inspector follows the tab in front: a note's Info, a folder tab's Info
   // Closed, its bar has the same icons whatever tab is in front.
   await run(page, "Toggle inspector");
   const bar = page.getByRole("navigation", { name: "Inspector bar" });
-  await expect(bar.getByRole("button")).toHaveCount(3);
+  await expect(bar.getByRole("button")).toHaveCount(4);
   await tab(page, "Calendar").click();
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await tabs(page, 1).first().click();
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await bar.getByRole("button", { name: "Info" }).click();
   await expect(inspector.getByRole("definition").first()).toHaveText("Projects");
 });
