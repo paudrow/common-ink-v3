@@ -1119,19 +1119,14 @@ interface Refiling {
  * line taken off the daily note, and one that stands again, because the change that reverted it was
  * itself reverted, has it filed again unless it is still there. The line is found by following the place it was filed at through the daily
  * note's changes since, never by what it says. One that was edited or deleted since is left as the
- * member has it. The statements go in the batch that records the change itself. The daily note is
- * the completer's. When it is private to someone else, it is changed even though the one taking the
- * completion back cannot see it, and they are told of it only when they can. A folder limit is not
- * that exception, and neither is a note they can only view: those lines are left and counted as left.
- * A daily note in Trash can't be changed, so its lines are left the same way.
+ * member has it. The statements go in the batch that records the change itself.
  */
-
-/** Whether taking a completion back may rewrite this daily note. */
 function mayRefile(ctx: Context, daily: NoteRow): boolean {
   const asked = itemAsked(ctx.sight, daily);
   if (asked.outside) return false;
   const level = itemLevel(ctx.sight, daily);
-  return level === "edit" || (asked.private === "theirs" && level === "none");
+  const privateToSomeoneElse = asked.private === "theirs" && level === "none";
+  return level === "edit" || privateToSomeoneElse;
 }
 
 async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[], reverts: Reverts): Promise<Refiling> {

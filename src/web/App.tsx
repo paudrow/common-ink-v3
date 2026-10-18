@@ -241,7 +241,6 @@ function useSettings(workspaceId: string) {
   const status = useSyncExternalStore(store.subscribe, store.status);
   const [waitedFor, setWaitedFor] = useState<SettingsStore | null>(null);
   useEffect(() => {
-    // An agent that opens a daily note without saying the day uses this. Empty used to mean UTC, so after 7pm in Chicago it made tomorrow's note.
     const keepZone = () => {
       const zone = zoneToKeep(store.text(), Intl.DateTimeFormat().resolvedOptions().timeZone);
       if (zone) store.set(DAILY_SETTINGS.timeZone.key, zone);

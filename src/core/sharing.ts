@@ -80,7 +80,6 @@ const GRANT_COLUMNS = `g.id, g.note_id, g.folder_id, g.upload_id, COALESCE(n.tit
 /** People first, by name or email, then the link. */
 const GRANT_ORDER = "g.kind <> 'person', COALESCE(p.name, g.email) COLLATE NOCASE, g.id";
 
-/** A grant on a folder above the item. Its link address is included only when this member can share that folder. */
 function inheritedGrant(ctx: Context, row: GrantRow): Grant {
   const grant = toGrant(ctx, row);
   if (grant.to.kind !== "link" || (row.folder_id !== null && canShare(folderAsked(ctx.sight, row.folder_id)))) return grant;
@@ -137,8 +136,6 @@ export async function listGrants(ctx: Context, on: On): Promise<Sharing> {
         .bind(item.folderId, item.kind === "folder" ? 1 : 0, ctx.sight.bind),
     ]);
     grants = own!.results.map((r) => toGrant(ctx, r));
-    // A private note or upload takes nothing from the folders above it. A link on a folder this member
-    // cannot share is named without its address, which would let them read every non-private note in that folder.
     inherited = item.facts && item.facts.private_owner !== null ? [] : above!.results.map((r) => inheritedGrant(ctx, r));
   }
   return { canShare: may, grants, inherited, note: item.kind === "note" ? await noteSharing(ctx, item.note) : null };
