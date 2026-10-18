@@ -49,6 +49,15 @@ export function dailySettings(text: string | null | undefined): DailySettings {
   };
 }
 
+/**
+ * The zone to store when a member named none. `zone` is the browser's. Null when the settings
+ * already name one, or `zone` isn't a zone, so a choice they typed is left as they typed it.
+ */
+export function zoneToKeep(text: string | null | undefined, zone: string): string | null {
+  if (dailySettings(text).timeZone !== null) return null;
+  return zoneOf(zone);
+}
+
 /** The day it is at `now` for someone with these settings: in their zone, or in UTC when they named none. */
 export const dayFor = (settings: DailySettings, now: number): string => dayIn(settings.timeZone ?? "UTC")(now);
 

@@ -445,6 +445,27 @@ describe("a private note", () => {
     expect((await perform(env.DB, ada, { type: "grant.list", noteId: beside.id })).inherited.map((g) => g.to.kind).sort()).toEqual(["link", "person"]);
   });
 
+  it("tells someone who can share a note, but not the folder above it, that the folder has a link, and not the address", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve");
+    const sam = await addMember(ada, "editor", "Sam");
+    const eveEmail = (await whoAmI(env.DB, eve.personId)).person.email;
+    const team = await folder(ada, "Team");
+    const plan = await note(ada, "# Plan", team.id);
+    await share(ada, { folderId: team.id }, eveEmail, "view");
+    await share(ada, { noteId: plan.id }, eveEmail, "edit");
+    const link = await perform(env.DB, ada, { type: "grant.link", folderId: team.id, link: "public" });
+    const token = tokenOf(link);
+
+    const hers = await perform(env.DB, eve, { type: "grant.list", noteId: plan.id });
+    expect(hers.canShare).toBe(true);
+    expect(hers.inherited.find((g) => g.to.kind === "link")?.to).toEqual({ kind: "link", link: "public", token: null });
+    expect(await perform(env.DB, eve, { type: "grant.list", folderId: team.id })).toMatchObject({ canShare: false, grants: [], inherited: [] });
+
+    expect(tokenOf((await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).inherited.find((g) => g.to.kind === "link") ?? null)).toBe(token);
+    expect(tokenOf((await perform(env.DB, sam, { type: "grant.list", noteId: plan.id })).inherited.find((g) => g.to.kind === "link") ?? null)).toBe(token);
+  });
+
   it("goes to Unsorted when an admin deletes the folder it was alone in, which looked empty to them", async () => {
     const { ada, eve, team, secret } = await withSecret();
     const { unsortedId } = await perform(env.DB, ada, { type: "folder.list" });

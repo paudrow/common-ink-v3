@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
-import { dailySettings } from "../../src/core/daily.ts";
+import { dailySettings, dayFor, zoneToKeep } from "../../src/core/daily.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type OpInput } from "../../src/core/protocol.ts";
 import { changesBetween } from "../../src/core/text.ts";
@@ -194,6 +194,17 @@ describe("what a member's settings say of daily notes", () => {
 
   it("takes a folder name, whether new daily notes are private, and a time zone", () => {
     expect(dailySettings(JSON.stringify({ "daily.folder": " Journal ", "daily.private": false, "daily.timeZone": "America/Chicago" }))).toEqual({ folder: "Journal", private: false, timeZone: "America/Chicago" });
+  });
+
+  it("keeps the browser's zone when the member named none, so 7:30pm in Chicago is still that day", () => {
+    // 00:30 UTC on the 18th is 7:30pm on the 17th in Chicago. A day nobody named is the 18th until the zone is kept.
+    const evening = Date.parse("2026-10-18T00:30:00.000Z");
+    expect(dayFor(dailySettings("{}"), evening)).toBe("2026-10-18");
+    const kept = zoneToKeep("{}", "America/Chicago");
+    expect(dayFor(dailySettings(JSON.stringify({ "daily.timeZone": kept })), evening)).toBe("2026-10-17");
+    expect(zoneToKeep(JSON.stringify({ "daily.timeZone": "Pacific/Auckland" }), "America/Chicago")).toBeNull();
+    expect(zoneToKeep(JSON.stringify({ "daily.timeZone": "UTC" }), "America/Chicago")).toBeNull();
+    expect(zoneToKeep("{}", "Mars/Olympus")).toBeNull();
   });
 });
 
@@ -769,6 +780,43 @@ describe("taking a completion back", () => {
     expect(await text()).toBe(`# ${SUNDAY}\n\n`);
     // The daily note is Ada's and private: Eve's change took the line off it, and she is told of no note she can't see.
     expect(reverted.unfiled).toEqual({ removed: 1, left: 0, dailyNoteIds: [] });
+  });
+
+  it("leaves a daily note outside a folder-limited agent's folders as it is", async () => {
+    const ada = await newMember();
+    const projects = (await perform(env.DB, ada, { type: "folder.create", name: "Projects" })).id;
+    const note = await create(ada, `# Chores\n\n${WATER}`, projects);
+    const done = await check(ada, note.id, 2, WATER);
+    const daily = done.filed!.dailyNoteId!;
+    const before = (await read(ada, daily)).text;
+    const connected = await connectAgent(env.DB, ada.personId, "Claude", { workspaceId: ada.workspaceId, folderIds: [projects] });
+    const claude: Actor = { kind: "agent", agentId: connected.agent.id, personId: ada.personId, workspaceId: ada.workspaceId, scope: { pinnedWorkspaceId: ada.workspaceId, folderIds: connected.agent.folderIds } };
+
+    const reverted = await perform(env.DB, claude, { type: "note.revert", id: note.id, revision: 1 });
+
+    expect(reverted.unfiled).toEqual({ removed: 0, left: 1, dailyNoteIds: [] });
+    expect((await read(ada, daily)).text).toBe(before);
+    expect((await read(ada, note.id)).text).toBe(`# Chores\n\n${WATER}`);
+    expect(await codeOf(read(claude, daily))).toBe("not_found");
+  });
+
+  it("leaves a daily note a member can only view as it is", async () => {
+    const ada = await newMember();
+    await settings(ada, { "daily.private": false });
+    const note = await create(ada, `# Chores\n\n${WATER}`);
+    const done = await check(ada, note.id, 2, WATER);
+    const daily = done.filed!.dailyNoteId!;
+    const before = (await read(ada, daily)).text;
+    const email = `${crypto.randomUUID()}@example.com`;
+    await perform(env.DB, ada, { type: "member.invite", email, as: "editor" });
+    const eve: Actor = { kind: "member", personId: (await signIn(env.DB, { email, name: "Eve" })).personId, workspaceId: ada.workspaceId };
+    await perform(env.DB, ada, { type: "grant.set", folderId: (await read(ada, daily)).folderId, email, access: "view" });
+
+    const reverted = await perform(env.DB, eve, { type: "note.revert", id: note.id, revision: 1 });
+
+    expect(reverted.unfiled).toEqual({ removed: 0, left: 1, dailyNoteIds: [] });
+    expect((await read(ada, daily)).text).toBe(before);
+    expect((await read(eve, daily)).text).toBe(before);
   });
 
   it("does so for changes of several notes reverted at once, as History's page reverts them, and files the line again when that revert is reverted", async () => {

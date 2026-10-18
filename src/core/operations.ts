@@ -1120,10 +1120,20 @@ interface Refiling {
  * itself reverted, has it filed again unless it is still there. The line is found by following the place it was filed at through the daily
  * note's changes since, never by what it says. One that was edited or deleted since is left as the
  * member has it. The statements go in the batch that records the change itself. The daily note is
- * the completer's, and is changed whether or not the one taking the change back can see it: they are
- * told of it only when they can. A daily note in Trash can't be changed, so its lines are left as
- * they are and counted as left.
+ * the completer's. When it is private to someone else, it is changed even though the one taking the
+ * completion back cannot see it, and they are told of it only when they can. A folder limit is not
+ * that exception, and neither is a note they can only view: those lines are left and counted as left.
+ * A daily note in Trash can't be changed, so its lines are left the same way.
  */
+
+/** Whether taking a completion back may rewrite this daily note. */
+function mayRefile(ctx: Context, daily: NoteRow): boolean {
+  const asked = itemAsked(ctx.sight, daily);
+  if (asked.outside) return false;
+  const level = itemLevel(ctx.sight, daily);
+  return level === "edit" || (asked.private === "theirs" && level === "none");
+}
+
 async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[], reverts: Reverts): Promise<Refiling> {
   const { results } = await ctx.db
     .prepare("SELECT revision, at, daily_note_id, daily_revision, daily_at FROM completions WHERE note_id = ?1 AND daily_note_id <> ?1 AND daily_revision IS NOT NULL ORDER BY revision, at")
@@ -1136,7 +1146,7 @@ async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[]
   for (const [dailyId, completions] of Map.groupBy(moved, (c) => c.daily_note_id)) {
     const daily = await ctx.db.prepare(NOTE_BY_ID).bind(dailyId).first<NoteRow>();
     if (!daily) continue;
-    if (daily.state === "trashed") {
+    if (daily.state === "trashed" || !mayRefile(ctx, daily)) {
       refiled.unfiled!.left += completions.filter((c) => after.has(c.revision)).length;
       continue;
     }

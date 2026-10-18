@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { DAILY_SETTINGS, zoneToKeep } from "../core/daily.ts";
 import type { Me, MeHere } from "../core/protocol.ts";
 import { ApiError, getMe, onRefused, perform, session, signOut, workspaceOfInvite, workspaceOfNote } from "./api.ts";
 import { showing, targetOf, type Target } from "./leads.ts";
@@ -240,9 +241,14 @@ function useSettings(workspaceId: string) {
   const status = useSyncExternalStore(store.subscribe, store.status);
   const [waitedFor, setWaitedFor] = useState<SettingsStore | null>(null);
   useEffect(() => {
-    void store.load();
+    // An agent that opens a daily note without saying the day uses this. Empty used to mean UTC, so after 7pm in Chicago it made tomorrow's note.
+    const keepZone = () => {
+      const zone = zoneToKeep(store.text(), Intl.DateTimeFormat().resolvedOptions().timeZone);
+      if (zone) store.set(DAILY_SETTINGS.timeZone.key, zone);
+    };
+    void store.load().then(keepZone);
     const timer = setTimeout(() => setWaitedFor(store), SETTINGS_WAIT_MS);
-    const refresh = () => document.visibilityState === "visible" && void store.refresh();
+    const refresh = () => document.visibilityState === "visible" && void store.refresh().then(keepZone);
     addEventListener("focus", refresh);
     addEventListener("pageshow", refresh);
     addEventListener("pagehide", store.flush);

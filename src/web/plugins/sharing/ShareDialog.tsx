@@ -237,7 +237,7 @@ export function ShareDialog({ host, app, on, name, close }: Props) {
                 </select>
                 {link ? (
                   <>
-                    <Copyable label="Link address" value={linkAddress(location.origin, link.token)} />
+                    {link.token && <Copyable label="Link address" value={linkAddress(location.origin, link.token)} />}
                     <p className="hint">
                       {link.link === "public" ? "Anyone who has this address can read" : "Anyone who has this address and signs in to Common Ink can read"} {isNote ? "this note" : "the notes in this folder"}, and can't change{" "}
                       {isNote ? "it" : "them"}. Turning the link off stops it at once.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MAX_SEARCH_LENGTH, useInspected, writtenMention, type App, type PersonPage as Person, type PluginHost, type Results, type Showing, type Source } from "../../plugin-api.ts";
+import { MAX_SEARCH_LENGTH, today, useInspected, writtenMention, type App, type PersonPage as Person, type PluginHost, type Results, type Showing, type Source } from "../../plugin-api.ts";
 import { personPath } from "../lib/person.ts";
 import { QueryBar } from "../lib/QueryBar.tsx";
 import { TodoList } from "../todos/Todos.tsx";
@@ -73,7 +73,7 @@ export function PersonPage({ host, app, who, openAt }: Props) {
     // What is typed is one group, so an OR in it is still among the notes that mention them.
     const asked = `${person.query} (${query})`;
     if (asked.length > MAX_SEARCH_LENGTH) return void setFound({ query, answer: null, problem: `A search here can be ${MAX_SEARCH_LENGTH - person.query.length - 3} characters long` });
-    host.perform({ type: "search", query: asked, today: new Date().toISOString().slice(0, 10), zone: Intl.DateTimeFormat().resolvedOptions().timeZone, limit: 50 }).then(
+    host.perform({ type: "search", query: asked, today: today(), zone: Intl.DateTimeFormat().resolvedOptions().timeZone, limit: 50 }).then(
       (answer) => !stale && setFound({ query, answer, problem: null }),
       (err: unknown) => !stale && setFound({ query, answer: null, problem: err instanceof Error ? err.message : "The search couldn't be made." }),
     );

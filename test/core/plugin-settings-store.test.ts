@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DAILY_SETTINGS, zoneToKeep } from "../../src/core/daily.ts";
 import { ApiError } from "../../src/web/api.ts";
 import { createSettingsStore, type SettingsServer } from "../../src/web/settingsStore.ts";
 
@@ -55,6 +56,26 @@ async function loaded(remote: ReturnType<typeof server>) {
 }
 
 describe("the settings store", () => {
+  it("stores the browser's zone when the member named none, and leaves a zone they named", async () => {
+    const keep = (store: ReturnType<typeof createSettingsStore>, zone: string) => {
+      const kept = zoneToKeep(store.text(), zone);
+      if (kept) store.set(DAILY_SETTINGS.timeZone.key, kept);
+    };
+    const remote = server();
+    const store = await loaded(remote);
+    keep(store, "America/Chicago");
+    await settle();
+    expect(JSON.parse(store.text())[DAILY_SETTINGS.timeZone.key]).toBe("America/Chicago");
+    keep(store, "America/Chicago");
+    await settle();
+    expect(remote.control.writes).toHaveLength(1);
+
+    const named = await loaded(server(JSON.stringify({ [DAILY_SETTINGS.timeZone.key]: "Pacific/Auckland" })));
+    keep(named, "America/Chicago");
+    await settle();
+    expect(JSON.parse(named.text())[DAILY_SETTINGS.timeZone.key]).toBe("Pacific/Auckland");
+  });
+
   it("shows a change at once, and sends only the latest after the write in flight", async () => {
     const remote = server();
     const store = await loaded(remote);
