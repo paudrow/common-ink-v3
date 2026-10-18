@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nightShift } from "../../src/web/plugins/nightShift/index.ts";
+import { isNight, sunTimes } from "../../src/web/plugins/nightShift/sun.ts";
 import { GREEN, STRENGTHS, colorsIn, contrast, nightTokens, solid, tintMatrix, tone } from "../../src/web/plugins/nightShift/theme.ts";
 
 describe("night shift's colors", () => {
@@ -77,5 +78,31 @@ describe("the Night shift plugin", () => {
     expect(nightShift.settings!.strength).toMatchObject({ type: "string", enum: STRENGTHS });
     expect(nightShift.settings!.tint).toMatchObject({ type: "boolean", default: false });
     expect(nightShift.settings!.on).toMatchObject({ remembered: true });
+    expect(nightShift.settings!.follow).toMatchObject({ type: "boolean", default: false, remembered: true });
+    expect(nightShift.settings!.place).toMatchObject({ type: "string", default: "", remembered: true });
+  });
+});
+
+describe("sunset and sunrise", () => {
+  it("puts sunrise near 06:00 and sunset near 18:00 on the equator at the March equinox", () => {
+    const times = sunTimes(0, 0, new Date("2026-03-20T12:00:00Z"));
+    expect(times).not.toBe("day");
+    expect(times).not.toBe("night");
+    if (times === "day" || times === "night") return;
+    const hour = (ms: number) => new Date(ms).getUTCHours() + new Date(ms).getUTCMinutes() / 60;
+    expect(hour(times.rise)).toBeGreaterThan(5.5);
+    expect(hour(times.rise)).toBeLessThan(6.5);
+    expect(hour(times.set)).toBeGreaterThan(17.5);
+    expect(hour(times.set)).toBeLessThan(18.5);
+    expect(isNight(0, 0, new Date(times.rise - 60_000))).toBe(true);
+    expect(isNight(0, 0, new Date(times.rise + 60_000))).toBe(false);
+    expect(isNight(0, 0, new Date(times.set + 60_000))).toBe(true);
+  });
+
+  it("is night through a polar winter and day through a polar summer", () => {
+    expect(sunTimes(78, 15, new Date("2026-12-21T12:00:00Z"))).toBe("night");
+    expect(sunTimes(78, 15, new Date("2026-06-21T12:00:00Z"))).toBe("day");
+    expect(isNight(78, 15, new Date("2026-12-21T12:00:00Z"))).toBe(true);
+    expect(isNight(78, 15, new Date("2026-06-21T12:00:00Z"))).toBe(false);
   });
 });

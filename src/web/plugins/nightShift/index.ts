@@ -1,4 +1,5 @@
 import type { Plugin } from "../../plugin-api.ts";
+import { isNight } from "./sun.ts";
 import { STRENGTHS, nightTokens, tintMatrix, type Strength } from "./theme.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -32,7 +33,7 @@ function tintFilter() {
 export const nightShift: Plugin = {
   id: "night-shift",
   name: "Night shift",
-  description: "A red-on-black theme for the night, over the light or dark theme. Turn it on and off by hand with a command and a key.",
+  description: "A red-on-black theme for the night, over the light or dark theme. Turn it on and off by hand, or let a place you set turn it on from sunset to sunrise.",
   icon: "moon",
   enabledByDefault: false,
   settings: {
@@ -56,6 +57,20 @@ export const nightShift: Plugin = {
       title: "Tint pictures, videos and embeds",
       description: "Colors pictures and videos red too. A frame from another site can't be changed inside, so it is covered with a red tint that lets clicks through.",
     },
+    follow: {
+      type: "boolean",
+      default: false,
+      remembered: true,
+      title: "Follow the night",
+      description: "Turns night shift on from sunset to sunrise at the place below. Off, the toggle and its key decide, and this never asks the browser where it is.",
+    },
+    place: {
+      type: "string",
+      default: "",
+      remembered: true,
+      title: "Place",
+      description: "A city, set once. Follow the night uses its sunset and sunrise.",
+    },
   },
   activate(host) {
     const root = document.documentElement;
@@ -70,10 +85,34 @@ export const nightShift: Plugin = {
       // The page had no style attribute, and has none again.
       if (!root.getAttribute("style")) root.removeAttribute("style");
     };
+    let place = "";
+    let coords: { lat: number; lon: number } | null = null;
+    let looking = 0;
+    const locate = () => {
+      const name = host.settings.get<string>("place").trim();
+      if (name === place) return;
+      place = name;
+      coords = null;
+      if (!name) return;
+      const round = ++looking;
+      void fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1`)
+        .then((res) => res.json())
+        .then((body: { results?: { latitude: number; longitude: number }[] }) => {
+          if (round !== looking) return;
+          const hit = body.results?.[0];
+          coords = hit ? { lat: hit.latitude, lon: hit.longitude } : null;
+          apply();
+        })
+        .catch(() => {
+          if (round === looking) coords = null;
+        });
+    };
     const apply = () => {
       const strength = host.settings.get<Strength>("strength");
       filter.set(strength);
-      if (!host.settings.get<boolean>("on")) return clear();
+      const following = host.settings.get<boolean>("follow") && coords !== null;
+      const on = following && coords ? isNight(coords.lat, coords.lon, new Date()) : host.settings.get<boolean>("on");
+      if (!on) return clear();
       for (const [token, value] of Object.entries(nightTokens(strength))) root.style.setProperty(token, value);
       root.style.setProperty("color-scheme", "dark");
       root.dataset.nightShift = strength;
@@ -93,10 +132,16 @@ export const nightShift: Plugin = {
 
     // Not at once: reading a setting while the plugin is starting has the host list what it adds before it is running, and its options are then shown as off.
     let stopped = false;
-    queueMicrotask(() => !stopped && apply());
-    host.settings.subscribe(apply);
+    const refresh = () => {
+      locate();
+      apply();
+    };
+    queueMicrotask(() => !stopped && refresh());
+    host.settings.subscribe(refresh);
+    const clock = setInterval(() => !stopped && apply(), 60_000);
     return () => {
       stopped = true;
+      clearInterval(clock);
       clear();
       filter.remove();
     };
