@@ -102,6 +102,11 @@ function kindOf(question: Question): string {
   }
 }
 
+// "0" is truthy. On an anonymous form that string is a tally, not a list of names.
+function picked(form: Form, label: string): boolean {
+  return form.anonymous ? Number(label) > 0 : label !== "";
+}
+
 function aside(text: string): Node | string {
   return text ? h("span", { className: "form-note" }, text) : "";
 }
@@ -276,7 +281,7 @@ function drawQuestion(
       const rows = question.options.map((option) => {
         const on = value === option || (Array.isArray(value) && value.includes(option));
         const who = detail(option, (stored) => stored === option || (Array.isArray(stored) && stored.includes(option)));
-        return answering ? choice(option, `${question.type}:${question.id}:${option}`, on, radio, who, () => choose(question.id, option)) : row(option, who, radio, Boolean(who));
+        return answering ? choice(option, `${question.type}:${question.id}:${option}`, on, radio, who, () => choose(question.id, option)) : row(option, who, radio, picked(form, who));
       });
       const group = h("div", { className: "form-choices" }, ...rows);
       group.setAttribute("role", radio ? "radiogroup" : "group");
@@ -286,13 +291,20 @@ function drawQuestion(
     }
     case "dropdown": {
       if (answering) block.append(menu(question.options, typeof value === "string" ? value : "", `drop:${question.id}`, question.prompt, (option) => choose(question.id, option)));
-      else if (typeof value === "string" && value) block.append(h("p", { className: "form-quote" }, value));
+      else if (form.anonymous) {
+        const rows = question.options.map((option) => {
+          const who = detail(option, () => false);
+          return row(option, who, true, picked(form, who));
+        });
+        block.append(h("div", { className: "form-choices" }, ...rows));
+      }
+      block.append(...quotes(form, question.id, answering, roster, meId));
       return finish(block);
     }
     case "date":
     case "time": {
       if (answering) block.append(field(question.type, typeof value === "string" ? value : "", `when:${question.id}`, (text) => typeText(question.id, text), question.prompt));
-      else if (typeof value === "string" && value) block.append(h("p", { className: "form-quote" }, value));
+      block.append(...quotes(form, question.id, answering, roster, meId));
       return finish(block);
     }
     case "scale": {
@@ -329,7 +341,7 @@ function drawQuestion(
               });
               const cell = answering
                 ? gridButton(on, who, `grid:${question.id}:${key}`, `${gridRow.label} ${col.label}`, question.several === true, () => choose(question.id, { [gridRow.id]: col.id }))
-                : h("span", { className: "form-cell-read" }, mark(!question.several, Boolean(who)), aside(who));
+                : h("span", { className: "form-cell-read" }, mark(!question.several, picked(form, who)), aside(who));
               return h("td", {}, cell);
             }),
           ),
@@ -349,7 +361,7 @@ function drawQuestion(
         const picture = Object.assign(document.createElement("img"), { src: option.src || swatch(option.label, at), alt: "" });
         const shot = answering
           ? imageButton(option.label, on, who, picture, `image:${question.id}:${option.id}`, question.several === true, () => choose(question.id, option.id))
-          : h("div", { className: on || who ? "form-shot form-shot-on" : "form-shot" }, picture, h("span", {}, option.label), aside(who));
+          : h("div", { className: on || picked(form, who) ? "form-shot form-shot-on" : "form-shot" }, picture, h("span", {}, option.label), aside(who));
         line.append(shot);
       });
       block.append(line);
@@ -575,7 +587,7 @@ function drawEditor(form: Form, question: Question, index: number, revise: (ques
     const box = h("label", { className: "form-check" }, h("span", {}, "Other line"));
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = question.explain !== false && form.explain !== false;
+    input.checked = showsOther(form, question);
     input.addEventListener("change", () => put({ ...question, explain: input.checked }));
     box.prepend(input);
     block.append(box);
