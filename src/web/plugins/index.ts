@@ -14,6 +14,7 @@ import { embedMenu } from "./embedMenu.ts";
 import { gfm } from "./gfm/index.ts";
 import { html } from "./html/index.ts";
 import { history } from "./history/index.tsx";
+import { forms } from "./forms/index.ts";
 import { kanban } from "./kanban/index.ts";
 import { lineNumbers } from "./lineNumbers.ts";
 import { links } from "./links/index.ts";
@@ -41,4 +42,4 @@ import { vim } from "./vim/index.ts";
 import { wordCount } from "./wordCount.tsx";
 
 /** The plugins that come with the app, in the order their contributions are shown. Each is on until a member turns it off, except one that says it starts off. */
-export const BUILT_INS: readonly Plugin[] = [sidebar, folders, tags, noteList, tabs, quickOpen, commandPalette, search, dashboard, uploads, history, blame, agents, members, sharing, backlinks, noteInfo, trash, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, media, html, calendar, contacts, gfm, todos, daily, links, mentions, tables, math, codeBlocks, bullets, lineNumbers, vim, wordCount];
+export const BUILT_INS: readonly Plugin[] = [sidebar, folders, tags, noteList, tabs, quickOpen, commandPalette, search, dashboard, uploads, history, blame, agents, members, sharing, backlinks, noteInfo, trash, embedMenu, timer, stopwatch, kanban, forms, noteClocks, quickTimer, media, html, calendar, contacts, gfm, todos, daily, links, mentions, tables, math, codeBlocks, bullets, lineNumbers, vim, wordCount];

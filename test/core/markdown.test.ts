@@ -86,6 +86,11 @@ describe("a note's title without a # heading", () => {
     expect(snippet.startsWith("word word")).toBe(true);
   });
 
+  it("passes over a form's JSON, and keeps an unclosed opening as prose", () => {
+    expect(summarize(':::form{}\n{\n  "prompt": "#launch"\n}\n:::\n# Real').title).toBe("Real");
+    expect(summarize(":::form{}\n{\n# Kept").title).toBe("Kept");
+  });
+
   it("passes over what is drawn and says nothing: an embed, an image, a rule, math's fence, a link by id, a code block", () => {
     expect(summarize("::timer{5m}\n![a cat](/files/abc)\n---\n[[abc123def456]]\n```js\nconst a = 1;\n```\n$$\nReal words here").title).toBe("Real words here");
   });
