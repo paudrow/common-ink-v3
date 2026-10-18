@@ -102,11 +102,6 @@ function kindOf(question: Question): string {
   }
 }
 
-// "0" is truthy. On an anonymous form that string is a tally, not a list of names.
-function picked(form: Form, label: string): boolean {
-  return form.anonymous ? Number(label) > 0 : label !== "";
-}
-
 function aside(text: string): Node | string {
   return text ? h("span", { className: "form-note" }, text) : "";
 }
@@ -130,7 +125,6 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
     const stored = form.anonymous ? undefined : form.mode === "one" ? Object.values(form.answers)[0] : form.answers[me.id];
     const valueOf = (questionId: string): AnswerValue | undefined => (form.anonymous ? (answering ? draft[questionId] : undefined) : stored?.[questionId]);
     const names = (questionId: string, hit: (value: AnswerValue | undefined) => boolean) => (form.anonymous ? "" : whoChose(form, roster, me.id, questionId, answering, hit));
-    const count = (questionId: string, key: string) => (form.anonymous && !answering ? String(form.tallies[questionId]?.[key] ?? 0) : "");
 
     const root = h("div", { className: "form-embed" });
     if (!current.readOnly) {
@@ -186,7 +180,7 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
       root.append(
         editing && !current.readOnly
           ? drawEditor(form, question, index, revise)
-          : drawQuestion(form, question, index, answering, roster, me.id, valueOf, names, count, choose, typeText, otherOf, typeOther),
+          : drawQuestion(form, question, index, answering, roster, me.id, valueOf, names, choose, typeText, otherOf, typeOther),
       );
     });
     if (editing && !current.readOnly) root.append(addQuestion(form, revise));
@@ -248,7 +242,6 @@ function drawQuestion(
   meId: string,
   valueOf: (questionId: string) => AnswerValue | undefined,
   names: (questionId: string, hit: (value: AnswerValue | undefined) => boolean) => string,
-  count: (questionId: string, key: string) => string,
   choose: (questionId: string, value: AnswerValue) => void,
   typeText: (questionId: string, value: string) => void,
   otherOf: (questionId: string) => string,
@@ -266,7 +259,14 @@ function drawQuestion(
     return node;
   };
   const value = valueOf(question.id);
-  const detail = (key: string, hit: (stored: AnswerValue | undefined) => boolean) => count(question.id, key) || names(question.id, hit);
+  const detail = (key: string, hit: (stored: AnswerValue | undefined) => boolean) => {
+    if (form.anonymous && !answering) {
+      const n = form.tallies[question.id]?.[key] ?? 0;
+      return { label: String(n), on: n > 0 };
+    }
+    const label = names(question.id, hit);
+    return { label, on: label !== "" };
+  };
 
   switch (question.type) {
     case "short":
@@ -281,7 +281,7 @@ function drawQuestion(
       const rows = question.options.map((option) => {
         const on = value === option || (Array.isArray(value) && value.includes(option));
         const who = detail(option, (stored) => stored === option || (Array.isArray(stored) && stored.includes(option)));
-        return answering ? choice(option, `${question.type}:${question.id}:${option}`, on, radio, who, () => choose(question.id, option)) : row(option, who, radio, picked(form, who));
+        return answering ? choice(option, `${question.type}:${question.id}:${option}`, on, radio, who.label, () => choose(question.id, option)) : row(option, who.label, radio, who.on);
       });
       const group = h("div", { className: "form-choices" }, ...rows);
       group.setAttribute("role", radio ? "radiogroup" : "group");
@@ -294,7 +294,7 @@ function drawQuestion(
       else if (form.anonymous) {
         const rows = question.options.map((option) => {
           const who = detail(option, () => false);
-          return row(option, who, true, picked(form, who));
+          return row(option, who.label, true, who.on);
         });
         block.append(h("div", { className: "form-choices" }, ...rows));
       }
@@ -314,7 +314,7 @@ function drawQuestion(
       if (question.minLabel) line.append(h("span", { className: "form-note" }, question.minLabel));
       for (let n = 1; n <= 5; n++) {
         const who = detail(String(n), (stored) => stored === n);
-        line.append(answering ? point(n, value === n, who, `scale:${question.id}:${n}`, () => choose(question.id, n)) : h("span", { className: "form-point" }, String(n), aside(who)));
+        line.append(answering ? point(n, value === n, who.label, `scale:${question.id}:${n}`, () => choose(question.id, n)) : h("span", { className: "form-point" }, String(n), aside(who.label)));
       }
       if (question.maxLabel) line.append(h("span", { className: "form-note" }, question.maxLabel));
       block.append(line);
@@ -340,8 +340,8 @@ function drawQuestion(
                 return question.several ? Array.isArray(cell) && cell.includes(col.id) : cell === col.id;
               });
               const cell = answering
-                ? gridButton(on, who, `grid:${question.id}:${key}`, `${gridRow.label} ${col.label}`, question.several === true, () => choose(question.id, { [gridRow.id]: col.id }))
-                : h("span", { className: "form-cell-read" }, mark(!question.several, picked(form, who)), aside(who));
+                ? gridButton(on, who.label, `grid:${question.id}:${key}`, `${gridRow.label} ${col.label}`, question.several === true, () => choose(question.id, { [gridRow.id]: col.id }))
+                : h("span", { className: "form-cell-read" }, mark(!question.several, who.on), aside(who.label));
               return h("td", {}, cell);
             }),
           ),
@@ -360,8 +360,8 @@ function drawQuestion(
         const who = detail(option.id, (stored) => stored === option.id || (Array.isArray(stored) && stored.includes(option.id)));
         const picture = Object.assign(document.createElement("img"), { src: option.src || swatch(option.label, at), alt: "" });
         const shot = answering
-          ? imageButton(option.label, on, who, picture, `image:${question.id}:${option.id}`, question.several === true, () => choose(question.id, option.id))
-          : h("div", { className: on || picked(form, who) ? "form-shot form-shot-on" : "form-shot" }, picture, h("span", {}, option.label), aside(who));
+          ? imageButton(option.label, on, who.label, picture, `image:${question.id}:${option.id}`, question.several === true, () => choose(question.id, option.id))
+          : h("div", { className: on || who.on ? "form-shot form-shot-on" : "form-shot" }, picture, h("span", {}, option.label), aside(who.label));
         line.append(shot);
       });
       block.append(line);
