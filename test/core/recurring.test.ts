@@ -810,7 +810,9 @@ describe("taking a completion back", () => {
     const email = `${crypto.randomUUID()}@example.com`;
     await perform(env.DB, ada, { type: "member.invite", email, as: "editor" });
     const eve: Actor = { kind: "member", personId: (await signIn(env.DB, { email, name: "Eve" })).personId, workspaceId: ada.workspaceId };
-    await perform(env.DB, ada, { type: "grant.set", folderId: (await read(ada, daily)).folderId, email, access: "view" });
+    const folderId = (await read(ada, daily)).folderId;
+    if (folderId === null) throw new Error("the daily note has no folder");
+    await perform(env.DB, ada, { type: "grant.set", folderId, email, access: "view" });
 
     const reverted = await perform(env.DB, eve, { type: "note.revert", id: note.id, revision: 1 });
 

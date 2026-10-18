@@ -24,7 +24,7 @@ const titles = async (as: Actor) => (await perform(env.DB, as, { type: "note.lis
 const read = (as: Actor, id: string) => perform(env.DB, as, { type: "note.read", id });
 const write = (as: Actor, id: string, baseRevision: number, text: string) => perform(env.DB, as, { type: "note.write", id, baseRevision, text });
 const share = (by: Actor, on: { noteId: string } | { folderId: string }, email: string, access: "view" | "edit") => perform(env.DB, by, { type: "grant.set", ...on, email, access });
-const tokenOf = (grant: Grant | null) => (grant?.to.kind === "link" ? grant.to.token : "");
+const tokenOf = (grant: Grant | null) => (grant?.to.kind === "link" ? (grant.to.token ?? "") : "");
 
 const NO_NOTE = { code: "not_found", message: "No such note" };
 const NO_FOLDER = { code: "not_found", message: "No such folder" };

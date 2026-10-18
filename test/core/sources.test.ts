@@ -170,7 +170,7 @@ describe("data sources belong to one person", () => {
     const ada = await newMember("Ada");
     const note = await perform(env.DB, ada, { type: "note.create", text: "# Shared" });
     const link = await perform(env.DB, ada, { type: "grant.link", noteId: note.id, link: "public" });
-    const token = link!.to.kind === "link" ? link!.to.token : "";
+    const token = link!.to.kind === "link" ? (link!.to.token ?? "") : "";
     for (const personId of [null, ada.personId]) {
       expect(await refusal(perform(env.DB, { kind: "visitor", token, personId }, { type: "event.list", ...WEEK }, T0, w.sources))).toBe("forbidden: A link can't event.list");
     }
@@ -646,7 +646,7 @@ describe("a reference in a note, asked about by everyone it doesn't belong to", 
     expect(await refusal(w.ask(others.editor!, { type: "record.read", ref: lunch.ref }))).toBe("not_found: No such record");
 
     const link = await w.ask(olga, { type: "grant.link", noteId: note.id, link: "public" });
-    const token = link!.to.kind === "link" ? link!.to.token : "";
+    const token = link!.to.kind === "link" ? (link!.to.token ?? "") : "";
     for (const personId of [null, others.editor!.personId, ada.personId]) {
       const visitor = { kind: "visitor", token, personId } as const;
       const shared = await perform(env.DB, visitor, { type: "shared.read", id: note.id }, T0, w.sources);
