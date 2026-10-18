@@ -2941,10 +2941,10 @@ button.link:hover {
 
 .form-q {
   display: grid;
-  gap: 8px;
-  padding: 12px 14px 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
   background: var(--bg-elev);
 }
 
@@ -2968,9 +2968,9 @@ button.link:hover {
 .form-row {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
   width: 100%;
-  padding: 4px 8px;
+  padding: 6px 8px;
   border-radius: 6px;
 }
 
@@ -2994,7 +2994,9 @@ button.link:hover {
 .form-choice[aria-pressed="true"],
 .form-point[aria-checked="true"],
 .form-cell[aria-checked="true"],
-.form-shot[aria-checked="true"] {
+.form-cell[aria-pressed="true"],
+.form-shot[aria-checked="true"],
+.form-shot[aria-pressed="true"] {
   background: var(--accent-soft);
 }
 
@@ -3020,22 +3022,116 @@ button.link:hover {
   white-space: pre-wrap;
 }
 
-.form-field {
+.form-field,
+.form-select {
+  box-sizing: border-box;
   width: 100%;
+  min-height: 42px;
   margin: 0;
-  padding: 4px 8px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg);
   color: var(--ink);
   font: inherit;
   resize: vertical;
 }
 
-.form-field:focus {
+.form-field::placeholder {
+  color: var(--faint);
+}
+
+.form-field:focus,
+.form-select:focus {
   outline: none;
-  border-bottom-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.form-index {
+  margin-right: 8px;
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.form-kind,
+.form-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.form-desc,
+.form-head .form-note,
+.form-build-row .form-note,
+.form-check .form-note {
+  margin-left: 0;
+}
+
+.form-mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border: 1.5px solid var(--faint);
+  box-sizing: border-box;
+}
+
+.form-mark-one {
+  border-radius: 50%;
+}
+
+.form-mark-any {
+  border-radius: 4px;
+}
+
+.form-mark-one[data-on="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--bg-elev), inset 0 0 0 8px var(--accent);
+}
+
+.form-mark-any[data-on="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.form-picture {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.form-shot-on {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.form-edit-toggle,
+.form-mini {
+  justify-self: start;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.form-build-bar,
+.form-build-option,
+.form-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.form-build-bar .form-select,
+.form-add .form-select,
+.form-build-option .form-field {
+  width: auto;
+  flex: 1;
 }
 
 .form-scale {
@@ -3085,6 +3181,9 @@ span.form-point {
 }
 
 .form-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   min-height: 1.75rem;
   padding: 4px;
@@ -3094,17 +3193,20 @@ span.form-point {
 .form-images {
   display: flex;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: 10px;
   overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 4px;
 }
 
 .form-shot {
   flex: none;
   display: grid;
-  gap: 4px;
+  gap: 6px;
   justify-items: center;
-  width: 7rem;
-  padding: 4px;
+  width: 11rem;
+  padding: 6px;
+  scroll-snap-align: start;
   cursor: pointer;
 }
 
@@ -3113,10 +3215,10 @@ div.form-shot {
 }
 
 .form-shot img {
-  height: 72px;
+  height: 8rem;
   width: 100%;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 .form-cast {

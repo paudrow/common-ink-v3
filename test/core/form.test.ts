@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { castVote, parseForm, serializeForm, setAnswer, setOther, showsOther, type AnonymousForm, type NamedForm } from "../../src/web/plugins/forms/form.ts";
+import { castVote, parseForm, replaceQuestions, serializeForm, setAnswer, setOther, showsOther, type AnonymousForm, type NamedForm } from "../../src/web/plugins/forms/form.ts";
 
 const one = (over: Partial<NamedForm> = {}): NamedForm => ({
   questions: [{ id: "q", type: "one", prompt: "Pick", options: ["A", "B"] }],
@@ -151,6 +151,32 @@ describe("reading and writing the form", () => {
   ]
 }
 `);
+  });
+
+  it("stores a dropdown, a date, several images, and more than one cell in a row", () => {
+    const form: NamedForm = {
+      questions: [
+        { id: "d", type: "dropdown", prompt: "Pick", options: ["A", "B"] },
+        { id: "when", type: "date", prompt: "When" },
+        { id: "pics", type: "image", prompt: "Pics", several: true, options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] },
+        { id: "g", type: "grid", prompt: "Grid", several: true, rows: [{ id: "r", label: "Row" }], cols: [{ id: "c", label: "Col" }, { id: "d", label: "Other" }] },
+      ],
+      answers: {},
+    };
+
+    expect(setAnswer(form, "ada", "d", "A").answers.ada?.d).toBe("A");
+    expect(setAnswer(form, "ada", "when", "not-a-date")).toBe(form);
+    expect(setAnswer(form, "ada", "when", "2026-10-18").answers.ada?.when).toBe("2026-10-18");
+    expect(setAnswer(setAnswer(form, "ada", "pics", "a"), "ada", "pics", "b").answers.ada?.pics).toEqual(["a", "b"]);
+    expect(setAnswer(setAnswer(form, "ada", "g", { r: "c" }), "ada", "g", { r: "d" }).answers.ada?.g).toEqual({ r: ["c", "d"] });
+  });
+
+  it("drops an answer when its question is replaced with one the answer does not fit", () => {
+    const stored = setAnswer(one(), "ada", "q", "A");
+    const next = replaceQuestions(stored, [{ id: "q", type: "dropdown", prompt: "Pick", options: ["B"] }]);
+
+    expect(next.questions).toEqual([{ id: "q", type: "dropdown", prompt: "Pick", options: ["B"] }]);
+    expect("answers" in next && next.answers).toEqual({});
   });
 
   it("returns null for what is not a form", () => {

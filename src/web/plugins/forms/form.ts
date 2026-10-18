@@ -27,18 +27,23 @@ interface Base {
   closed?: boolean;
   /** Absent means a choice question has an Other line. False hides Other on the whole form. */
   explain?: boolean;
+  /** Who asked, as written. Absent means the form doesn't say. */
+  by?: string;
   questions: Question[];
 }
 
 export type MemberAnswers = Record<string, AnswerValue>;
 
-export type AnswerValue = string | string[] | number | Record<string, string>;
+export type AnswerValue = string | string[] | number | Record<string, string | string[]>;
 
-export type Question = ShortQuestion | OneQuestion | SeveralQuestion | ScaleQuestion | GridQuestion | ImageQuestion;
+export type Question = ShortQuestion | OneQuestion | SeveralQuestion | DropdownQuestion | ScaleQuestion | WhenQuestion | GridQuestion | ImageQuestion;
 
 interface QuestionBase {
   id: string;
   prompt: string;
+  description?: string;
+  /** A picture shown with the question. An address on this site, or a data image. */
+  picture?: string;
 }
 
 export interface ShortQuestion extends QuestionBase {
@@ -60,6 +65,19 @@ export interface SeveralQuestion extends QuestionBase {
   explain?: boolean;
 }
 
+export interface DropdownQuestion extends QuestionBase {
+  type: "dropdown";
+  options: string[];
+  required?: boolean;
+  explain?: boolean;
+}
+
+export interface WhenQuestion extends QuestionBase {
+  type: "date" | "time";
+  required?: boolean;
+  explain?: boolean;
+}
+
 export interface ScaleQuestion extends QuestionBase {
   type: "scale";
   minLabel?: string;
@@ -71,12 +89,16 @@ export interface GridQuestion extends QuestionBase {
   type: "grid";
   rows: { id: string; label: string }[];
   cols: { id: string; label: string }[];
+  /** True lets a row take more than one column. Absent means one column per row. */
+  several?: boolean;
   explain?: boolean;
 }
 
 export interface ImageQuestion extends QuestionBase {
   type: "image";
   options: { id: string; label: string; src?: string }[];
+  /** True lets someone pick more than one image. Absent means one. */
+  several?: boolean;
   explain?: boolean;
 }
 
@@ -95,17 +117,20 @@ export function showsOther(form: Form, question: Question): boolean {
 
 const id = z.string().min(1);
 const labelled = z.object({ id, label: z.string() }).passthrough();
-const text = (type: "short" | "paragraph") => z.object({ id, type: z.literal(type), prompt: z.string(), required: z.boolean().optional() }).passthrough();
 const explain = z.boolean().optional();
-const one = z.object({ id, type: z.literal("one"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional(), explain }).passthrough();
-const several = z.object({ id, type: z.literal("several"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional(), explain }).passthrough();
-const scale = z.object({ id, type: z.literal("scale"), prompt: z.string(), minLabel: z.string().optional(), maxLabel: z.string().optional(), explain }).passthrough();
-const grid = z.object({ id, type: z.literal("grid"), prompt: z.string(), rows: z.array(labelled), cols: z.array(labelled), explain }).passthrough();
-const image = z.object({ id, type: z.literal("image"), prompt: z.string(), options: z.array(z.object({ id, label: z.string(), src: z.string().optional() }).passthrough()), explain }).passthrough();
-const question = z.discriminatedUnion("type", [text("short"), text("paragraph"), one, several, scale, grid, image]);
+const described = { description: z.string().optional(), picture: z.string().optional() };
+const text = (type: "short" | "paragraph") => z.object({ id, type: z.literal(type), prompt: z.string(), required: z.boolean().optional(), ...described }).passthrough();
+const one = z.object({ id, type: z.literal("one"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional(), explain, ...described }).passthrough();
+const several = z.object({ id, type: z.literal("several"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional(), explain, ...described }).passthrough();
+const dropdown = z.object({ id, type: z.literal("dropdown"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional(), explain, ...described }).passthrough();
+const when = (type: "date" | "time") => z.object({ id, type: z.literal(type), prompt: z.string(), required: z.boolean().optional(), explain, ...described }).passthrough();
+const scale = z.object({ id, type: z.literal("scale"), prompt: z.string(), minLabel: z.string().optional(), maxLabel: z.string().optional(), explain, ...described }).passthrough();
+const grid = z.object({ id, type: z.literal("grid"), prompt: z.string(), rows: z.array(labelled), cols: z.array(labelled), several: z.boolean().optional(), explain, ...described }).passthrough();
+const image = z.object({ id, type: z.literal("image"), prompt: z.string(), options: z.array(z.object({ id, label: z.string(), src: z.string().optional() }).passthrough()), several: z.boolean().optional(), explain, ...described }).passthrough();
+const question = z.discriminatedUnion("type", [text("short"), text("paragraph"), one, several, dropdown, scale, when("date"), when("time"), grid, image]);
 
-const answerValue = z.union([z.string(), z.number(), z.array(z.string()), z.record(z.string(), z.string())]);
-const shared = { ask: z.array(z.string()).optional(), closed: z.boolean().optional(), explain, questions: z.array(question) };
+const answerValue = z.union([z.string(), z.number(), z.array(z.string()), z.record(z.string(), z.union([z.string(), z.array(z.string())]))]);
+const shared = { ask: z.array(z.string()).optional(), closed: z.boolean().optional(), explain, by: z.string().optional(), questions: z.array(question) };
 
 const namedSchema = z
   .object({
@@ -260,15 +285,22 @@ function fits(question: Question | undefined, value: AnswerValue): boolean {
     case "paragraph":
       return typeof value === "string";
     case "one":
+    case "dropdown":
       return typeof value === "string" && question.options.includes(value);
     case "several":
       return Array.isArray(value) && value.every((option) => question.options.includes(option));
+    case "date":
+      return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+    case "time":
+      return typeof value === "string" && /^\d{2}:\d{2}$/.test(value);
     case "scale":
       return scalePoint(value);
     case "grid":
-      return gridValue(question, value) !== null;
+      return question.several ? gridMany(question, value) !== null : gridValue(question, value) !== null;
     case "image":
-      return typeof value === "string" && question.options.some((option) => option.id === value);
+      return question.several
+        ? Array.isArray(value) && value.every((option) => question.options.some((item) => item.id === option))
+        : typeof value === "string" && question.options.some((option) => option.id === value);
     default: {
       const unreachable: never = question;
       return unreachable;
@@ -285,10 +317,19 @@ function apply(question: Question, current: AnswerValue | undefined, value: unkn
       return value === current ? "same" : value;
     }
     case "one":
+    case "dropdown":
     case "image": {
-      const ok = question.type === "one" ? typeof value === "string" && question.options.includes(value) : typeof value === "string" && question.options.some((option) => option.id === value);
+      if (question.type === "image" && question.several) return toggleList(value, current, (option) => question.options.some((item) => item.id === option));
+      const ok = question.type === "image" ? typeof value === "string" && question.options.some((option) => option.id === value) : typeof value === "string" && question.options.includes(value);
       if (!ok || typeof value !== "string") return "same";
       return value === current ? "clear" : value;
+    }
+    case "date":
+    case "time": {
+      if (typeof value !== "string") return "same";
+      if (value === "") return current === undefined ? "same" : "clear";
+      if (!fits(question, value)) return "same";
+      return value === current ? "same" : value;
     }
     case "several": {
       if (typeof value !== "string" || !question.options.includes(value)) return "same";
@@ -304,6 +345,17 @@ function apply(question: Question, current: AnswerValue | undefined, value: unkn
     case "grid": {
       const pick = gridPick(question, value);
       if (!pick) return "same";
+      if (question.several) {
+        const have = gridMany(question, current) ?? {};
+        for (const [row, col] of Object.entries(pick)) {
+          const cols = new Set(have[row] ?? []);
+          if (cols.has(col)) cols.delete(col);
+          else cols.add(col);
+          if (cols.size) have[row] = [...cols];
+          else delete have[row];
+        }
+        return Object.keys(have).length ? have : "clear";
+      }
       const have = gridValue(question, current) ?? {};
       for (const [row, col] of Object.entries(pick)) {
         if (have[row] === col) delete have[row];
@@ -330,7 +382,12 @@ function count(question: Question, value: AnswerValue, tallies: Record<string, R
       if (typeof value === "string" && value !== "") texts[question.id] = [...(texts[question.id] ?? []), value].sort();
       return;
     case "one":
+    case "dropdown":
       if (typeof value === "string" && question.options.includes(value)) bump(value);
+      return;
+    case "date":
+    case "time":
+      if (typeof value === "string" && value !== "") texts[question.id] = [...(texts[question.id] ?? []), value].sort();
       return;
     case "several":
       if (Array.isArray(value)) for (const option of value) if (question.options.includes(option)) bump(option);
@@ -339,11 +396,20 @@ function count(question: Question, value: AnswerValue, tallies: Record<string, R
       if (scalePoint(value)) bump(String(value));
       return;
     case "grid": {
+      if (question.several) {
+        const cells = gridMany(question, value);
+        if (cells) for (const [row, cols] of Object.entries(cells)) for (const col of cols) bump(`${row}:${col}`);
+        return;
+      }
       const cells = gridValue(question, value);
-      if (cells) for (const [row, col] of Object.entries(cells)) bump(`${row}:${col}`);
+      if (cells) for (const [row, col] of Object.entries(cells)) if (typeof col === "string") bump(`${row}:${col}`);
       return;
     }
     case "image":
+      if (question.several && Array.isArray(value)) {
+        for (const option of value) if (question.options.some((item) => item.id === option)) bump(option);
+        return;
+      }
       if (typeof value === "string" && question.options.some((option) => option.id === value)) bump(value);
       return;
     default: {
@@ -367,6 +433,58 @@ function gridValue(question: GridQuestion, value: unknown): Record<string, strin
     cells[row] = col;
   }
   return cells;
+}
+
+function gridMany(question: GridQuestion, value: unknown): Record<string, string[]> | null {
+  if (!plain(value)) return null;
+  const rows = new Set(question.rows.map((row) => row.id));
+  const cols = new Set(question.cols.map((col) => col.id));
+  const cells: Record<string, string[]> = {};
+  for (const [row, picked] of Object.entries(value)) {
+    if (!rows.has(row) || !Array.isArray(picked) || !picked.every((col) => typeof col === "string" && cols.has(col))) return null;
+    cells[row] = picked;
+  }
+  return cells;
+}
+
+function toggleList(value: unknown, current: AnswerValue | undefined, ok: (option: string) => boolean): "same" | "clear" | string[] {
+  if (typeof value !== "string" || !ok(value)) return "same";
+  const have = Array.isArray(current) ? current : [];
+  const next = have.includes(value) ? have.filter((option) => option !== value) : [...have, value];
+  if (!next.length) return have.length ? "clear" : "same";
+  return next;
+}
+
+/** Puts `questions` on the form and drops answers that no longer fit. An ill-formed list is refused. */
+export function replaceQuestions(form: Form, questions: Question[]): Form {
+  if (!wellFormed(questions)) return form;
+  const byId = new Map(questions.map((question) => [question.id, question]));
+  if (form.anonymous) {
+    const keep = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([key]) => byId.has(key)));
+    return { ...form, questions, tallies: keep(form.tallies), texts: keep(form.texts) };
+  }
+  const answers: NamedForm["answers"] = {};
+  for (const [memberId, mine] of Object.entries(form.answers)) {
+    const next: MemberAnswers = {};
+    for (const [questionId, value] of Object.entries(mine)) {
+      const question = byId.get(questionId);
+      if (question && fits(question, value)) next[questionId] = value;
+    }
+    if (Object.keys(next).length) answers[memberId] = next;
+  }
+  const other: NonNullable<NamedForm["other"]> = {};
+  for (const [memberId, notes] of Object.entries(form.other ?? {})) {
+    const next: Record<string, string> = {};
+    for (const [questionId, text] of Object.entries(notes)) {
+      const question = byId.get(questionId);
+      if (question && showsOther({ ...form, questions }, question) && text) next[questionId] = text;
+    }
+    if (Object.keys(next).length) other[memberId] = next;
+  }
+  const named: NamedForm = { ...form, questions, answers };
+  if (Object.keys(other).length) named.other = other;
+  else delete named.other;
+  return named;
 }
 
 function gridPick(question: GridQuestion, value: unknown): Record<string, string> | null {

@@ -1,4 +1,4 @@
-import { castVote, parseForm, serializeForm, setAnswer, setOther, showsOther, type AnswerValue, type Form, type NamedForm, type Question } from "./form.ts";
+import { castVote, parseForm, replaceQuestions, serializeForm, setAnswer, setOther, showsOther, type AnswerValue, type Form, type NamedForm, type Question } from "./form.ts";
 import type { Drawn, EmbedOptions, Embedded, Plugin, PluginHost } from "../../plugin-api.ts";
 
 interface Props {
@@ -67,9 +67,39 @@ function whoChose(form: NamedForm, roster: Map<string, string>, meId: string, qu
   return names.join(", ");
 }
 
-function promptOf(question: Question): HTMLElement {
-  const required = (question.type === "short" || question.type === "paragraph" || question.type === "one" || question.type === "several") && question.required;
-  return h("p", { className: "form-prompt" }, question.prompt, ...(required ? [h("span", { className: "form-note" }, " *")] : []));
+function promptOf(question: Question, index: number): HTMLElement {
+  const required = "required" in question && question.required;
+  const head = h("div", { className: "form-head" });
+  const kind = kindOf(question);
+  head.append(
+    h("p", { className: "form-prompt" }, h("span", { className: "form-index" }, String(index + 1)), question.prompt, ...(required ? [h("span", { className: "form-note" }, " *")] : [])),
+  );
+  if (kind) head.append(h("p", { className: "form-kind" }, kind));
+  if (question.description) head.append(h("p", { className: "form-note form-desc" }, question.description));
+  if (question.picture) head.append(Object.assign(document.createElement("img"), { className: "form-picture", src: question.picture, alt: "" }));
+  return head;
+}
+
+function kindOf(question: Question): string {
+  switch (question.type) {
+    case "one":
+    case "dropdown":
+      return "Pick one";
+    case "several":
+      return "Pick any";
+    case "image":
+      return question.several ? "Pick any" : "Pick one";
+    case "grid":
+      return question.several ? "Any in a row" : "One in a row";
+    case "scale":
+      return "1 to 5";
+    case "date":
+      return "A date";
+    case "time":
+      return "A time";
+    default:
+      return "";
+  }
 }
 
 function aside(text: string): Node | string {
@@ -81,6 +111,7 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
   const me = host.app().me;
   let draft: Record<string, AnswerValue> = {};
   let more: Record<string, string> = {};
+  let editing = false;
   const roster = new Map<string, string>();
   let asked = false;
 
@@ -97,6 +128,15 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
     const count = (questionId: string, key: string) => (form.anonymous && !answering ? String(form.tallies[questionId]?.[key] ?? 0) : "");
 
     const root = h("div", { className: "form-embed" });
+    if (!current.readOnly) {
+      const edit = h("button", { type: "button", className: "form-edit-toggle", textContent: editing ? "Done" : "Edit questions", data: { focus: "edit" } });
+      edit.addEventListener("click", () => {
+        editing = !editing;
+        paint();
+      });
+      root.append(edit);
+    }
+    if (form.by && !editing) root.append(h("p", { className: "form-kind" }, "Asked by ", form.by));
     const write = (next: Form) => current.update({ body: serializeForm(next) });
     // One member's answers, so a click toggles the draft the way setAnswer toggles a stored choice.
     const draftOf = (): NamedForm => ({ questions: form.questions, answers: { [me.id]: { ...draft } } });
@@ -133,7 +173,22 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
     };
     const otherOf = (questionId: string) => (form.anonymous ? (more[questionId] ?? "") : (form.mode === "one" ? Object.values(form.other ?? {})[0] : form.other?.[me.id])?.[questionId] ?? "");
 
-    for (const question of form.questions) root.append(drawQuestion(form, question, answering, roster, me.id, valueOf, names, count, choose, typeText, otherOf, typeOther));
+    const revise = (questions: Question[]) => {
+      const next = replaceQuestions(form, questions);
+      if (next !== form) write(next);
+    };
+    form.questions.forEach((question, index) => {
+      root.append(
+        editing && !current.readOnly
+          ? drawEditor(form, question, index, revise)
+          : drawQuestion(form, question, index, answering, roster, me.id, valueOf, names, count, choose, typeText, otherOf, typeOther),
+      );
+    });
+    if (editing && !current.readOnly) root.append(addQuestion(form, revise));
+    if (!editing && !form.anonymous && Object.keys(form.answers).length) {
+      const who = Object.keys(form.answers).map((id) => nameOf(roster, id, me.id)).join(", ");
+      root.append(h("p", { className: "form-kind" }, "Answered by ", who));
+    }
 
     if (answering && form.anonymous) {
       const cast = h("button", { type: "button", className: "form-cast", textContent: "Cast vote", data: { focus: "cast" } });
@@ -174,6 +229,7 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
 function drawQuestion(
   form: Form,
   question: Question,
+  index: number,
   answering: boolean,
   roster: Map<string, string>,
   meId: string,
@@ -185,12 +241,12 @@ function drawQuestion(
   otherOf: (questionId: string) => string,
   typeOther: (questionId: string, value: string) => void,
 ): HTMLElement {
-  const block = h("div", { className: "form-q" }, promptOf(question));
+  const block = h("div", { className: "form-q" }, promptOf(question, index));
   const finish = (node: HTMLElement) => {
     if (!showsOther(form, question)) return node;
     if (answering) {
       const line = h("label", { className: "form-other" }, h("span", { className: "form-note", textContent: "Other" }));
-      line.append(field("short", otherOf(question.id), `other:${question.id}`, (text) => typeOther(question.id, text)));
+      line.append(field("short", otherOf(question.id), `other:${question.id}`, (text) => typeOther(question.id, text), "Other", "Say more"));
       node.append(line);
     }
     node.append(...otherLines(form, question.id, answering, roster, meId));
@@ -202,7 +258,7 @@ function drawQuestion(
   switch (question.type) {
     case "short":
     case "paragraph": {
-      if (answering) block.append(field(question.type, typeof value === "string" ? value : "", `text:${question.id}`, (text) => typeText(question.id, text), question.prompt));
+      if (answering) block.append(field(question.type, typeof value === "string" ? value : "", `text:${question.id}`, (text) => typeText(question.id, text), question.prompt, question.type === "short" ? "Type an answer" : "Write a longer answer"));
       block.append(...quotes(form, question.id, answering, roster, meId));
       return block;
     }
@@ -212,12 +268,23 @@ function drawQuestion(
       const rows = question.options.map((option) => {
         const on = value === option || (Array.isArray(value) && value.includes(option));
         const who = detail(option, (stored) => stored === option || (Array.isArray(stored) && stored.includes(option)));
-        return answering ? choice(option, `${question.type}:${question.id}:${option}`, on, radio, who, () => choose(question.id, option)) : row(option, who);
+        return answering ? choice(option, `${question.type}:${question.id}:${option}`, on, radio, who, () => choose(question.id, option)) : row(option, who, radio, Boolean(who));
       });
       const group = h("div", { className: "form-choices" }, ...rows);
       group.setAttribute("role", radio ? "radiogroup" : "group");
       group.setAttribute("aria-label", question.prompt);
       block.append(group);
+      return finish(block);
+    }
+    case "dropdown": {
+      if (answering) block.append(menu(question.options, typeof value === "string" ? value : "", `drop:${question.id}`, question.prompt, (option) => choose(question.id, option)));
+      else if (typeof value === "string" && value) block.append(h("p", { className: "form-quote" }, value));
+      return finish(block);
+    }
+    case "date":
+    case "time": {
+      if (answering) block.append(field(question.type, typeof value === "string" ? value : "", `when:${question.id}`, (text) => typeText(question.id, text), question.prompt));
+      else if (typeof value === "string" && value) block.append(h("p", { className: "form-quote" }, value));
       return finish(block);
     }
     case "scale": {
@@ -245,9 +312,16 @@ function drawQuestion(
             h("th", {}, gridRow.label),
             ...question.cols.map((col) => {
               const key = `${gridRow.id}:${col.id}`;
-              const on = plain(value) && value[gridRow.id] === col.id;
-              const who = detail(key, (stored) => plain(stored) && stored[gridRow.id] === col.id);
-              const cell = answering ? gridButton(on, who, `grid:${question.id}:${key}`, `${gridRow.label} ${col.label}`, () => choose(question.id, { [gridRow.id]: col.id })) : h("span", { className: "form-note" }, who);
+              const storedCol = plain(value) ? value[gridRow.id] : undefined;
+              const on = question.several ? Array.isArray(storedCol) && storedCol.includes(col.id) : storedCol === col.id;
+              const who = detail(key, (stored) => {
+                if (!plain(stored)) return false;
+                const cell = stored[gridRow.id];
+                return question.several ? Array.isArray(cell) && cell.includes(col.id) : cell === col.id;
+              });
+              const cell = answering
+                ? gridButton(on, who, `grid:${question.id}:${key}`, `${gridRow.label} ${col.label}`, question.several === true, () => choose(question.id, { [gridRow.id]: col.id }))
+                : h("span", { className: "form-cell-read" }, mark(!question.several, Boolean(who)), aside(who));
               return h("td", {}, cell);
             }),
           ),
@@ -259,16 +333,17 @@ function drawQuestion(
     }
     case "image": {
       const line = h("div", { className: "form-images" });
-      line.setAttribute("role", "radiogroup");
+      line.setAttribute("role", question.several ? "group" : "radiogroup");
       line.setAttribute("aria-label", question.prompt);
-      for (const option of question.options) {
-        const who = detail(option.id, (stored) => stored === option.id);
-        const picture = option.src ? Object.assign(document.createElement("img"), { src: option.src, alt: "" }) : "";
+      question.options.forEach((option, at) => {
+        const on = question.several ? Array.isArray(value) && value.includes(option.id) : value === option.id;
+        const who = detail(option.id, (stored) => stored === option.id || (Array.isArray(stored) && stored.includes(option.id)));
+        const picture = Object.assign(document.createElement("img"), { src: option.src || swatch(option.label, at), alt: "" });
         const shot = answering
-          ? imageButton(option.label, value === option.id, who, picture, `image:${question.id}:${option.id}`, () => choose(question.id, option.id))
-          : h("div", { className: "form-shot" }, ...(picture ? [picture] : []), h("span", {}, option.label), aside(who));
+          ? imageButton(option.label, on, who, picture, `image:${question.id}:${option.id}`, question.several === true, () => choose(question.id, option.id))
+          : h("div", { className: on || who ? "form-shot form-shot-on" : "form-shot" }, picture, h("span", {}, option.label), aside(who));
         line.append(shot);
-      }
+      });
       block.append(line);
       return finish(block);
     }
@@ -311,15 +386,23 @@ function otherLines(form: Form, questionId: string, answering: boolean, roster: 
   return lines;
 }
 
-function field(type: "short" | "paragraph", value: string, focus: string, onInput: (value: string) => void, label?: string): HTMLElement {
-  const input = type === "short" ? h("input", { type: "text", className: "form-field", value, data: { focus } }) : h("textarea", { className: "form-field", rows: 3, value, data: { focus } });
+function field(type: "short" | "paragraph" | "date" | "time", value: string, focus: string, onInput: (value: string) => void, label?: string, placeholder?: string): HTMLElement {
+  const input = type === "paragraph" ? h("textarea", { className: "form-field", rows: 3, value, data: { focus } }) : h("input", { type: type === "short" ? "text" : type, className: "form-field", value, data: { focus } });
   if (label) input.setAttribute("aria-label", label);
+  if (placeholder) input.setAttribute("placeholder", placeholder);
   input.addEventListener("input", () => onInput((input as HTMLInputElement | HTMLTextAreaElement).value));
   return input;
 }
 
+function mark(one: boolean, on: boolean): HTMLElement {
+  const el = h("span", { className: one ? "form-mark form-mark-one" : "form-mark form-mark-any" });
+  if (on) el.dataset.on = "true";
+  el.setAttribute("aria-hidden", "true");
+  return el;
+}
+
 function choice(label: string, focus: string, on: boolean, radio: boolean, extra: string, run: () => void): HTMLButtonElement {
-  const button = h("button", { type: "button", className: "form-choice", data: { focus } }, h("span", {}, label), aside(extra));
+  const button = h("button", { type: "button", className: "form-choice", data: { focus } }, mark(radio, on), h("span", {}, label), aside(extra));
   if (radio) {
     button.setAttribute("role", "radio");
     button.setAttribute("aria-checked", String(on));
@@ -328,8 +411,8 @@ function choice(label: string, focus: string, on: boolean, radio: boolean, extra
   return button;
 }
 
-function row(label: string, extra: string, ...leading: Node[]): HTMLElement {
-  return h("div", { className: "form-row" }, ...leading, h("span", {}, label), aside(extra));
+function row(label: string, extra: string, one: boolean, on: boolean): HTMLElement {
+  return h("div", { className: "form-row" }, mark(one, on), h("span", {}, label), aside(extra));
 }
 
 function point(n: number, on: boolean, extra: string, focus: string, run: () => void): HTMLButtonElement {
@@ -340,24 +423,179 @@ function point(n: number, on: boolean, extra: string, focus: string, run: () => 
   return button;
 }
 
-function gridButton(on: boolean, extra: string, focus: string, label: string, run: () => void): HTMLButtonElement {
-  const button = h("button", { type: "button", className: "form-cell", data: { focus } }, aside(extra));
-  button.setAttribute("role", "radio");
-  button.setAttribute("aria-checked", String(on));
+function gridButton(on: boolean, extra: string, focus: string, label: string, several: boolean, run: () => void): HTMLButtonElement {
+  const button = h("button", { type: "button", className: "form-cell", data: { focus } }, mark(!several, on), aside(extra));
+  button.setAttribute("role", several ? "checkbox" : "radio");
+  if (several) button.setAttribute("aria-pressed", String(on));
+  else button.setAttribute("aria-checked", String(on));
   button.setAttribute("aria-label", label);
   button.addEventListener("click", run);
   return button;
 }
 
-function imageButton(label: string, on: boolean, extra: string, picture: Node | "", focus: string, run: () => void): HTMLButtonElement {
-  const button = h("button", { type: "button", className: "form-shot", data: { focus } }, ...(picture ? [picture] : []), h("span", {}, label), aside(extra));
-  button.setAttribute("role", "radio");
-  button.setAttribute("aria-checked", String(on));
+function imageButton(label: string, on: boolean, extra: string, picture: Node | "", focus: string, several: boolean, run: () => void): HTMLButtonElement {
+  const button = h("button", { type: "button", className: on ? "form-shot form-shot-on" : "form-shot", data: { focus } }, picture, h("span", {}, label), aside(extra));
+  button.setAttribute("role", several ? "checkbox" : "radio");
+  if (several) button.setAttribute("aria-pressed", String(on));
+  else button.setAttribute("aria-checked", String(on));
   button.addEventListener("click", run);
   return button;
 }
 
-function plain(value: AnswerValue | undefined): value is Record<string, string> {
+function menu(options: string[], value: string, focus: string, label: string, onChange: (value: string) => void): HTMLSelectElement {
+  const select = document.createElement("select");
+  select.className = "form-select";
+  select.dataset.focus = focus;
+  select.setAttribute("aria-label", label);
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "Choose";
+  select.append(empty);
+  for (const option of options) {
+    const item = document.createElement("option");
+    item.value = option;
+    item.textContent = option;
+    if (option === value) item.selected = true;
+    select.append(item);
+  }
+  select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+
+function swatch(label: string, at: number): string {
+  const colors = ["#5b5bd6", "#c2410c", "#15803d", "#895913", "#4545b8"];
+  const color = colors[at % colors.length] ?? "#5b5bd6";
+  const safe = label.replace(/[<>&]/g, "");
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="100%" height="100%" fill="${color}"/><text x="50%" y="54%" fill="white" font-size="28" text-anchor="middle" font-family="sans-serif">${safe}</text></svg>`)}`;
+}
+
+const ADDABLE = [
+  ["short", "Short answer"],
+  ["paragraph", "Paragraph"],
+  ["one", "Pick one"],
+  ["several", "Pick any"],
+  ["dropdown", "Dropdown"],
+  ["scale", "Scale"],
+  ["date", "Date"],
+  ["time", "Time"],
+  ["grid", "Grid"],
+  ["checks", "Checkbox grid"],
+  ["image", "Images"],
+] as const;
+
+function blankQuestion(kind: string): Question {
+  const id = `q${Math.random().toString(36).slice(2, 7)}`;
+  const prompt = "New question";
+  switch (kind) {
+    case "paragraph":
+      return { id, type: "paragraph", prompt };
+    case "short":
+      return { id, type: "short", prompt };
+    case "several":
+      return { id, type: "several", prompt, options: ["Yes", "No"] };
+    case "dropdown":
+      return { id, type: "dropdown", prompt, options: ["Yes", "No"] };
+    case "scale":
+      return { id, type: "scale", prompt, minLabel: "Low", maxLabel: "High" };
+    case "date":
+      return { id, type: "date", prompt };
+    case "time":
+      return { id, type: "time", prompt };
+    case "grid":
+      return { id, type: "grid", prompt, rows: [{ id: "r1", label: "First" }, { id: "r2", label: "Second" }], cols: [{ id: "c1", label: "A" }, { id: "c2", label: "B" }] };
+    case "checks":
+      return { id, type: "grid", prompt, several: true, rows: [{ id: "r1", label: "First" }, { id: "r2", label: "Second" }], cols: [{ id: "c1", label: "A" }, { id: "c2", label: "B" }] };
+    default:
+      return kind === "image"
+        ? { id, type: "image", prompt, several: true, options: [{ id: "a", label: "One" }, { id: "b", label: "Two" }, { id: "c", label: "Three" }] }
+        : { id, type: "one", prompt, options: ["Yes", "No"] };
+  }
+}
+
+function drawEditor(form: Form, question: Question, index: number, revise: (questions: Question[]) => void): HTMLElement {
+  const block = h("div", { className: "form-q form-building" });
+  const questions = form.questions;
+  const put = (next: Question) => revise(questions.map((item) => (item.id === question.id ? next : item)));
+  const bar = h("div", { className: "form-build-bar" });
+  bar.append(h("span", { className: "form-index", textContent: String(index + 1) }));
+  const kind = question.type === "grid" && question.several ? "checks" : question.type === "image" ? "image" : question.type;
+  const kindLabel = ADDABLE.find(([value]) => value === kind)?.[1] ?? "Pick one";
+  bar.append(menu(ADDABLE.map(([, label]) => label), kindLabel, `kind:${question.id}`, "Question type", (label) => {
+    const next = ADDABLE.find(([, name]) => name === label)?.[0];
+    if (!next || next === kind) return;
+    const made = blankQuestion(next);
+    made.id = question.id;
+    made.prompt = question.prompt;
+    if (question.description) made.description = question.description;
+    put(made);
+  }));
+  const up = h("button", { type: "button", className: "form-mini", textContent: "Up" });
+  const down = h("button", { type: "button", className: "form-mini", textContent: "Down" });
+  const remove = h("button", { type: "button", className: "form-mini", textContent: "Remove" });
+  up.addEventListener("click", () => slide(questions, question.id, -1, revise));
+  down.addEventListener("click", () => slide(questions, question.id, 1, revise));
+  remove.addEventListener("click", () => revise(questions.filter((item) => item.id !== question.id)));
+  bar.append(up, down, remove);
+  block.append(bar);
+  block.append(field("short", question.prompt, `prompt:${question.id}`, (text) => put({ ...question, prompt: text }), "Prompt", "Question"));
+  block.append(field("short", question.description ?? "", `desc:${question.id}`, (text) => put({ ...question, description: text || undefined }), "Description", "Description, optional"));
+  if ("options" in question && question.type !== "image") {
+    question.options.forEach((option, at) => {
+      const line = h("div", { className: "form-build-option" });
+      line.append(field("short", option, `opt:${question.id}:${at}`, (text) => {
+        const options = question.options.map((item, i) => (i === at ? text : item));
+        put({ ...question, options });
+      }, "Option", "Option"));
+      const drop = h("button", { type: "button", className: "form-mini", textContent: "Remove" });
+      drop.addEventListener("click", () => put({ ...question, options: question.options.filter((_, i) => i !== at) }));
+      line.append(drop);
+      block.append(line);
+    });
+    const add = h("button", { type: "button", className: "form-mini", textContent: "Add option" });
+    add.addEventListener("click", () => put({ ...question, options: [...question.options, "New"] }));
+    block.append(add);
+  }
+  if (question.type === "image") {
+    question.options.forEach((option, at) => {
+      block.append(field("short", option.label, `img:${question.id}:${at}`, (text) => {
+        const options = question.options.map((item, i) => (i === at ? { ...item, label: text } : item));
+        put({ ...question, options });
+      }, "Image label", "Label"));
+    });
+  }
+  if ("explain" in question) {
+    const box = h("label", { className: "form-check" }, h("span", {}, "Other line"));
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = question.explain !== false && form.explain !== false;
+    input.addEventListener("change", () => put({ ...question, explain: input.checked }));
+    box.prepend(input);
+    block.append(box);
+  }
+  return block;
+}
+
+function addQuestion(form: Form, revise: (questions: Question[]) => void): HTMLElement {
+  const wrap = h("div", { className: "form-add" });
+  wrap.append(h("span", { className: "form-kind", textContent: "Add a question" }));
+  wrap.append(menu(ADDABLE.map(([value, label]) => label), "", "add", "Add a question", (label) => {
+    const kind = ADDABLE.find(([, name]) => name === label)?.[0];
+    if (kind) revise([...form.questions, blankQuestion(kind)]);
+  }));
+  return wrap;
+}
+
+function slide(questions: Question[], id: string, dir: -1 | 1, revise: (questions: Question[]) => void): void {
+  const at = questions.findIndex((question) => question.id === id);
+  const to = at + dir;
+  if (at < 0 || to < 0 || to >= questions.length) return;
+  const next = questions.slice();
+  const [item] = next.splice(at, 1);
+  next.splice(to, 0, item!);
+  revise(next);
+}
+
+function plain(value: AnswerValue | undefined): value is Record<string, string | string[]> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
