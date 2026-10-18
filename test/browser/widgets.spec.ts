@@ -63,7 +63,7 @@ test("/ opens the embed menu, typing filters it, and picking a timer writes it w
   const note = await open(page, "# Tea\n\n");
 
   await page.keyboard.type("/");
-  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/]);
+  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/]);
   await expect(options(page).nth(0)).toContainText("::timer{5m}");
   await expect(options(page).nth(2)).toContainText(":::kanban{}");
   await page.keyboard.type("st");
@@ -420,7 +420,7 @@ test("with vim on, / opens the embed menu in insert mode and is vim's search in 
   await page.keyboard.press("A");
   await expect(statusLine).toHaveText("--INSERT--");
   await page.keyboard.type(" /");
-  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/]);
+  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/]);
   await page.keyboard.type("sto");
   await expect(options(page)).toHaveText([/^Stopwatch/]);
   await settled(page);
@@ -465,7 +465,7 @@ test("the embed menu lists only the embeds of plugins that are on, and is gone w
   await open(page, "# Tea\n\n", { "timer.enabled": false });
 
   await page.keyboard.type("/");
-  await expect(options(page)).toHaveText([/^Stopwatch/, /^Kanban board/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/]);
+  await expect(options(page)).toHaveText([/^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/]);
   await page.keyboard.press("Escape");
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("Disable plugin: Embed menu");
@@ -618,7 +618,7 @@ test("completions whose triggers both fit share one list, in the order of their 
   const note = await open(page, "# Tea\n\n");
 
   await slash(page, "/");
-  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/, "Signature", "Standup notes", "Thanks"]);
+  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/, "Signature", "Standup notes", "Thanks"]);
   await page.keyboard.type("st");
   await expect(options(page)).toHaveText([/^Stopwatch/, "Standup notes"]);
   await settled(page);

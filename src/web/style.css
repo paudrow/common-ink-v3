@@ -2930,6 +2930,196 @@ button.link:hover {
   color: var(--muted);
 }
 
+.form-embed {
+  display: grid;
+  gap: 16px;
+  color: var(--ink);
+  font-family: var(--prose);
+  font-size: calc(14px * var(--text-scale));
+  line-height: 1.4;
+}
+
+.form-q {
+  display: grid;
+  gap: 2px;
+}
+
+.form-prompt {
+  margin: 0;
+  font-weight: 600;
+}
+
+.form-choice,
+.form-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.form-choice {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.form-choice:hover,
+.form-point:hover,
+.form-cell:hover,
+.form-shot:hover {
+  background: var(--hover);
+}
+
+.form-choice[aria-checked="true"],
+.form-choice[aria-pressed="true"],
+.form-point[aria-checked="true"],
+.form-cell[aria-checked="true"],
+.form-shot[aria-checked="true"] {
+  background: var(--accent-soft);
+}
+
+.form-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.form-scale .form-note,
+.form-shot .form-note,
+.form-point .form-note,
+.form-prompt .form-note {
+  margin-left: 0;
+}
+
+.form-quote {
+  margin: 0;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: calc(13px * var(--text-scale));
+  white-space: pre-wrap;
+}
+
+.form-field {
+  width: 100%;
+  margin: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.form-field:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+.form-scale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.form-point,
+.form-cell,
+.form-shot {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.form-point {
+  display: grid;
+  justify-items: center;
+  min-width: 2rem;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+span.form-point {
+  cursor: default;
+}
+
+.form-grid {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.form-grid th,
+.form-grid td {
+  padding: 2px 4px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.form-grid tbody th {
+  text-align: left;
+  color: var(--ink);
+}
+
+.form-cell {
+  width: 100%;
+  min-height: 1.75rem;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.form-images {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.form-shot {
+  flex: none;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  width: 7rem;
+  padding: 4px;
+  cursor: pointer;
+}
+
+div.form-shot {
+  cursor: default;
+}
+
+.form-shot img {
+  height: 72px;
+  width: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.form-cast {
+  justify-self: start;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.form-embed :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* A clock in the bottom bar is a button that fills its item, so the item's own padding is the button's. */
 .bar-item:has(> .bar-clock) {
   padding: 0;
