@@ -4,7 +4,7 @@ import worker from "../../src/worker/index.ts";
 import { signIn, whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent, listAgents } from "../../src/core/agents.ts";
 import { authenticateClipper, clipperRedirect, connectClipper } from "../../src/core/clipper.ts";
-import { perform } from "../../src/core/operations.ts";
+import { PRIOR_WRITE, perform } from "../../src/core/operations.ts";
 import { sign } from "../../src/worker/session.ts";
 
 const SECRET = "test-secret";
@@ -222,5 +222,21 @@ describe("revoking a clipper", () => {
     expect((await authenticateClipper(env.DB, token))?.personId).toBe(ada.personId);
     await perform(env.DB, { kind: "member", personId: ada.personId, workspaceId: ada.workspaceId }, { type: "member.signOut", memberId: ada.personId, agents: true });
     expect(await authenticateClipper(env.DB, token)).toBeNull();
+  });
+});
+
+describe("a clip sent twice", () => {
+  it("finds the first note by its author and write id through an index, not a scan of changes", async () => {
+    const { results } = await env.DB.prepare(`EXPLAIN QUERY PLAN ${PRIOR_WRITE}`).bind("w", "ws", "member", "p").all<{ detail: string }>();
+    expect(results.map((row) => row.detail).find((detail) => detail.includes(" c "))).toBe("SEARCH c USING INDEX changes_by_author_write (author_id=? AND write_id=?)");
+  });
+
+  it("makes one note", async () => {
+    const ada = await member();
+    const { token } = await allow(ada.cookie);
+    const writeId = crypto.randomUUID();
+    const first = await tool(token, "create_note", { text: "# Once", writeId });
+    const again = await tool(token, "create_note", { text: "# Once", writeId });
+    expect(again.json().id).toBe(first.json().id);
   });
 });

@@ -13,3 +13,6 @@ CREATE TABLE clipper_grants (
 );
 
 CREATE INDEX clipper_grants_by_person ON clipper_grants (person_id);
+
+-- note.create looks for the note an author already made with a write id, so a clip sent twice makes one note.
+CREATE INDEX changes_by_author_write ON changes (author_id, write_id) WHERE write_id IS NOT NULL;

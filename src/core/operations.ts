@@ -74,6 +74,10 @@ import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
 import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed } from "./todos.ts";
 
+/** The note an author already made with a write id, so a create sent again makes one note. Served by changes_by_author_write. */
+export const PRIOR_WRITE = `SELECT c.note_id AS id FROM changes c JOIN notes n ON n.id = c.note_id
+  WHERE c.write_id = ?1 AND c.revision = 1 AND c.base_revision = 0 AND n.workspace_id = ?2 AND c.author_kind = ?3 AND c.author_id = ?4`;
+
 /** Who is performing an operation, and where. */
 export type Actor =
   /** A signed-in person, in a workspace they are a member of or a guest in. */
@@ -1778,10 +1782,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       if (op.writeId) {
         const prior = await ctx.db
-          .prepare(
-            `SELECT c.note_id AS id FROM changes c JOIN notes n ON n.id = c.note_id
-             WHERE c.write_id = ?1 AND c.revision = 1 AND c.base_revision = 0 AND n.workspace_id = ?2 AND c.author_kind = ?3 AND c.author_id = ?4`,
-          )
+          .prepare(PRIOR_WRITE)
           .bind(op.writeId, ctx.workspaceId, ctx.author.kind, authorId(ctx))
           .first<{ id: string }>();
         if (prior) return linked(toNote(ctx, await loadNote(ctx, prior.id, "edit", "opens")), []);
