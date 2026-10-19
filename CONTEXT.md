@@ -314,6 +314,14 @@ Who made a change: a member, a named agent, or a third-party plugin acting for a
 An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. What an agent may do (read only or not, the workspace it reaches, the folders it is limited to there, when it expires or that it never does) is set when it is connected and can be edited afterwards by the member who connected it, with the same token. An agent's changes can be reverted on their own, which keeps everyone else's.
 _Avoid_: Bot
 
+**Connection by OAuth**:
+An agent that an app connected by sending the member to sign in, instead of a member pasting a token into it. It is how a hosted chat app such as claude.ai connects, since it can't send a pasted token. The member chooses on the consent page what it may do, as on the Agents page, and it is an agent in everything after that: its changes, its limits, editing it and disconnecting it. It has no token of its own to show. The app holds an access token for an hour and a refresh token for 30 days, neither past the agent's own end. The Agents page lists it under the app's name, marked as connected by OAuth. Connecting the same app again replaces the earlier connection. See `docs/adr/0012-oauth-connections-are-agents.md`.
+_Avoid_: Integration, OAuth grant, authorization
+
+**App**:
+A program that registered itself with Common Ink to connect by OAuth, with a name and the addresses it may be sent back to. Anyone can register one, so its name is its own and shown as unchecked, and one that never connects anyone is forgotten. An app is not an agent: each member it connects for is a connection by OAuth of their own.
+_Avoid_: Client, integration
+
 **Folder limit**:
 The folders an agent is limited to in the one workspace it reaches: it reaches those folders, the folders inside them and the notes in those, with what its member may do there and no more. Everything outside is to it as if it weren't there. With no folder limit an agent reaches all notes its member can. The limit is read from where notes and folders are at the time, and one whose folders are all deleted leaves the agent nothing.
 _Avoid_: Scope, sandbox
