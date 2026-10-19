@@ -42,9 +42,10 @@ interface AgentRow {
   workspace_id: string | null;
   read_only: number;
   folder_ids: string | null;
+  app: string | null;
 }
 
-const COLUMNS = "id, name, token_prefix, created_at, expires_at, last_used_at, revoked_at, workspace_id, read_only, folder_ids";
+const COLUMNS = "id, name, token_prefix, created_at, expires_at, last_used_at, revoked_at, workspace_id, read_only, folder_ids, (SELECT name FROM oauth_clients WHERE id = agents.client_id) AS app";
 
 /** Only a null column is no limit. Anything kept there that isn't a list of ids is a limit to nothing. */
 function foldersOf(r: Pick<AgentRow, "folder_ids">): string[] | null {
@@ -68,6 +69,7 @@ const toAgent = (r: AgentRow): Agent => ({
   workspaceId: r.workspace_id,
   readOnly: r.read_only === 1,
   folderIds: foldersOf(r),
+  app: r.app,
 });
 
 /** A token that never expires has no end, so it is always before it. */

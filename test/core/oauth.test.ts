@@ -756,7 +756,10 @@ describe("a connection is an agent", () => {
   it("is on the agent list as connected from the app, and disconnecting it ends every token at once", async () => {
     const ada = await newMember();
     const { tokens, agentId, client } = await connect(ada);
-    expect((await listAgents(env.DB, ada.personId)).find((a) => a.id === agentId)).toMatchObject({ name: "Chat", revokedAt: null, tokenPrefix: "oauth" });
+    const pasted = await connectAgent(env.DB, ada.personId, "Pasted");
+    const listed = await listAgents(env.DB, ada.personId);
+    expect(listed.find((a) => a.id === agentId)).toMatchObject({ name: "Chat", revokedAt: null, tokenPrefix: "oauth", app: "Chat" });
+    expect(listed.find((a) => a.id === pasted.agent.id)).toMatchObject({ name: "Pasted", app: null });
     expect((await agentRow(agentId))!.client_id).toBe(client);
     const second = (await (await refresh({ refresh_token: tokens.refresh_token, client_id: client })).json()) as TokenAnswer;
     expect(await status(tokens.access_token)).toBe(200);
