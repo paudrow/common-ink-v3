@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, noteIdIn, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, me, noteIdIn, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -19,13 +19,14 @@ const edits = (page: Page) => results(page).getByRole("link", { name: /^Edit / }
 /** How many notes are listed, beside the heading, which is also where a search says it is on its way. */
 const status = (page: Page) => searchPage(page).locator(".folder-count");
 const nothing = (page: Page) => searchPage(page).locator(".empty");
-const create = (page: Page, text: string) => perform(page, { type: "note.create", text });
+const create = (page: Page, text: string, workspaceId?: string) => perform(page, { type: "note.create", text }, workspaceId);
 
-/** Signs in, makes the notes in order, and opens the Search page. */
+/** Signs in, makes the notes in order, and opens the Search page. The workspace is asked for once, so each note is one request to a slow server, not two. */
 async function searching(page: Page, texts: readonly string[]) {
   await signInAsNewPerson(page, "Ada Lovelace");
+  const workspaceId = (await me(page)).workspaces[0]!.id;
   const notes = [];
-  for (const text of texts) notes.push(await create(page, text));
+  for (const text of texts) notes.push(await create(page, text, workspaceId));
   await page.goto("/search");
   await expect(field(page)).toBeFocused();
   return notes;
