@@ -52,6 +52,8 @@ async function start(page: Page, settings: Record<string, unknown> = {}, text = 
   return note;
 }
 
+/** What is set inline on the root besides the app's own text size and editor settings: night shift's tokens while it is on. */
+const leftOn = (page: Page) => root(page).evaluate((el) => [...el.style].filter((name) => !/^--(text-scale|editor-)/.test(name)));
 const isOn = async (page: Page) => (await root(page).getAttribute("data-night-shift")) !== null;
 /** What the member's settings have, as the server keeps them. */
 const kept = async (page: Page) => JSON.parse((await perform(page, { type: "settings.read" })).text || "{}") as Record<string, unknown>;
@@ -131,7 +133,7 @@ test("is off until it is turned on, and then the app is as it was", async ({ pag
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Night notes");
   expect(await isOn(page)).toBe(false);
-  expect(await root(page).getAttribute("style")).toBeNull();
+  expect(await leftOn(page)).toEqual([]);
   await expect(page.getByRole("dialog", { name: "Commands" })).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+Shift+P");
   const palette = page.getByRole("dialog", { name: "Commands" });
@@ -174,7 +176,7 @@ test("turns on and off by its command and by its key, with no reload, and stays 
   await page.reload();
   await expect(editor(page)).toContainText("Night notes");
   expect(await isOn(page)).toBe(false);
-  expect(await root(page).getAttribute("style")).toBeNull();
+  expect(await leftOn(page)).toEqual([]);
   await page.keyboard.press("ControlOrMeta+Shift+X");
   await expect.poll(() => isOn(page)).toBe(true);
   await page.keyboard.press("ControlOrMeta+Shift+X");
@@ -335,7 +337,7 @@ test("off puts back the theme that was in use, light or dark, exactly, with noth
         });
       return {
         theme: root.dataset.theme ?? null,
-        style: root.getAttribute("style"),
+        style: [...root.style].filter((name) => !/^--(text-scale|editor-)/.test(name)),
         attributes: [...root.attributes].map((a) => a.name).sort(),
         scheme: getComputedStyle(root).colorScheme,
         tokens: tokens.map((t) => getComputedStyle(root).getPropertyValue(t)),
@@ -351,7 +353,7 @@ test("off puts back the theme that was in use, light or dark, exactly, with noth
     await expect(page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "Unsorted", exact: true })).toBeVisible();
     await settled(page);
     const was = await look();
-    expect(was.style).toBeNull();
+    expect(was.style).toEqual([]);
 
     await runCommand(page, "Toggle night shift");
     await expect.poll(() => isOn(page)).toBe(true);
@@ -544,8 +546,8 @@ test("covers a frame the app can't reach into with a tint that lets every press 
   await start(page, { "html.run": "automatically", "night-shift.tint": true }, `# Frame\n\n${html}\n\nunder`);
   const box = page.locator('.embed-below[data-embed="html"]');
   await expect(box).toBeVisible();
-  const frame = () => page.frames().find((f) => f.url() === "about:srcdoc");
-  await expect.poll(async () => (await frame()?.locator("#go").count().catch(() => 0)) ?? 0).toBe(1);
+  const go = box.frameLocator("iframe").frameLocator("iframe").locator("#go");
+  await expect(go).toHaveCount(1);
   await settled(page);
 
   // The cover is over the frame, on top of the page's other layers, and lets pointers through.
@@ -603,7 +605,7 @@ test("turning the plugin off takes everything it did off the page, and none of i
   await page.goto("/plugins");
   await page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Night shift", exact: true }).setChecked(false);
   await expect.poll(() => isOn(page)).toBe(false);
-  expect(await root(page).getAttribute("style")).toBeNull();
+  expect(await leftOn(page)).toEqual([]);
   expect(await root(page).getAttribute("data-night-tint")).toBeNull();
   expect(await page.locator("#night-shift-tint").count()).toBe(0);
   await page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Night shift", exact: true }).setChecked(true);

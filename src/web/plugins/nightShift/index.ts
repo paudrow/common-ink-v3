@@ -1,4 +1,4 @@
-import type { Plugin } from "../../plugin-api.ts";
+import { askSite, type Plugin } from "../../plugin-api.ts";
 import { isNight } from "./sun.ts";
 import { STRENGTHS, nightTokens, tintMatrix, type Strength } from "./theme.ts";
 
@@ -73,11 +73,12 @@ export const nightShift: Plugin = {
     },
   },
   activate(host) {
-    const root = document.documentElement;
     const tokens = Object.keys(nightTokens("red"));
-    const filter = tintFilter();
+    // Made the first time the theme goes on, so a plugin that is on and never shown touches nothing on the page.
+    let filter: ReturnType<typeof tintFilter> | null = null;
 
     const clear = () => {
+      const root = document.documentElement;
       for (const token of tokens) root.style.removeProperty(token);
       root.style.removeProperty("color-scheme");
       delete root.dataset.nightShift;
@@ -95,24 +96,20 @@ export const nightShift: Plugin = {
       coords = null;
       if (!name) return;
       const round = ++looking;
-      void fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1`)
-        .then((res) => res.json())
-        .then((body: { results?: { latitude: number; longitude: number }[] }) => {
-          if (round !== looking) return;
-          const hit = body.results?.[0];
-          coords = hit ? { lat: hit.latitude, lon: hit.longitude } : null;
-          apply();
-        })
-        .catch(() => {
-          if (round === looking) coords = null;
-        });
+      void askSite(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1`).then((body) => {
+        if (round !== looking) return;
+        const hit = (body as { results?: { latitude: number; longitude: number }[] } | null)?.results?.[0];
+        coords = hit ? { lat: hit.latitude, lon: hit.longitude } : null;
+        apply();
+      });
     };
     const apply = () => {
       const strength = host.settings.get<Strength>("strength");
-      filter.set(strength);
       const following = host.settings.get<boolean>("follow") && coords !== null;
       const on = following && coords ? isNight(coords.lat, coords.lon, new Date()) : host.settings.get<boolean>("on");
       if (!on) return clear();
+      (filter ??= tintFilter()).set(strength);
+      const root = document.documentElement;
       for (const [token, value] of Object.entries(nightTokens(strength))) root.style.setProperty(token, value);
       root.style.setProperty("color-scheme", "dark");
       root.dataset.nightShift = strength;
@@ -143,7 +140,7 @@ export const nightShift: Plugin = {
       stopped = true;
       clearInterval(clock);
       clear();
-      filter.remove();
+      filter?.remove();
     };
   },
 };
