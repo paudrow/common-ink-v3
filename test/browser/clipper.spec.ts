@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -43,6 +43,30 @@ test("an extension that isn't the clipper can't sign in", async ({ page }) => {
   const answer = await page.goto(`/clipper/connect?${new URLSearchParams({ redirect: other })}`);
   expect(answer?.status()).toBe(400);
   await expect(page.getByRole("button", { name: "Allow" })).toHaveCount(0);
+});
+
+test("the dev server offers the clipper as a zip to load unpacked, and a deploy does not", async ({ page }) => {
+  await signInAsNewPerson(page, "Clip Tester");
+  await page.goto("/settings/account");
+  const row = page.getByLabel("Clipper");
+  await expect(row.getByText("No clipper is signed in.")).toBeVisible();
+  if (process.env.BASE_URL) {
+    await expect(row.getByRole("link", { name: "Download" })).toHaveCount(0);
+    const answer = await page.request.get("/dev/clipper.zip");
+    expect(answer.headers()["content-type"]).not.toBe("application/zip");
+    expect((await answer.body()).subarray(0, 2).toString()).not.toBe("PK");
+    return;
+  }
+  await expect(row.getByText("Load unpacked")).toBeVisible();
+  const download = page.waitForEvent("download");
+  await row.getByRole("link", { name: "Download" }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe("common-ink-clipper-0.1.0.zip");
+  const dir = mkdtempSync(path.join(tmpdir(), "clipper-download-"));
+  await file.saveAs(path.join(dir, "clipper.zip"));
+  execFileSync("unzip", ["-q", "clipper.zip", "-d", "out"], { cwd: dir });
+  expect(unpackedExtensionId(path.join(dir, "out/manifest.json"))).toBe(EXTENSION);
+  expect(readFileSync(path.join(dir, "out/manifest.json"), "utf8")).toBe(readFileSync("extension/manifest.json", "utf8"));
 });
 
 const article = `<!doctype html>

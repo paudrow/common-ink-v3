@@ -621,6 +621,20 @@ function ClipperRow() {
           </button>
         </div>
       ))}
+      {import.meta.env.DEV && (
+        <div className="setting-control">
+          <span>
+            This build of the clipper, to try before it is in the Chrome Web
+            Store. Unzip it, open <code>chrome://extensions</code>, turn on
+            Developer mode, choose Load unpacked, and pick the unzipped folder.
+            For a newer build, unzip it over that folder and press the
+            clipper&rsquo;s reload button there.
+          </span>
+          <a className="button small" href="/dev/clipper.zip" download>
+            Download
+          </a>
+        </div>
+      )}
       {error && (
         <p role="alert" className="error">
           {error}
