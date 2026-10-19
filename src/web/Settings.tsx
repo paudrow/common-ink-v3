@@ -38,6 +38,7 @@ import {
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
 import type { ClipperGrantView, UploadStorage } from "../core/protocol.ts";
 import { formatBytes } from "./plugins/uploads/sizing.ts";
+import { clipperTarget } from "./plugins/lib/clipperLink.ts";
 import { listClipperGrants, revokeClipperGrant } from "./api.ts";
 
 const NOT_JSON = "Settings are one JSON object, such as {}.";
@@ -574,6 +575,8 @@ const shortDate = (time: number) =>
 
 /** The Chrome clipper this member allowed, if any, and revoking it from here. */
 function ClipperRow() {
+  const target = clipperTarget();
+  const zip = target?.kind === "zip" ? target : null;
   const [grants, setGrants] = useState<readonly ClipperGrantView[] | null>(
     null,
   );
@@ -622,7 +625,7 @@ function ClipperRow() {
           </button>
         </div>
       ))}
-      {import.meta.env.DEV && (
+      {zip && (
         <div className="setting-control">
           <span>
             This build of the clipper, to try before it is in the Chrome Web
@@ -631,7 +634,7 @@ function ClipperRow() {
             For a newer build, unzip it over that folder and press the
             clipper&rsquo;s reload button there.
           </span>
-          <a className="button small" href="/dev/clipper.zip" download>
+          <a className="button small" href={zip.url} download>
             Download
           </a>
         </div>

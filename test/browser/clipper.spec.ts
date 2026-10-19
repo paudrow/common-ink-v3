@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { chromium, expect, test } from "@playwright/test";
+import { chromium, expect, test, type Download } from "@playwright/test";
 import { unpackedExtensionId } from "../../scripts/extension-id.ts";
 import { agentWith, signInAsNewPerson } from "./helpers.ts";
 
@@ -45,7 +45,17 @@ test("an extension that isn't the clipper can't sign in", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Allow" })).toHaveCount(0);
 });
 
-test("the dev server offers the clipper as a zip to load unpacked, and a deploy does not", async ({ page }) => {
+/** Saves a downloaded clipper and unzips it, and says the id its manifest gives it. */
+async function unzipped(file: Download): Promise<string> {
+  expect(file.suggestedFilename()).toBe("common-ink-clipper-0.1.0.zip");
+  const dir = mkdtempSync(path.join(tmpdir(), "clipper-download-"));
+  await file.saveAs(path.join(dir, "clipper.zip"));
+  execFileSync("unzip", ["-q", "clipper.zip", "-d", "out"], { cwd: dir });
+  expect(readFileSync(path.join(dir, "out/manifest.json"), "utf8")).toBe(readFileSync("extension/manifest.json", "utf8"));
+  return unpackedExtensionId(path.join(dir, "out/manifest.json"));
+}
+
+test("the dev server offers the clipper as a zip to load unpacked, and a built app does not", async ({ page }) => {
   await signInAsNewPerson(page, "Clip Tester");
   await page.goto("/settings/account");
   const row = page.getByLabel("Clipper");
@@ -60,13 +70,23 @@ test("the dev server offers the clipper as a zip to load unpacked, and a deploy 
   await expect(row.getByText("Load unpacked")).toBeVisible();
   const download = page.waitForEvent("download");
   await row.getByRole("link", { name: "Download" }).click();
-  const file = await download;
-  expect(file.suggestedFilename()).toBe("common-ink-clipper-0.1.0.zip");
-  const dir = mkdtempSync(path.join(tmpdir(), "clipper-download-"));
-  await file.saveAs(path.join(dir, "clipper.zip"));
-  execFileSync("unzip", ["-q", "clipper.zip", "-d", "out"], { cwd: dir });
-  expect(unpackedExtensionId(path.join(dir, "out/manifest.json"))).toBe(EXTENSION);
-  expect(readFileSync(path.join(dir, "out/manifest.json"), "utf8")).toBe(readFileSync("extension/manifest.json", "utf8"));
+  expect(await unzipped(await download)).toBe(EXTENSION);
+});
+
+test("Get the Chrome Extension in the command palette downloads the clipper on the dev server, and a built app with no store page doesn't offer it", async ({ page }) => {
+  await signInAsNewPerson(page, "Clip Getter");
+  await expect(page.getByRole("button", { name: "New note" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  const palette = page.getByRole("dialog", { name: "Commands" });
+  await palette.getByRole("combobox").fill("Chrome Extension");
+  if (process.env.BASE_URL) {
+    await expect(palette.getByRole("option", { name: /Get the Chrome Extension/ })).toHaveCount(0);
+    return;
+  }
+  await expect(palette.getByRole("option").first()).toHaveText(/^Get the Chrome Extension/);
+  const download = page.waitForEvent("download");
+  await page.keyboard.press("Enter");
+  expect(await unzipped(await download)).toBe(EXTENSION);
 });
 
 const article = `<!doctype html>

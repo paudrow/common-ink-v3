@@ -1,3 +1,4 @@
+import { clipperTarget, getClipper } from "./lib/clipperLink.ts";
 import { HelpOverlay, type CommandInfo, type Plugin, type PluginHost } from "../plugin-api.ts";
 import { matching } from "./lib/match.ts";
 import { Palette, type PaletteItem } from "./lib/Palette.tsx";
@@ -63,6 +64,8 @@ export const commandPalette: Plugin = {
     host.commands.register({ id: SHOW, title: "Show all commands", keys: ["mod+shift+p"], group: "Navigation", run: () => host.app().toggleOverlay("commands") });
     // ? is Shift and / on most keyboards, written as the key it types. Being a key that types, it is left to every field and note.
     host.commands.register({ id: SHORTCUTS_COMMAND, title: "Keyboard shortcuts", keys: ["shift+?"], group: "Navigation", run: () => host.app().toggleOverlay(SHORTCUTS) });
+    const clipper = clipperTarget();
+    if (clipper) host.commands.register({ id: "clipper.get", title: "Get the Chrome Extension", aliases: ["clipper", "web clipper"], run: () => getClipper(clipper) });
     host.views.register("overlay", {
       id: "commands",
       component: ({ close }) => {
