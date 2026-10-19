@@ -109,6 +109,23 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     await expect(perform(env.DB, gus.actor, { type: "grant.link", noteId: made.id, link: "public" })).rejects.toMatchObject({ code: "forbidden" });
   });
 
+  it("does not say which hidden folder a note they can still see is in", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const parent = await folder(ada, "Parent");
+    const gus = await newPerson(ada, "Gina Guest");
+    const onParent = await share(ada, { folderId: parent.id }, gus.email, "edit");
+    const child = await folder(gus.actor, "Child", parent.id);
+    const secret = await note(gus.actor, "# Secret", child.id);
+    await share(ada, { noteId: secret.id }, gus.email, "edit");
+    await perform(env.DB, ada, { type: "grant.revoke", id: onParent.id });
+
+    expect(await read(gus.actor, secret.id)).toMatchObject({ id: secret.id, folderId: null });
+    expect(await titles(gus.actor)).toEqual(["Secret"]);
+    expect(await perform(env.DB, gus.actor, { type: "note.list", folderId: child.id })).toEqual([]);
+    await expect(perform(env.DB, gus.actor, { type: "todo.list", folderId: child.id })).rejects.toMatchObject(NO_FOLDER);
+    await expect(perform(env.DB, gus.actor, { type: "search", query: "Secret", folderId: child.id })).rejects.toMatchObject(NO_FOLDER);
+  });
+
   it("is covered by a folder's grant all the way down, and a closer grant wins either way", async () => {
     const ada = await newMember("Ada Lovelace");
     const top = await folder(ada, "Top");

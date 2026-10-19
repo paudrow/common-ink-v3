@@ -214,8 +214,9 @@ export const Op = z.discriminatedUnion("type", [
    * `updatedSince` leaves out notes that haven't changed since that time: neither their text, nor
    * their state, as by being unarchived or restored. A note that left the listing since, by being
    * archived or trashed, is not in it to be told of: ask with `includeArchived`, and trash.list.
-   * `tag` lists only the notes with that tag, ignoring case. `includeArchived: "only"` lists the
-   * archived notes and no live one.
+   * `folderId` lists the notes in that folder. A folder the asker can't see lists nothing, and the
+   * note is still in the list with no folder. `tag` lists only the notes with that tag, ignoring case.
+   * `includeArchived: "only"` lists the archived notes and no live one.
    */
   z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived }),
   z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles, mentionNames: MentionNames }),
