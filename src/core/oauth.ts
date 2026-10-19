@@ -23,7 +23,8 @@ export const REQUEST_MS = 10 * MINUTE;
 export const CODE_MS = MINUTE;
 export const ACCESS_MS = HOUR;
 export const REFRESH_MS = 30 * DAY;
-/** An app that never got a grant is forgotten after this, since anyone can register one. */
+/** Anyone can register an app, so one that never sends anyone to sign in is forgotten after an hour, and one that never gets a grant after a day. */
+export const UNSTARTED_CLIENT_MS = HOUR;
 export const UNUSED_CLIENT_MS = DAY;
 /** How many apps that never got a grant there can be, and how many requests waiting for a member. Past either, more are refused. */
 export const MAX_UNUSED_CLIENTS = 1000;
@@ -31,6 +32,8 @@ export const MAX_PENDING_REQUESTS = 2000;
 /** And per app, so one app can't fill the room for all, and per address an app is registered from, per hour. */
 export const MAX_PENDING_PER_CLIENT = 20;
 export const MAX_REGISTRATIONS_PER_HOUR = 20;
+/** Per address a browser comes from, fewer than an app's room, so one address can't fill an app's. */
+export const MAX_PENDING_PER_ADDRESS = 10;
 /** A refresh token that is used again within this long of its use is a retry after a lost answer, not a copy. */
 export const RETRY_MS = 30_000;
 /** How often a sweep runs at most. */
@@ -117,10 +120,13 @@ export function normalized(uri: string): string | null {
 /** When the last sweep began in this isolate. See `sweep`. */
 let lastSweep = 0;
 
+/** Apps that are waiting for a grant and not yet forgotten: `?1` is an hour ago, `?2` a day ago. */
+const WAITING_CLIENT = "last_used_at IS NULL AND created_at > ?2 AND (requested_at IS NOT NULL OR created_at > ?1)";
+
 /**
- * Removes what has lapsed: requests nobody answered, codes nobody traded, tokens long past their end,
- * apps that never got a grant, and the agents of OAuth connections that hold nothing that works: a code
- * that lapsed untraded, or every token run out. Run when someone starts something, so no timer is needed
+ * Removes what has lapsed: requests nobody answered, codes past their end, tokens long past their end,
+ * apps that never got a grant, and the agents of OAuth connections that hold nothing that works: no
+ * code still to trade, and every token run out. Run when someone starts something, so no timer is needed
  * (and from the Worker's hourly timer too, for a quiet day).
  *
  * It writes, and an isolate answers many requests, so it runs at most once a minute in each unless
@@ -135,7 +141,7 @@ export async function sweep(db: D1Database, now = Date.now(), force = false): Pr
     db
       .prepare(
         `UPDATE agents SET revoked_at = ?1 WHERE revoked_at IS NULL AND client_id IS NOT NULL
-           AND NOT EXISTS (SELECT 1 FROM oauth_codes c WHERE c.agent_id = agents.id AND c.expires_at > ?1)
+           AND NOT EXISTS (SELECT 1 FROM oauth_codes c WHERE c.agent_id = agents.id AND c.expires_at > ?1 AND c.used_at IS NULL)
            AND NOT EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.agent_id = agents.id AND t.expires_at > ?1 AND (t.kind = 'access' OR t.used_at IS NULL))`,
       )
       .bind(now),
@@ -145,12 +151,12 @@ export async function sweep(db: D1Database, now = Date.now(), force = false): Pr
     db.prepare("DELETE FROM oauth_tokens WHERE expires_at < ?").bind(now - DAY),
     db
       .prepare(
-        `DELETE FROM oauth_clients WHERE last_used_at IS NULL AND created_at < ?
+        `DELETE FROM oauth_clients WHERE last_used_at IS NULL AND NOT (${WAITING_CLIENT})
            AND NOT EXISTS (SELECT 1 FROM agents WHERE client_id = oauth_clients.id)
            AND NOT EXISTS (SELECT 1 FROM oauth_requests WHERE client_id = oauth_clients.id)
            AND NOT EXISTS (SELECT 1 FROM oauth_codes WHERE client_id = oauth_clients.id)`,
       )
-      .bind(now - UNUSED_CLIENT_MS),
+      .bind(now - UNSTARTED_CLIENT_MS, now - UNUSED_CLIENT_MS),
   ]);
 }
 
@@ -158,7 +164,7 @@ export async function sweep(db: D1Database, now = Date.now(), force = false): Pr
  * Registers an app as RFC 7591 describes, for a public client only: one with no secret, which proves
  * itself with PKCE. An app that asks for another way to authenticate is registered as `none`, which
  * the answer says (the RFC lets a server choose). Anyone can register, so an app that never gets a
- * grant is forgotten after a day, only so many wait at once, and one address registers only so many an
+ * grant is forgotten (see UNSTARTED_CLIENT_MS), only so many wait at once, and one address registers only so many an
  * hour: `from` is a hash of it, kept to count by and for nothing else. What the app calls itself is kept as
  * given and shown as unverified.
  */
@@ -192,7 +198,7 @@ export async function registerClient(db: D1Database, body: unknown, now = Date.n
   }
 
   // Refused before anything is written, counting only what is live, so a flood of refusals costs reads alone.
-  const waiting = await db.prepare("SELECT COUNT(*) AS n FROM oauth_clients WHERE last_used_at IS NULL AND created_at > ?").bind(now - UNUSED_CLIENT_MS).first<{ n: number }>();
+  const waiting = await db.prepare(`SELECT COUNT(*) AS n FROM oauth_clients WHERE ${WAITING_CLIENT}`).bind(now - UNSTARTED_CLIENT_MS, now - UNUSED_CLIENT_MS).first<{ n: number }>();
   if ((waiting?.n ?? 0) >= MAX_UNUSED_CLIENTS) throw new OAuthError("temporarily_unavailable", "Too many apps have registered and not yet connected. Try again later", 503);
   if (from) {
     const lately = await db.prepare("SELECT COUNT(*) AS n FROM oauth_clients WHERE registered_from = ? AND created_at > ?").bind(from, now - HOUR).first<{ n: number }>();
@@ -229,19 +235,25 @@ const keyOf = (requestId: string) => hashToken(requestId);
 
 /**
  * Keeps what /oauth/authorize was sent (already checked there), for the page where the member answers.
- * Gives the request's id: 256 random bits, good for ten minutes. Too many waiting, in all or for this app, is refused.
+ * Gives the request's id: 256 random bits, good for ten minutes. Too many waiting, in all, for this app
+ * or from this address, is refused. `from` is a hash of the browser's network, kept to count by.
  */
-export async function startRequest(db: D1Database, r: AuthRequest, now = Date.now()): Promise<string> {
-  const live = now - REQUEST_MS;
-  const pending = await db.prepare("SELECT COUNT(*) AS n, COUNT(CASE WHEN client_id = ? THEN 1 END) AS mine FROM oauth_requests WHERE created_at > ?").bind(r.clientId, live).first<{ n: number; mine: number }>();
+export async function startRequest(db: D1Database, r: AuthRequest, now = Date.now(), from: string | null = null): Promise<string> {
+  const pending = await db
+    .prepare("SELECT COUNT(*) AS n, COUNT(CASE WHEN client_id = ?1 THEN 1 END) AS mine, COUNT(CASE WHEN requested_from = ?2 THEN 1 END) AS here FROM oauth_requests WHERE created_at > ?3")
+    .bind(r.clientId, from, now - REQUEST_MS)
+    .first<{ n: number; mine: number; here: number }>();
   if ((pending?.n ?? 0) >= MAX_PENDING_REQUESTS) throw new OAuthError("temporarily_unavailable", "Too many sign-ins are waiting. Try again in a few minutes", 503);
   if ((pending?.mine ?? 0) >= MAX_PENDING_PER_CLIENT) throw new OAuthError("temporarily_unavailable", "This app has too many sign-ins waiting. Finish one, or try again in a few minutes", 429);
+  if ((pending?.here ?? 0) >= MAX_PENDING_PER_ADDRESS) throw new OAuthError("temporarily_unavailable", "Too many sign-ins are waiting from this address. Finish one, or try again in a few minutes", 429);
   await sweep(db, now);
   const id = b64url(crypto.getRandomValues(new Uint8Array(32)));
-  await db
-    .prepare("INSERT INTO oauth_requests (id, client_id, redirect_uri, state, code_challenge, resource, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(await keyOf(id), r.clientId, r.redirectUri, r.state, r.codeChallenge, r.resource, now)
-    .run();
+  await db.batch([
+    db
+      .prepare("INSERT INTO oauth_requests (id, client_id, redirect_uri, state, code_challenge, resource, requested_from, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(await keyOf(id), r.clientId, r.redirectUri, r.state, r.codeChallenge, r.resource, from, now),
+    db.prepare("UPDATE oauth_clients SET requested_at = ? WHERE id = ? AND requested_at IS NULL").bind(now, r.clientId),
+  ]);
   return id;
 }
 
@@ -400,29 +412,37 @@ async function endGrant(db: D1Database, agentId: string, now: number): Promise<v
 const grantError = (what: string) => new OAuthError("invalid_grant", what);
 
 /** An agent that has no tokens, because its code was spoilt or never traded, has nothing to hold: it is disconnected. */
-async function abandon(db: D1Database, agentId: string, now: number): Promise<void> {
-  await db.prepare("UPDATE agents SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM oauth_tokens WHERE agent_id = ?2)").bind(now, agentId).run();
-}
+const abandon = (db: D1Database, agentId: string, now: number) =>
+  db.prepare("UPDATE agents SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM oauth_tokens WHERE agent_id = ?2)").bind(now, agentId);
 
 async function challengeOf(verifier: string): Promise<string> {
   return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
 }
 
 /**
- * Trades a code for tokens. A code works once: it is taken out as it is read, so a second try, or a
- * second at the same moment, finds nothing, and a try that fails spends it. The app has to be the one
- * the code was made for, at the address it was made for, with the verifier its challenge came from.
+ * Trades a code for tokens. A code works once. The app has to be the one the code was made for, at the
+ * address it was made for, with the verifier its challenge came from, and a try that fails spends it.
+ * A traded code is kept until it would have lapsed, so a second try is seen: it may be someone who
+ * stole the code, so what the first try was given ends, as RFC 6749 (4.1.2) asks.
  */
 export async function exchangeCode(db: D1Database, p: { code: string; clientId: string; redirectUri: string; verifier: string }, now = Date.now()): Promise<Tokens> {
   if (!(await clientOf(db, p.clientId))) throw new OAuthError("invalid_client", "No app is registered with that client_id", 401);
-  if (!p.code.startsWith(CODE_PREFIX) || p.code.length > 200) throw grantError("That code isn't one this server made, or it was used or has lapsed");
+  const gone = () => grantError("That code isn't one this server made, or it was used or has lapsed");
+  if (!p.code.startsWith(CODE_PREFIX) || p.code.length > 200) throw gone();
+  const hash = await hashToken(p.code);
   const row = await db
-    .prepare("DELETE FROM oauth_codes WHERE hash = ? RETURNING client_id, redirect_uri, code_challenge, agent_id, expires_at")
-    .bind(await hashToken(p.code))
-    .first<{ client_id: string; redirect_uri: string; code_challenge: string; agent_id: string; expires_at: number }>();
-  if (!row) throw grantError("That code isn't one this server made, or it was used or has lapsed");
+    .prepare("SELECT client_id, redirect_uri, code_challenge, agent_id, expires_at, used_at FROM oauth_codes WHERE hash = ?")
+    .bind(hash)
+    .first<{ client_id: string; redirect_uri: string; code_challenge: string; agent_id: string; expires_at: number; used_at: number | null }>();
+  if (!row || (row.used_at !== null && row.expires_at <= now)) throw gone();
+  const reused = async () => {
+    await endGrant(db, row.agent_id, now);
+    return grantError("That code was already used, so what it gave has ended. Connect again");
+  };
+  if (row.used_at !== null) throw await reused();
+  const spend = db.prepare("UPDATE oauth_codes SET used_at = ? WHERE hash = ? AND used_at IS NULL").bind(now, hash);
   const refused = async (what: string) => {
-    await abandon(db, row.agent_id, now);
+    await db.batch([spend, abandon(db, row.agent_id, now)]);
     return grantError(what);
   };
   if (row.expires_at <= now) throw await refused("That code has lapsed");
@@ -431,8 +451,11 @@ export async function exchangeCode(db: D1Database, p: { code: string; clientId: 
   if (!VERIFIER.test(p.verifier) || (await challengeOf(p.verifier)) !== row.code_challenge) throw await refused("code_verifier doesn't match the code_challenge");
   const agent = await db.prepare("SELECT id, expires_at FROM agents WHERE id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)").bind(row.agent_id, now).first<Grantee>();
   if (!agent) throw await refused("The agent this was for has been disconnected, or has expired");
-  const { tokens, statements } = await issue(db, agent, newId(), now);
-  await db.batch(statements);
+  // The spending and the tokens are one batch, so the agent holds the unspent code or its tokens at every
+  // moment, and a sweep between the two never finds it holding nothing.
+  const { tokens, statements } = await issue(db, agent, newId(), now, true);
+  const [spent] = await db.batch([spend, ...statements]);
+  if (!spent!.meta.changes) throw await reused();
   return tokens;
 }
 

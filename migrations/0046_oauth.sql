@@ -4,14 +4,17 @@
 -- its token is obtained: a code, traded for an access token (1 hour) and a refresh token (30 days).
 -- Like an agent's token, every code and token is kept only as a SHA-256 hash of 256 random bits.
 
--- An app that registered itself (RFC 7591). Public clients only: none has a secret. A client that
--- never gets a grant is removed after a day, since anyone can register one.
+-- An app that registered itself (RFC 7591). Public clients only: none has a secret. Anyone can register
+-- one, so a client that never sends anyone to sign in is removed after an hour, and one that never gets a
+-- grant after a day.
 CREATE TABLE oauth_clients (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   redirect_uris TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   last_used_at INTEGER,
+  -- When it first sent someone to /oauth/authorize.
+  requested_at INTEGER,
   -- A hash of the address it registered from, to count registrations by and for nothing else.
   registered_from TEXT
 );
@@ -27,17 +30,21 @@ CREATE TABLE oauth_requests (
   code_challenge TEXT NOT NULL,
   resource TEXT,
   person_id TEXT REFERENCES people (id),
+  -- A hash of the network the browser came from, to count waiting requests by and for nothing else.
+  requested_from TEXT,
   created_at INTEGER NOT NULL
 );
 
--- What consent hands the app, to be traded at /oauth/token within a minute, once.
+-- What consent hands the app, to be traded at /oauth/token within a minute, once. A traded code is kept
+-- until it would have lapsed, with `used_at`, so a second try is seen and ends what the first was given.
 CREATE TABLE oauth_codes (
   hash TEXT PRIMARY KEY,
   client_id TEXT NOT NULL REFERENCES oauth_clients (id) ON DELETE CASCADE,
   redirect_uri TEXT NOT NULL,
   code_challenge TEXT NOT NULL,
   agent_id TEXT NOT NULL REFERENCES agents (id),
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
 );
 
 -- An access or a refresh token. `family` is one authorization's: a refresh token that is used twice ends
@@ -60,6 +67,7 @@ CREATE INDEX oauth_tokens_by_end ON oauth_tokens (expires_at);
 CREATE INDEX oauth_requests_by_age ON oauth_requests (created_at);
 CREATE INDEX oauth_codes_by_end ON oauth_codes (expires_at);
 CREATE INDEX oauth_clients_unused ON oauth_clients (created_at) WHERE last_used_at IS NULL;
+CREATE INDEX oauth_requests_by_source ON oauth_requests (requested_from, created_at) WHERE requested_from IS NOT NULL;
 CREATE INDEX oauth_clients_by_source ON oauth_clients (registered_from, created_at) WHERE registered_from IS NOT NULL;
 
 -- The app an agent was connected from, or null for an agent connected on the Agents page. `token_hash`

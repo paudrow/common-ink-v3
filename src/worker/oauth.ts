@@ -109,6 +109,30 @@ const needed = (p: URLSearchParams, ...names: string[]): string[] => {
   return values as string[];
 };
 
+/**
+ * The network an address is in, as caps count it. One host is usually given a whole IPv6 /64, and could
+ * change its address within it at will, so an IPv6 address counts as its /64. An IPv4 address, or one
+ * written inside an IPv6 address, counts as itself.
+ */
+function network(address: string): string {
+  const v4 = /(\d{1,3}(\.\d{1,3}){3})$/.exec(address);
+  if (v4 || !address.includes(":")) return v4 ? v4[1]! : address;
+  const [head = "", tail] = address.toLowerCase().split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const groups = [...front, ...Array<string>(Math.max(0, 8 - front.length - back.length)).fill("0"), ...back];
+  return `${groups
+    .slice(0, 4)
+    .map((g) => parseInt(g, 16).toString(16))
+    .join(":")}::/64`;
+}
+
+/** What caps count a request's sender by: a hash of its network, salted with the session secret, kept for that and logged nowhere. Null when the address isn't known. */
+async function senderOf(req: Request, env: Env): Promise<string | null> {
+  const address = req.headers.get("CF-Connecting-IP");
+  return address ? hashToken(`oauth-sender\u0000${env.SESSION_SECRET ?? ""}\u0000${network(address)}`) : null;
+}
+
 const tokensAnswer = (t: Tokens) => json({ access_token: t.accessToken, token_type: "Bearer", expires_in: t.expiresIn, refresh_token: t.refreshToken });
 
 async function register(req: Request, env: Env): Promise<Response> {
@@ -119,10 +143,7 @@ async function register(req: Request, env: Env): Promise<Response> {
   } catch {
     throw new OAuthError("invalid_client_metadata", "The body isn't JSON");
   }
-  // Counted by a hash of the address (salted with the session secret), which is kept for that and logged nowhere.
-  const address = req.headers.get("CF-Connecting-IP");
-  const from = address ? await hashToken(`oauth-register\u0000${env.SESSION_SECRET ?? ""}\u0000${address}`) : null;
-  const client = await registerClient(env.DB, body, Date.now(), from);
+  const client = await registerClient(env.DB, body, Date.now(), await senderOf(req, env));
   return json(
     {
       client_id: client.id,
@@ -201,7 +222,7 @@ async function authorize(req: Request, env: Env, url: URL): Promise<Response> {
 
   let id: string;
   try {
-    id = await startRequest(env.DB, { clientId: client.id, redirectUri, state, codeChallenge: challenge, resource });
+    id = await startRequest(env.DB, { clientId: client.id, redirectUri, state, codeChallenge: challenge, resource }, Date.now(), await senderOf(req, env));
   } catch (err) {
     if (err instanceof OAuthError) return refusal(err.message, err.status);
     throw err;

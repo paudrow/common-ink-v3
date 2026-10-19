@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { authenticateAgent, connectAgent, disconnectAgent, editAgent, hashToken, listAgents, MAX_ACTIVE_AGENTS } from "../../src/core/agents.ts";
-import { MAX_PENDING_PER_CLIENT, MAX_PENDING_REQUESTS, MAX_REGISTRATIONS_PER_HOUR, MAX_UNUSED_CLIENTS, consent, deny, openRequest, redirectBack, registerClient, sweep } from "../../src/core/oauth.ts";
+import { MAX_PENDING_PER_ADDRESS, MAX_PENDING_PER_CLIENT, MAX_PENDING_REQUESTS, MAX_REGISTRATIONS_PER_HOUR, MAX_UNUSED_CLIENTS, consent, deny, exchangeCode, openRequest, redirectBack, registerClient, sweep } from "../../src/core/oauth.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { b64url, sign } from "../../src/worker/session.ts";
 import * as people from "./members.ts";
@@ -169,6 +169,38 @@ describe("registering an app", () => {
     // After the hour it may register again.
     await env.DB.prepare("UPDATE oauth_clients SET created_at = created_at - ?").bind(2 * 3_600_000).run();
     expect((await send("/oauth/register", { method: "POST", body, ...from("203.0.113.7") })).status).toBe(201);
+  });
+
+  it("counts an IPv6 address by its /64, so one host can't register more by changing its address", async () => {
+    const from = (ip: string) => send("/oauth/register", { method: "POST", body: JSON.stringify({ client_name: "Chat", redirect_uris: [REDIRECT] }), headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip } });
+    for (let i = 1; i <= MAX_REGISTRATIONS_PER_HOUR; i++) expect((await from(`2001:db8:1:2::${i.toString(16)}`)).status).toBe(201);
+    for (const same of ["2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:0DB8:0001:0002:0:0:0:abcd"]) {
+      const refused = await from(same);
+      expect([same, refused.status, await errorOf(refused)]).toEqual([same, 429, "temporarily_unavailable"]);
+    }
+    for (const other of ["2001:db8:1:3::1", "::ffff:203.0.113.77", "203.0.113.78"]) expect((await from(other)).status, other).toBe(201);
+  });
+
+  it("forgets within the hour an app that never sent anyone to sign in, and gives one that did the day", async () => {
+    const idle = (await register({ client_name: "Idle" })).body.client_id;
+    const started = (await register({ client_name: "Started" })).body.client_id;
+    await authorize(started, (await pkce()).challenge);
+    const age = (id: string, by: number) => env.DB.prepare("UPDATE oauth_clients SET created_at = ? WHERE id = ?").bind(Date.now() - by, id).run();
+    const left = async () => (await env.DB.prepare("SELECT id FROM oauth_clients WHERE id IN (?, ?)").bind(idle, started).all<{ id: string }>()).results.map((r) => r.id);
+    await age(idle, 2 * HOUR);
+    await age(started, 2 * HOUR);
+    await sweep(env.DB, Date.now(), true);
+    expect(await left()).toEqual([started]);
+    await age(started, 25 * HOUR);
+    await env.DB.prepare("UPDATE oauth_requests SET created_at = ? WHERE client_id = ?").bind(Date.now() - 11 * 60_000, started).run();
+    await sweep(env.DB, Date.now(), true);
+    expect(await left()).toEqual([]);
+
+    // Apps past their hour are not counted toward those waiting, so a table full of them refuses no one.
+    await env.DB.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO oauth_clients (id, name, redirect_uris, created_at) SELECT 'filler' || i, 'Filler', '[]', ? FROM n").bind(MAX_UNUSED_CLIENTS, Date.now() - 2 * HOUR).run();
+    const allowed = await register();
+    await env.DB.prepare("DELETE FROM oauth_clients WHERE id LIKE 'filler%'").run();
+    expect(allowed.res.status).toBe(201);
   });
 
   it("takes https addresses, and http only to this machine", async () => {
@@ -369,6 +401,25 @@ describe("authorizing", () => {
   });
 });
 
+describe("waiting requests from one address", () => {
+  it("holds only so many from one address, across apps, fewer than one app's room, and leaves the room for other addresses", async () => {
+    expect(MAX_PENDING_PER_ADDRESS).toBeLessThan(MAX_PENDING_PER_CLIENT);
+    const ada = await newMember();
+    const apps = [(await register()).body.client_id, (await register()).body.client_id];
+    const { challenge } = await pkce();
+    const from = async (ip: string, client: string) => {
+      const query = new URLSearchParams({ response_type: "code", client_id: client, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", state: "xyz" });
+      const res = await send(`/oauth/authorize?${query}`, { redirect: "manual", headers: { ...(await session(ada)), "CF-Connecting-IP": ip } });
+      await res.body?.cancel();
+      return res.status;
+    };
+    for (let i = 0; i < MAX_PENDING_PER_ADDRESS; i++) expect(await from(`2001:db8:9:9::${i + 1}`, apps[i % 2]!)).toBe(302);
+    expect(await from("2001:db8:9:9::ffff", apps[0]!)).toBe(429);
+    expect(await from("198.51.100.4", apps[0]!)).toBe(302);
+    expect(await from("2001:db8:9:a::1", apps[1]!)).toBe(302);
+  });
+});
+
 describe("consent", () => {
   it("makes an agent with the limits the member chose, and a code for the app", async () => {
     const ada = await newMember();
@@ -557,10 +608,45 @@ describe("trading a code for tokens", () => {
     const lapsed = await exchange({ code: late.code, client_id: client, code_verifier: verifier });
     expect([lapsed.status, await errorOf(lapsed)]).toEqual([400, "invalid_grant"]);
     expect((await agentRow(late.agentId))!.revoked_at).not.toBeNull();
-    // Two at the same moment: one wins.
+    // Two at the same moment: one wins, and the other is a second use, which ends what the winner was given.
     const racing = await consent(env.DB, ada.personId, { requestId: requestOf((await authorize(client, challenge, ada)).to) });
     const results = await Promise.all([1, 2].map(() => exchange({ code: racing.code, client_id: client, code_verifier: verifier })));
     expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+    const won = (await results.find((r) => r.status === 200)!.json()) as TokenAnswer;
+    expect(await status(won.access_token)).toBe(401);
+  });
+
+  it("ends what a code gave when the code is presented again, as RFC 6749 asks", async () => {
+    const ada = await newMember();
+    const client = (await register()).body.client_id;
+    const { verifier, challenge } = await pkce();
+    const granted = await consent(env.DB, ada.personId, { requestId: requestOf((await authorize(client, challenge, ada)).to) });
+    const first = (await (await exchange({ code: granted.code, client_id: client, code_verifier: verifier })).json()) as TokenAnswer;
+    expect(await status(first.access_token)).toBe(200);
+    const again = await exchange({ code: granted.code, client_id: client, code_verifier: verifier });
+    expect([again.status, await errorOf(again)]).toEqual([400, "invalid_grant"]);
+    expect(await status(first.access_token)).toBe(401);
+    const refreshed = await refresh({ refresh_token: first.refresh_token, client_id: client });
+    expect([refreshed.status, await errorOf(refreshed)]).toEqual([400, "invalid_grant"]);
+    expect((await agentRow(granted.agentId))!.revoked_at).not.toBeNull();
+  });
+
+  it("keeps a fresh connection through a sweep that runs while its code is being traded", async () => {
+    const ada = await newMember();
+    const client = (await register()).body.client_id;
+    const { verifier, challenge } = await pkce();
+    const granted = await consent(env.DB, ada.personId, { requestId: requestOf((await authorize(client, challenge, ada)).to) });
+    // Every batch the trade writes is preceded by a sweep, as if another request ran one at that moment.
+    const sweeping = {
+      prepare: (query: string) => env.DB.prepare(query),
+      batch: async (statements: D1PreparedStatement[]) => {
+        await sweep(env.DB, Date.now(), true);
+        return env.DB.batch(statements);
+      },
+    } as unknown as D1Database;
+    const tokens = await exchangeCode(sweeping, { code: granted.code, clientId: client, redirectUri: REDIRECT, verifier });
+    expect((await agentRow(granted.agentId))!.revoked_at).toBeNull();
+    expect(await status(tokens.accessToken)).toBe(200);
   });
 
   it("refuses a verifier that isn't the code's, and a code made for another address or another app, and spends the code", async () => {
