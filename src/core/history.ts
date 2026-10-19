@@ -658,11 +658,15 @@ export function dayStartIn(timeZone: string): (day: string) => number {
     const parts = Object.fromEntries(format.formatToParts(time).map((p) => [p.type, Number(p.value)]));
     return Date.UTC(parts.year!, parts.month! - 1, parts.day, parts.hour, parts.minute, parts.second);
   };
+  const on = dayIn(timeZone);
   return (day) => {
     const wanted = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
     let time = wanted;
     // The zone's offset at the first guess can differ from the one at the answer, across a change of clocks.
     for (let i = 0; i < 3; i++) time -= read(time) - wanted;
-    return time;
+    // A skipped midnight never reads 00:00, so the correction bounces between the previous evening and the first instant of this day.
+    if (on(time) === day) return time;
+    const across = time - (read(time) - wanted);
+    return on(across) === day ? across : time;
   };
 }
