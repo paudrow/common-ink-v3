@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });
@@ -148,7 +148,7 @@ test("More expands and collapses Contacts, Uploads, and History, and each mode i
   const less = modes.getByRole("button", { name: "Less" });
   await expect(less).toHaveAttribute("aria-expanded", "true");
   await expect(more).toHaveCount(0);
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Plugins"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Dice", "Plugins"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");
@@ -241,7 +241,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(folder(page, "Common Ink")).toHaveAttribute("aria-selected", "true");
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await pinPanel(page, "Info");
   const panel = inspector.locator(".inspector-body");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive", "Trash"]);
@@ -257,7 +257,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await showPanel(page, "History");
   await expect(panel.getByRole("listbox", { name: "Changes" }).getByRole("option")).toContainText("You wrote");
   await showPanel(page, "Backlinks");
-  await expect(panel).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
+  await expect(ownPlugin(page, "Backlinks").locator("body")).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
 
   await showPanel(page, "Info");
   await panel.getByRole("combobox", { name: "Move to" }).selectOption({ label: "Projects" });
@@ -336,14 +336,14 @@ test("the inspector stays open whatever is in front, with the same icons in its 
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const panel = inspector.locator(".inspector-body");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await pinPanel(page, "Info");
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
   const place = await inspector.boundingBox();
 
   await folder(page, "Projects").click();
   await expect(listHeading(page)).toHaveText("Projects");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Notes", "Last changed"]);
   await expect(panel.getByRole("definition")).toHaveText(["Projects", "2 notes", "just now by Ada Lovelace"]);
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
@@ -365,7 +365,7 @@ test("the inspector stays open whatever is in front, with the same icons in its 
   await page.getByRole("link", { name: "Calendar" }).click();
   await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
   await expect(panel).toHaveText("Nothing to show for this view");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   expect(await inspector.boundingBox()).toEqual(place);
 
   await page.goto("/folder/nosuchfolder");

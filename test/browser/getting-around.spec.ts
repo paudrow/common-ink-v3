@@ -205,6 +205,7 @@ const PAGES: Record<string, ((made: { uploadId: string; tag: string }) => { addr
   Sharing: () => ({ address: "/sharing" }),
   Agents: () => ({ address: "/agents" }),
   Plugins: () => ({ address: "/plugins" }),
+  Dice: () => ({ address: "/dice" }),
   Settings: "not in the history",
 };
 

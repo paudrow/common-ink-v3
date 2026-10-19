@@ -2,6 +2,8 @@
 
 Most of the web app is plugins. The core is the workspace's data, the editor for one note, focus, the inspector's frame, and the plugin host. The sidebar, folder tree, a folder's list of notes, tabs and splits, command palette, quick open, History, Agents, Members, and the rest are built-in plugins in `src/web/plugins/`.
 
+This document has two readers. Someone writing a plugin of their own for a workspace reads [Third-party plugins](#third-party-plugins): that is the whole of what such a plugin is and can do. Everything before it is for Common Ink's own built-in plugins, which run in the app's page and are trusted.
+
 The plugin API is one module, `src/web/plugin-api.ts`. Its doc comments are the reference. A plugin imports that module and nothing else from the app. `test/core/plugin-boundary.test.ts` fails when a file under `src/web/plugins/` breaks that rule.
 
 ## A plugin
@@ -113,7 +115,7 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 - `app.notify({ message, icon, action })` tells the member something that just happened, in a card at the foot of the pane the member is working in, centred under it and above anything kept at its foot such as vim's bar, as v1's toasts: an icon in a tile (`info` unless said), the message, and `action`, one button such as Undo. Every notice of the app is drawn this way (`src/web/Toasts.tsx`): the todos plugin's "Task completed", Archive and Trash's "Archived" and "Moved to Trash", and History's and Agents' "Reverted …". Cards stack, the newest at the foot and three at most (`stacked` in `src/web/notices.ts`); one with the same message as a card shown takes that card's place. A card goes after five seconds, or ten with a button, counted only while neither the pointer nor the keyboard is on it; a press on it or Escape sends it away. While what `action.run` answers is on its way the card stays, without its button; a notice it answers with is said in the card's place ("Undone: …", or why it couldn't be), and nothing sends the card away. It is laid over the app, so nothing moves when one comes or goes. `stays` keeps a card up with no timer until it is answered or pressed, for a question such as an offer to share or the Todos page's "Order changed" with Refresh, and `notify` answers with what takes the card down. It is for what the member just did and may want back, not for a standing fact about a note, which is a `mark` or a `notice` view.
 - The `mark` slot is a word or two about a note in the bar above its text, in every editor showing it: the Archive and Trash plugin's "Archived" and its Unarchive button. The bar keeps its height, so nothing in the note moves when a mark comes or goes. The `notice` slot is a banner between that bar and the text, for what changes what the member can do with the note: that it is in Trash. Each is handed `note`, and draws nothing when it has nothing to say of it. When a banner appears the text moves down by the banner's height and no further.
 
-A plugin does not call `fetch` or read `localStorage`. The host is where a third-party plugin's permissions will be checked, so a plugin that goes around it can't be trusted later.
+A built-in plugin does not call `fetch` or read `localStorage`: it goes through the host. A third-party plugin has neither to call, since it does not run in the app's page at all.
 
 ## What a plugin says of itself
 
@@ -148,8 +150,8 @@ A widget is a small live thing to glance at or press. There are three places one
 | In a note, inline | `host.embeds.register({ name, render })`, written `::name{config}` | The note: its config | Timer (`timer`), Stopwatch (`stopwatch`), Event (`calendar`), Contact (`contacts`) |
 | In a note, as a block | `host.embeds.register({ name, block: true, render })`, written `:::name{config}` … `:::` | The note: its config and body | Kanban board (`kanban`) |
 | In a note, below its line | An embed, inline or block, that also gives `below: { box, render }`, or an address embed: `host.embeds.register({ name, title, claims, below })` | The note: its config and body, or the address | A video's or a post's address alone on a line (`media`), HTML (`html`) |
-| The bottom bar | `host.views.register("bar", { id, component, side, order })` | Whatever it shows: the open note, the app | Note clocks (`note-clocks`) at the left end, Word count (`word-count`, from #31) at the right |
-| From the command palette only | A command that opens an `overlay` to ask what it needs, and a `bar` view that shows it | This browser, for this workspace: `host.storage` | Quick timer (`quick-timer`) |
+| The bottom bar | `host.views.register("bar", { id, component, side, order })` | Whatever it shows: the open note, the app | Note clocks (`note-clocks`) at the left end. Word count (`word-count`) at the right is the same slot from a frame: see [One interface for a plugin that runs shut off](#one-interface-for-a-plugin-that-runs-shut-off) |
+| From the command palette only | A command that asks what it needs with `ink.prompt`, and a `bar` view that shows it | This browser, for this member and workspace: `ink.storage` | Quick timer (`quick-timer`), which runs shut off |
 
 Every embed with a syntax is in the `/` menu, by itself or, with `menu: false`, through the `pick` of another that writes it (a picture, a video and a sound are all written by "Upload a file" and "Insert an upload"), and every command-started widget is a command in the palette. An address embed is written by pasting or typing its address and by nothing else.
 
@@ -197,7 +199,34 @@ The cursor counts from the first time it is put somewhere or something is typed.
 
 ### Options
 
-An embed that declares options has one options button in its card, with three sliders on it. An embed with none has no button, and neither has a member who can't change the note. The button opens a small panel beneath the card, from the card's left edge, laid over the app so it moves nothing in the note. A card whose foot is out of the window, as a long board's is, has the panel beneath the button instead. The panel holds a field for each option the embed declares and nothing else.
+An embed that declares options has one options button in its card, with three sliders on it. An embed with none has no button, and neither has a member who can't change the note. The button opens a panel beneath the embed, as wide as its card (or, for an embed whose drawing is below its line, as wide as that room), laid over the app so it moves nothing in the note. A card whose foot is out of the window, as a long board's is, has the panel beneath the button instead. The panel holds a field for each option the embed declares and nothing else.
+
+Most options are declared as data, and then the host does everything: it reads each from the embed's config as an `id=value` word, draws its field, refuses a value the option can't take with a sentence saying what it takes, and writes the value back as a word at the end of the config (the default as no word at all, and every word that is no option's left where it was). The HTML embed's height is declared this way, and so is every option a third-party plugin's manifest gives its embed:
+
+```ts
+host.embeds.register({
+  name: "html",
+  title: "HTML",
+  options: [{ type: "number", id: "height", label: "Height", min: 40, max: 2000, step: 1, default: 320 }],
+  /* render, below */
+});
+```
+
+Each is a `DeclaredOption` (`src/core/embedOptions.ts`) with an `id` (a small letter, then letters, digits and `-`), a `label`, a `default`, and a `type`:
+
+| `type` | Written as | Drawn as | Also takes |
+|---|---|---|---|
+| `text` | `to=Ada`, `to="Ada Lovelace"` | a field | `maxLength`. No quotes, braces or line breaks. |
+| `number` | `times=3` | a field, with what it takes under it | `min`, `max`, `step` |
+| `toggle` | `loud=on`, `loud=off` | On and Off | |
+| `choice` | `show=dots` | one button per value | `values`, one word each; no `default` means the first |
+| `colour` | `tint=green` | a dot for each of `SWATCHES`, and none | |
+| `duration` | `for=1h30m` | a field; `90`, `90m` and `1h30m` are one value | |
+| `date` | `until=2026-10-31` | a field | empty is none |
+
+A number written past either end of its range, as by hand, is read as that end; a number or a duration emptied in its field is its default again. `optionValues(options, config)` from the plugin API reads them all at once, each as its type (a number as a number, a toggle as true or false) or its default, which is what the HTML embed draws its height from. The table and the refusals are tested in `test/core/embed-options.test.ts`.
+
+An option that lives anywhere else in what the note says, as the timer's length (the config's first word) and a board's column colours (its body) do, is given as `fields` and `set` instead:
 
 ```ts
 host.embeds.register({
@@ -308,7 +337,7 @@ It can also post messages to the shell, which listens for nothing after the firs
 
 Where the shell is served from: on this machine, in Previews, and in production it is the app's own host, which is the only host each of those has. Its origin is still its own, and the inner frame's another, because the response header says so. The member's session cookie goes with the request for the shell, which is the same empty document for everyone. Setting `EMBED_ORIGIN` on the Worker to a host kept for embeds (and routing that host to the Worker) serves it from there instead: that host answers with the shell and nothing else, and the app's host sends the frame to it (a redirect from `/embed-frame`, and the page's `frame-src` names it). Nothing sets that in production yet. For a loop in HTML to be unable to stop the app in a browser that keeps each site in its own process, that host must be another site, not only another origin: a registrable domain of its own (not `embed.commonink.app`, which is the same site), or a `*.workers.dev` name, each of which is its own site.
 
-**For #16.** `embedPolicy({ network })` in `src/worker/frames.ts` is the one switch that lets an embed fetch. A grant must never be a variant of the shell's address, a path or a query: any frame can be sent to any address its ancestors' `frame-src` allows, and `frame-src` ignores the query, so an embed could send a frame to the granted variant and get the network unasked. A grant is an unguessable token for that one grant which the Worker checks before answering with the wider policy, or a separate host for each policy. The inner frame keeps `frame-src 'none'` either way: a grant of the network is not a grant to leave. And an untrusted plugin's embed gets `sandboxed` and nothing else: not `Embed.render`, not `Below.render`.
+**The network** is off for an HTML embed until an admin allows it. HTML embeds have one permission in the workspace's record of its plugins, `network`, with the sites an admin lists (Plugins page, "HTML embeds"). It belongs to the workspace and not to a note or a plugin: an HTML embed is a note's text, so the allowance is "HTML written in this workspace's notes may reach these sites, once a reader presses Run". While it is allowed, the Run button names the sites, and the frame is opened with a grant: `plugin.frame` answers a token, good once and for a minute, and the Worker answers `/embed-frame/g/<token>` with the same shell under a policy whose `connect-src`, `img-src`, `media-src` and `font-src` name those sites and no other (`embedPolicy({ network })` in `src/worker/frames.ts`). Script is never loaded from a site, and the inner frame keeps `frame-src 'none'`: a grant of the network is not a grant to leave. The grant is a token and not a variant of the shell's address because any frame can be sent to any address its ancestors' `frame-src` allows: an embed can't guess a token, a used one answers 404, and only the hash of one is kept. A frame's requests carry no session: its origin is its own, so the member's cookie doesn't go with them, which `test/browser/third-party-attacks.spec.ts` checks on the wire. A guest and a link's page get no grant.
 
 ## Completions
 
@@ -586,23 +615,272 @@ The Plugins page is under More in the sidebar and the Settings page is in the wo
 
 With every plugin off, the core still opens the note its address names, takes typing, and saves.
 
+A plugin's details end with its **source**, to read. A third-party plugin shows its `manifest.json` and its `plugin.js` as the workspace has them, which every member can read (`plugin.read`). A plugin that comes with Common Ink shows the file it starts from and every file of `src/web/plugins/` that file imports, however far down: `SOURCE_OF` in `src/web/plugins/index.ts` names each one's first file, and `test/core/plugin-source-map.test.ts` holds the table to the imports beside it. The text is bundled when the app is built (`import.meta.glob` with `?raw` in `src/web/pluginSource.ts`), each file in a piece of its own, so what is shown is what was built, no server keeps a second copy, and nothing is fetched until the section is scrolled near: the files, and the editor they are drawn in (`src/web/pluginSourceView.ts`, CodeMirror with the language's colors, read-only). One list picks the file, so a plugin of twenty files adds one control to the page and not twenty.
+
+Under an installed plugin's source is **Edit a copy**, which makes a **draft**: the member's own copy of the manifest and the code, kept on the server beside their settings and out of sight of the notes (`plugin_drafts`, migration `0033`; `draft.list`, `draft.read`, `draft.save`, `draft.discard` in `src/core/pluginRecord.ts`). A draft is no note: it is in no folder, search or history.
+
+- **It is its author's alone.** Every statement about drafts names the asker and no operation takes a person, so nobody else reads or changes one, an admin included: another member is answered "You have no draft of that plugin". Plugins are refused the four operations, the draft itself included. The member's own agent reads and writes the member's drafts as the member does (`list_drafts`, `read_draft`, `save_draft`, `discard_draft`), a read-only one only reads them, and one limited to folders is refused all four. A member who is removed or leaves loses their drafts in the same batch, so none is waiting if they are added again, and uninstalling a plugin removes every draft of it.
+- **Run my draft** runs it in the original's place, for its author only and in frames like any installed plugin, with what the original is allowed and the draft's own manifest still asks for, and never more. The app decides that in `decideRun` (`src/web/pluginRun.ts`) and the server decides it again: a draft's operations come to `/api/workspaces/<id>/plugins/<install id>/draft/ops`, where `actingPlugin` reads the draft of the session's person and allows the original's standing permissions that the draft still declares. A capability the draft adds is off, the sites of `network` are the ones an admin allowed the original, and an admin turning a permission off turns it off for every draft. For anyone else that address answers "You have no draft of that plugin that is running". A draft whose manifest can't be read, or that asks for something no manifest may, is kept as text and never runs. While one runs, the plugin's card and page say "Running your draft".
+- **Publishing is installing.** Only an admin has "Publish to the workspace", which is `plugin.install` with `replaces`: the existing admin-only path, refused to everyone else by the core. The new code has no approval, so every permission has to be allowed again.
+- The list of a draft's files ends with "What I changed", which compares the draft with the plugin as it is now, and says so when the plugin has been replaced since the copy was made. What was typed and not saved is kept, as text, when the page is left.
+- A draft's writes are recorded as the plugin's, for its author, as a write the member posts to the plugin's own address already is. They are the member's own writes: a draft can change only what its author can.
+
+Plugins that come with Common Ink show their source and can't be copied.
+
 A plugin whose `activate` throws is left out whole. A view that throws while being drawn is left out alone, an embed that throws is shown as it is written, and a completion that throws offers nothing. Each way the Plugins page says what failed.
 
-## What third-party plugins must not get as it is
+## One interface for a plugin that runs shut off
 
-The built-in plugins are trusted, and the host gives them more than an untrusted plugin can have. Third-party plugins (#16) need each of these gated first:
+Word count, Quick timer and Backlinks come with Common Ink and run shut off from it, through the broker, the port and the address on the server a third-party plugin uses (ADR 10). Weather, a sample calendar, Coin and Dice are the same kind of plugin, one in each place a plugin can live, so those places can be tried without writing one. There is no second door: what the first three needed and a frame lacked was added for every plugin. Their manifests are in `src/core/ownPlugins.ts`, read by the schema every manifest is read by, and their code is one file each in `src/web/plugins/sandboxed/`, plain JavaScript written against `ink` and nothing else. The server holds each to what its manifest declares (`actingPlugin` in `src/core/pluginRecord.ts`): no row in any workspace is read for one, so nobody permits, locks or uninstalls it, and what it declares is all it can ask, in an admin's session as in a guest's. A guest's app runs them too, as that guest.
 
-- `host.perform` runs as the member with the member's whole access, and the server records the member, not the plugin, as the author.
-- `host.agents`, `host.members` and `host.sharing` are given to Common Ink's own plugins and to no other. The host is told its own plugins as the values it was built with (`trusted` in `createPluginHost`), so a plugin can't become one by the id or name it gives itself, and a plugin put on the page by a test (`window.__INK_FIXTURE_PLUGINS__`) is not one. Any other plugin is handed the same three objects with every method refusing: `<name> isn't given host.sharing.link: only Common Ink's own plugins are`. Each acts as the member where history can't take it back: `agents.connect` mints a token that acts as the member, `members` can invite a stranger as admin or remove the other admins, and `sharing` can put a note behind a public link. `host.members.invites()`, an admin's `member.list` and `host.sharing.all()` also carry emails. What is still open for #16 is giving one of these to a third-party plugin on an admin's say.
-- The member's data sources, their contacts and calendar, are refused to a plugin that isn't Common Ink's own through `host.perform` (`ownOnly` in `pluginHost.ts`, the type `OwnOnly`). `member.list` is not: any plugin can read the members' names and roles, and an admin's plugin their emails. #16 decides whether that becomes a permission.
-- A member's pins and their last visit are refused to a plugin that isn't Common Ink's own through `host.perform` (`ownOnly`, the type `OwnOnly`): `pin.*` and `visit.*`. One that could mark the summary read would hide from the member what they haven't seen.
-- **Uploads.** An untrusted plugin must never be given an upload's bytes or an operation on one. Today that is three gates, and #16 has to keep all three and add a fourth. `host.uploads` (`referred`, `learn`, `address`, `bytes`, `send`) is given only to Common Ink's own plugins; any other is handed one that knows no upload, answers `about:blank` for every address and refuses `bytes` and `send` (`noUploads` in `pluginHost.ts`). Every `upload.*` operation is refused to it through `host.perform` (`ownOnly`, the type `OwnOnly`). And `upload.create`, `upload.open` and `upload.setPrivate` are refused to every plugin as operations. The fourth is the page itself: the bytes are served to the member's session at `/api/workspaces/<id>/uploads/<upload id>`, and a plugin that runs in the page can ask that address without the host, read an `<img>` the uploads plugin drew, or read `note.read`'s `uploads` through `host.perform`, which names files the note refers to. So before a third-party plugin runs, its code must be out of the page (a sandboxed frame has no session and is refused the bytes by `Cross-Origin-Resource-Policy: same-origin`), `Embed.render` and `Below.render` must not hand it an element beside an upload's drawing, and `note.read` must reach it without `uploads`, or with names and types left out.
-- What the app draws is in the page, and a plugin runs in the page. So a plugin refused `contact.*` can still read the names and organizations of the contacts the `@` list shows while it is open, as it can read an open note. The list shows no contact's email for that reason. This holds until plugins are isolated from the page (#16).
-- `host.commands.run` runs any command, including `plugins.toggle.<another plugin>`. That command writes the member's settings, so it is a way around the refusal in `host.perform`. The palette needs it to run what the member picks.
-- `Embed.render` is handed a real element inside the note, so it can reach the rest of the page from there. So is `Below.render`, which can also rewrite the embed with `update`. The HTML embed is the pattern for an untrusted one: only a `sandboxed` frame, and nothing drawn by the plugin's own code.
-- A `sandboxed` frame can open a WebRTC peer connection once it runs, which no header stops. Until a browser offers a way, an untrusted embed has that one way out, and what it is handed must be chosen with that in mind.
-- `Embedded.update` changes the note as the member, recorded as the member's change. It can only rewrite the embed's own config and body, but an untrusted embed could do that without the member touching it.
-- A completion's `items` is told what the member types after its trigger, and what an item inserts is written into the note as the member.
-- An editor extension runs inside the editor with the note's text, every key typed, and the page. It must also be built from the app's own copy of `@codemirror/state`, which a plugin loaded from elsewhere doesn't have.
-- `host.storage` is the browser's localStorage under a prefix, which any script on the page can read.
-- A view is handed `app`, which carries the member's email, every note's title and first lines, `signOut`, `switchWorkspace`, and `reloadWorkspaces`. Each view is drawn with the `app` its own plugin is given (`provide` in `Workspace.tsx`), so that is the one place to narrow it.
+| Plugin | Runs | The Plugins page says |
+|---|---|---|
+| Common Ink's own that needs the editor or the app's layout | in the page, compiled in, as the member | Built-in, full access |
+| Common Ink's own that needs nothing of the page | shut off, in frames | Built-in, sandboxed |
+| A workspace's | shut off, in frames | Third-party |
+| A workspace's that asks for `full-trust` | in the page, for each member who turned it on, while an admin's grant of that exact code stands. Otherwise not at all | Third-party, full trust |
+
+What sets the three apart from a workspace's plugin, and all of it is decided by the app from where the plugin was read, never from anything a manifest or a record says:
+
+- **Their words are the app's.** Commands, tabs and questions are not marked `<name> plugin:`, their views keep the ids they had in the page, their frames are named `ink-own-plugin`, and a manifest of theirs may name an `icon`. A workspace's manifest that names an icon is refused, as one with a name of the app's own is.
+- **Their frames are never stopped for holding the keyboard.** Any frame can hand the keyboard to another (`top.frames[i].focus()`), and the app can't see which did. The keyboard goes back to the note either way. A workspace's plugin's frame is stopped for it, as before, so one workspace plugin can still have another's frame stopped.
+- **They are on from the start,** and placed among the built-ins where they were (`PLACED_AFTER` in `src/web/plugins/index.ts`).
+- **Their code for commands starts with the app,** not at the first command, so what a command shows is there at once. A workspace's plugin runs nothing until the member asks something of it.
+
+What was added to the sandbox, for every plugin:
+
+| Added | For | Needs |
+|---|---|---|
+| `views[].slot: "bar"` with `width`, and `end` for the right side | an item in the app's one bottom bar. The frame is as wide as what `ink.root` holds, which the SDK reports as it changes, and never wider than `width`. With nothing drawn it takes no room. It is not told which note is in front and not started again for each: it asks with `ink.onNote`. A press in it works, and the keyboard goes straight back to where it was. A plugin has one, and beside a workspace's the app writes the plugin's name | nothing |
+| `ink.onNote(fn)` | the note in front as its editor has it, `{ id, text, selected }`, typing not yet saved included, or null when no note is open in an editor. Told again when any of the three changes, 150 ms after the last change | `notes.read` |
+| `ink.onItems(fn)` | told when the notes the member can see have changed | `notes.read` |
+| `ink.storage.get(key)`, `ink.storage.set(key, value)`, `ink.onStorage(fn)` | JSON kept in this browser for this plugin, this member and this workspace. At most 20,000 characters a key, 50 keys and 100,000 characters in all with the keys' names counted, refused with `invalid` past any of them. Setting a key to null takes it out, and leaves nothing under it. Every frame of the plugin hears a set. No plugin reads another's, and a second person in the same browser has their own | nothing |
+| `ink.prompt({ title, label, value, hint, error })` | one line of text asked in a dialog the app draws, answered with the text or null. One at a time, and only within ten seconds of the member running one of the plugin's commands, or at once after an answer: no plugin puts a dialog up of its own accord, or again once it was turned away. Above a workspace's plugin's question the app says "The plugin <name> asks", and its title is `<name> plugin: ...`, so it can't be taken for the app's. Asked again within 120 ms of an answer, the dialog stays with what was typed | nothing |
+| `ink.open(noteId, { background })` | open a note in a tab of its own behind the one in front | `notes.read` |
+| `note.backlinks` in `notes.read` | the notes that link to a note, as the member may see them | `notes.read` |
+
+What moving the three cost, which is what a workspace's plugin lives with:
+
+- **A question is asked a moment after its command.** The command goes to the plugin's frame, which asks the app. With the frame already running that was 36 ms on a laptop, measured once, so Enter pressed twice at once is not what it was. What is typed is judged where the plugin runs, so the quick timer says a length is wrong once it is entered, not as it is typed.
+- **A frame is under a shield until the pointer is on it.** With a mouse nothing is noticed. On a touch screen the first tap on a frame only takes the shield away.
+- **The bar's frames are passed by Tab.** The quick timer in the bar is pressed with the pointer, or stopped with its command.
+- **A link in a frame is not the browser's.** ⌘ or Ctrl and a press on a backlink opens it in a tab behind, as in the note list, and not in a new window.
+
+Tab does reach into a frame in the inspector, and Enter there opens a backlink.
+
+**A member's copy of one** runs in its place for them alone ("Edit a copy" on its page, as for a workspace's plugin). It has what the original declares and its own manifest still asks for, never more, its name may stay, and since it is no longer the app's code everything of it is marked `<name> plugin:`. It is never published over the original: an admin installs its two files as a workspace's plugin under another name.
+
+### Full trust
+
+A manifest asks for it as a capability:
+
+```json
+{ "name": "Deep Keys", "capabilities": [{ "name": "full-trust", "reason": "It adds keys to the editor." }] }
+```
+
+It runs in the page for a member only while both hold: an admin's grant of the code it is now stands (`plugin.permit`, the Allow on its permission row, which names the code's hash), and that member has turned it on for themself (`plugin.trust`, the plugin's own switch, behind a warning). Otherwise none of it runs, shut off or in the page, and its page says why in one line. ADR 11 has the whole of it.
+
+- **Any change ends it for everyone, for good.** An update to its code, or to how it asks for full trust, ends the grant and every member's turning on in the batch that makes the change. Putting the old code back restores neither. Only a fresh grant and each member's own fresh turning on start it again.
+- **An admin's decision starts it from nobody.** Taking the grant back turns everyone off. Granting again turns nobody back on.
+- **Nobody turns it on for anyone else.** `plugin.trust` names no person. It is refused to agents, to plugins and to guests, and it is refused for code no admin granted.
+- **Stopping loads the app again.** Code that has run in a page can't be taken out of it, so turning it off, a change to it, and going to another workspace each send what is typed and load the app again. A window open elsewhere does so when it next reads the record: when it is come back to, and every 15 seconds while it is in front. A window that is hidden reads nothing until it is shown. This ends honest code. Code that means harm can get in the way of it in a window it is already in, since it shares the page: what ends it there is closing the window. A window loaded after it was turned off, or after the grant ended, never runs it, because the app decides that from the record before any of the plugin's code runs.
+- **The app hashes the code itself** and runs it only when that is the granted hash. Once the member's switch starts it, the app loads it as a module from its own address, `/api/workspaces/<id>/plugins/<id>/trusted/<hash>.js`, which answers only code whose hash it works out again to be that one, only to a member it runs for now. Loading it can run code written to step outside the function it is wrapped in, so the app counts it as running from then, and turning it off still loads the app again: the page's policy allows script from the app's address alone and no `eval`, and full trust leaves that policy as it is. A draft that asks for full trust never runs.
+
+Its code is the body of a function handed `host`, the `PluginHost` on this page, and `modules`: the app's own `react`, `@codemirror/state`, `@codemirror/view` and `@codemirror/language`, since a second copy of either would not work with the app's. It may return a function that stops what it started. What its manifest lists as commands, views and embeds is not registered for it: it registers them itself through `host`, as a built-in does.
+
+```js
+const { keymap } = modules["@codemirror/view"];
+host.editorExtensions.register({ id: "deep.keys", extension: keymap.of([{ key: "Ctrl-j", run: () => (host.commands.run("note.new"), true) }]) });
+```
+
+It is handed what the app's own plugins are: `host.agents`, `host.members`, `host.sharing`, `host.uploads`, and every operation `host.perform` takes from them. `host.perform` goes to the plugin's address, so what it writes is recorded as the plugin's, for the member, and the server answers it as it answers that member (uploads and mentions included), refusing only what is a member's alone to ask. Three things about whose it is stay as for any plugin a workspace installed: its embeds are written `::x-name{}`, its name can't be one of Common Ink's own, and it can't take the page at `/`.
+
+**What it can do** in the session of a member who turned it on: anything that member can do in Common Ink. Read and change every note they can open, private ones included; see what they type; read and change their settings and drafts; and call the server with their session directly, which the `host` object does not limit. That reaches every workspace the member belongs to, not only the one that granted it, because the session is the same in all of them. Some of it outlasts the switch: it can create an agent token in the member's name and share their notes by link, and both keep working after it is turned off. In an admin's session it can also invite people, change roles, and install and approve plugins, including approving a new version of itself or another plugin and turning that on for that admin, with no warning shown: `plugin.trust` is the admin's to call, and the code calls it as them. That holds in any workspace where the member is an admin, not only this one. It can't turn anything on for anyone else. The warning a member reads before turning it on says this, an admin is shown the admin's part, and the grant an admin gives says that the code can act as any member who turns it on.
+
+**What it can't**: see a note its member can't, do an admin's work in a non-admin's session, or run for anyone who hasn't turned it on themself. The server decides those by who the member is.
+
+### The built-ins that stay in the page, and what each needs
+
+This is the map for moving more. Each row names what a frame can't be given today.
+
+| Built-in | What it needs that a frame can't have |
+|---|---|
+| Vim mode, Outline bullets, Tables, LaTeX, Code blocks, GitHub-flavored markdown, Links, Mentions, Todos, Tags, Media embeds, Upload embeds, HTML embeds, Line numbers, Embed menu, Daily notes | Editor extensions and completions: CodeMirror values that run in the editor's own page. Nothing crosses a port. |
+| Timer, Stopwatch, Kanban | An embed drawn inside the line, sized by what it draws, that rewrites its own config as the member's edit. A sandboxed embed is a fixed-height frame below the line and read-only. |
+| Note clocks | It reads the open note's running clocks, which `ink.onNote` gives, and scrolls the editor to one, which nothing gives yet. |
+| Tabs and splits, Sidebar, Folders, Note list | The `editor`, `column`, `section` and `folder` slots, which draw the app's own layout and the editor itself. |
+| Command palette, Quick open | The `overlay` slot with the keyboard from the first key, and the list of every command. |
+| Search, History, Dashboard | Pages that move the app (`app.go`, the address's query), the sync seam, the page at `/`, and pins and visits, which are the member's own. |
+| Calendar, Contacts, Uploads | The member's data sources and an upload's bytes, for which there is no capability. |
+| Agents, Members, Sharing | Operations that are the member's alone (`by: "member"`): tokens, roles, invites, grants. No plugin actor is let do them. |
+| Note info, Trash | The `mark` and `notice` slots, and moving and trashing notes, for which there is no capability. |
+
+## Third-party plugins
+
+A third-party plugin is one a member wrote and an admin installed in a workspace. It is two pieces of text: a **manifest**, which is JSON and says what the plugin is, and its **code**, which is JavaScript. An admin pastes both into the form on the Plugins page. They are kept in the workspace and nowhere else: nothing is fetched from another site to run a plugin, now or later.
+
+```json
+{
+  "name": "Word counter",
+  "version": "1.2",
+  "description": "Counts the words in your notes.",
+  "capabilities": [
+    { "name": "notes.read", "reason": "To count the words in your notes." },
+    { "name": "network", "reason": "To look words up.", "origins": ["https://api.example.com"] }
+  ],
+  "commands": [{ "id": "count", "title": "Count notes" }],
+  "views": [{ "slot": "inspector", "id": "words", "label": "Words" }],
+  "embeds": [{ "name": "wordcount", "title": "Word count", "height": 96 }],
+  "settings": { "unit": { "type": "string", "default": "words", "enum": ["words", "characters"], "title": "Unit" } }
+}
+```
+
+```js
+ink.onCommand("count", async () => {
+  const notes = await ink.perform({ type: "note.list" });
+  await ink.notify("Counted " + notes.length + " notes");
+});
+
+if (ink.context.kind === "view" && ink.context.noteId) {
+  ink.perform({ type: "note.read", id: ink.context.noteId }).then(
+    (note) => (ink.root.textContent = note.text.split(/\s+/).filter(Boolean).length + " " + ink.settings.unit),
+    (refused) => (ink.root.textContent = refused.message),
+  );
+}
+
+// A note writes this one as ::x-wordcount{all}.
+if (ink.context.kind === "embed") ink.root.textContent = "Counting: " + ink.context.config;
+```
+
+### The manifest
+
+`Manifest` in `src/core/plugins.ts` is the schema, and it is strict: a key it doesn't know is refused. The app lists a plugin's commands, views, embeds and options from the manifest without running any code.
+
+- `name` (60 characters), `version`, `description`. No control or invisible characters anywhere. A name that is Common Ink's own, or reads as one, is refused when the plugin is installed and again when it would start: the app, its pages and its built-in plugins (`OWN_NAMES`, and in the app the built-ins it actually has). Names are compared by `nameSkeleton` in `src/core/plugins.ts`: compatibility forms folded, accents off, Cyrillic and Greek letters drawn as Latin ones read as those, case, spaces and punctuation dropped, and `l`, `1`, `0` read as `i` and `o`. So `Сommon Ink` with a Cyrillic С, `HISTORY` and `Hist0ry` are all refused. It covers Latin, Cyrillic and Greek look-alikes and no other script.
+- `capabilities`: each `{ name, reason }`, and for `network` also `origins`, up to ten sites such as `https://api.example.com` (no path, no wildcard). The reason is in the author's words and is shown to whoever decides.
+- `commands`: `{ id, title }`. In the app the command is `<install id>.<id>`, titled `<plugin name> plugin: <title>`, and can be given a keybinding like any other.
+- `views`: `{ slot, id, label }` with `slot` `inspector` (a tab about the open note), `page` (at `/x/<install id>/<id>`, linked under More) or `bar` (one item in the bottom bar, with `width` from 24 to 480 and `end: true` for the right side, and the plugin's name written beside it by the app). All are labelled `<plugin name> plugin: <label>`, so none reads as part of the app. A third-party page is never the home page at `/`: only Common Ink's own plugins register one with `home`.
+- `embeds`: `{ name, title, height, options }`. A note writes `::x-name{config}`: every third-party embed's name starts with `x-`, which no built-in's does, so a plugin can't take a built-in embed's name, on or off. `<plugin name> plugin: <title>` stands in the line and in the `/` menu, and the plugin's frame is below the line, in a room `height` pixels tall, which comes from the manifest so nothing moves when the frame loads. A name an earlier plugin already has is refused, and the Plugins page says so. `ink.context.name` is the manifest's own name, without the `x-`. **`config` and `body` are written by whoever can edit the note and run in every reader's browser: treat them as untrusted input.** An embed runs with no Run button, as the reader, with everything the plugin is permitted, so a plugin that acts on its config (reads the note it names, writes what it says) lets any editor of a note steer it in another member's session. The install prompt tells the admin so when a manifest declares embeds. `options` is a list of up to twelve declared options (see [Options](#options-1) under Embeds, with the table of types): the app draws them beneath the embed and writes them into its config, and the frame is handed their values as `ink.context.options`, each as its type or its default, so a plugin reads `ink.context.options.times` and never parses its config. A manifest whose option couldn't be written or read back (a default its own range refuses, a choice value of two words, a text default with a quote) is refused.
+- `settings`: options as built-ins declare them (`boolean`, `string`, `number`, `integer`), kept in each member's settings under `<install id>.<name>`.
+
+### Capabilities
+
+`CAPABILITIES` in `src/core/plugins.ts` is the whole of what a plugin can be permitted, and the operations each one opens:
+
+| Capability | Opens |
+| --- | --- |
+| `notes.read` | `note.list`, `note.read`, `note.backlinks`, `folder.list`, `search`, `daily.find` (the member's daily note for a day, when there is one: nothing is made), `ink.open(noteId)`, `ink.onNote` and `ink.onItems` |
+| `notes.write` | `note.create`, `note.write` |
+| `todos.read` | `todo.list` |
+| `members.read` | `member.list`: names and roles, never emails |
+| `network` | no operation: the sites its frames may load from and send to |
+| `full-trust` | no operation: where the code runs. See "Full trust" above |
+
+An operation in no row is refused to every plugin that runs shut off, whatever it was permitted: settings, members and invites, sharing, uploads, data sources, History and its reverts and labels, agents, the plugin record itself, and what a member keeps for their own dashboard, their pins and how far they have read the changes (`pin.*`, `visit.*`). A plugin that could mark the changes read would hide from the member what they haven't seen, and no capability covers pins: they are the member's own arrangement, as settings are. `daily.open` is refused too, since it makes a note. A new operation is refused to plugins until a row lists it.
+
+A plugin acts for the member whose app it runs in and never has more than they do: a viewer's plugin with `notes.write` allowed is still refused the write, and a note the member can't see is not found. What it is answered is narrowed too: `note.read` comes without the uploads and members the note refers to. A plugin running with full trust is the exception to both: it is answered as its member is, and asks anything that isn't a member's alone to ask.
+
+### Installing, permitting, asking
+
+The workspace keeps a record of its plugins (`src/core/pluginRecord.ts`, migration `0021`): what is installed, what each is permitted, and who is waiting on an admin. It is the workspace's and no part of anyone's settings. Every member reads it on the Plugins page; only an admin changes it. An agent acts in its member's role: an admin's agent installs, updates, uninstalls and permits as the admin does, and is recorded beside them ("installed by Claude for Ada", migration `0041`); a member's agent reads the record and asks. Turning full trust on stays each member's own click. `docs/mcp.md` lists the tools, and `scaffold_plugin` / `validate_plugin` (`ink plugin-new`, `ink plugin-validate`) make and check a plugin's two files without installing anything.
+
+- **Install.** An admin pastes the manifest and code and presses Review. The prompt lists each capability with the plugin's reason and a checkbox, all unchecked. Install puts the plugin in the workspace and allows what was checked. Installing alone allows nothing.
+- **On, for each member.** An installed plugin is available, and off for each member until they turn it on on the Plugins page (`<install id>.enabled` in their settings). Nobody runs a third-party plugin they didn't turn on.
+- **Permissions** are the workspace's: one decision per capability, for every member. An admin allows one or turns it off, and can lock it. A locked permission takes no requests and is changed only after an admin unlocks it.
+- **A member who isn't an admin** sees the same prompt with "Ask an admin" in place of Allow. Their yes is a request. It allows nothing, and the capability stays off until an admin approves it. A denial clears the requests.
+- **A change voids what it changes.** The code is named by its SHA-256. An approval records the code and the capability as declared (`approvalOf`), and stands only while the plugin is still that: new code voids every approval, and a capability declared with another reason or other sites voids its own. The page shows a voided permission as off, saying the plugin changed. Allowing names the code: `plugin.permit` is refused without the hash the admin was shown (`codeHash`), and refused if the plugin was replaced since.
+- **Uninstall** takes the plugin's permissions and requests with it. The server refuses the plugin from that moment, and an app that is open loses its commands, views and frames the next time it reads the record: when its window is come back to, every 15 seconds, and at once when the server refuses the plugin. History still names the plugin for the changes it made.
+
+Operations: `plugin.list`, `plugin.read`, `plugin.install`, `plugin.uninstall`, `plugin.permit`, `plugin.request`, `plugin.frame`, and `plugin.trust` for a plugin that asks for full trust.
+
+### Where the code runs
+
+Never in the app's page, unless it asks for full trust and has it (see "Full trust"). Each running piece of a plugin is a frame of its own: the shell the Worker serves at `/embed-frame`, and inside it a frame with no address, an origin no other document has, `sandbox="allow-scripts"`, and a policy of `default-src 'none'`. It is the frame an HTML embed runs in, described under [Frames](#frames). So a plugin's code can't read the app's page, the member's session, cookies, or anything the browser keeps, can't fetch from the app or anywhere else, can't navigate itself, the shell or the app, and can't open a window.
+
+A plugin runs in up to three kinds of frame, each with all of its code and an `ink.context` saying which it is:
+
+- `{ kind: "background" }`: hidden, started the first time one of the plugin's commands is run, and kept. Commands are heard here.
+- `{ kind: "view", id, slot, noteId }`: in the inspector, on its page, or in the bar. `noteId` is the open note's id for an inspector tab when the plugin has `notes.read`, and null otherwise.
+- `{ kind: "embed", name, config, body, readOnly: true, options }`: below the line that writes the embed. `options` holds the value of each option its manifest declares. It runs without a Run button, since the member turned the plugin on. It is made again when the note says something else of the embed.
+
+The app and a frame talk over a `MessagePort` the app makes for that frame (`src/web/remote/`). The port is who the frame is: nothing in a message is read as an identity. Every message is parsed against a strict schema (`protocol.ts`): another version, an unknown key, a wrong type, a key naming a prototype, or more than 600,000 characters is dropped. One function decides what a message leads to (`decide` in `broker.ts`), from the record as it is now. Each plugin may send 30 messages at once and 15 a second after that, with 8 operations under way; the rest are answered `rate_limited`, and a plugin that keeps on is stopped, with its frames taken out and the reason on the Plugins page. Nothing a frame sends is run, read as markup, or set as HTML.
+
+What the code is given, as `ink`:
+
+- `ink.context`, `ink.granted` (the capabilities allowed now), `ink.settings` (its own options' values), `ink.plugin` (`{ name, version }`), `ink.root` (the element to draw in). A permission that changes starts the plugin's frames again.
+- `ink.perform(op)`: an operation from the table above. The app refuses one the plugin isn't permitted, and sends the rest to the server at an address that names the install (`/api/workspaces/<id>/plugins/<install id>/ops`), where it is checked again against the record and performed as the plugin, for the member. A refusal rejects with `{ code, message }`.
+- `ink.notify(message)`: a notice at the foot of the app, as text, 200 characters at most, starting with `<plugin name> plugin:`.
+- `ink.open(noteId, { background })`: opens a note, with `notes.read`.
+- `ink.onCommand(id, fn)`, `ink.onSettings(fn)`.
+- `ink.scheme` (`"light"` or `"dark"`) and `ink.onTheme(fn)`, called with the new scheme after the frame's look has changed with the app's.
+- `ink.onNote(fn)`, `ink.onItems(fn)`, `ink.storage`, `ink.onStorage(fn)` and `ink.prompt(question)`: see [One interface for a plugin that runs shut off](#one-interface-for-a-plugin-that-runs-shut-off).
+
+Nothing of the member is sent to a frame: no name, no email, no role.
+
+**A plugin's writes are the plugin's.** `note.create` and `note.write` by a plugin are recorded in History with the plugin as author and the member it acted for, are filtered by it, and are reverted as an agent's are ("Revert all by"). An open editor of the note takes the result as it takes another member's change.
+
+The frame's look is the app's, and follows it from one theme to the other: see [Styling a plugin](#styling-a-plugin). Each frame is cut to its slot, and the frame focus guard applies to every one, the hidden background frame included: a frame that takes the keyboard without the member's pointer on it is stopped.
+
+### Styling a plugin
+
+The app draws a plugin's card, its title, its options and its errors; the plugin draws only what is inside its frame, and the frame starts out looking like the app. Its document is given the app's look as CSS variables on `:root`, and given them again each time the member's theme changes, so nothing a plugin draws with them is left in the other theme:
+
+- Colours: `--bg`, `--bg-elev` (a card's surface), `--bg-side`, `--ink`, `--muted`, `--faint`, `--line`, `--line-strong`, `--hover`, `--accent`, `--accent-soft`, `--accent-ink`, `--on-accent`, `--danger`, `--added`, `--warn`, `--code-bg`.
+- Faces and sizes: `--prose`, `--mono`, `--text-small` (12px), `--text` (14px), `--text-large` (16px).
+- Corners and room: `--radius-small` (6px), `--radius` (10px), `--space-1` to `--space-4` (4, 8, 12 and 16px).
+
+The app's controls come with them as classes, for a plugin to take or leave: `ink-button` (with `primary` for the one main action, or `quiet`), `ink-input`, `ink-chip`, `ink-card`, `ink-title` (the small capitals of a card's title), `ink-muted`, `ink-row` and `ink-stack`. One line takes all of it for the plain elements too:
+
+```js
+document.body.classList.add("ink-kit"); // buttons, fields, lists and headings as the app draws them
+```
+
+Before, a plugin that styles itself carries colours that are right in one theme and wrong in the other:
+
+```js
+ink.root.innerHTML = `<div style="border:1px solid #ddd;padding:12px;background:#fff">
+  <h3 style="color:#333">Votes</h3><button style="background:#5b5bd6;color:white">Vote</button></div>`;
+```
+
+After, the same thing is the app's in both themes and says nothing of colour:
+
+```js
+document.body.classList.add("ink-kit");
+ink.root.innerHTML = `<div class="ink-card ink-stack"><h3>Votes</h3><button class="primary">Vote</button></div>`;
+```
+
+A plugin that draws on a canvas, where CSS variables don't reach, reads them with `getComputedStyle(document.documentElement)` and draws again in `ink.onTheme`. The plugin `ink plugin-new` (and `scaffold_plugin`) makes uses the kit and declares an embed with options, as an example of both. The variables and classes are in `src/web/remote/frame.ts`. A built-in in the page uses the app's stylesheet and the same variables.
+
+### What a third-party plugin can't do in this version
+
+- **Editor extensions and completions.** An editor extension is code inside the editor, built from the app's own copy of CodeMirror, with the note's text and every key typed. It can't cross to a frame, and no declarative subset is offered yet.
+- **Drawing in the app's page.** No `Embed.render` or `Below.render`, no inline widget in the line beyond the embed's title, no block embeds, and no view in the `column`, `section`, `rail`, `editor`, `overlay`, `mark` or `notice` slots. A view in `bar` is a frame.
+- **Writing a note from an embed** (`update`). An embed is read-only. A plugin changes a note only through `note.write`, with `notes.write`, as itself.
+- **Keeping much in the browser.** `ink.storage` holds small JSON for this member in this browser. Anything else a plugin keeps, it keeps in a note.
+- **Running commands**, its own or any other: there is no call for it, so `plugins.toggle.<another>` is out of reach. It can't change or read settings other than its own options' values.
+- **The `app` snapshot**, uploads and their bytes, data sources, sharing, members' emails, agents.
+
+### What isolation does not cover
+
+- **WebRTC.** A frame can open a WebRTC peer connection, which no header a browser honours stops (see Frames). So a plugin can send what it is permitted to read to another computer, with or without `network`. The install prompt says so. Permit a plugin `notes.read` only if it would be acceptable for it to send those notes out. `network` governs `fetch`, images, media, fonts, WebSocket and the rest.
+- **The reader's processor.** A frame can spin. The focus guard and the rate limit keep the app answering; they don't make a busy frame free.
+- **Names.** Everything a plugin shows in the app carries `<name> plugin:` in front: its commands, notices, page, inspector tab and embeds. A plugin can't take a name of Common Ink's own or a Latin, Cyrillic or Greek look-alike of one, and can still choose a misleading name of its own, or a look-alike from another script. An admin reads the manifest before installing.
+- **`updatedBy`.** A note listed for a plugin with `notes.read` says who changed it last, by name, without `members.read`.
+- **One notice at a time.** A plugin's notice takes the place of the app's, as any notice does.
+
+`test/browser/third-party-attacks.spec.ts` installs a hostile plugin and has it try, from inside its frame: the page's DOM, cookies and storage; the API with and without credentials; other plugins' frames, and forged ports and messages at them and at the app; malformed, oversized, flooding and identity-claiming messages on its own port; operations it wasn't permitted, prototype keys and path tricks; navigation of itself, the shell and the app; the keyboard; drawing outside its box; writing without attribution; running commands; outliving its uninstall; and the network without a grant and past the granted sites. Each fails, beside the allowed path working in the same run. `test/core/third-party.test.ts` and the plugin actors in `test/core/access-matrix.test.ts` hold the server to the same.
+
+### Plugins put on the page by a test
+
+`window.__INK_FIXTURE_PLUGINS__` puts plugin values straight into the app's page. It is for testing what the host refuses an untrusted plugin that does run in the page (`test/browser/plugin-failures.spec.ts` and others), and it is read only where the Worker says `dev` in `/api/me`, which is where dev sign-in is on: this machine and Previews. Production ignores it. A plugin put there is not trusted and gets the refusals below.
+
+## What a plugin in the page that isn't Common Ink's own is refused
+
+A third-party plugin runs in the page only with full trust, which lifts the first two of these. So this is about fixture plugins and about defence in depth. The host is told its own plugins as the values it was built with (`trusted` in `createPluginHost`), and which of a workspace's runs with full trust by the app's own runtime (`inPage` on what `createInstaller` lists), so a plugin can't become either by the id or name it gives itself. Any other plugin:
+
+- is handed `host.agents`, `host.members` and `host.sharing` with every method refusing, and a `host.uploads` that knows no upload, answers `about:blank` for every address and refuses `send`;
+- is refused, through `host.perform`, the member's data sources (`source.*`, `event.*`, `contact.*`, `record.*`), every `upload.*` operation, every `plugin.*` operation, and the member's pins and their last visit (`pin.*`, `visit.*`): one that could mark the summary read would hide from the member what they haven't seen;
+- can't register a page with `home`, and so can't take over `/`;
+- is refused, as every plugin is, settings, changes to who is in the workspace, sharing, an upload's bytes, and installing, permitting or reading plugins.
+
+These are refusals by the host's own objects, and not a boundary: code in the page can read the page. That is why third-party code is not in it unless an admin granted it full trust and the member turned it on.

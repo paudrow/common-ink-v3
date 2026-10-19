@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { CalendarEvent, Note } from "../../src/core/protocol.ts";
-import { anotherPerson, connectAgent, join, me, newEmail, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, connectAgent, join, me, newEmail, ownPlugin, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -507,7 +507,7 @@ test("the member picks the dashboard's panels, moves and resizes them with the k
   await dashboard(page).getByRole("button", { name: "Move Today's events", exact: true }).focus();
   await page.keyboard.press("ArrowUp");
   await dashboard(page).getByRole("button", { name: "Add panel" }).click();
-  await expect(page.getByRole("menuitem")).toHaveText(["Coming up", "Recently edited"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Coming up", "Recently edited", "Weather"]);
   await expect(page.getByRole("menuitem").first()).toBeFocused();
   // Escape closes the menu and leaves the dashboard being arranged, with the keys back on Add panel.
   await page.keyboard.press("Escape");
@@ -725,7 +725,7 @@ test("a saved layout is drawn as far as it is sound: a panel there isn't is left
   await expect(dashboard(page)).toContainText("Nothing is on your dashboard. Press Edit dashboard to add panels.");
   await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
   await dashboard(page).getByRole("button", { name: "Add panel" }).click();
-  await expect(page.getByRole("menuitem")).toHaveCount(7);
+  await expect(page.getByRole("menuitem")).toHaveCount(8);
   await page.getByRole("menuitem", { name: "Coming up" }).click();
   await expect.poll(() => placed(page)).toEqual(["upcoming small"]);
   await expect(card(page, "Coming up")).toContainText("No calendar is connected.");
@@ -738,4 +738,80 @@ test("a saved layout is drawn as far as it is sound: a panel there isn't is left
   const said = await card(page, "Coming up").locator(".dash-meta").allInnerTexts();
   expect(said.length).toBeGreaterThan(3);
   for (const when of said) expect(when).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) [A-Z][a-z]{2} \d+, (all day|\d)/);
+});
+
+const forecastBody = () => {
+  const zone = "America/Chicago";
+  const time = Array.from({ length: 8 }, (_, i) => new Date(Date.now() + (i + 1) * 3_600_000).toLocaleString("sv-SE", { timeZone: zone, hour12: false }).replace(" ", "T").slice(0, 16));
+  return {
+    timezone: zone,
+    current: { temperature_2m: 21.4, weather_code: 1 },
+    hourly: {
+      time,
+      temperature_2m: [22, 23, 21, 20, 19, 18, 18, 17],
+      weather_code: [1, 1, 1, 61, 61, 1, 1, 1],
+      precipitation_probability: [0, 10, 20, 70, 80, 10, 0, 0],
+    },
+  };
+};
+
+test("Weather is a panel a plugin adds, it uses this browser's place, and its form can be edited while the dashboard is arranged", async ({ page, context }) => {
+  await context.grantPermissions(["geolocation"]);
+  await context.setGeolocation({ latitude: 29.88, longitude: -97.67 });
+  const json = (body: unknown) => ({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+  await page.route("**/api.open-meteo.com/**", (route) => route.fulfill(json(forecastBody())));
+  await page.route("**/api.bigdatacloud.net/**", (route) => route.fulfill(json({ city: "Lockhart", countryCode: "US" })));
+  await page.route("**/geocoding-api.open-meteo.com/**", (route) => {
+    const name = new URL(route.request().url()).searchParams.get("name");
+    const hit = name === "Austin" ? { name: "Austin", latitude: 30.27, longitude: -97.74, country_code: "US", timezone: "America/Chicago" } : null;
+    return route.fulfill(json(hit ? { results: [hit] } : { results: [] }));
+  });
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await settled(page);
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  await dashboard(page).getByRole("button", { name: "Add panel" }).click();
+  await page.getByRole("menuitem", { name: "Weather" }).click();
+  // Arranging no longer freezes a plugin panel: the form is the panel.
+  expect(await card(page, "Weather").locator(".dash-body").evaluate((el) => (el as HTMLElement).inert)).toBe(false);
+  const frame = ownPlugin(page, "Weather");
+  const status = frame.getByRole("status");
+  await expect(status).toContainText("71°");
+  await expect(status).toContainText("Mainly clear");
+  await expect(status).toContainText("Lockhart");
+  await expect(frame.getByRole("img", { name: "Mainly clear" }).first()).toBeVisible();
+  await expect(frame.getByRole("img", { name: "Rain" }).first()).toBeVisible();
+  await expect(frame.getByRole("button", { name: "Fahrenheit" })).toHaveAttribute("aria-pressed", "true");
+  await expect(frame.getByRole("list", { name: "Next hours" })).toContainText("70%");
+  await expect(frame.getByRole("textbox", { name: "Place" })).toHaveCount(0);
+  const gap = await card(page, "Weather").locator(".dash-body").evaluate((el) => {
+    const body = el.getBoundingClientRect();
+    const frameBox = el.querySelector("iframe")!.getBoundingClientRect();
+    return { width: Math.abs(body.width - frameBox.width), height: Math.abs(body.height - frameBox.height) };
+  });
+  expect(gap.width).toBeLessThan(2);
+  expect(gap.height).toBeLessThan(2);
+  await frame.getByRole("button", { name: "Celsius" }).click();
+  await expect(status).toContainText("21°");
+  await page.locator('.plugin-frame[aria-label="Weather"]').hover();
+  await frame.getByRole("button", { name: "Somewhere else" }).click();
+  const place = frame.getByRole("textbox", { name: "Place" });
+  await place.evaluate((el) => {
+    if (!(el instanceof HTMLInputElement)) return;
+    el.value = "Austin";
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  });
+  await expect(status).toContainText("Austin");
+  await expect(status).toContainText("21°");
+});
+
+test("Weather explains the location request and does not prompt until asked", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await settled(page);
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  await dashboard(page).getByRole("button", { name: "Add panel" }).click();
+  await page.getByRole("menuitem", { name: "Weather" }).click();
+  const frame = ownPlugin(page, "Weather");
+  await expect(frame.getByText("Weather uses this browser's location for the forecast here.")).toBeVisible();
+  await expect(frame.getByRole("button", { name: "Use my location" })).toBeVisible();
+  expect(await page.evaluate(async () => (await navigator.permissions.query({ name: "geolocation" })).state)).toBe("prompt");
 });

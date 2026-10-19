@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { connectAgent, folderRow, listedNote, noteCard, openAllNotes, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, folderRow, listedNote, noteCard, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson } from "./helpers.ts";
 import { openDetails, pluginRow } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });
@@ -200,16 +200,84 @@ test("with every plugin off a note still opens at its address, takes typing, and
 test("turning History off takes its page, its link, and its inspector panel away", async ({ page }) => {
   await withNote(page, "Alpha");
   await openNote(page, "Alpha");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
 
   await run(page, "Disable plugin: History");
-  await expect.poll(panelIcons(page)).toEqual(["Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["Backlinks", "Info", "Sample calendar"]);
   await page.getByRole("button", { name: "More" }).click();
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "Trash", "Plugins"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "Trash", "Dice", "Plugins"]);
 
   await run(page, "Enable plugin: History");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Plugins"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Dice", "Plugins"]);
+});
+
+test("Dice is a page under More, and a coin in the bottom bar flips", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("link", { name: "Dice" }).click();
+  await expect(page).toHaveURL(/\/dice$/);
+  const die = ownPlugin(page, "Dice");
+  await page.locator('.plugin-frame[aria-label="Dice"]').hover();
+  await die.getByRole("button", { name: "Roll" }).click();
+  await expect(die.getByRole("status")).toHaveText(/^[1-6]$/);
+  // The button in the frame has the keyboard, so the press is the frame's. It gives the chord back and the app opens the box.
+  await die.getByRole("button", { name: "Roll" }).focus();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("IFRAME");
+  await page.keyboard.press("ControlOrMeta+p");
+  await expect(page.getByRole("dialog", { name: "Go to note" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await die.getByRole("button", { name: "Roll" }).focus();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await expect(page.getByRole("dialog", { name: "Commands" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  const coin = ownPlugin(page, "Coin").getByRole("button", { name: "Coin" });
+  await expect(page.locator('[data-bar-item="coin"]')).toBeVisible();
+  await expect(coin).toHaveText("Heads");
+  await page.locator('.plugin-frame[aria-label="Coin"]').hover();
+  await coin.click();
+  await expect(coin).toHaveText("Tails");
+  await expect(page.getByRole("button", { name: "Back to the note" })).toBeHidden();
+});
+
+test("ctrl+o leaves the Dice page for the note, and the page does not cover itself with Back to the note", async ({ page }) => {
+  const note = await withNote(page, "Alpha");
+  await page.goto("/plugins");
+  await page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Vim mode", exact: true }).check();
+  await page.goto(`/note/${note.id}`);
+  // The note is in the history only once it is shown. Opening Dice before that leaves Back on the Plugins page.
+  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("Alpha");
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("link", { name: "Dice" }).click();
+  await expect(page).toHaveURL(/\/dice$/);
+  await expect(page.getByRole("button", { name: "Back to the note" })).toBeHidden();
+  await page.locator('.plugin-frame[aria-label="Dice"]').hover();
+  const roll = ownPlugin(page, "Dice").getByRole("button", { name: "Roll" });
+  await roll.focus();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("IFRAME");
+  await page.keyboard.press("Control+o");
+  await expect(page).toHaveURL(new RegExp(`/note/alpha-${note.id}`));
+});
+
+test("flipping the coin leaves the note where it was scrolled", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: `# Tall\n\n${"A line of the note.\n".repeat(80)}` });
+  await page.goto(`/note/${note.id}`);
+  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("A line of the note.");
+  const before = await page.evaluate(() => {
+    const scroller = [...document.querySelectorAll<HTMLElement>(".note-scroll, .cm-scroller")].find((el) => el.scrollHeight > el.clientHeight + 50);
+    if (!scroller) return 0;
+    scroller.scrollTop = scroller.scrollHeight;
+    scroller.dataset.scrolled = "";
+    return scroller.scrollTop;
+  });
+  expect(before).toBeGreaterThan(200);
+  await page.locator('.plugin-frame[aria-label="Coin"]').hover();
+  await ownPlugin(page, "Coin").getByRole("button", { name: "Coin" }).click();
+  await expect(ownPlugin(page, "Coin").getByRole("button", { name: "Coin" })).toHaveText("Tails");
+  // The frame guard gives the keyboard back again a moment later. The note stays where it was scrolled.
+  await page.waitForTimeout(400);
+  expect(await page.evaluate((was) => Math.abs((document.querySelector<HTMLElement>("[data-scrolled]")?.scrollTop ?? 0) - was), before)).toBeLessThan(30);
 });
 
 test("a stopwatch written in a note is drawn in it and runs, and is plain text again with its plugin off", async ({ page }) => {
@@ -347,7 +415,16 @@ test("the Plugins page lists every plugin with its icon, name, description and s
   );
   expect(listed.length).toBeGreaterThan(10);
   expect(listed.filter((row) => !row.name || row.icon !== 1 || !row.described || row.switches !== 1)).toEqual([]);
-  expect(listed.filter((row) => row.kind !== "Built-in")).toEqual([]);
+  // Each says where it runs: inside the app with everything the member has, or shut off from it.
+  expect(listed.filter((row) => row.kind !== "Built-in, full access").map((row) => [row.name, row.kind])).toEqual([
+    ["Weather", "Built-in, sandboxed"],
+    ["Backlinks", "Built-in, sandboxed"],
+    ["Quick timer", "Built-in, sandboxed"],
+    ["Sample calendar", "Built-in, sandboxed"],
+    ["Dice", "Built-in, sandboxed"],
+    ["Coin", "Built-in, sandboxed"],
+    ["Word count", "Built-in, sandboxed"],
+  ]);
   expect(listed.slice(0, 3).map((row) => row.name)).toEqual(["Sidebar", "Folders", "Tags"]);
   await expect(pluginRow(page, "Tabs and splits")).toContainText("Open notes in tabs, and side by side in splits.");
   await expect(pluginRow(page, "Vim mode").getByRole("checkbox")).not.toBeChecked();
@@ -439,10 +516,10 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
   await expect(page).toHaveURL(/\/plugins\/kanban$/);
   const details = page.locator(".plugin-details");
   await expect(details.locator(".plugin-head svg")).toHaveCount(1);
-  await expect(details.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
+  await expect(details.locator(".plugin-meta")).toHaveText("Built-in, full accessComes with Common Ink");
   await expect(details).toContainText("A board of columns and cards kept in a note as headings and lists.");
   await expect(section(page, "Permissions")).toContainText("It comes with Common Ink and runs inside the app as you, so it asks for nothing");
-  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Pictures", "Permissions", "What it adds", "Settings"]);
+  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Pictures", "Permissions", "What it adds", "Settings", "Source"]);
 
   const picture = section(page, "Pictures").locator("img:visible");
   const shown = () => picture.evaluate((img: HTMLImageElement) => [new URL(img.currentSrc || img.src).pathname, img.complete && img.naturalWidth > 600]);
@@ -515,7 +592,8 @@ test("only a plugin that came with the app is called Built-in", async ({ page })
   });
   await withNote(page, "Alpha");
   await page.goto("/plugins");
-  await expect(pluginRow(page, "Backlinks").locator(".badge")).toHaveText("Built-in");
+  await expect(pluginRow(page, "Backlinks").locator(".badge")).toHaveText("Built-in, sandboxed");
+  await expect(pluginRow(page, "Sharing").locator(".badge")).toHaveText("Built-in, full access");
   await expect(pluginRow(page, "Fixture")).toContainText("A plugin a test put on the page.");
   await expect(pluginRow(page, "Fixture").locator(".badge")).toHaveCount(0);
 
@@ -525,7 +603,7 @@ test("only a plugin that came with the app is called Built-in", async ({ page })
   await expect(page.locator(".plugin-meta")).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Permissions" })).toHaveText("PermissionsIt runs inside the app as you, so it asks for nothing: it can do what you can, and no more. What it does with that is what it adds, below.");
   await page.goto("/plugins/backlinks");
-  await expect(page.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
+  await expect(page.locator(".plugin-meta")).toHaveText("Built-in, sandboxedComes with Common Ink");
 });
 
 test("an inspector view a plugin adds is an icon in the bar whatever is in front, is handed what is in front where it says it is for that, and says nothing to show elsewhere", async ({ page }) => {
@@ -552,7 +630,7 @@ test("an inspector view a plugin adds is an icon in the bar whatever is in front
   await keepNote(page, "Alpha");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
 
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Count"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar", "Count"]);
   await pinPanel(page, "Info");
   await expect(shownPanel(page)).toHaveText("Info");
   await showPanel(page, "Count");
@@ -560,13 +638,13 @@ test("an inspector view a plugin adds is an icon in the bar whatever is in front
 
   // A folder's list is handed to the same view, which is still the one that shows.
   await openAllNotes(page);
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Count"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar", "Count"]);
   await expect(shownPanel(page)).toHaveText("Count");
   await expect(inspector.locator(".inspector-body")).toHaveText("Counting 1 in All notes");
 
   // A page is nothing the view said it is for: its icon and its panel are there, and the inspector says there is nothing to show.
   await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Dashboard" }).click();
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Count"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar", "Count"]);
   await expect(shownPanel(page)).toHaveText("Count");
   await expect(inspector.locator(".inspector-body")).toHaveText("Nothing to show for this view");
   await tabs(page).filter({ hasText: "Alpha" }).click();

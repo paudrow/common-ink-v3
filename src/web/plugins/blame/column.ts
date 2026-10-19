@@ -7,7 +7,7 @@ import { did, initials } from "../lib/historyView.ts";
 /*
  * Blame mode, once called Who wrote this: a column left of the text, as a blame view has. Each run of lines one change last
  * wrote is a hunk, and the hunk's first row names who wrote it and when, with the change's summary
- * where History has one. Members are one family of colours and agents another; the member's own
+ * where History has one. Members, agents and plugins are each a family of colours; the member's own
  * lines are grey. A strip at the column's edge is stronger the newer the change. The column is drawn
  * in a layer of its own, in room the editor makes left of the text when the mode is on, so the text
  * moves at most once, as the mode comes on, and never while scrolling or typing.
@@ -18,9 +18,10 @@ type Wrote = number;
 const TYPED = 0;
 
 /** How a hunk is drawn: the member's own, or one of the colours of a family. */
-type Tone = "self" | `member-${number}` | `agent-${number}`;
+type Tone = "self" | `member-${number}` | `agent-${number}` | `plugin-${number}`;
 const MEMBER_TONES = 5;
 const AGENT_TONES = 4;
+const PLUGIN_TONES = 4;
 /** How new a change is among the note's, from 0 for the oldest to the newest. */
 const HEAT_STEPS = 4;
 
@@ -84,7 +85,7 @@ export function blameToggles(storage: PluginHost["storage"], former: () => Forme
   };
 }
 
-const keyOf = (author: Author) => (author.kind === "member" ? author.personId : author.agentId);
+const keyOf = (author: Author) => (author.kind === "member" ? author.personId : author.kind === "agent" ? author.agentId : author.pluginId);
 
 /**
  * A colour for each author: the member's own lines quiet, and everyone else a colour of their
@@ -94,8 +95,8 @@ const keyOf = (author: Author) => (author.kind === "member" ? author.personId : 
 function tonesOf(changes: readonly ChangeEntry[], me: string): Map<number, Tone> {
   const authors = new Map(changes.map((c) => [keyOf(c.author), c.author]));
   const taken = new Map<string, Tone>();
-  for (const family of ["member", "agent"] as const) {
-    const size = family === "member" ? MEMBER_TONES : AGENT_TONES;
+  for (const family of ["member", "agent", "plugin"] as const) {
+    const size = family === "member" ? MEMBER_TONES : family === "agent" ? AGENT_TONES : PLUGIN_TONES;
     const used = new Set<number>();
     for (const [key, author] of [...authors].sort(([a], [b]) => (a < b ? -1 : 1))) {
       if (author.kind !== family || (author.kind === "member" && author.personId === me)) continue;
@@ -193,7 +194,8 @@ function labelOf(read: Read, wrote: Wrote): Label {
   const what = change.label ?? (change.reverts ? capital(did({ reverts: change.reverts, restores: change.restores, revisions: [change.revision] }, false)) : null);
   const { author } = change;
   if (author.kind === "member") return { who: author.personId === read.me ? "You" : author.name, when, what };
-  const owner = author.onBehalfOf === read.me ? "your agent" : read.blame.owners[author.onBehalfOf] ? `${read.blame.owners[author.onBehalfOf]}'s agent` : "an agent";
+  const kind = author.kind === "plugin" ? "plugin" : "agent";
+  const owner = author.onBehalfOf === read.me ? `your ${kind}` : read.blame.owners[author.onBehalfOf] ? `${read.blame.owners[author.onBehalfOf]}'s ${kind}` : `a ${kind}`;
   return { who: `${author.name} (${owner})`, when, what };
 }
 

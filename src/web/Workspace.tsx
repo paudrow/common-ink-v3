@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
+import type { DraftSummary, PluginRecord } from "../core/plugins.ts";
 import type { MeHere, Note, NoteSummary, Results, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, readUpload, sendUpload, signOut, uploadAddress } from "./api.ts";
@@ -22,6 +23,7 @@ import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Fold
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
+import { createInstaller, loadAgain } from "./pluginRuntime.ts";
 import { referredUploads } from "./referredUploads.ts";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, keepsATab, routeOf, type Navigate, type Place } from "./router.ts";
@@ -30,7 +32,7 @@ import { JSON_VIEW, ROOT as SETTINGS, Settings, type Account } from "./Settings.
 import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { isOpen, openInAnotherTab } from "./openNotes.ts";
-import { commitTyping, onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
+import { commitTyping, onFiled, performInSync, saveAll, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 import { Toasts } from "./Toasts.tsx";
 import { keptTravels, samePlace, stepped, travelled, type Travel, type Travels } from "./travels.ts";
@@ -223,12 +225,44 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   const [referred] = useState(referredUploads);
   /** What the app's own commands do, as of the latest render. */
   const inner = useRef<{ goBy: (by: -1 | 1) => void; step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
+  /** The workspace's record of its plugins, as last read. Null until it has been. */
+  const [record, setRecord] = useState<PluginRecord | null>(null);
+  const recordNow = useRef(record);
+  recordNow.current = record;
+  /** What the Plugins page is drawn with, which the page is handed fresh on each drawing of the app. */
+  /** Counts each asking and each answer taken, so an answer to an older asking never replaces a newer one. */
+  const recordAsked = useRef(0);
+  const takeRecord = useCallback((now: PluginRecord) => {
+    recordAsked.current++;
+    setRecord(now);
+  }, []);
+  /** The member's own drafts of plugins, as last read. */
+  const [drafts, setDrafts] = useState<readonly DraftSummary[]>([]);
+  const pluginsPage = useRef({ record, onRecord: takeRecord, drafts, onDrafts: setDrafts });
+  pluginsPage.current = { record, onRecord: takeRecord, drafts, onDrafts: setDrafts };
+  const draftsNow = useRef(drafts);
+  draftsNow.current = drafts;
+  const reread = useRef(() => {});
+  const relist = useRef(() => {});
+  const [installer] = useState(() =>
+    createInstaller({
+      workspaceId,
+      record: () => recordNow.current,
+      drafts: () => draftsNow.current,
+      reread: () => reread.current(),
+      changed: () => relist.current(),
+      // Code that ran in the page is ended only by loading the app again. What is typed is sent first.
+      ended: () => loadAgain(saveAll),
+    }),
+  );
   const panel = useRef<HTMLElement>(null);
   const inspectorBar = useRef<HTMLElement>(null);
   const panelId = useId();
   const [host] = useState(() => {
     let created: Host;
-    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
+    // Every session ends, this one with them, so the page is read again signed out.
+    const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
+    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} adminElsewhere={me.workspaces.some((w) => w.id !== workspaceId && w.role === "admin")} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
       id: "core",
@@ -266,8 +300,9 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
       },
     };
     created = createPluginHost({
-      // A test puts plugins on the page before the app loads. Loading a member's own plugins is another matter.
-      plugins: [core, ...BUILT_INS, ...((window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__ ?? []), pages],
+      // A test puts plugins on the page before the app loads, to try what the host refuses a plugin it doesn't trust. Only where the
+      // Worker says tests run: production never reads it. A workspace's own plugins never run in the page: see `remote/`.
+      plugins: [core, ...BUILT_INS, ...((me.dev && (window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__) || []), pages],
       builtIn: [core, ...BUILT_INS, pages].map((p) => p.id),
       required: [core.id, pages.id],
       // Fixture plugins are a test's, and stand for anyone's: they are not among these.
@@ -312,10 +347,13 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
         storage: {
           // By member too: two people who share a browser and a workspace don't share what a plugin keeps, such as which notes are open.
           get: (key) => readStored(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`, isAnything),
-          set: (key, value) => writeStored(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`, value),
+          // Null keeps nothing, so nothing is left under the key: what a plugin takes out takes no room.
+          set: (key, value) => (value === null || value === undefined ? localStorage.removeItem(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`) : writeStored(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`, value)),
         },
       }),
     });
+    // The app's own plugins that run shut off are there from the first drawing, as the ones compiled in are, for a guest too, who is told no record.
+    created.setInstalled(installer.list());
     return created;
   });
   useEffect(() => {
@@ -330,6 +368,26 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     read();
     return settings.subscribe(read);
   }, [host, settings]);
+  const readRecord = useCallback(() => {
+    const asked = ++recordAsked.current;
+    perform(workspaceId, { type: "plugin.list" }).then(
+      (now) => asked === recordAsked.current && setRecord(now),
+      () => {},
+    );
+  }, [workspaceId]);
+  useEffect(readRecord, [readRecord]);
+  reread.current = readRecord;
+  // A guest keeps no drafts, and is refused the asking.
+  useEffect(
+    () =>
+      void perform(workspaceId, { type: "draft.list" }).then(
+        (mine) => setDrafts(mine.drafts),
+        () => {},
+      ),
+    [workspaceId],
+  );
+  relist.current = () => host.setInstalled(installer.list());
+  useEffect(() => host.setInstalled(installer.list()), [host, installer, record, drafts]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   /** The page the address names: the one at exactly that address, or else the one whose path it is under. */
   const routePage = route.kind === "page" ? (contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`))) : undefined;
@@ -449,14 +507,18 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   useEffect(() => onFiled(refresh), [refresh]);
 
   useEffect(() => {
-    const again = () => document.visibilityState === "visible" && refresh();
+    const again = () => {
+      if (document.visibilityState !== "visible") return;
+      refresh();
+      readRecord();
+    };
     const timer = setInterval(again, REFRESH_ALL_MS);
     addEventListener("focus", again);
     return () => {
       clearInterval(timer);
       removeEventListener("focus", again);
     };
-  }, [refresh]);
+  }, [refresh, readRecord]);
 
   useEffect(() => {
     const relist = async () => {
@@ -812,6 +874,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || isModifier(e.key)) return;
+      // A press in a plugin frame is the frame's to give back. Handling it here as well would step back twice.
+      if (e.target instanceof HTMLIFrameElement) return;
       // A press in the keyboard shortcuts table's recorder is a key to write down, not one to run.
       if (e.target instanceof Element && e.target.closest("[data-records-keys]")) return;
       const { keybindings, commands } = host.contributions();
