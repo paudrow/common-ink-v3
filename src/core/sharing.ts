@@ -80,6 +80,12 @@ const GRANT_COLUMNS = `g.id, g.note_id, g.folder_id, g.upload_id, COALESCE(n.tit
 /** People first, by name or email, then the link. */
 const GRANT_ORDER = "g.kind <> 'person', COALESCE(p.name, g.email) COLLATE NOCASE, g.id";
 
+function inheritedGrant(ctx: Context, row: GrantRow): Grant {
+  const grant = toGrant(ctx, row);
+  if (grant.to.kind !== "link" || (row.folder_id !== null && canShare(folderAsked(ctx.sight, row.folder_id)))) return grant;
+  return { ...grant, to: { kind: "link", link: grant.to.link, token: null } };
+}
+
 const toGrant = (ctx: Context, r: GrantRow): Grant => ({
   id: r.id,
   on: r.note_id !== null ? { kind: "note", id: r.note_id, name: r.on_name } : r.upload_id !== null ? { kind: "upload", id: r.upload_id, name: r.on_name } : { kind: "folder", id: r.folder_id!, name: r.on_name },
@@ -130,8 +136,7 @@ export async function listGrants(ctx: Context, on: On): Promise<Sharing> {
         .bind(item.folderId, item.kind === "folder" ? 1 : 0, ctx.sight.bind),
     ]);
     grants = own!.results.map((r) => toGrant(ctx, r));
-    // A private note or upload takes nothing from the folders above it.
-    inherited = item.facts && item.facts.private_owner !== null ? [] : above!.results.map((r) => toGrant(ctx, r));
+    inherited = item.facts && item.facts.private_owner !== null ? [] : above!.results.map((r) => inheritedGrant(ctx, r));
   }
   return { canShare: may, grants, inherited, note: item.kind === "note" ? await noteSharing(ctx, item.note) : null };
 }

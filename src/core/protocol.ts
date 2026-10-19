@@ -1077,8 +1077,11 @@ export interface Grant {
         /** Their role when they are a member, whom the grant narrows. Null for a guest. */
         role: Role | null;
       }
-    /** `token` is what the link's address ends in: `/s/<token>`. */
-    | { kind: "link"; link: LinkKind; token: string };
+    /**
+     * `token` is what the link's address ends in: `/s/<token>`. Null when the link is on a folder
+     * this member cannot share. They are told the link exists. The address stays with whoever can change that folder.
+     */
+    | { kind: "link"; link: LinkKind; token: string | null };
   grantedBy: { personId: string; name: string };
   createdAt: number;
 }

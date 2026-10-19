@@ -1119,11 +1119,16 @@ interface Refiling {
  * line taken off the daily note, and one that stands again, because the change that reverted it was
  * itself reverted, has it filed again unless it is still there. The line is found by following the place it was filed at through the daily
  * note's changes since, never by what it says. One that was edited or deleted since is left as the
- * member has it. The statements go in the batch that records the change itself. The daily note is
- * the completer's, and is changed whether or not the one taking the change back can see it: they are
- * told of it only when they can. A daily note in Trash can't be changed, so its lines are left as
- * they are and counted as left.
+ * member has it. The statements go in the batch that records the change itself.
  */
+function mayRefile(ctx: Context, daily: NoteRow): boolean {
+  const asked = itemAsked(ctx.sight, daily);
+  if (asked.outside) return false;
+  const level = itemLevel(ctx.sight, daily);
+  const privateToSomeoneElse = asked.private === "theirs" && level === "none";
+  return level === "edit" || privateToSomeoneElse;
+}
+
 async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[], reverts: Reverts): Promise<Refiling> {
   const { results } = await ctx.db
     .prepare("SELECT revision, at, daily_note_id, daily_revision, daily_at FROM completions WHERE note_id = ?1 AND daily_note_id <> ?1 AND daily_revision IS NOT NULL ORDER BY revision, at")
@@ -1136,7 +1141,7 @@ async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[]
   for (const [dailyId, completions] of Map.groupBy(moved, (c) => c.daily_note_id)) {
     const daily = await ctx.db.prepare(NOTE_BY_ID).bind(dailyId).first<NoteRow>();
     if (!daily) continue;
-    if (daily.state === "trashed") {
+    if (daily.state === "trashed" || !mayRefile(ctx, daily)) {
       refiled.unfiled!.left += completions.filter((c) => after.has(c.revision)).length;
       continue;
     }

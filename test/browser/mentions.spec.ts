@@ -390,7 +390,7 @@ test("a link's page shows a mentioned member by the name the note writes, in gra
   const { graceId } = await team(page);
   const note = await perform(page, { type: "note.create", text: `# Minutes\n\nPresent: @[[${graceId}|Grace Hopper]] and @[[Sam Okafor]]\n\n- [ ] Follow up @[[${graceId}|Grace Hopper]]` });
   const link = await perform(page, { type: "grant.link", noteId: note.id, link: "public" });
-  const token = link!.to.kind === "link" ? link!.to.token : "";
+  const token = link!.to.kind === "link" ? (link!.to.token ?? "") : "";
 
   const reader = await visitor(page);
   const requests: string[] = [];

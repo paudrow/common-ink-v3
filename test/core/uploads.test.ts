@@ -355,7 +355,7 @@ describe("who an upload is shown to", () => {
     const note = await perform(env.DB, ada, { type: "note.create", folderId: folder.id, text: `# Page\n::image{${inside.id}} ::image{${outside.id}} ::image{${secret.id}} ::image{${trashed.id}}` });
     const visitor = async (on: { noteId: string } | { folderId: string }): Promise<Visitor> => {
       const link = await perform(env.DB, ada, { type: "grant.link", ...on, link: "public" });
-      return { kind: "visitor", token: link!.to.kind === "link" ? link!.to.token : "", personId: null };
+      return { kind: "visitor", token: link!.to.kind === "link" ? (link!.to.token ?? "") : "", personId: null };
     };
     const byFolder = await visitor({ folderId: folder.id });
     const page = await perform(env.DB, byFolder, { type: "shared.read", id: note.id });

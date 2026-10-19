@@ -250,7 +250,7 @@ describe("Trash", () => {
     const old = await create(ada, "# Old news", folder.id);
     const tokenOf = async (on: { noteId: string } | { folderId: string }) => {
       const link = await perform(env.DB, ada, { type: "grant.link", ...on, link: "public" });
-      return link!.to.kind === "link" ? link!.to.token : "";
+      return link!.to.kind === "link" ? (link!.to.token ?? "") : "";
     };
     const onNote: Visitor = { kind: "visitor", token: await tokenOf({ noteId: note.id }), personId: null };
     const onOld: Visitor = { kind: "visitor", token: await tokenOf({ noteId: old.id }), personId: null };

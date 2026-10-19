@@ -382,7 +382,7 @@ describe("search, tags and Trash, asked by someone who sees part of the workspac
   it("answers whoever holds a link with the linked note alone: no search, no tags, no Trash, and nothing of the note once it is in Trash", async () => {
     const w = await world();
     const link = await perform(env.DB, w.ada, { type: "grant.link", noteId: w.open.live.id, link: "public" });
-    const visitor: Visitor = { kind: "visitor", token: link!.to.kind === "link" ? link!.to.token : "", personId: null };
+    const visitor: Visitor = { kind: "visitor", token: link!.to.kind === "link" ? (link!.to.token ?? "") : "", personId: null };
     const nobody: Visitor = { kind: "visitor", token: "x".repeat(43), personId: null };
     const ops = [...everything(), { type: "note.archive", id: w.open.live.id, archived: true }, { type: "note.trash", id: w.open.live.id }, { type: "note.restore", id: w.open.trashed.id }, { type: "note.purge", id: w.open.trashed.id }] as OpInput[];
     for (const op of ops) expect(await asked(visitor, op), op.type).toEqual({ code: "forbidden", message: `A link can't ${op.type}` });

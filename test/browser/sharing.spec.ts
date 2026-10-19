@@ -446,7 +446,7 @@ test("making a note private takes away the link and the guest an admin had put o
   const { workspaceId } = await join(page, ada, "editor");
   const note = await perform(page, { type: "note.create", text: "# Diary\n\nevery word of it" }, workspaceId);
   const link = await perform(ada, { type: "grant.link", noteId: note.id, link: "public" });
-  const token = link!.to.kind === "link" ? link!.to.token : "";
+  const token = link!.to.kind === "link" ? (link!.to.token ?? "") : "";
   await perform(ada, { type: "grant.set", noteId: note.id, email: await emailOf(gus), access: "view" });
   const anyone = await visitor(page);
   await anyone.goto(`/s/${token}`);

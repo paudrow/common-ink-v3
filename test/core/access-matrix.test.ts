@@ -172,7 +172,7 @@ async function world(more = ""): Promise<World> {
   const linked = await perform(env.DB, ada, { type: "grant.link", noteId: notes.secret, link: "public" });
   await perform(env.DB, ada, { type: "grant.set", noteId: notes.secret, email: vic!.email, access: "view" });
   const { removed } = await perform(env.DB, eve, { type: "note.setPrivate", id: notes.secret, private: true });
-  const before = { token: linked!.to.kind === "link" ? linked!.to.token : "", removed };
+  const before = { token: linked!.to.kind === "link" ? (linked!.to.token ?? "") : "", removed };
 
   await perform(env.DB, ada, { type: "grant.set", folderId: team, email: nedEmail, access: "view" });
   await perform(env.DB, ada, { type: "grant.set", folderId: team, email: gus!.email, access: "edit" });
@@ -784,7 +784,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
   it("opens through a folder's link the notes in that folder, and neither a note outside it nor a private note inside it", async () => {
     const w = await world();
     const link = await perform(env.DB, w.actors["Ada, an admin"], { type: "grant.link", folderId: w.folders.Team, link: "public" });
-    const visitor: Visitor = { kind: "visitor", token: link!.to.kind === "link" ? link!.to.token : "", personId: null };
+    const visitor: Visitor = { kind: "visitor", token: link!.to.kind === "link" ? (link!.to.token ?? "") : "", personId: null };
     const read: Record<string, Outcome> = {};
     const answers: unknown[] = [(await ask(visitor, { type: "shared.open" })).answer];
     for (const note of NOTES) {
@@ -808,7 +808,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
     const w = await world();
     const ada = w.actors["Ada, an admin"];
     const link = await perform(env.DB, ada, { type: "grant.link", noteId: w.notes.open, link: "public" });
-    const visitor: Visitor = { kind: "visitor", token: link!.to.kind === "link" ? link!.to.token : "", personId: null };
+    const visitor: Visitor = { kind: "visitor", token: link!.to.kind === "link" ? (link!.to.token ?? "") : "", personId: null };
     const outcomes: Record<string, Outcome> = {};
     for (const type of Object.keys(PLANS) as OpType[]) {
       const plan = PLANS[type] as Plan<OpType>;

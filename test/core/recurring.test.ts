@@ -771,6 +771,45 @@ describe("taking a completion back", () => {
     expect(reverted.unfiled).toEqual({ removed: 1, left: 0, dailyNoteIds: [] });
   });
 
+  it("leaves a daily note outside a folder-limited agent's folders as it is", async () => {
+    const ada = await newMember();
+    const projects = (await perform(env.DB, ada, { type: "folder.create", name: "Projects" })).id;
+    const note = await create(ada, `# Chores\n\n${WATER}`, projects);
+    const done = await check(ada, note.id, 2, WATER);
+    const daily = done.filed!.dailyNoteId!;
+    const before = (await read(ada, daily)).text;
+    const connected = await connectAgent(env.DB, ada.personId, "Claude", { workspaceId: ada.workspaceId, folderIds: [projects] });
+    const claude: Actor = { kind: "agent", agentId: connected.agent.id, personId: ada.personId, workspaceId: ada.workspaceId, scope: { pinnedWorkspaceId: ada.workspaceId, folderIds: connected.agent.folderIds } };
+
+    const reverted = await perform(env.DB, claude, { type: "note.revert", id: note.id, revision: 1 });
+
+    expect(reverted.unfiled).toEqual({ removed: 0, left: 1, dailyNoteIds: [] });
+    expect((await read(ada, daily)).text).toBe(before);
+    expect((await read(ada, note.id)).text).toBe(`# Chores\n\n${WATER}`);
+    expect(await codeOf(read(claude, daily))).toBe("not_found");
+  });
+
+  it("leaves a daily note a member can only view as it is", async () => {
+    const ada = await newMember();
+    await settings(ada, { "daily.private": false });
+    const note = await create(ada, `# Chores\n\n${WATER}`);
+    const done = await check(ada, note.id, 2, WATER);
+    const daily = done.filed!.dailyNoteId!;
+    const before = (await read(ada, daily)).text;
+    const email = `${crypto.randomUUID()}@example.com`;
+    await perform(env.DB, ada, { type: "member.invite", email, as: "editor" });
+    const eve: Actor = { kind: "member", personId: (await signIn(env.DB, { email, name: "Eve" })).personId, workspaceId: ada.workspaceId };
+    const folderId = (await read(ada, daily)).folderId;
+    if (folderId === null) throw new Error("the daily note has no folder");
+    await perform(env.DB, ada, { type: "grant.set", folderId, email, access: "view" });
+
+    const reverted = await perform(env.DB, eve, { type: "note.revert", id: note.id, revision: 1 });
+
+    expect(reverted.unfiled).toEqual({ removed: 0, left: 1, dailyNoteIds: [] });
+    expect((await read(ada, daily)).text).toBe(before);
+    expect((await read(eve, daily)).text).toBe(before);
+  });
+
   it("does so for changes of several notes reverted at once, as History's page reverts them, and files the line again when that revert is reverted", async () => {
     const { ada, note, daily, text } = await setUp();
     const other = await create(ada, "# Other\n\nwords");
