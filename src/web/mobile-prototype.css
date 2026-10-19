@@ -1,0 +1,354 @@
+/* PROTOTYPE, throwaway: phone layouts switched with ?mobile=A|B|C. */
+
+.proto-switcher {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #111;
+  color: #fff;
+  font: 12px/1 system-ui, sans-serif;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+  white-space: nowrap;
+}
+.proto-switcher button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: #333;
+  color: #fff;
+  font-size: 16px;
+}
+.proto-switcher b {
+  color: #ffd84d;
+}
+
+.m-top,
+.m-tabs,
+.m-keys,
+.m-fab,
+.m-scrim {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .app[data-mobile] {
+    --top: 52px;
+    padding-bottom: 0;
+    font-size: calc(15px * var(--text-scale));
+  }
+  .app[data-mobile] > :is(.resize-handle, .bar),
+  .app[data-mobile] .tab-row,
+  .app[data-mobile] .panel-head > button {
+    display: none !important;
+  }
+  .app[data-mobile] > .rail {
+    display: none;
+  }
+  .app[data-mobile] > .main {
+    min-width: 0;
+    flex: 1 1 100%;
+    padding-top: var(--top);
+  }
+  .app[data-mobile][data-keyboard] > .main {
+    padding-bottom: 44px;
+  }
+
+  .m-top {
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 25;
+    display: grid;
+    grid-template-columns: minmax(44px, auto) 1fr auto;
+    align-items: center;
+    gap: 4px;
+    height: var(--top);
+    padding: 0 6px;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(12px);
+  }
+  .m-title {
+    overflow: hidden;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .m-top-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .m-top .icon-button,
+  .m-top .note-tools .icon-button {
+    width: 40px;
+    height: 40px;
+  }
+  .m-top .note-tools > :not(:last-child) {
+    display: none;
+  }
+  .m-back {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 40px;
+    padding: 0 6px 0 2px;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font-size: 16px;
+  }
+
+  .m-keys {
+    position: fixed;
+    left: 0;
+    right: 0;
+    z-index: 60;
+    display: flex;
+    height: 44px;
+    border-top: 1px solid var(--line);
+    background: var(--bg-side);
+  }
+  .m-keys-row {
+    display: flex;
+    flex: 1;
+    overflow-x: auto;
+  }
+  .m-keys button {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    background: none;
+    color: inherit;
+    font-size: 17px;
+  }
+  .m-keys-done {
+    border-left: 1px solid var(--line) !important;
+  }
+
+  /* A: a stack. The sidebar is the top screen, a folder's list the next, a note the last. */
+  .app[data-mobile="A"][data-sidebar-open] > .sidebar {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    width: 100%;
+    padding: 12px 12px 24px;
+    font-size: 17px;
+    border: 0;
+  }
+  .app[data-mobile="A"][data-sidebar-open] > .main {
+    visibility: hidden;
+  }
+  .app[data-mobile="A"] .m-fab {
+    position: fixed;
+    right: 20px;
+    bottom: 28px;
+    z-index: 26;
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.25);
+  }
+  .app[data-mobile="A"] .m-fab svg {
+    width: 24px;
+    height: 24px;
+  }
+  /* A's inspector is a sheet from the bottom, its panels as tabs along the sheet's top. */
+  .app[data-mobile="A"][data-inspector-open]::after,
+  .app[data-mobile="C"][data-inspector-open]::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    background: rgb(0 0 0 / 0.3);
+  }
+  .app[data-mobile="A"][data-inspector-open] > .rail:last-of-type {
+    position: fixed;
+    top: 32vh;
+    left: 0;
+    right: 0;
+    z-index: 41;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    width: auto;
+    height: 52px;
+    padding: 14px 0 0;
+    border-radius: 16px 16px 0 0;
+  }
+  .app[data-mobile="A"][data-inspector-open] > .rail:last-of-type::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: calc(50% - 18px);
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line-strong);
+  }
+  .app[data-mobile="A"] > .inspector {
+    position: fixed !important;
+    inset: calc(32vh + 52px) 0 0 0 !important;
+    z-index: 40;
+    width: auto;
+    max-width: none;
+    border: 0;
+  }
+
+  /* B: modes along the bottom. Notes is the sidebar, whole. */
+  .app[data-mobile="B"] > .main {
+    padding-bottom: 64px;
+  }
+  .m-tabs {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 32;
+    display: flex;
+    height: calc(60px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg-side) 94%, transparent);
+    backdrop-filter: blur(12px);
+  }
+  .m-tab {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: 0;
+    background: none;
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+  .m-tab[aria-current] {
+    color: var(--accent);
+  }
+  .m-tab svg {
+    width: 22px;
+    height: 22px;
+  }
+  .m-tab[data-new] svg {
+    width: 34px;
+    height: 34px;
+    padding: 7px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+  }
+  .m-tab[data-new] span {
+    display: none;
+  }
+  .app[data-mobile="B"][data-sidebar-open] > .sidebar {
+    position: fixed;
+    inset: 0 0 60px 0;
+    z-index: 30;
+    width: 100%;
+    padding: 12px 12px 24px;
+    font-size: 17px;
+    border: 0;
+  }
+  .app[data-mobile="B"][data-inspector-open] > .rail:last-of-type {
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 51;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    width: auto;
+    height: var(--top);
+    padding: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .app[data-mobile="B"] > .inspector {
+    position: fixed !important;
+    inset: var(--top) 0 0 0 !important;
+    z-index: 50;
+    width: auto;
+    max-width: none;
+    border: 0;
+  }
+
+  /* C: drawers over the page from either edge. */
+  .app[data-mobile="C"] .m-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    display: block;
+    background: rgb(0 0 0 / 0.3);
+  }
+  .app[data-mobile="C"][data-sidebar-open] > .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(320px, 84vw);
+    min-width: 0;
+    font-size: 16px;
+    box-shadow: var(--shadow);
+  }
+  .app[data-mobile="C"][data-inspector-open] > .rail:last-of-type {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 41;
+    display: flex;
+    border-left: 1px solid var(--line);
+  }
+  .app[data-mobile="C"] > .inspector {
+    position: fixed !important;
+    inset: 0 44px 0 auto !important;
+    z-index: 40;
+    width: calc(min(340px, 88vw) - 44px);
+    min-width: 0;
+    max-width: none;
+    box-shadow: var(--shadow);
+  }
+}
+
+@media (max-width: 700px) {
+  .app[data-mobile] .cm-content {
+    min-width: 0;
+  }
+  .app[data-mobile] .embed-frame-block {
+    max-width: 100%;
+  }
+  .m-fake-keyboard {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 59;
+    display: grid;
+    place-items: center;
+    background: #d1d4da;
+    color: #555;
+    font: 13px system-ui, sans-serif;
+  }
+  .m-sheet-done {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 52;
+    height: 36px;
+    padding: 0 10px;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font-size: 16px;
+    font-weight: 600;
+  }
+}

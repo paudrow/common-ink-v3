@@ -35,6 +35,8 @@ import { isOpen, openInAnotherTab } from "./openNotes.ts";
 import { commitTyping, onFiled, performInSync, saveAll, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 import { Toasts } from "./Toasts.tsx";
+import { PhoneChrome, Switcher, offOnPhone, useKeyboardHeight, useVariant } from "./MobilePrototype.tsx";
+import "./mobile-prototype.css";
 import { keptTravels, samePlace, stepped, travelled, type Travel, type Travels } from "./travels.ts";
 
 const FOCUS_KEY = "ink.focus";
@@ -304,7 +306,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     created = createPluginHost({
       // A test puts plugins on the page before the app loads, to try what the host refuses a plugin it doesn't trust. Only where the
       // Worker says tests run: production never reads it. A workspace's own plugins never run in the page: see `remote/`.
-      plugins: [core, ...BUILT_INS, ...((me.dev && (window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__) || []), pages],
+      plugins: [core, ...BUILT_INS.filter((p) => !offOnPhone(p.id)), ...((me.dev && (window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__) || []), pages],
       builtIn: [core, ...BUILT_INS, pages].map((p) => p.id),
       required: [core.id, pages.id],
       // Fixture plugins are a test's, and stand for anyone's: they are not among these.
@@ -923,6 +925,11 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     };
   }, [host]);
   useEffect(() => host.navigated(), [host, place.path]);
+  const phone = useVariant();
+  const keyboard = useKeyboardHeight();
+  useEffect(() => {
+    if (phone && matchMedia("(max-width: 700px)").matches) setSidebarOpen(false);
+  }, [phone, place.path, setSidebarOpen]);
   useEffect(() => host.notesChanged(), [host, notes]);
 
   const actions = useLatest({
@@ -1155,7 +1162,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
 
   return (
-    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || !!saved || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+    <div className="app" data-mobile={phone ?? undefined} data-sidebar-open={sidebarOpen || undefined} data-inspector-open={layout !== "closed" || undefined} data-keyboard={keyboard > 0 || undefined} data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || !!saved || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
       {contributed.views.column.map((column) => (
         <Drawn key={column.id} host={host} view={column} />
       ))}
@@ -1225,6 +1232,27 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
           ))}
         </div>
       )}
+      {phone && (
+        <PhoneChrome
+          variant={phone}
+          title={current ? (current.title ?? "Untitled") : routeFolderId ? (tree?.byId.get(routeFolderId)?.name ?? "All notes") : (contributed.views.page.find((pg) => pg.id === opened?.id)?.label ?? (home?.label ?? "Home"))}
+          up={
+            current
+              ? { label: (current.folderId && tree?.byId.get(current.folderId)?.name) || "Notes", go: () => navigate(folderPath(current.folderId ?? ALL_NOTES)) }
+              : { label: "Folders", go: () => setSidebarOpen(true) }
+          }
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          inspectorOpen={layout !== "closed"}
+          toggleInspector={toggleInspector}
+          noteTools={routeNoteId ? renderNoteTools(routeNoteId) : null}
+          go={navigate}
+          path={place.path}
+          createNote={() => void createNote()}
+          keyboard={keyboard}
+        />
+      )}
+      {phone && <Switcher current={phone} />}
       {settingsPath && (
         <Settings
           host={host}
