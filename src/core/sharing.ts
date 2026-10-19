@@ -80,10 +80,12 @@ const GRANT_COLUMNS = `g.id, g.note_id, g.folder_id, g.upload_id, COALESCE(n.tit
 /** People first, by name or email, then the link. */
 const GRANT_ORDER = "g.kind <> 'person', COALESCE(p.name, g.email) COLLATE NOCASE, g.id";
 
-function inheritedGrant(ctx: Context, row: GrantRow): Grant {
-  const grant = toGrant(ctx, row);
-  if (grant.to.kind !== "link" || (row.folder_id !== null && canShare(folderAsked(ctx.sight, row.folder_id)))) return grant;
-  return { ...grant, to: { kind: "link", link: grant.to.link, token: null } };
+/** A folder the asker cannot share does not give them its link's address, or the email of a grant still waiting. */
+function told(ctx: Context, grant: Grant): Grant {
+  if (grant.on.kind !== "folder" || mayShare(ctx, { kind: "folder", id: grant.on.id, folderId: grant.on.id })) return grant;
+  if (grant.to.kind === "link") return { ...grant, to: { kind: "link", link: grant.to.link, token: null } };
+  if (grant.to.personId === null && ctx.role !== "admin" && grant.grantedBy.personId !== ctx.personId) return { ...grant, to: { ...grant.to, email: null } };
+  return grant;
 }
 
 const toGrant = (ctx: Context, r: GrantRow): Grant => ({
@@ -136,7 +138,8 @@ export async function listGrants(ctx: Context, on: On): Promise<Sharing> {
         .bind(item.folderId, item.kind === "folder" ? 1 : 0, ctx.sight.bind),
     ]);
     grants = own!.results.map((r) => toGrant(ctx, r));
-    inherited = item.facts && item.facts.private_owner !== null ? [] : above!.results.map((r) => inheritedGrant(ctx, r));
+    // A private note or upload takes nothing from the folders above it.
+    inherited = item.facts && item.facts.private_owner !== null ? [] : above!.results.map((r) => told(ctx, toGrant(ctx, r)));
   }
   return { canShare: may, grants, inherited, note: item.kind === "note" ? await noteSharing(ctx, item.note) : null };
 }
@@ -290,5 +293,13 @@ export const MAKER_SHARES = `EXISTS (
            SELECT f.id, f.parent_id, above.depth + 1 FROM folders f JOIN above ON f.id = above.parent_id WHERE above.depth < 100
          )
          SELECT up.access FROM above JOIN grants up ON up.folder_id = above.id AND up.person_id = mk.person_id AND up.kind = 'person' ORDER BY above.depth LIMIT 1),
-        'edit') = 'edit')
+        -- The walk stops at 100 folders. A parent still above that was not read, so the maker is not treated as allowed to share.
+        (SELECT CASE WHEN EXISTS (
+           WITH RECURSIVE above (id, parent_id, depth) AS (
+             SELECT f.id, f.parent_id, 0 FROM folders f WHERE f.id = COALESCE(grants.folder_id, (SELECT folder_id FROM items WHERE id = COALESCE(grants.note_id, grants.upload_id)))
+             UNION ALL
+             SELECT f.id, f.parent_id, above.depth + 1 FROM folders f JOIN above ON f.id = above.parent_id WHERE above.depth < 100
+           )
+           SELECT 1 FROM above WHERE above.depth = 100 AND above.parent_id IS NOT NULL
+         ) THEN 'view' ELSE 'edit' END)) = 'edit')
   )`;

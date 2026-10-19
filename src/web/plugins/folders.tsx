@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carriesTab, carry, type App, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
-import { canMove, movable, placesFor, type Place } from "./lib/folderMoves.ts";
+import { canMove, canRename, movable, placesFor, type Place } from "./lib/folderMoves.ts";
 import { useKept } from "./lib/kept.ts";
 import { listable } from "./lib/listable.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
@@ -351,9 +351,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             ...(menu.folder?.access === "edit" ? [{ label: "New folder inside", icon: "plus" as const, action: () => startCreate(menu.id) }] : []),
             ...(menu.folder && placesFor(tree, menu.id, member).length ? [{ label: "Move to…", icon: "folders" as const, action: () => onPickPlace(menu.id) }] : []),
             ...(onShare && menu.folder && shareable === menu.id ? [{ label: "Share", icon: "share" as const, action: () => onShare(menu.id) }] : []),
-            ...(menu.folder?.access !== "edit" || menu.id === tree.unsortedId
-              ? []
-              : [
+            ...(menu.folder && canRename(tree, menu.id, member)
+              ? [
                   {
                     label: "Rename",
                     icon: "edit" as const,
@@ -363,7 +362,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
                     },
                   },
                   ...(role === "admin" ? [{ label: "Delete", icon: "trash" as const, action: () => run({ type: "folder.delete", id: menu.id }) }] : []),
-                ]),
+                ]
+              : []),
           ]}
         />
       )}

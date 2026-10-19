@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Icon, useDismiss, type App, type GrantAccess, type PluginHost, type SharedItem, type Sharing } from "../../plugin-api.ts";
 import { Copyable } from "../lib/Copyable.tsx";
-import { ACCESS, ACCESS_LABEL, LINK_CHOICES, LINK_LABEL, isPerson, linkAddress, linkOf, toOf, whoOf, type LinkChoice } from "./words.ts";
+import { ACCESS, ACCESS_LABEL, LINK_CHOICES, LINK_LABEL, canRevoke, isPerson, linkAddress, linkOf, toOf, whoOf, type LinkChoice } from "./words.ts";
 
 const ROLE_LABEL = { admin: "Admin", editor: "Editor", viewer: "Viewer" } as const;
 
@@ -162,6 +162,7 @@ export function ShareDialog({ host, app, on, name, close }: Props) {
                   const who = whoOf(grant.to);
                   // A member let in to one's own private note is named by who they are, and their email was never told.
                   const changeable = grant.to.email !== null || (grant.to.role !== null && note?.private === true);
+                  const revoke = canRevoke(grant, { role: app.workspace.role, personId: app.me.id }, note && { private: note.private, ownerId: note.owner?.personId ?? null });
                   return (
                     <li key={grant.id} className="share-row" aria-label={who}>
                       <span className="share-who">
@@ -178,7 +179,7 @@ export function ShareDialog({ host, app, on, name, close }: Props) {
                         value={grant.access}
                         // A grant is changed by its email, or for a member by who they are. The email of a guest is kept from an editor who didn't make the grant.
                         disabled={busy || !changeable}
-                        title={changeable ? undefined : "Remove them and add them again to change this"}
+                        title={changeable ? undefined : revoke ? "Remove them and add them again to change this" : "Only an admin can change what a member is narrowed to"}
                         onChange={(e) => void change(() => host.sharing.grant(on, grant.to.email ?? { memberId: grant.to.personId! }, e.target.value as GrantAccess))}
                       >
                         {ACCESS.map((access) => (
@@ -187,7 +188,7 @@ export function ShareDialog({ host, app, on, name, close }: Props) {
                           </option>
                         ))}
                       </select>
-                      <button type="button" className="button small" aria-label={`Remove ${who}`} disabled={busy} onClick={() => void change(() => host.sharing.revoke(grant.id))}>
+                      <button type="button" className="button small" aria-label={`Remove ${who}`} disabled={busy || !revoke} title={revoke ? undefined : "Only an admin can change what a member is narrowed to"} onClick={() => void change(() => host.sharing.revoke(grant.id))}>
                         Remove
                       </button>
                     </li>

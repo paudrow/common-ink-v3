@@ -685,3 +685,44 @@ describe("an agent", () => {
     expect(await titles({ kind: "member", personId, workspaceId: ada.workspaceId })).toEqual(["Plan"]);
   });
 });
+
+describe("what an editor is told of a folder they cannot share", () => {
+  it("does not include that folder's link address or a waiting email", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve Editor");
+    const eveEmail = (await whoAmI(env.DB, eve.personId)).person.email;
+    const projects = await folder(ada, "Projects");
+    const plan = await note(ada, "# Plan", projects.id);
+    const waiting = address();
+    await share(ada, { folderId: projects.id }, waiting, "view");
+    const link = await perform(env.DB, ada, { type: "grant.link", folderId: projects.id, link: "public" });
+    await share(ada, { folderId: projects.id }, eveEmail, "view");
+    await share(ada, { noteId: plan.id }, eveEmail, "edit");
+
+    const seen = await perform(env.DB, eve, { type: "grant.list", noteId: plan.id });
+    const inheritedLink = seen.inherited.find((g) => g.to.kind === "link");
+    const inheritedPerson = seen.inherited.find((g) => g.to.kind === "person");
+    expect(seen.canShare).toBe(true);
+    expect(inheritedLink?.to.kind === "link" ? inheritedLink.to.token : "missing").toBeNull();
+    expect(inheritedPerson?.to.kind === "person" ? inheritedPerson.to.email : "missing").toBeNull();
+    expect(await perform(env.DB, eve, { type: "grant.list", folderId: projects.id })).toMatchObject({ canShare: false, grants: [], inherited: [] });
+    const adaLink = (await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).inherited.find((g) => g.to.kind === "link");
+    expect(adaLink?.to.kind === "link" ? adaLink.to.token : "").toBe(tokenOf(link));
+  });
+
+  it("does not let a waiting grant take effect once the maker is narrowed further up than the walk looks", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve Editor");
+    const narrow = await folder(ada, "Narrow");
+    await share(ada, { folderId: narrow.id }, (await whoAmI(env.DB, eve.personId)).person.email, "view");
+    const plan = await note(eve, "# Plan");
+    const sam = address();
+    await share(eve, { noteId: plan.id }, sam, "view");
+    let parent = narrow.id;
+    for (let i = 0; i < 101; i++) parent = (await folder(ada, `L${i}`, parent)).id;
+    await perform(env.DB, ada, { type: "note.move", id: plan.id, folderId: parent });
+
+    const { personId } = await signIn(env.DB, { email: sam, name: "Sam Waiting" });
+    expect(await workspaceOfNote(env.DB, personId, plan.id)).toBeNull();
+  });
+});
