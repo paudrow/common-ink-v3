@@ -1713,9 +1713,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       // A list is where titles are read, so it is where the ones made by an older rule are made again.
       await mend(ctx);
+      // A folder the asker can't see lists nothing. The note stays in the unfiltered list, with no folder, as note.read says.
       const { results } = await ctx.db
         .prepare(
-          `SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR n.folder_id = ?2) AND (?3 IS NULL OR n.updated_at >= ?3 OR n.state_at >= ?3) AND ${SEEN("n", "?4", listing(op.includeArchived))}
+          `SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR (n.folder_id = ?2 AND EXISTS (SELECT 1 FROM folders f WHERE f.workspace_id = ?1 AND f.id = ?2 AND ${SEEN_FOLDER("f", "?4")}))) AND (?3 IS NULL OR n.updated_at >= ?3 OR n.state_at >= ?3) AND ${SEEN("n", "?4", listing(op.includeArchived))}
              AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = ?5))
            ORDER BY n.updated_at DESC`,
         )
