@@ -51,6 +51,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       open one with none; --query QUERY is the same. "ink syntax todos" lists
                                       what a query can say
   syntax [todos|uploads]              the query language of search, of todos, or of uploads
+  note-syntax                         how to write a form, a board, a timer, and the rest of what a note can hold
   todo-filters [--archived true]      the tags and assignees that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
         [--every RULE|none] [--skip true] [--assign WHO]
@@ -477,6 +478,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
     /** Set by a command that only looks: the author whose revert is previewed, in `noteIds` or in every note they changed. */
     let previewOf: { author: { kind: string; id: string }; noteIds?: string[] } | undefined;
     switch (command) {
+      case "note-syntax":
+        tool = "note_syntax";
+        break;
       case "workspaces":
         tool = "list_workspaces";
         break;

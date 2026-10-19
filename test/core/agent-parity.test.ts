@@ -24,6 +24,7 @@ const COMMANDS: Record<string, string[][]> = {
   restore_note: [["restore", ID]],
   list_trash: [["trashed"]],
   read_note: [["read", ID, "--revision", "1"]],
+  note_syntax: [["note-syntax"]],
   create_note: [["create", "--text", "# Hi", "--folder", ID, "--link-titles", "keep", "--mention-names", "keep"]],
   write_note: [["write", ID, "--base", "1", "--text", "# Hi", "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--on", "2026-10-11"]],
   backlinks: [["backlinks", ID]],

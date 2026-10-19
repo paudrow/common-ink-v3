@@ -112,6 +112,7 @@ describe("MCP protocol", () => {
 
     const init = (await (await call(token, rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } }))).json()) as any;
     expect(init.result).toMatchObject({ protocolVersion: "2025-06-18", serverInfo: { name: "common-ink" }, capabilities: { tools: {} } });
+    expect(init.result.instructions).toContain("call note_syntax");
     const old = (await (await call(token, rpc("initialize", { protocolVersion: "1999-01-01" }))).json()) as any;
     expect(old.result.protocolVersion).toBe("2025-06-18");
 
@@ -123,6 +124,7 @@ describe("MCP protocol", () => {
       "list_workspaces",
       "list_notes",
       "read_note",
+      "note_syntax",
       "create_note",
       "write_note",
       "backlinks",
@@ -191,6 +193,17 @@ describe("MCP protocol", () => {
       "list_members",
     ]);
     for (const t of list.result.tools) expect(t.inputSchema.type).toBe("object");
+    expect(list.result.tools.find((t: { name: string }) => t.name === "create_note").description).toContain("call note_syntax");
+    expect(list.result.tools.find((t: { name: string }) => t.name === "write_note").description).toContain("call note_syntax");
+  });
+
+  it("note_syntax answers with an example of a form and takes nothing else", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const { text, isError } = await tool(token, "note_syntax");
+    expect(isError).toBe(false);
+    expect(text).toContain(":::form{}");
+    expect(text).toContain('"answers": {}');
+    expect(await tool(token, "note_syntax", { form: true })).toMatchObject({ isError: true, text: 'invalid: note_syntax takes no "form". It takes no arguments.' });
   });
 
   it("reports unknown methods and tools, and bad requests, as JSON-RPC errors", async () => {
