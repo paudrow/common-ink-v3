@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leaving, narrowingOf, type Narrowing } from "../../src/web/plugins/todos/leaving.ts";
+import { leaving, narrowingOf, tagsLeft, type Narrowing } from "../../src/web/plugins/todos/leaving.ts";
 
 const NOW = "2026-10-15";
 const ANY: Narrowing = { completed: false, due: "any", importance: "", tag: "", folder: null };
@@ -58,6 +58,8 @@ describe("what a todos query narrows to, for those sentences", () => {
     expect(leaving(todo(), by("bank due:today..+6d"), NOW)?.says).toBe("Its date was taken off, so it no longer shows under Next 7 days. It leaves when you refresh.");
     expect(leaving(todo({ due: "2026-10-15" }), by("bank due:today"), NOW)?.says).toBe("Changed, so it no longer matches “bank due:today”. It leaves when you refresh.");
     expect(leaving(todo({ words: "call", tags: ["work"] }), by("#work budget"), NOW)?.says).toBe("Changed, so it no longer matches “#work budget”. It leaves when you refresh.");
+    expect(tagsLeft(["health"], "- [ ] Gym #health", "- [ ] Gym")).toEqual([]);
+    expect(tagsLeft(["work", "health"], "- [ ] Gym #health", "- [ ] Gym")).toEqual(["work"]);
     expect(leaving(todo(), by(""), NOW)).toBeNull();
   });
 });

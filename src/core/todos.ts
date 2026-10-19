@@ -219,9 +219,9 @@ export function todoEdits(line: string, change: Omit<TodoChange, "words">): Edit
 }
 
 /**
- * The todo's line saying `words`, with the importance it has before them and the due date, the rule and
- * the last-done mark it has after them, unless the words write their own: then theirs is the one, and
- * the line has one of each.
+ * The todo's line saying `words`, with the importance it has before them and the due date, the rule,
+ * the last-done mark and the assignees it has after them, unless the words write their own: then theirs
+ * is the one, and the line has one of each. An assignee the words name is not written again.
  */
 function reworded(line: string, words: string): string {
   if (/[\r\n]/.test(words)) throw new RangeError("A todo's words are one line");
@@ -230,7 +230,9 @@ function reworded(line: string, words: string): string {
   if (!todo || said.replace(/\s+/g, " ") === todo.words) return line;
   const own = parseTodo(`- [ ] ${said}`)!;
   const kept = (span: Span | null, theirs: Span | null) => (span && !theirs ? line.slice(span.from, span.to) : "");
-  const after = [kept(todo.due, own.due), kept(todo.every, own.every), kept(todo.lastDone, own.lastDone)];
+  const named = new Set(own.assignees.map(mentionKey));
+  const assignees = todo.assignees.filter((assignee) => !named.has(mentionKey(assignee))).map((assignee) => line.slice(assignee.from, assignee.to));
+  const after = [kept(todo.due, own.due), kept(todo.every, own.every), kept(todo.lastDone, own.lastDone), ...assignees];
   return [line.slice(0, todo.box.to), kept(todo.importanceAt, own.importanceAt), said, ...after].filter(Boolean).join(" ");
 }
 

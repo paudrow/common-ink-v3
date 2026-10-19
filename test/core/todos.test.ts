@@ -100,7 +100,7 @@ describe("the index of todos", () => {
 
     const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "# Old, renamed\n\n- [ ] from before +P #t" });
     expect(await indexed(note.id)).toEqual(todoIndex(written.text));
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 7 });
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 8 });
   });
 
   it("is made again from every note's text by an admin, another member's private note included, and the answer says nothing of how many", async () => {

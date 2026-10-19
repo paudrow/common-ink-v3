@@ -263,7 +263,7 @@ export interface NoteRow extends SummaryRow {
 }
 
 /** What a note's `indexed` is once its title and snippet, its links, todos, tags, mentions, search text and the uploads it refers to have been made from its text as they are made now. */
-const MADE = 7;
+const MADE = 8;
 
 /** A note as it is made: live. */
 const NEW = { state: "live", state_at: null } as const;
@@ -642,13 +642,13 @@ function inParts(rows: readonly unknown[]): string[] {
   return parts.filter((part) => part.length).map((part) => `[${part.join(",")}]`);
 }
 
-/** Each order of todo.list, before its ties by note and line. A todo's words are its line after its checkbox and priority marks. */
+/** Each order of todo.list, before its ties by note and line. */
 const TODO_ORDER: Record<TodoSort, string> = {
   due: "t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE",
   priority: "t.importance DESC, t.due IS NULL, t.due, n.title COLLATE NOCASE",
   changed: "n.updated_at DESC",
   note: "n.title COLLATE NOCASE",
-  text: "ltrim(substr(t.text, instr(t.text, ']') + 1), ' !') COLLATE NOCASE",
+  text: "t.words COLLATE NOCASE",
 };
 
 const INDEXED = {
@@ -676,8 +676,8 @@ function indexing(ctx: Context, noteId: string, text: string, { was, atRevision 
     if (before && JSON.stringify(before[part]) === JSON.stringify(now[part])) return [];
     return [
       ctx.db.prepare(`DELETE FROM ${INDEX_TABLE[part]} WHERE note_id = ?1 AND ${current}`).bind(noteId, at),
-      // Each todo with its line's words as the index folds them, a space before each, so a word is found by its start.
-      ...inParts(part === "todos" ? now.todos.map((row) => [...row, ` ${folded(row[4])}`]) : now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows, ...(part === "todos" ? [recurring] : []))),
+      // Each todo with its words as the index folds them, a space before each, so a word is found by its start. A due date, a repeat, a last-done mark and an assignee are not words of it.
+      ...inParts(part === "todos" ? now.todos.map((row) => [...row, ` ${folded(parseTodo(row[4])?.words ?? "")}`]) : now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows, ...(part === "todos" ? [recurring] : []))),
     ];
   });
 }
