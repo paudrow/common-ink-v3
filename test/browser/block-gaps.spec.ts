@@ -70,7 +70,8 @@ function send(page: Page, name: string, bytes: Buffer): Promise<Upload> {
 /** A block drawn from lines of a note: what the note writes, the element its top is, and the element its bottom is. */
 interface Kind {
   name: string;
-  written: string;
+  /** What the note writes for it, after sending the upload it shows, if any. */
+  written: (page: Page) => Promise<string>;
   top: string;
   bottom: string;
   /** Whether its source is shown in place of it, as a formula's is, and not above it. */
@@ -79,23 +80,22 @@ interface Kind {
 
 const below = (embed: string) => `.embed-below[data-embed="${embed}"]`;
 
-async function kinds(page: Page): Promise<Kind[]> {
-  const [picture, film, song] = [await send(page, "picture.png", png(320, 180)), await send(page, "film.webm", readFileSync(new URL("fixtures/moving-box.webm", import.meta.url))), await send(page, "tone.wav", wav())];
-  const [paper, table, text] = [await send(page, "paper.pdf", pdf({ pages: 2 })), await send(page, "cities.csv", Buffer.from("city,country\nLisbon,Portugal\nOslo,Norway\n")), await send(page, "minutes.txt", Buffer.from("What was said.\nWhat was done.\n"))];
-  return [
-    { name: "picture", written: `::image{${picture.id} 320x180}`, top: below("image"), bottom: below("image") },
-    { name: "video", written: `::video{${film.id} 320x180}`, top: below("video"), bottom: below("video") },
-    { name: "recording", written: `::audio{${song.id}}`, top: below("audio"), bottom: below("audio") },
-    { name: "PDF", written: `::file{${paper.id}}`, top: below("file"), bottom: below("file") },
-    { name: "CSV", written: `::file{${table.id}}`, top: below("file"), bottom: below("file") },
-    { name: "text", written: `::file{${text.id}}`, top: below("file"), bottom: below("file") },
-    { name: "video address", written: "https://www.youtube.com/watch?v=NgRkyAlJx5s", top: below("video"), bottom: below("video") },
-    { name: "kanban", written: ":::kanban{}\n## To do\n- write\n\n## Done\n:::", top: ".embed-frame-block .embed-card", bottom: ".embed-frame-block .embed-card" },
-    { name: "HTML", written: ":::html{height=120}\n<p>hi</p>\n:::", top: ".embed-frame-block .embed-card", bottom: below("html") },
-    { name: "table", written: "| a | b |\n|---|---|\n| 1 | 2 |", top: ".md-table-frame", bottom: ".md-table-frame" },
-    { name: "formula", written: "$$\nx^2 + y^2 = z^2\n$$", top: ".math-block", bottom: ".math-block", replaced: true },
-  ];
-}
+const uploaded = (name: string, bytes: () => Buffer, as: (id: string) => string) => async (page: Page) => as((await send(page, name, bytes())).id);
+const written = (text: string) => async () => text;
+
+const KINDS: readonly Kind[] = [
+  { name: "picture", written: uploaded("picture.png", () => png(320, 180), (id) => `::image{${id} 320x180}`), top: below("image"), bottom: below("image") },
+  { name: "video", written: uploaded("film.webm", () => readFileSync(new URL("fixtures/moving-box.webm", import.meta.url)), (id) => `::video{${id} 320x180}`), top: below("video"), bottom: below("video") },
+  { name: "recording", written: uploaded("tone.wav", wav, (id) => `::audio{${id}}`), top: below("audio"), bottom: below("audio") },
+  { name: "PDF", written: uploaded("paper.pdf", () => pdf({ pages: 2 }), (id) => `::file{${id}}`), top: below("file"), bottom: below("file") },
+  { name: "CSV", written: uploaded("cities.csv", () => Buffer.from("city,country\nLisbon,Portugal\nOslo,Norway\n"), (id) => `::file{${id}}`), top: below("file"), bottom: below("file") },
+  { name: "text", written: uploaded("minutes.txt", () => Buffer.from("What was said.\nWhat was done.\n"), (id) => `::file{${id}}`), top: below("file"), bottom: below("file") },
+  { name: "video address", written: written("https://www.youtube.com/watch?v=NgRkyAlJx5s"), top: below("video"), bottom: below("video") },
+  { name: "kanban", written: written(":::kanban{}\n## To do\n- write\n\n## Done\n:::"), top: ".embed-frame-block .embed-card", bottom: ".embed-frame-block .embed-card" },
+  { name: "HTML", written: written(":::html{height=120}\n<p>hi</p>\n:::"), top: ".embed-frame-block .embed-card", bottom: below("html") },
+  { name: "table", written: written("| a | b |\n|---|---|\n| 1 | 2 |"), top: ".md-table-frame", bottom: ".md-table-frame" },
+  { name: "formula", written: written("$$\nx^2 + y^2 = z^2\n$$"), top: ".math-block", bottom: ".math-block", replaced: true },
+];
 
 /** Where the words above and below a block are, where the block is, and the lines of the note between the words. */
 const measure = (page: Page, kind: Kind) =>
@@ -117,10 +117,10 @@ const measure = (page: Page, kind: Kind) =>
       shownHeight: shown.reduce((sum, l) => sum + l.getBoundingClientRect().height, 0),
       blanks: [between[0], between.at(-1)].filter((l) => l?.textContent === "").length,
     };
-  }, kind);
+  }, { top: kind.top, bottom: kind.bottom });
 
 async function openKind(page: Page, kind: Kind) {
-  const note = await perform(page, { type: "note.create", text: `# ${kind.name}\n\nPara A.\n\n${kind.written}\n\nPara B.` });
+  const note = await perform(page, { type: "note.create", text: `# ${kind.name}\n\nPara A.\n\n${await kind.written(page)}\n\nPara B.` });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Para B.");
   await expect(page.locator(kind.bottom).last()).toBeVisible();
@@ -129,11 +129,12 @@ async function openKind(page: Page, kind: Kind) {
   await settled(page);
 }
 
-test("every block drawn from lines is as far below the words above it as above the words below it, its lines take no room until the cursor is on them, and then they are above it and push down only by their height", async ({ page }) => {
-  await standIns(page);
-  await signInAsNewPerson(page, "Ada Lovelace");
-  await page.setViewportSize({ width: 1280, height: 1100 });
-  for (const kind of await kinds(page)) {
+// One test for each, so a slow server holds up one block's page loads, not all eleven of them in one test's time.
+for (const kind of KINDS) {
+  test(`a ${kind.name} is as far below the words above it as above the words below it, its lines take no room until the cursor is on them, and then they are above it and push down only by their height`, async ({ page }) => {
+    await standIns(page);
+    await signInAsNewPerson(page, "Ada Lovelace");
+    await page.setViewportSize({ width: 1280, height: 1100 });
     await openKind(page, kind);
     const away = await measure(page, kind);
     expect(away.shown, `${kind.name}: nothing of its lines is in the note with the cursor away`).toEqual([]);
@@ -157,8 +158,8 @@ test("every block drawn from lines is as far below the words above it as above t
     await page.keyboard.press("ControlOrMeta+End");
     await settled(page);
     expect(await measure(page, kind), `${kind.name}: with the cursor away again`).toEqual(away);
-  }
-});
+  });
+}
 
 test("the arrow keys and vim's j and k each stop on the line of an upload or an address that is out of sight, which shows it, and step off it again", async ({ page }) => {
   await standIns(page);

@@ -204,6 +204,8 @@ test("Today, the arrows and the keys glide the days to the same places a scroll 
   await expect(calendar(page).getByRole("button", { name: "Agenda", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("w");
   await expect(calendar(page).getByRole("button", { name: "Week", exact: true })).toHaveAttribute("aria-pressed", "true");
+  // The address catches up with the view once it has settled, half a second on; a reload before then would show what the address still names.
+  await expect(page).toHaveURL(/\/calendar$/);
   await page.reload();
   await expect(calendar(page).getByRole("button", { name: "Week", exact: true }), "the view is remembered").toHaveAttribute("aria-pressed", "true");
 });
@@ -485,6 +487,7 @@ test("Day and 3 days slide sideways by whole days under a modest swipe, as Week 
   await expect.poll(() => daysInView(page), "the next three days").toEqual([shift(today, 3), shift(today, 4), shift(today, 5)]);
   await page.keyboard.press("t");
   await expect.poll(() => daysInView(page)).toEqual([today, shift(today, 1), shift(today, 2)]);
+  await expect(page).toHaveURL(/\/calendar$/);
   await page.reload();
   await expect(viewButton(page, "3 days"), "the view is remembered").toHaveAttribute("aria-pressed", "true");
 });

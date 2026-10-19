@@ -943,6 +943,8 @@ test("checking off a recurring todo on the Todos page says so in the toast, and 
 
   await bins.getByRole("checkbox").click();
   await expect(toast(page)).toHaveText("Task completedUndo");
+  // The pointer keeps the notice up while the change is read back, which on a slow server takes longer than its 10 seconds.
+  await toast(page).hover();
   await expect(toast(page).getByRole("button")).toHaveText(["Undo"]);
   // The todo is open, due next, with one fewer time left.
   await expect.poll(() => completionOf(page, note.id, today)).toEqual({ text: text.replace(`due:${today} every:2w-times-3 done:2026-01-05x4`, `due:${addDays(today, 14)} every:2w-times-2 done:${today}x5`), filed: [`- [x] Take out the bins due:${today} [[${note.id}]]`], completions: 1 });
@@ -965,6 +967,7 @@ test("checking off a recurring todo on the Todos page says so in the toast, and 
   await expect(bins.locator(".todo-every")).toHaveText("every 2 weeks · 1 left");
   await bins.getByRole("checkbox").check();
   await expect(toast(page)).toHaveText("Task completedUndo");
+  await toast(page).hover();
   await expect.poll(async () => (await completionOf(page, note.id, today)).filed).toHaveLength(1);
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(`- [x] Take out the bins due:${today} every:2w-times-1 done:2026-01-05x4`);
   await toast(page).getByRole("button", { name: "Undo" }).click();
@@ -1032,6 +1035,7 @@ test("Undo of a recurring todo's completion changes nothing when its line was wr
   await page.goto("/todos");
   await row(page, "Stretch").getByRole("checkbox").click();
   await expect(toast(page)).toHaveText("Task completedUndo");
+  await toast(page).hover();
   await expect.poll(async () => (await completionOf(page, note.id, today)).completions).toBe(2);
   const revision = (await perform(page, { type: "note.read", id: note.id })).revision;
   await perform(page, { type: "note.write", id: note.id, baseRevision: revision, text: `${await read(page, note.id)}Below\n` });

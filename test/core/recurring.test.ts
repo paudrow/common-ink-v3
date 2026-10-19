@@ -77,6 +77,10 @@ describe("how a recurring todo is written", () => {
     expect(completeTodo(WATERED, "2026-10-17")).toEqual({ line: "- [ ] ! Water the plants due:2026-10-24 every:1w +Home done:2026-10-17x2", filed: "- [x] ! Water the plants due:2026-10-17 +Home" });
   });
 
+  it("files a checked line with no repeat left on it when the line has a second one", () => {
+    expect(completeTodo("- [ ] Pay every:1w every:1m due:2026-10-10 done:2026-09-01x1 done:2026-09-08x2", SUNDAY).filed).toBe("- [x] Pay due:2026-10-10");
+  });
+
   it("gives a recurring todo with no due date one, from the day it was done", () => {
     expect(completeTodo("  - [ ] Stretch every:3d", SUNDAY)).toEqual({ line: "  - [ ] Stretch every:3d due:2026-10-14 done:2026-10-11x1", filed: "- [x] Stretch" });
     expect(completeTodo("- [ ] Review every:mon,thu", SUNDAY).line).toBe("- [ ] Review every:mon,thu due:2026-10-12 done:2026-10-11x1");

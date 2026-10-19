@@ -1093,10 +1093,12 @@ test("an agent's edit read into the editor while the member types is never what 
   await page.keyboard.press("ControlOrMeta+z");
   await expect(editorLines(page).nth(2)).toHaveText("From Claude.");
   await expect(editorLines(page).nth(3)).not.toHaveText(/a{5}/);
+  // Further undos go on to the member's own saved changes, and how many of those the typing made depends on how fast it was sent: on a slow machine the next is the note's creation. The agent's line stays whatever they reach.
   await page.keyboard.press("ControlOrMeta+z");
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(editorLines(page).nth(2)).toHaveText("From Claude.");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(editorLines(page).filter({ hasText: /^From Claude\.$/ })).toHaveCount(1);
+  // What the editor shows is what the note is: nothing is left unsent.
+  await expect.poll(async () => (await editorLines(page).allTextContents()).join("\n") === (await text(page, note.id))).toBe(true);
   await expect.poll(() => text(page, note.id)).toContain("From Claude.");
 });
 

@@ -122,6 +122,11 @@ test("with Show snippets off a card says its note's title in its head, and with 
   await settled(page);
   const corner = card.locator(".card-head");
   const before = await top(corner);
+  // The note is read slowly, as a busy server reads it, so the card grows well after the click.
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"note.read"')) await new Promise((resume) => setTimeout(resume, 1500));
+    await route.continue();
+  });
   await whole(card).click();
   const less = card.getByRole("button", { name: "Show less" });
   await expect(less).toHaveAttribute("aria-expanded", "true");

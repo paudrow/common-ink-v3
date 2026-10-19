@@ -133,7 +133,8 @@ test("a calendar that isn't connected says so, and connecting it shows the week'
   await calendar(page).getByRole("button", { name: "Agenda", exact: true }).click();
   await expect(calendar(page).getByRole("region").filter({ has: page.getByRole("heading", { level: 3 }) }).first()).toBeVisible();
   await expect(eventIn(calendar(page), "Standup").first()).toBeVisible();
-
+  // The address catches up with the view half a second after it settles; a reload before then shows what the address still names.
+  await expect(page).toHaveURL(/\/calendar$/);
   await page.reload();
   await expect(calendar(page).getByRole("button", { name: "Agenda", exact: true }), "the view is the one that was left").toHaveAttribute("aria-pressed", "true");
 });

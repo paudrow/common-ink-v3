@@ -268,7 +268,16 @@ export function completeTodo(line: string, on: string): Completed {
   const rule = todo.every?.rule;
   const next = rule && nextDue(rule, { due: todo.due?.date ?? null, done: on });
   if (!rule || (!next && !rule.end)) return { line: rewriteTodo(line, { done: true }), filed: null };
-  const filed = `- ${rewriteTodo(line, { done: true, every: null, lastDone: null }).slice(todo.box.from)}`;
+  // The line is parsed as its first every: and its first done:. Another of either is still one, and the filed line has none.
+  let shown = rewriteTodo(line, { done: true, every: null, lastDone: null });
+  for (;;) {
+    const left = parseTodo(shown);
+    if (!left?.every && !left?.lastDone) break;
+    const next = rewriteTodo(shown, { every: null, lastDone: null });
+    if (next === shown) break;
+    shown = next;
+  }
+  const filed = `- ${shown.slice(todo.box.from)}`;
   if (!next) return { line: rewriteTodo(line, { done: true }), filed };
   return { line: rewriteTodo(line, { due: next, every: writeRule(counted(rule)), lastDone: { on, times: (todo.lastDone?.times ?? 0) + 1 } }), filed };
 }

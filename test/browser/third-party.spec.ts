@@ -268,7 +268,8 @@ test("a member who isn't an admin sees what a plugin may do and can only ask; on
   await expect(page.getByRole("form", { name: "Install a plugin" })).toHaveCount(0);
   await openDetails(page, "Word counter");
   const mine = page.locator(".plugin-details");
-  await expect(mine.getByRole("button")).toHaveText(["Ask an admin", "Ask an admin"]);
+  // Its source, further down, is read once it comes near, and then offers Edit a copy, which a member may: the asks are the buttons that matter here.
+  await expect(mine.getByRole("button").filter({ hasNotText: "Edit a copy" })).toHaveText(["Ask an admin", "Ask an admin"]);
   await expect(permission(page, "Read notes")).toContainText("Allowed");
   await expect(permission(page, "Read notes").getByRole("button")).toHaveCount(0);
   await expect(permission(page, "Write notes")).toContainText("Off");
