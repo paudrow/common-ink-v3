@@ -26,7 +26,6 @@ const EDITORS_AT_ONCE = 100;
 /** How many cards past the ones drawn are asked about with them, so scrolling on slowly is not a question a card. */
 const EDITORS_AHEAD = 20;
 /** How long a card the member grew or cut back is left out of the list's scrolling to make up for a change of height. */
-const TOGGLE_MS = 500;
 /** How long the list goes on returning to where it was left. One that has become shorter since never gets there. */
 const RETURNING_MS = 1500;
 const INFO_OVERLAY = "note-card-info";
@@ -239,7 +238,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
   const scroller = useRef<HTMLElement>(null);
   /** A card just made shorter, whose head is brought back into sight if that left it above the list. */
   const shortened = useRef<string | null>(null);
-  /** The card the member last grew or cut back, which the list doesn't scroll to make up for. */
+  /**
+   * The card the member last grew or cut back, which the list doesn't scroll to make up for until the
+   * member next scrolls, clicks or types: the note it grows by can be read seconds after the click.
+   */
   const toggled = useRef<string | null>(null);
 
   const title = app.folders && folderTitle(app.folders, folderId);
@@ -448,6 +450,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     };
   }, [ready]);
   const takeOver = () => void (returning.current = null);
+  const memberMoves = () => {
+    takeOver();
+    toggled.current = null;
+  };
 
   useLayoutEffect(() => {
     const card = shortened.current && scroller.current?.querySelector<HTMLElement>(`[data-note="${shortened.current}"]`);
@@ -465,7 +471,6 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     how === "behind" ? app.openNote(note.id, { background: true }) : app.openNote(note.id, { preview: how === "preview", focus: true });
   const wholeOrLess = (noteId: string) => {
     toggled.current = noteId;
-    setTimeout(() => toggled.current === noteId && (toggled.current = null), TOGGLE_MS);
     if (view.whole[noteId]) shortened.current = noteId;
     act({ type: "wholeOrLess", noteId });
   };
@@ -605,9 +610,9 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
       className="folder-list"
       aria-labelledby={`${ids}-heading`}
       ref={scroller}
-      onWheel={takeOver}
-      onPointerDown={takeOver}
-      onKeyDown={takeOver}
+      onWheel={memberMoves}
+      onPointerDown={memberMoves}
+      onKeyDown={memberMoves}
       onScroll={(e) => {
         if (e.target === e.currentTarget && returning.current === null) kept.scrollTop = e.currentTarget.scrollTop;
       }}
