@@ -12,6 +12,9 @@ interface Props {
   onOpen: (noteId: string) => void;
 }
 
+/** How many times the heading says. The line's mark can count completions the list no longer follows. The list can also hold the last one, which the mark is left not counting. */
+export const shownTimes = (marked: number, listed: number) => Math.max(marked, listed);
+
 /** Each time a recurring todo was checked off: the day and who did it, and its daily note a click away. */
 export function Completions({ ask, done, now, onOpen }: Props) {
   const [read, setRead] = useState<{ completions: TodoCompletion[] } | { problem: string } | null>(null);
@@ -34,6 +37,7 @@ export function Completions({ ask, done, now, onOpen }: Props) {
       </p>
     );
   const { completions } = read;
+  const times = shownTimes(done.times, completions.length);
   const missing = done.times - completions.length;
   const says = (completion: TodoCompletion) => (
     <>
@@ -47,7 +51,7 @@ export function Completions({ ask, done, now, onOpen }: Props) {
   return (
     <div className="completions">
       <h2 data-autofocus tabIndex={-1}>
-        Done {done.times} {done.times === 1 ? "time" : "times"}
+        Done {times} {times === 1 ? "time" : "times"}
       </h2>
       {completions.length > 0 && (
         <ol aria-label="Completions">

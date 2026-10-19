@@ -71,7 +71,7 @@ import { referencesIn } from "./references.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
-import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, todoIndex, todosIn, type Completed } from "./todos.ts";
+import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed } from "./todos.ts";
 
 /** Who is performing an operation, and where. */
 export type Actor =
@@ -263,7 +263,7 @@ export interface NoteRow extends SummaryRow {
 }
 
 /** What a note's `indexed` is once its title and snippet, its links, todos, tags, mentions, search text and the uploads it refers to have been made from its text as they are made now. */
-const MADE = 7;
+const MADE = 8;
 
 /** A note as it is made: live. */
 const NEW = { state: "live", state_at: null } as const;
@@ -642,13 +642,13 @@ function inParts(rows: readonly unknown[]): string[] {
   return parts.filter((part) => part.length).map((part) => `[${part.join(",")}]`);
 }
 
-/** Each order of todo.list, before its ties by note and line. A todo's words are its line after its checkbox and priority marks. */
+/** Each order of todo.list, before its ties by note and line. */
 const TODO_ORDER: Record<TodoSort, string> = {
   due: "t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE",
   priority: "t.importance DESC, t.due IS NULL, t.due, n.title COLLATE NOCASE",
   changed: "n.updated_at DESC",
   note: "n.title COLLATE NOCASE",
-  text: "ltrim(substr(t.text, instr(t.text, ']') + 1), ' !') COLLATE NOCASE",
+  text: "t.words COLLATE NOCASE",
 };
 
 const INDEXED = {
@@ -676,8 +676,8 @@ function indexing(ctx: Context, noteId: string, text: string, { was, atRevision 
     if (before && JSON.stringify(before[part]) === JSON.stringify(now[part])) return [];
     return [
       ctx.db.prepare(`DELETE FROM ${INDEX_TABLE[part]} WHERE note_id = ?1 AND ${current}`).bind(noteId, at),
-      // Each todo with its line's words as the index folds them, a space before each, so a word is found by its start.
-      ...inParts(part === "todos" ? now.todos.map((row) => [...row, ` ${folded(row[4])}`]) : now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows, ...(part === "todos" ? [recurring] : []))),
+      // Each todo with its words as the index folds them, a space before each, so a word is found by its start. A due date, a repeat, a last-done mark and an assignee are not words of it.
+      ...inParts(part === "todos" ? now.todos.map((row) => [...row, ` ${folded(parseTodo(row[4])?.words ?? "")}`]) : now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows, ...(part === "todos" ? [recurring] : []))),
     ];
   });
 }
@@ -1810,6 +1810,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       ).all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
       const page = results.slice(0, op.limit).map((r) => ({ r, todo: parseTodo(r.text) }));
       const members = (await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []))).byId;
+      const tagged = page.filter(({ r }) => r.tags !== "[]").map(({ r }) => r.note_id);
+      const texts = new Map(
+        tagged.length === 0 ? [] : (await ctx.db.prepare("SELECT id, text FROM notes WHERE id IN (SELECT value FROM json_each(?1))").bind(JSON.stringify([...new Set(tagged)])).all<{ id: string; text: string }>()).results.map((n) => [n.id, n.text]),
+      );
       return {
         todos: page.map(({ r, todo }) => {
           return {
@@ -1825,6 +1829,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             recurs: todo?.every ? ruleLabel(todo.every.rule) : null,
             lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
             tags: JSON.parse(r.tags) as string[],
+            tagsElsewhere: tagsBesides(texts.get(r.note_id) ?? "", r.line),
             assignees: mentionedIn(members, todo?.assignees ?? []),
             words: todo?.words ?? r.text,
             access: itemLevel(ctx.sight, { id: r.note_id, folder_id: r.folder_id, private_owner: r.private_owner }) === "edit" ? "edit" : "view",

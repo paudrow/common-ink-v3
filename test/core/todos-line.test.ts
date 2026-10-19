@@ -120,6 +120,8 @@ describe("rewriting a todo's line", () => {
     expect(rewriteTodo("- [ ] a every:2w", { words: "b every:mon" })).toBe("- [ ] b every:mon");
     expect(rewriteTodo("- [ ] a every:1d done:2026-10-01x3", { words: "b done:2026-10-13x4" })).toBe("- [ ] b done:2026-10-13x4 every:1d");
     expect(rewriteTodo("- [ ] a every:2w", { words: "b", every: null })).toBe("- [ ] b");
+    expect(rewriteTodo("- [ ] Call the bank @[[ada111111111|Ada]] every:1w due:2026-10-18", { words: "Call the credit union" })).toBe("- [ ] Call the credit union due:2026-10-18 every:1w @[[ada111111111|Ada]]");
+    expect(rewriteTodo("- [ ] Call the bank @[[ada111111111|Ada]] every:1w due:2026-10-18", { words: "Call @[[ada111111111|Ada]]" })).toBe("- [ ] Call @[[ada111111111|Ada]] due:2026-10-18 every:1w");
   });
 
   it("writes nothing when the line already says it, and nothing to a line that isn't a todo", () => {

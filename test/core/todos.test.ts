@@ -100,7 +100,7 @@ describe("the index of todos", () => {
 
     const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "# Old, renamed\n\n- [ ] from before +P #t" });
     expect(await indexed(note.id)).toEqual(todoIndex(written.text));
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 7 });
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 8 });
   });
 
   it("is made again from every note's text by an admin, another member's private note included, and the answer says nothing of how many", async () => {
@@ -156,6 +156,7 @@ describe("listing todos", () => {
       recurs: null,
       lastDone: null,
       tags: ["work", "garden"],
+      tagsElsewhere: ["work"],
       assignees: [],
       words: "Water plants +home #garden",
       access: "edit",
@@ -201,6 +202,11 @@ describe("listing todos", () => {
     // A listed todo says its note's tags, and its own are the ones its text writes.
     expect((await list(ada, { tag: "outside" })).map((t) => [t.text, t.tags])).toEqual([
       ["- [ ] Water plants #weekly", ["outside", "weekly", "someday"]],
+      ["- [ ] Mow", ["outside", "weekly", "someday"]],
+    ]);
+    // What the rest of the note tags it with, so taking #weekly off the first line is not taking it off the note when another line has it.
+    expect((await list(ada, { tag: "outside" })).map((t) => [t.text, t.tagsElsewhere])).toEqual([
+      ["- [ ] Water plants #weekly", ["outside", "someday"]],
       ["- [ ] Mow", ["outside", "weekly", "someday"]],
     ]);
     expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["outside", "someday", "weekly"], assignees: [] });
@@ -271,6 +277,13 @@ describe("listing todos", () => {
       expect(await words(ada, { includeCompleted: true, query: `sort:${word}`, sort: order === "text" ? "due" : "text" })).toEqual(await sorted(order as Listing["sort"]));
     }
     expect(await words(ada, { query: "is:open OR is:done sort:due-desc" })).toEqual(["apples", "feed the cats", "zebra tickets", "Buy hay", "Clean up"]);
+  });
+
+  it("sorts A to Z by the words, so a due date after them does not change the order", async () => {
+    const ada = await newMember();
+    await create(ada, "- [ ] Man due:2020-01-01\n- [ ] Man apple");
+    expect(await words(ada, { sort: "text" })).toEqual(["Man", "Man apple"]);
+    expect(await words(ada, { query: "sort:text-asc" })).toEqual(["Man", "Man apple"]);
   });
 
   it("says nothing of a todo in a note the asker can't see: not the todo, its note's tag, or a count", async () => {
