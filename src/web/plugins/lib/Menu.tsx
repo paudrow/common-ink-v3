@@ -36,12 +36,13 @@ function move(e: KeyboardEvent<HTMLDivElement>, onClose: () => void) {
 export function ContextMenu({ label, x, y, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(onClose, ref);
+  // Placed again each time it is drawn: its items can change after it opens, as when what the member may do is read.
   useLayoutEffect(() => {
     const el = ref.current!;
     const { width, height } = el.getBoundingClientRect();
     el.style.left = `${Math.max(EDGE, Math.min(x, innerWidth - EDGE - width))}px`;
     el.style.top = `${Math.max(EDGE, Math.min(y, innerHeight - EDGE - height))}px`;
-  }, [x, y]);
+  });
   useEffect(() => ref.current?.querySelector<HTMLElement>("button:enabled")?.focus(), []);
   return (
     <div ref={ref} role="menu" aria-label={label} className="menu" style={{ left: x, top: y }} onKeyDown={(e) => move(e, onClose)}>
