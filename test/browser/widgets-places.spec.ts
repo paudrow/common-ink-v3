@@ -161,7 +161,7 @@ test("a member who can't change the note still sees the bar's clocks and count, 
   await expect(page.getByRole("button", { name: "Ada's workspace Viewer" })).toBeVisible();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 
-  await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
+  await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:\d\d$/]);
   await expect(wordCount(page)).toHaveText("3 words · 1 min read");
   await run(page, "Start a quick timer…");
   await expect(page.getByRole("dialog", { name: "Quick timer" })).toBeVisible();

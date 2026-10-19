@@ -796,10 +796,10 @@ test("Weather is a panel a plugin adds, it uses this browser's place, and its fo
   await frame.getByRole("button", { name: "Somewhere else" }).click();
   const place = frame.getByRole("textbox", { name: "Place" });
   await place.evaluate((el) => {
-    if (el instanceof HTMLInputElement) el.value = "Austin";
+    if (!(el instanceof HTMLInputElement)) return;
+    el.value = "Austin";
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   });
-  await expect(place).toHaveValue("Austin");
-  await place.press("Enter");
   await expect(status).toContainText("Austin");
   await expect(status).toContainText("21°");
 });

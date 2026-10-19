@@ -245,6 +245,8 @@ test("ctrl+o leaves the Dice page for the note, and the page does not cover itse
   await page.goto("/plugins");
   await page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Vim mode", exact: true }).check();
   await page.goto(`/note/${note.id}`);
+  // The note is in the history only once it is shown. Opening Dice before that leaves Back on the Plugins page.
+  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("Alpha");
   await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("link", { name: "Dice" }).click();
   await expect(page).toHaveURL(/\/dice$/);

@@ -874,6 +874,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || isModifier(e.key)) return;
+      // A press in a plugin frame is the frame's to give back. Handling it here as well would step back twice.
+      if (e.target instanceof HTMLIFrameElement) return;
       // A press in the keyboard shortcuts table's recorder is a key to write down, not one to run.
       if (e.target instanceof Element && e.target.closest("[data-records-keys]")) return;
       const { keybindings, commands } = host.contributions();

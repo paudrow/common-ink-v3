@@ -92,8 +92,8 @@ test("a panel opened from the bar lies over the page, which is as wide with it a
     expect(await drawn(page)).toEqual(closed.bar);
     expect(await boxOf(panel(page))).toEqual([closed.bar.box[0] - 256, 0, 256, closed.bar.box[3]]);
   }
-  // The same icon again closes it.
-  await icon(page, "Info").click();
+  // The icon that is open, again, closes it.
+  await icon(page, "Sample calendar").click();
   await expect(panel(page)).toHaveCount(0);
   expect(await boxOf(main(page))).toEqual(closed.main);
   expect(await drawn(page)).toEqual(closed.bar);
