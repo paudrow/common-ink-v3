@@ -1,4 +1,4 @@
-import { ALL_NOTES, SHARED_WITH_ME, type NoteSummary, type SortKey } from "../plugin-api.ts";
+import { ALL_NOTES, SHARED_WITH_ME, parseQuery, printQuery, queryNames, type NoteSummary, type QueryNode, type SortKey } from "../plugin-api.ts";
 
 export const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -19,9 +19,6 @@ export const ORDERS: Partial<Record<SortKey, (a: NoteSummary, b: NoteSummary) =>
   "title-asc": (a, b) => titleOf(a).localeCompare(titleOf(b)),
   "title-desc": (a, b) => titleOf(b).localeCompare(titleOf(a)),
 };
-
-/** How much of an expanded card's note is shown: its first part, fading out, or all of it. A card that isn't here is collapsed. */
-export type Expanded = "excerpt" | "whole";
 
 /** Which of a folder's notes a list is of, by where each is in its life. A note in Trash is in none of them. */
 export const SHOWS = [
@@ -48,23 +45,74 @@ export interface ListView {
   show: Show;
   sort: Sort | null;
   hasTodos: boolean;
-  expanded: Readonly<Record<string, Expanded>>;
+  /** The cards grown to the whole of their notes. Every other card shows its note's first part. */
+  whole: Readonly<Record<string, true>>;
 }
 
-export const INITIAL_VIEW: ListView = { query: "", show: "open", sort: null, hasTodos: false, expanded: {} };
+export const INITIAL_VIEW: ListView = { query: "", show: "open", sort: null, hasTodos: false, whole: {} };
+
+/** The three ways a folder's list is asked for notes, written into the search bar so the choice is visible. */
+export const LIVES = [
+  { id: "active", label: "Active", show: "open", clause: "is:open" },
+  { id: "archived", label: "Archived", show: "archived", clause: "is:archived" },
+  { id: "all", label: "All", show: "all", clause: "(is:open OR is:archived)" },
+] as const;
+
+export type Life = (typeof LIVES)[number]["id"];
+
+const STATE_WORDS = new Set(["open", "archived", "trashed"]);
+
+/** A query with every `is:open`, `is:archived` and `is:trashed` taken out, so a new choice replaces the last. */
+function withoutState(node: QueryNode | null): QueryNode | null {
+  if (!node) return null;
+  if (node.kind === "text") return node;
+  if (node.kind === "filter") return node.key === "is" && STATE_WORDS.has(node.value) ? null : node;
+  if (node.kind === "not") {
+    const of = withoutState(node.of);
+    return of ? { kind: "not", of } : null;
+  }
+  const of = node.of.flatMap((child) => {
+    const next = withoutState(child);
+    return next ? [next] : [];
+  });
+  if (of.length === 0) return null;
+  if (of.length === 1) return of[0]!;
+  return { kind: node.kind, of };
+}
+
+/**
+ * The search bar with one choice of notes written into it. What was already asked for stays, and an
+ * earlier choice of active, archived or all notes is replaced. A query that can't be read becomes the choice alone.
+ */
+export function withLife(text: string, life: Life): string {
+  const clause = LIVES.find((item) => item.id === life)!.clause;
+  const read = parseQuery(text, "notes");
+  if (!read.ok) return clause;
+  const rest = printQuery({ ...read.query, where: withoutState(read.query.where) });
+  return rest ? `${rest} ${clause}` : clause;
+}
+
+/** Which choice the search bar is showing. With none written, the list is active notes. */
+export function lifeOf(text: string): Life {
+  const read = parseQuery(text, "notes");
+  if (!read.ok || !read.query.where) return "active";
+  const open = queryNames(read.query.where, "open");
+  const archived = queryNames(read.query.where, "archived");
+  if (open && archived) return "all";
+  if (archived) return "archived";
+  return "active";
+}
+
+/** What the list itself is of, for the same choice the search bar shows. */
+export const showOf = (life: Life): Show => LIVES.find((item) => item.id === life)!.show;
 
 export type ListAction =
   | { type: "query"; text: string }
   | { type: "show"; show: Show }
   | { type: "sort"; sort: Sort | null }
   | { type: "hasTodos" }
-  /** Expands a collapsed card to its excerpt, and collapses an expanded one. */
-  | { type: "expandOrCollapse"; noteId: string }
-  | { type: "collapse"; noteId: string }
-  /** Shows the whole note in an expanded card, or goes back to its excerpt. It does nothing to a collapsed card. */
-  | { type: "wholeOrExcerpt"; noteId: string };
-
-const without = (expanded: ListView["expanded"], noteId: string) => Object.fromEntries(Object.entries(expanded).filter(([id]) => id !== noteId));
+  /** Grows a card to the whole of its note, or cuts it back to the first part. */
+  | { type: "wholeOrLess"; noteId: string };
 
 export function listReducer(view: ListView, action: ListAction): ListView {
   switch (action.type) {
@@ -76,13 +124,9 @@ export function listReducer(view: ListView, action: ListAction): ListView {
       return { ...view, sort: action.sort };
     case "hasTodos":
       return { ...view, hasTodos: !view.hasTodos };
-    case "expandOrCollapse":
-      return { ...view, expanded: view.expanded[action.noteId] ? without(view.expanded, action.noteId) : { ...view.expanded, [action.noteId]: "excerpt" } };
-    case "collapse":
-      return view.expanded[action.noteId] ? { ...view, expanded: without(view.expanded, action.noteId) } : view;
-    case "wholeOrExcerpt": {
-      const now = view.expanded[action.noteId];
-      return now ? { ...view, expanded: { ...view.expanded, [action.noteId]: now === "whole" ? "excerpt" : "whole" } } : view;
+    case "wholeOrLess": {
+      const { [action.noteId]: was, ...rest } = view.whole;
+      return { ...view, whole: was ? rest : { ...rest, [action.noteId]: true } };
     }
   }
 }

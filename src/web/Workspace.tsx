@@ -14,7 +14,7 @@ import { layoutOf, reduce, restored, showing, type Side, type SideAction } from 
 import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, typed } from "./keybindings.ts";
 import { lastChange, relisted, withChanged } from "./knownNotes.ts";
 import { LOOK_SETTINGS, lookOf } from "./look.ts";
-import { NoteEditor } from "./NoteEditor.tsx";
+import { NoteEditor, type SaveShown } from "./NoteEditor.tsx";
 import { MarkdownReader } from "./MarkdownReader.tsx";
 import { NoteReader } from "./NoteReader.tsx";
 import { cursorIn, onNoteMoves, putCursor } from "./openNotes.ts";
@@ -209,6 +209,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   /** An undo or redo that didn't happen, and why, shown on its note until the member's next step. */
   const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
+  /** What each open note's editor says of saving its note, for the bottom bar to say of the note in front. */
+  const [saving, setSaving] = useState<ReadonlyMap<string, { noteId: string; shown: SaveShown }>>(() => new Map());
 
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
   /** The notes a listing may cover, and the ones in Trash, which none does. */
@@ -477,6 +479,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   listedNotes.current = notes;
   /** Notes loaded, saved, or created since the last listing was asked for, which its answer can't know. */
   const learned = useRef(new Map<string, NoteSummary>());
+  /** Notes that were read before the listing arrived. The note is drawn from its own read, and what is said above it (its breadcrumbs) needs its summary, so it is held here until the listing can say it. */
+  const [early, setEarly] = useState<ReadonlyMap<string, NoteSummary>>(new Map());
   useEffect(() => {
     let live = true;
     const since = (learned.current = new Map());
@@ -551,6 +555,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
       // Before the app goes to a note it has just made, so it doesn't stop to ask where the note is.
       noteIsHere(note.id, workspaceId);
       learned.current.set(note.id, summary);
+      if (!listedNotes.current) setEarly((was) => new Map(was).set(note.id, summary));
       setNotes((all) => all && [summary, ...all.filter((n) => n.id !== note.id)]);
       setGone((was) => (was.has(note.id) ? new Set([...was].filter((id) => id !== note.id)) : was));
       if (location.pathname.startsWith("/note/") && location.pathname.endsWith(note.id)) navigate(notePath(note), { replace: true });
@@ -987,6 +992,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
   /** The bottom bar's items, lowest order first. Sorting keeps those of one order as the plugins added them. */
   const bar = useMemo(() => [...contributed.views.bar].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.bar]);
+  const tools = useMemo(() => [...contributed.views.tool].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.tool]);
+  const saved = [...saving.values()].findLast((s) => s.noteId === routeNoteId)?.shown;
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay?.id);
   /** What the app tells the member, drawn inside the settings while they are open, where it is above them. */
   const toasts = <Toasts told={told} onGone={(id) => tell((shown) => shown.filter((t) => t.id !== id))} />;
@@ -1020,8 +1027,9 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     return note ? { kind: "note", note } : { kind: "nothing" };
   })();
 
+  const summaryFor = (noteId: string) => byId.get(noteId) ?? (notes ? undefined : early.get(noteId));
   const renderNote = (noteId: string, { onEdit, focus, onFocused }: { onEdit?: () => void; focus?: boolean; onFocused?: () => void } = {}) => {
-    const note = byId.get(noteId);
+    const note = summaryFor(noteId);
     return (
       <NoteEditor
         key={noteId}
@@ -1049,24 +1057,14 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
         onContributionFailed={host.fail}
         extensions={extensions}
         onExtensionRefused={host.fail}
-        meta={
-          // Both are there from the start, empty until they are known, so the bar is as tall while they load as after.
-          <>
-            <span className="crumbs" title={(note && tree?.pathName(note.folderId)) || undefined}>
-              {note && tree?.pathName(note.folderId)}
-            </span>
-            {note?.private && (
-              <span className="private-mark">
-                <Icon name="lock" /> Private
-              </span>
-            )}
-            {note?.access === "view" && canEdit && <span className="private-mark">View only</span>}
-            {note &&
-              contributed.views.mark.map((mark) => (
-                <Drawn key={mark.id} host={host} view={mark} note={note} />
-              ))}
-            <span>{note && `edited ${ago(note.updatedAt, now)} by ${note.updatedBy.name}`}</span>
-          </>
+        marks={note && contributed.views.mark.map((mark) => <Drawn key={mark.id} host={host} view={mark} note={note} />)}
+        onSaveShown={(editor, shown) =>
+          setSaving((was) => {
+            const next = new Map(was);
+            if (shown) next.set(editor, { noteId, shown });
+            else next.delete(editor);
+            return next;
+          })
         }
         live={
           focusMode &&
@@ -1085,6 +1083,19 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
           ))
         }
       />
+    );
+  };
+
+  /** An open note's own buttons at its top right, before Focus: those the plugins put in the `tool` slot, lowest order first. */
+  const renderNoteTools = (noteId: string) => {
+    const note = summaryFor(noteId);
+    if (!note || !tools.length) return null;
+    return (
+      <span className="note-tools">
+        {tools.map((tool) => (
+          <Drawn key={tool.id} host={host} view={tool} note={note} />
+        ))}
+      </span>
     );
   };
 
@@ -1125,6 +1136,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     <div className="groups" data-focus-mode={focusMode || undefined}>
       <section className="group" data-front="">
         <div className="tab-row">
+          {routeNoteId && renderNoteTools(routeNoteId)}
           <button type="button" className="icon-button focus-button" aria-label="Focus" title={`${focusMode ? "Leave focus" : "Focus"} (${shortcut("view.toggleFocus")})`} aria-pressed={focusMode} onClick={toggleFocus}>
             <Icon name="focus" />
           </button>
@@ -1143,7 +1155,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
 
   return (
-    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || !!saved || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
       {contributed.views.column.map((column) => (
         <Drawn key={column.id} host={host} view={column} />
       ))}
@@ -1169,7 +1181,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
         {/* The editor area stays as it is under a page that only leads somewhere else, out of sight, so no open editor or embed is made again. */}
         {editorArea ? (
           <div className="editor-area" data-under={passing ? "" : undefined}>
-            <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} fallback={loneEditor} />
+            <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderNoteTools={renderNoteTools} renderFolder={renderFolder} renderPage={renderPage} empty={empty} fallback={loneEditor} />
           </div>
         ) : (
           !passing && loneEditor
@@ -1193,10 +1205,15 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
           <InspectorBar ref={inspectorBar} views={inspectorViews} app={app} shown={shownPanel} panelId={panelId} onPick={togglePanel} />
         </>
       )}
-      {bar.length > 0 && (
+      {(bar.length > 0 || saved) && (
         <div className="bar" role="group" aria-label="Bottom bar">
           {(["left", "right"] as const).map((side) => (
             <div key={side} className="bar-side" data-side={side}>
+              {side === "right" && saved && (
+                <span className="bar-item save-state" role="status" data-failed={saved.failed || undefined}>
+                  {saved.label}
+                </span>
+              )}
               {bar
                 .filter((item) => (item.side ?? "left") === side)
                 .map((item) => (

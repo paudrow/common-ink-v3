@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, listedNote, openAllNotes, ownPlugin, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { editOf, folderRow, openAllNotes, ownPlugin, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
 import { settingsDialog } from "./settings-helpers.ts";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -224,7 +224,7 @@ test("a note that arrives after the member opened a panel over the page leaves t
     await route.fallback();
   });
   await openAllNotes(page);
-  await listedNote(page, "Draft").click();
+  await editOf(page, "Draft").click();
   await reading;
 
   await icon(page, "Info").click();

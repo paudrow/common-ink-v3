@@ -28,12 +28,12 @@ async function aNote(page: Page, text: string) {
 test("Text size sizes the whole app, and a note's text with it until Editor text size is set", async ({ page }) => {
   await aNote(page, "# Sizes\n\nWords.");
   const menu = await px(page, ".sidebar a, .sidebar button", "font-size");
-  const bar = await px(page, ".note-bar", "font-size");
+  const bar = await px(page, ".bar", "font-size");
   const text = await px(page, ".editor .cm-editor", "font-size");
 
   await settle(page, { "core.textSize": 125 });
   expect(await px(page, ".sidebar a, .sidebar button", "font-size")).toBeCloseTo(menu * 1.25, 1);
-  expect(await px(page, ".note-bar", "font-size")).toBeCloseTo(bar * 1.25, 1);
+  expect(await px(page, ".bar", "font-size")).toBeCloseTo(bar * 1.25, 1);
   expect(await px(page, ".editor .cm-editor", "font-size"), "the note's text follows").toBeCloseTo(text * 1.25, 1);
 
   // The settings over the window are sized by it too.
@@ -46,7 +46,7 @@ test("Text size sizes the whole app, and a note's text with it until Editor text
 
   await settle(page, { "core.textSize": 125, "core.editorTextSize": 100 });
   expect(await px(page, ".editor .cm-editor", "font-size"), "set, the editor's own size is used").toBeCloseTo(text, 1);
-  expect(await px(page, ".note-bar", "font-size"), "and the rest of the app keeps its").toBeCloseTo(bar * 1.25, 1);
+  expect(await px(page, ".bar", "font-size"), "and the rest of the app keeps its").toBeCloseTo(bar * 1.25, 1);
 
   // Set to 100 in Settings, the same as its default, it is still the member's: the note's text stays at 100 under a Text size of 125.
   await settle(page, { "core.textSize": 125 });
@@ -60,7 +60,7 @@ test("Text size sizes the whole app, and a note's text with it until Editor text
 
   await settle(page, { "core.textSize": 90, "core.editorTextSize": 120 });
   expect(await px(page, ".editor .cm-editor", "font-size")).toBeCloseTo(text * 1.2, 1);
-  expect(await px(page, ".note-bar", "font-size")).toBeCloseTo(bar * 0.9, 1);
+  expect(await px(page, ".bar", "font-size")).toBeCloseTo(bar * 0.9, 1);
 });
 
 const FONTS = [

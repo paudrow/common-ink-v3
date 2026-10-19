@@ -17,7 +17,7 @@ async function open(page: Page, text: string, settings?: Record<string, unknown>
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Last words.");
-  await expect(page.locator(".note-meta .crumbs")).not.toBeEmpty();
+  await expect(page.locator(".note-tools")).toBeVisible();
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+Home");
   await page.evaluate(() => document.fonts.ready);

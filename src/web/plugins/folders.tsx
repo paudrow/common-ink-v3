@@ -344,24 +344,25 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
           items={[
             ...(onSplit
               ? [
-                  { label: "Open in a split right", action: () => onSplit(menu.id, "right") },
-                  { label: "Open in a split down", action: () => onSplit(menu.id, "down") },
+                  { label: "Open in a split right", icon: "split" as const, action: () => onSplit(menu.id, "right") },
+                  { label: "Open in a split down", icon: "splitDown" as const, action: () => onSplit(menu.id, "down") },
                 ]
               : []),
-            ...(menu.folder?.access === "edit" ? [{ label: "New folder inside", action: () => startCreate(menu.id) }] : []),
-            ...(menu.folder && placesFor(tree, menu.id, member).length ? [{ label: "Move to…", action: () => onPickPlace(menu.id) }] : []),
-            ...(onShare && menu.folder && shareable === menu.id ? [{ label: "Share", action: () => onShare(menu.id) }] : []),
+            ...(menu.folder?.access === "edit" ? [{ label: "New folder inside", icon: "plus" as const, action: () => startCreate(menu.id) }] : []),
+            ...(menu.folder && placesFor(tree, menu.id, member).length ? [{ label: "Move to…", icon: "folders" as const, action: () => onPickPlace(menu.id) }] : []),
+            ...(onShare && menu.folder && shareable === menu.id ? [{ label: "Share", icon: "share" as const, action: () => onShare(menu.id) }] : []),
             ...(menu.folder?.access !== "edit" || menu.id === tree.unsortedId
               ? []
               : [
                   {
                     label: "Rename",
+                    icon: "edit" as const,
                     action: () => {
                       setError(null);
                       setEditing({ kind: "rename", id: menu.id });
                     },
                   },
-                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.id }) }] : []),
+                  ...(role === "admin" ? [{ label: "Delete", icon: "trash" as const, action: () => run({ type: "folder.delete", id: menu.id }) }] : []),
                 ]),
           ]}
         />
@@ -506,7 +507,7 @@ export const folders: Plugin = {
   id: "folders",
   name: "Folders",
   description: "The folder tree in the sidebar, where notes are filed, moved and found.",
-  icon: "folders",
+  icon: "folders" as const,
   activate(host) {
     const moves = mover(host);
     const pickPlace = (folderId: string | null) => host.app().toggleOverlay(MOVE_OVERLAY, { folderId });
@@ -515,7 +516,7 @@ export const folders: Plugin = {
     host.views.register("section", {
       id: "folders",
       label: "Folders",
-      icon: "folders",
+      icon: "folders" as const,
       component: ({ app }) => {
         const live = listable(app.notes ?? [], false);
         return (

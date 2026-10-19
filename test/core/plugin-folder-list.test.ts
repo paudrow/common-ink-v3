@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NoteSummary } from "../../src/core/protocol.ts";
 import { ALL_NOTES, SHARED_WITH_ME } from "../../src/web/plugin-api.ts";
-import { INITIAL_VIEW, SHOWS, fits, includeArchivedOf, listReducer, listed, notesIn } from "../../src/web/plugins/noteListView.ts";
+import { INITIAL_VIEW, SHOWS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, withLife } from "../../src/web/plugins/noteListView.ts";
 
 const note = (id: string, over: Partial<NoteSummary> = {}) =>
   ({ id, title: id, snippet: "", folderId: "f", openTodos: 0, createdAt: 0, updatedAt: 0, state: "live", ...over }) as NoteSummary;
@@ -62,23 +62,35 @@ describe("how the list is set", () => {
   });
 });
 
-describe("a card", () => {
-  const expand = { type: "expandOrCollapse", noteId: "a" } as const;
-  const whole = { type: "wholeOrExcerpt", noteId: "a" } as const;
-
-  it("expands to an excerpt, then to the whole note and back, and collapses from either", () => {
-    const excerpt = listReducer(INITIAL_VIEW, expand);
-    expect(excerpt.expanded).toEqual({ a: "excerpt" });
-    expect(listReducer(excerpt, whole).expanded).toEqual({ a: "whole" });
-    expect(listReducer(listReducer(excerpt, whole), whole).expanded).toEqual({ a: "excerpt" });
-    expect(listReducer(listReducer(excerpt, whole), expand).expanded).toEqual({});
-    expect(listReducer(excerpt, { type: "collapse", noteId: "a" }).expanded).toEqual({});
+describe("the choice under the search bar", () => {
+  it("writes the choice into the bar and replaces the one already there", () => {
+    expect(withLife("", "active")).toBe("is:open");
+    expect(withLife("tea", "archived")).toBe("tea is:archived");
+    expect(withLife("tea is:open", "all")).toBe("tea (is:open OR is:archived)");
+    expect(withLife("is:archived sort:title-asc", "active")).toBe("sort:title-asc is:open");
+    expect(withLife("is:trashed", "archived")).toBe("is:archived");
+    expect(withLife("is:open OR is:archived", "active")).toBe("is:open");
+    expect(withLife("((", "all")).toBe("(is:open OR is:archived)");
   });
 
-  it("is expanded apart from the others, and a collapsed one is left as it is by what only an expanded one takes", () => {
-    const two = listReducer(listReducer(INITIAL_VIEW, expand), { type: "expandOrCollapse", noteId: "b" });
-    expect(listReducer(two, whole).expanded).toEqual({ a: "whole", b: "excerpt" });
-    expect(listReducer(INITIAL_VIEW, whole)).toBe(INITIAL_VIEW);
-    expect(listReducer(INITIAL_VIEW, { type: "collapse", noteId: "a" })).toBe(INITIAL_VIEW);
+  it("reads the choice back, and an empty bar is active notes", () => {
+    expect(lifeOf("")).toBe("active");
+    expect(lifeOf("tea")).toBe("active");
+    expect(lifeOf("is:open")).toBe("active");
+    expect(lifeOf("tea is:archived")).toBe("archived");
+    expect(lifeOf("tea (is:open OR is:archived)")).toBe("all");
+  });
+});
+
+describe("a card", () => {
+  const whole = { type: "wholeOrLess", noteId: "a" } as const;
+
+  it("grows to the whole of its note and is cut back again, apart from the others", () => {
+    expect(INITIAL_VIEW.whole).toEqual({});
+    expect(listReducer(INITIAL_VIEW, whole).whole).toEqual({ a: true });
+    expect(listReducer(listReducer(INITIAL_VIEW, whole), whole).whole).toEqual({});
+    const two = listReducer(listReducer(INITIAL_VIEW, whole), { type: "wholeOrLess", noteId: "b" });
+    expect(two.whole).toEqual({ a: true, b: true });
+    expect(listReducer(two, whole).whole).toEqual({ b: true });
   });
 });

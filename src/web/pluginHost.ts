@@ -152,7 +152,7 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "dashboard", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "dashboard", "bar", "overlay", "mark", "tool", "notice"] as const satisfies readonly (keyof Slots)[];
 
 /** The most a plugin may keep in one remembered setting, in characters of JSON: the member's settings are small, and theirs. */
 const MAX_REMEMBERED = 10_000;

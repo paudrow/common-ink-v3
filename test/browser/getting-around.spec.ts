@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { Upload } from "../../src/core/protocol.ts";
-import { listedNote, openAllNotes, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { editOf, openAllNotes, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -38,7 +38,7 @@ const cursorLine = (page: Page) =>
 const tabsOf = (page: Page, n = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(n).getByRole("tab");
 async function openNote(page: Page, title: string) {
   await openAllNotes(page);
-  await listedNote(page, title).click();
+  await editOf(page, title).click();
 }
 const LONG = `# Long\n\n${Array.from({ length: 80 }, (_, i) => `Line ${i + 1} of the long note.`).join("\n\n")}`;
 

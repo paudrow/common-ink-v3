@@ -544,13 +544,19 @@ export interface Slots {
    */
   bar: { id: string; component: View; side?: "left" | "right"; order?: number; live?: true };
   /**
-   * A word or two about a note in the bar above its text, after its folder, in every editor showing
-   * it: that it is archived, say, with a button that undoes it. The bar keeps its height, so the
-   * note's text doesn't move when a mark comes or goes. One with nothing to say of a note draws nothing.
+   * A word or two about a note in a quiet line under its title, in every editor showing it: that it
+   * is archived, say, with a button that undoes it. The line takes no room while no mark has anything
+   * to say, and the text under the title moves down by its height when one does.
    */
   mark: { id: string; component: ComponentType<ViewProps & { note: NoteSummary }> };
   /**
-   * A banner between a note's bar and its text, in every editor showing it, for what changes what
+   * A quiet button at an open note's top right, before Focus, in every editor group showing the note
+   * in front: Archive, and the note's "…" menu. `order` places it among the others, lowest first and
+   * 0 unless said. One with nothing to offer for a note draws nothing.
+   */
+  tool: { id: string; order?: number; component: ComponentType<ViewProps & { note: NoteSummary }> };
+  /**
+   * A banner above a note's text, in every editor showing it, for what changes what
    * the member can do with the note: that it is in Trash. One with nothing to say of a note draws
    * nothing. When one appears the text moves down by the banner's height and no further.
    */
@@ -608,6 +614,8 @@ export interface EditorProps extends ViewProps {
   renderNote: (noteId: string, options?: { onEdit?: () => void; focus?: boolean; onFocused?: () => void }) => ReactNode;
   /** Draws a folder's list of notes, with whatever is in the `folder` slot. */
   renderFolder: (folderId: string) => ReactNode;
+  /** Draws an open note's own buttons for its group's tab row, before Focus: the `tool` slot's. Nothing for a note not known yet. */
+  renderNoteTools: (noteId: string) => ReactNode;
   /** Draws a page at the address it is at, which is {@link Opened}'s `path`. One no plugin has registered any more is drawn as nothing being there. */
   renderPage: (pageId: string, path: string) => ReactNode;
   /** What to show where nothing is open: a line saying to pick a note. */

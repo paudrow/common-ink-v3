@@ -86,8 +86,10 @@ const look = EditorView.baseTheme({
 /** The editor extension that draws links, a way to put the cursor inside the link it is at, and whether it is at one. */
 export function linkDrawing(noteOf: NoteOf, open: Open): { extension: Extension; edit: (view: EditorView) => void; canEdit: (view: EditorView) => boolean } {
   const following = EditorView.domEventHandlers({
-    mousedown(event) {
-      const noteId = modClick(event) && event.target instanceof Element ? event.target.closest<HTMLElement>("[data-note]")?.dataset.note : undefined;
+    mousedown(event, view) {
+      // A link is in the note's text. The card a note is read in is itself marked with its note, and is not a link.
+      const link = modClick(event) && event.target instanceof Element ? event.target.closest<HTMLElement>("[data-note]") : null;
+      const noteId = link && view.contentDOM.contains(link) ? link.dataset.note : undefined;
       if (!noteId) return false;
       open(noteId);
       event.preventDefault();

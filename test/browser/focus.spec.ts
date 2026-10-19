@@ -114,11 +114,12 @@ for (const { n, kind, shows } of KINDS) {
     const out = (await page.getByRole("button", { name: "Focus" }).boundingBox())!;
     expect(out.x + out.width).toBe(1280 - 6);
     expect(out.y).toBeLessThan(10);
-    // A note's save state is on the quiet line at the window's foot, not under the way out.
+    // A note's save state is on the quiet line at the window's foot. The bottom bar and the note's own buttons are out of sight.
     if (kind === "a note") {
       const saved = (await page.locator(".note-live-save").filter({ visible: true }).boundingBox())!;
       expect(saved.y).toBeGreaterThan(out.y + out.height);
       expect(saved.y + saved.height).toBeGreaterThan(720 - 30);
+      await expect(page.locator(".save-state, .note-tools").filter({ visible: true })).toHaveCount(0);
     }
 
     await page.reload();

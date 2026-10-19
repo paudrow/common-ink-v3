@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, me, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { editOf, listedNotes, me, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const history = (page: Page, id: string) => perform(page, { type: "note.history", id });
 
@@ -34,10 +34,10 @@ test("a new person signs in, writes a note, and finds it intact after reloading"
   ]);
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Field notes"]);
-  await expect(noteCard(page, "Field notes").locator(".card-preview")).toHaveText("Typed in one go.");
+  await expect(noteCard(page, "Field notes").locator(".card-body .cm-line")).toHaveText(["# Field notes", "", "Typed in one go."]);
   await expect(noteCard(page, "Field notes")).toContainText("just now");
   await expect(noteCard(page, "Field notes")).toContainText("Mary Somerville");
-  await listedNote(page, "Field notes").click();
+  await editOf(page, "Field notes").click();
 
   await page.reload();
   await expect(page.locator(".cm-line")).toHaveText(["# Field notes", "", "Typed in one go."]);

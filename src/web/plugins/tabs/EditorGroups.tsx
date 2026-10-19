@@ -42,6 +42,8 @@ interface Props {
   isPrivate: (tab: Opened) => boolean;
   /** What a tab's menu offers about its note, after what it offers about the tab. */
   noteItems: (tab: Opened) => MenuItem[];
+  /** An open note's own buttons, drawn before Focus while the note is the group's tab in front. */
+  noteTools: (noteId: string) => ReactNode;
   dispatch: (action: EditorAction) => void;
   render: (group: Group, tab: Opened) => ReactNode;
   /** What a group with nothing open shows. */
@@ -62,7 +64,7 @@ export function showTabMenu() {
   tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: left, clientY: bottom }));
 }
 
-export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
+export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, noteTools, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -207,6 +209,7 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, di
                 })}
               </div>
             )}
+          {group.active?.kind === "note" && noteTools(group.active.id)}
           <button
             type="button"
             className="icon-button focus-button"
@@ -248,14 +251,14 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, di
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
-            { label: "Close", action: () => dispatch({ type: "close", scope: "tab", ...menuTab }) },
+            { label: "Close", icon: "close" as const, action: () => dispatch({ type: "close", scope: "tab", ...menuTab }) },
             { label: "Close others", disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "close", scope: "others", ...menuTab }) },
             { label: "Close to the left", disabled: menuAt === 0, action: () => dispatch({ type: "close", scope: "left", ...menuTab }) },
             { label: "Close to the right", disabled: menuAt === menuGroup.tabs.length - 1, action: () => dispatch({ type: "close", scope: "right", ...menuTab }) },
             { label: "Close all", action: () => dispatch({ type: "close", scope: "all", ...menuTab }) },
-            ...(menuGroup.tabs[menuAt]!.preview ? [{ label: "Keep open", action: () => dispatch({ type: "pin", ...menuTab }) }] : []),
-            { label: "Split right", disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "right", ...menuTab }) },
-            { label: "Split down", disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "down", ...menuTab }) },
+            ...(menuGroup.tabs[menuAt]!.preview ? [{ label: "Keep open", icon: "pin" as const, action: () => dispatch({ type: "pin", ...menuTab }) }] : []),
+            { label: "Split right", icon: "split" as const, disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "right", ...menuTab }) },
+            { label: "Split down", icon: "splitDown" as const, disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "down", ...menuTab }) },
             ...noteItems(menu.tab),
           ]}
         />

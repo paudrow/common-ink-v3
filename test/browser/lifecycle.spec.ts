@@ -11,7 +11,9 @@ const listShows = async (page: Page, titles: string[]) => {
   await expect(page.getByRole("main", { name: "Editor" }).getByRole("heading", { level: 1 })).toHaveText("All notes");
   await expect(listedNotes(page)).toHaveText(titles);
 };
-const bar = (page: Page) => page.locator(".note-bar");
+/** The quiet line under an open note's title, and the bottom bar, which says whether it is saved. */
+const bar = (page: Page) => page.locator(".note-marks");
+const saveBar = (page: Page) => page.getByRole("group", { name: "Bottom bar" });
 const banner = (page: Page) => page.getByRole("group", { name: "In Trash" });
 const notice = (page: Page) => page.getByRole("group", { name: "Notice" });
 const trashRows = (page: Page) => page.getByRole("list", { name: "Notes in Trash" }).getByRole("listitem");
@@ -48,7 +50,7 @@ async function holdingSaves(page: Page) {
 
 /** Everything the note's save state says on `page` from now on, read back with the function returned. */
 async function saveStatesSaid(page: Page) {
-  await bar(page)
+  await saveBar(page)
     .getByRole("status")
     .evaluate((el) => {
       const said: string[] = ((window as unknown as { __said: string[] }).__said = [el.textContent ?? ""]);
@@ -121,16 +123,16 @@ test("an archived note leaves the note list and Todos, and comes back when archi
   await page.goto("/");
   await listShows(page, ["Old", "Kept"]);
 
-  await noteCard(page, "Old").click({ button: "right" });
+  await noteCard(page, "Old").locator(".card-head").click({ button: "right" });
   await page.getByRole("menuitem", { name: "Archive" }).click();
 
   await expect(listedNotes(page)).toHaveText(["Kept"]);
   await expect.poll(() => stateOf(page, old.id)).toBe("archived");
 
-  await page.getByRole("radio", { name: "All", exact: true }).check();
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("(is:open OR is:archived)");
   await expect(listedNotes(page)).toHaveText(["Old", "Kept"]);
-  await expect(noteCard(page, "Old")).toContainText("Archived");
-  await expect(noteCard(page, "Kept")).not.toContainText("Archived");
+  await expect(noteCard(page, "Old").locator(".state-label")).toHaveText("Archived");
+  await expect(noteCard(page, "Kept").locator(".state-label")).toHaveCount(0);
 
   await page.goto("/todos");
   await expect(todosPage(page).getByRole("list", { name: "Todos" }).getByRole("listitem")).toHaveCount(1);
@@ -218,7 +220,7 @@ test("the Trash page says who trashed a note and how long it has, and restores i
   await page.goto("/");
   await listShows(page, ["Roadmap"]);
 
-  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
   await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Trash" }).click();
   await expect(page).toHaveURL(/\/trash$/);
   await expect(page.getByRole("region", { name: "Trash" })).toContainText("Trash is empty.");
@@ -389,13 +391,13 @@ test("typing in a note that turns out to be in Trash is kept and said to be unsa
   saves.release();
 
   await expect(banner(page)).toBeVisible();
-  await expect(bar(page).getByRole("status")).toHaveText(UNSAVED_IN_TRASH);
+  await expect(saveBar(page).getByRole("status")).toHaveText(UNSAVED_IN_TRASH);
   await expect(lines(page).last()).toHaveText("first and second");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Draft\n\nfirst");
 
   await banner(page).getByRole("button", { name: "Restore" }).click();
 
-  await expect(bar(page).getByRole("status")).toHaveText("Saved");
+  await expect(saveBar(page).getByRole("status")).toHaveText("Saved");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Draft\n\nfirst and second");
 });
 
@@ -408,7 +410,7 @@ test("a note someone else archives, trashes, and restores shows each state in a 
   const note = await create(page, "# Shared plan\n\nsteady");
   await page.goto("/");
   await openAllNotes(page);
-  await page.getByRole("radio", { name: "All", exact: true }).check();
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("(is:open OR is:archived)");
   await expect(noteCard(page, "Shared plan")).toBeVisible();
   await expect(noteCard(page, "Shared plan")).not.toContainText("Archived");
 
@@ -444,7 +446,7 @@ test("a save refused because someone else moved the note to Trash says so at onc
   await perform(grace, { type: "note.trash", id: note.id }, workspaceId);
   saves.release();
 
-  await expect(bar(page).getByRole("status")).toHaveText(UNSAVED_IN_TRASH);
+  await expect(saveBar(page).getByRole("status")).toHaveText(UNSAVED_IN_TRASH);
   await expect(banner(page)).toContainText("This note is in Trash");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(lines(page).last()).toHaveText("first and second");
@@ -452,7 +454,7 @@ test("a save refused because someone else moved the note to Trash says so at onc
 
   await banner(page).getByRole("button", { name: "Restore" }).click();
 
-  await expect(bar(page).getByRole("status")).toHaveText("Saved");
+  await expect(saveBar(page).getByRole("status")).toHaveText("Saved");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Draft\n\nfirst and second");
   await expect.poll(async () => (await said()).filter((text) => text.includes("Couldn't save"))).toEqual([]);
 });

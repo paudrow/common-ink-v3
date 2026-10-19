@@ -69,7 +69,7 @@ test("a new note lands in the folder whose list is open, or Unsorted from the li
   await folder(page, "Unsorted").click();
   await expect(listHeading(page)).toHaveText("Unsorted");
   await expect(listedNotes(page)).toHaveText(["Untitled"]);
-  await expect(noteCard(page, "Untitled").locator(".card-details")).toHaveText("Ada Lovelacejust now");
+  await expect(noteCard(page, "Untitled").locator(".card-details")).toHaveText("edited just nowAda Lovelace");
 
   await newFolder(page, "Projects");
   await folder(page, "Projects").click();
@@ -78,13 +78,13 @@ test("a new note lands in the folder whose list is open, or Unsorted from the li
   await page.keyboard.type("# Plan");
 
   await expect(page.getByRole("tab", { name: "Plan" })).toBeVisible();
-  await expect(editorPane(page).locator(".note-meta").getByText("Projects", { exact: true })).toBeVisible();
-  await expect(editorPane(page).getByText("edited just now by Ada Lovelace")).toBeVisible();
+  await showPanel(page, "Info");
+  await expect(page.getByRole("complementary", { name: "Inspector" })).toContainText("Projects");
   await expect(folder(page, "Projects")).toHaveAccessibleDescription("1");
   await expect(folder(page, "Unsorted")).toHaveAccessibleDescription("1");
   await folder(page, "Projects").click();
   await expect(listedNotes(page)).toHaveText(["Plan"]);
-  await expect(noteCard(page, "Plan").locator(".card-details")).toHaveText("Ada Lovelacejust now");
+  await expect(noteCard(page, "Plan").locator(".card-details")).toHaveText("edited just nowAda Lovelace");
 });
 
 test("dragging a note onto a folder moves it there", async ({ page }) => {
@@ -94,14 +94,14 @@ test("dragging a note onto a folder moves it there", async ({ page }) => {
   await page.reload();
   await folder(page, "Unsorted").click();
 
-  await noteCard(page, "Plan").dragTo(folder(page, "Projects"));
+  await noteCard(page, "Plan").locator(".card-head").dragTo(folder(page, "Projects"));
 
   await expect(folder(page, "Projects")).toHaveAccessibleDescription("1");
   await expect(folder(page, "Unsorted")).toHaveAccessibleDescription("0");
   await expect(page.getByText("No notes in this folder.")).toBeVisible();
   await folder(page, "Projects").click();
   await expect(listedNotes(page)).toHaveText(["Plan"]);
-  await expect(noteCard(page, "Plan").locator(".card-preview")).toHaveText("Write it down.");
+  await expect(noteCard(page, "Plan").locator(".card-body .cm-line")).toHaveText(["# Plan", "", "Write it down."]);
 });
 
 test("a folder with notes in it can't be deleted, and an empty one can", async ({ page }) => {
@@ -196,21 +196,21 @@ test("a folder's list filters on title and snippet, sorts, and narrows to notes 
   await expect(listHeading(page)).toHaveText("Fruit");
   await expect(editorPane(page).getByText("3 notes", { exact: true })).toBeVisible();
   await expect(listedNotes(page)).toHaveText(["Banana", "Cherry", "Apple"]);
-  await expect(noteCard(page, "Banana").locator(".card-preview")).toHaveText("Yellow and curved, ripe. buy");
-  await expect(noteCard(page, "Banana").locator(".card-details")).toHaveText("Ada Lovelacejust now1 open");
-  await expect(noteCard(page, "Cherry").locator(".card-preview")).toHaveText("pit wash");
-  await expect(noteCard(page, "Cherry").locator(".card-details")).toHaveText("Ada Lovelacejust now2 open");
-  await expect(noteCard(page, "Apple").locator(".card-details")).toHaveText("Ada Lovelacejust now");
-  const sort = page.getByRole("combobox", { name: "Sort by" });
-  await expect(sort).toHaveValue("recent");
-  await sort.selectOption("Created");
+  await expect(noteCard(page, "Banana").locator(".card-body .cm-line").nth(2)).toHaveText("Yellow and curved, ripe.");
+  await expect(noteCard(page, "Banana").locator(".card-body .cm-line").nth(4)).toContainText("buy");
+  await expect(noteCard(page, "Banana").locator(".card-details")).toHaveText("edited just nowAda Lovelace");
+  await expect(noteCard(page, "Cherry").locator(".card-body .cm-line").nth(2)).toContainText("pit");
+  await expect(noteCard(page, "Cherry").locator(".card-body .cm-line").nth(3)).toContainText("wash");
+  await expect(noteCard(page, "Cherry").locator(".card-details")).toHaveText("edited just nowAda Lovelace");
+  await expect(noteCard(page, "Apple").locator(".card-details")).toHaveText("edited just nowAda Lovelace");
+  // The query is the list's one control: its order and whether notes have todos are said in it.
+  const search = page.getByRole("searchbox", { name: "Search notes" });
+  await search.fill("sort:created-desc");
   await expect(listedNotes(page)).toHaveText(["Cherry", "Apple", "Banana"]);
-  await sort.selectOption("Title");
+  await search.fill("sort:title-asc");
   await expect(listedNotes(page)).toHaveText(["Apple", "Banana", "Cherry"]);
-
-  await page.getByRole("button", { name: "Has todos" }).click();
+  await search.fill("has:todo sort:title-asc");
   await expect(listedNotes(page)).toHaveText(["Banana", "Cherry"]);
-  await page.getByRole("button", { name: "Has todos" }).click();
 
   // What is typed is searched for in the folder's notes, by the server, and found in a note's text as in its title.
   await page.getByRole("searchbox", { name: "Search notes" }).fill("RED");
@@ -225,10 +225,9 @@ test("a folder's list filters on title and snippet, sorts, and narrows to notes 
   await page.getByRole("searchbox", { name: "Search notes" }).fill("cherry");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
   await openAllNotes(page);
-  await expect(noteCard(page, "Cherry").locator(".card-details")).toHaveText("FruitAda Lovelacejust now2 open");
+  await expect(noteCard(page, "Cherry").locator(".card-details")).toHaveText("Fruitedited just nowAda Lovelace");
   await folder(page, "Fruit").click();
   await expect(page.getByRole("searchbox", { name: "Search notes" })).toHaveValue("cherry");
-  await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue("title");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
 });
 
