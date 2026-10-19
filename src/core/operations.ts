@@ -1183,9 +1183,9 @@ async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[]
  * its completions were filed on, as one batch. Every revert goes through here, of one note or of
  * many. Null when another write got in first.
  */
-async function recordTakenBack(ctx: Context, row: NoteRow, history: readonly Recorded[], reverts: Reverts, changes: ChangeSet, resolution: Resolution | null): Promise<{ next: NoteRow; unfiled?: NonNullable<Written["unfiled"]> } | null> {
+async function recordTakenBack(ctx: Context, row: NoteRow, history: readonly Recorded[], reverts: Reverts, changes: ChangeSet, resolution: Resolution | null, filed = true): Promise<{ next: NoteRow; unfiled?: NonNullable<Written["unfiled"]> } | null> {
   const { next, statements } = recording(ctx, row, changes, row.revision, { reverts, resolution });
-  const refiled = await refiling(ctx, row, history, reverts);
+  const refiled = filed ? await refiling(ctx, row, history, reverts) : { statements: [] };
   if (!(await landed(ctx, [...statements, ...refiled.statements]))) return null;
   return { next, ...(refiled.unfiled && { unfiled: refiled.unfiled }) };
 }
@@ -1312,6 +1312,15 @@ async function takingBack(ctx: Context, id: string, need: GrantLevel, choose: Ch
  * many they are. A note that isn't in the workspace, or that the actor can't see, is left out: the
  * two are the same to whoever asks. What they may do with each note that is here is still to ask.
  */
+/** Of these notes, those with a completion filed on a daily note, whose revert may change that note too. */
+async function filedElsewhere(ctx: Context, ids: readonly string[]): Promise<Set<string>> {
+  const { results } = await ctx.db
+    .prepare("SELECT DISTINCT note_id FROM completions WHERE note_id IN (SELECT value FROM json_each(?1)) AND daily_note_id <> note_id AND daily_revision IS NOT NULL")
+    .bind(JSON.stringify(ids))
+    .all<{ note_id: string }>();
+  return new Set(results.map((r) => r.note_id));
+}
+
 async function loadWithHistory(ctx: Context, ids: readonly string[]): Promise<Map<string, { row: NoteRow; history: Recorded[] }>> {
   const named = JSON.stringify(ids);
   const [notes, changes] = await ctx.db.batch<NoteRow & RecordedRow & { note_id: string }>([
@@ -2407,45 +2416,47 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "history.revert": {
     needs: "edit",
     async run(ctx, op) {
-      const read = await loadWithHistory(ctx, op.changes.map((c) => c.noteId));
-      const done: RevertedNotes = { reverted: [], skipped: [] };
-      for (const item of op.changes) {
+      const ids = op.changes.map((c) => c.noteId);
+      const [read, filing] = await Promise.all([loadWithHistory(ctx, ids), filedElsewhere(ctx, ids)]);
+      type Told = RevertedNotes["reverted"][number] | RevertedNotes["skipped"][number];
+      const told: (Told | (() => Promise<Told>))[] = op.changes.map((item) => {
         const note = read.get(item.noteId);
-        if (!note) {
-          done.skipped.push({ noteId: item.noteId, noteTitle: "", why: "refused", message: NO_SUCH_NOTE });
-          continue;
-        }
+        if (!note) return { noteId: item.noteId, noteTitle: "", why: "refused", message: NO_SUCH_NOTE };
         const { row, history } = note;
         const name = row.title || "Untitled";
         // Asked of each note, as `loadNote` asks it of one: a role that may edit doesn't say this note may be.
-        if (!allows(itemLevel(ctx.sight, row), "edit")) {
-          done.skipped.push({ ...titled(row), why: "refused", message: CANT_CHANGE });
-          continue;
-        }
-        if (row.state === "trashed") {
-          done.skipped.push({ ...titled(row), why: "refused", message: IN_TRASH });
-          continue;
-        }
-        const moved = () => done.skipped.push({ ...titled(row), why: "changed", message: `${name} has changed since this revert was previewed, so it was left as it is. Preview its revert again` });
-        if (item.at !== undefined && item.at !== row.revision) {
-          moved();
-          continue;
-        }
+        if (!allows(itemLevel(ctx.sight, row), "edit")) return { ...titled(row), why: "refused", message: CANT_CHANGE };
+        if (row.state === "trashed") return { ...titled(row), why: "refused", message: IN_TRASH };
+        const moved: Told = { ...titled(row), why: "changed", message: `${name} has changed since this revert was previewed, so it was left as it is. Preview its revert again` };
+        if (item.at !== undefined && item.at !== row.revision) return moved;
         try {
           const { reverts, changes, resolution } = takingBackItem(row, history, item);
-          if (!reverts || applyChanges(changes, row.text) === row.text) {
-            done.skipped.push({ ...titled(row), why: "nothing", message: `Nothing in ${name} would change` });
-            continue;
-          }
-          const taken = await recordTakenBack(ctx, row, history, reverts, changes, resolution);
-          // By the title it had: a revert can leave a note with another, or with none.
-          if (taken) done.reverted.push({ ...titled(row), revision: taken.next.revision, reverted: reverts.revisions, ...(taken.unfiled && { unfiled: taken.unfiled }) });
-          else moved();
+          if (!reverts || applyChanges(changes, row.text) === row.text) return { ...titled(row), why: "nothing", message: `Nothing in ${name} would change` };
+          return async () => {
+            try {
+              const taken = await recordTakenBack(ctx, row, history, reverts, changes, resolution, filing.has(row.id));
+              // By the title it had: a revert can leave a note with another, or with none.
+              return taken ? { ...titled(row), revision: taken.next.revision, reverted: reverts.revisions, ...(taken.unfiled && { unfiled: taken.unfiled }) } : moved;
+            } catch (err) {
+              if (!(err instanceof OpError)) throw err;
+              return { ...titled(row), why: "refused", message: err.message };
+            }
+          };
         } catch (err) {
           if (!(err instanceof OpError)) throw err;
-          done.skipped.push({ ...titled(row), why: "refused", message: err.message });
+          return { ...titled(row), why: "refused", message: err.message };
         }
-      }
+      });
+      // Each note's revert is its own batch, so the notes are written at once and the request waits on
+      // the database a few times, not once for each note. A note whose completions were filed on a
+      // daily note changes that note too, so those go one at a time, after the rest.
+      const writes = told.flatMap((t, i) => (typeof t === "function" ? [i] : []));
+      const [alone, together] = [writes.filter((i) => filing.has(op.changes[i]!.noteId)), writes.filter((i) => !filing.has(op.changes[i]!.noteId))];
+      await Promise.all(together.map(async (i) => (told[i] = await (told[i] as () => Promise<Told>)())));
+      for (const i of alone) told[i] = await (told[i] as () => Promise<Told>)();
+      const done: RevertedNotes = { reverted: [], skipped: [] };
+      for (const t of told as Told[]) if ("why" in t) done.skipped.push(t);
+      else done.reverted.push(t);
       return done;
     },
   },
