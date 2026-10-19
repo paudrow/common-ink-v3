@@ -3,7 +3,7 @@ import { lineHunks, type Author, type AuthorRef, type Diff, type DiffLine, type 
 /** Saves to one note by one author closer together than this are one row. */
 export const SITTING_MS = 10 * 60_000;
 
-export const authorKey = (author: Author) => `${author.kind}:${author.kind === "agent" ? author.agentId : author.personId}`;
+export const authorKey = (author: Author) => `${author.kind}:${author.kind === "agent" ? author.agentId : author.kind === "plugin" ? author.pluginId : author.personId}`;
 export const titleOf = (title: string) => title || "Untitled";
 export const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 

@@ -33,12 +33,20 @@ function opening(): string {
  *
  * `refused` is called when the document hasn't answered that way in a few seconds: the browser would
  * not load it, or it came without what shuts it in. Nothing of `html` has run then, and nothing will.
+ *
+ * `port` goes with the string to the document, which passes it to what it runs: it is the only way
+ * what runs there and the app talk, and holding the other end is how the app knows which frame is
+ * speaking. `scheme` is what the document shows behind what it runs. `grant` is a token from
+ * `plugin.frame`, good once, for a document whose policy lets it reach the sites an admin allowed.
+ * `name` names the frame, which is how the frames of the app's own plugins are told from a workspace's.
+ *
  * `drawn` is called once the document has put `html` on its page, or a few seconds after `html` was
  * handed over if the page never says so (HTML that stops its own loading).
  */
-export function sandboxed(html: string, { title, refused, drawn }: { title: string; refused?: () => void; drawn?: () => void }): { frame: HTMLIFrameElement; stop: () => void } {
+export function sandboxed(html: string, { title, port, scheme, grant, refused, drawn, name }: { title: string; refused?: () => void; drawn?: () => void; port?: MessagePort; scheme?: "light" | "dark"; grant?: string | null; name?: string }): { frame: HTMLIFrameElement; stop: () => void } {
   const frame = document.createElement("iframe");
   frame.title = title;
+  if (name) frame.name = name;
   frame.referrerPolicy = "no-referrer";
   frame.setAttribute("allow", "");
   let handed = false;
@@ -49,7 +57,7 @@ export function sandboxed(html: string, { title, refused, drawn }: { title: stri
       handed = true;
       clearTimeout(waited);
       // The document's origin is its own, which has no name to address it by. Only this frame's window is sent to.
-      frame.contentWindow!.postMessage({ html: opening() + html }, "*");
+      frame.contentWindow!.postMessage({ html: opening() + html, ...(scheme && { scheme }) }, "*", port ? [port] : []);
       waited = setTimeout(() => {
         stop();
         drawn?.();
@@ -68,6 +76,6 @@ export function sandboxed(html: string, { title, refused, drawn }: { title: stri
     clearTimeout(waited);
   };
   addEventListener("message", heard);
-  frame.src = EMBED_FRAME_PATH;
+  frame.src = grant ? `${EMBED_FRAME_PATH}/g/${encodeURIComponent(grant)}` : EMBED_FRAME_PATH;
   return { frame, stop };
 }

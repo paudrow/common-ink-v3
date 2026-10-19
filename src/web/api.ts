@@ -84,6 +84,21 @@ export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<
   return answer;
 }
 
+/**
+ * Performs an operation as a plugin installed in the workspace, for the member. The server lets it do
+ * only what the plugin is permitted and records the plugin as the author. A refusal here says nothing
+ * of the member's own standing, so nobody listening for those is told.
+ */
+export const performAsPlugin = <T extends OpInput>(workspaceId: string, pluginId: string, op: T, draft = false) =>
+  request<Results[T["type"]]>(`/api/workspaces/${workspaceId}/plugins/${pluginId}${draft ? "/draft" : ""}/ops`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(op) });
+
+/**
+ * Loads a full-trust plugin's code as a module from the app's own address, which the page's policy
+ * allows where it allows no `eval`. The server answers only code of `hash` that runs for this member.
+ */
+export const trustedModule = async (workspaceId: string, pluginId: string, hash: string) =>
+  ((await import(/* @vite-ignore */ `/api/workspaces/${workspaceId}/plugins/${pluginId}/trusted/${hash}.js`)) as { default: (host: unknown, modules: unknown) => unknown }).default;
+
 /** Where an upload's bytes are asked for by the member's session. */
 export const uploadAddress = (workspaceId: string, id: string) => `/api/workspaces/${workspaceId}/uploads/${id}`;
 

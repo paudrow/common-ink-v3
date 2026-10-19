@@ -5,7 +5,7 @@
 // HSTS is the zone's, not the Worker's.
 
 import { EMBED_FRAME_PATH } from "../core/frames.ts";
-import { embedOrigin, FRAME_ORIGINS } from "./frames.ts";
+import { embedOrigin, FRAME_ORIGINS, GRANTED_PATH } from "./frames.ts";
 
 /** A policy as each directive and its sources. A later PR that loads something new adds its source here. */
 type Policy = Readonly<Record<string, readonly string[]>>;
@@ -65,10 +65,15 @@ export const written = (policy: Policy) =>
 const policyFor = (path: string): Policy =>
   path === "/mcp" || path.startsWith("/api/") ? DATA : path === EMBED_FRAME_PATH || path.startsWith(`${EMBED_FRAME_PATH}/`) ? EMBED_FRAME : PAGE;
 
-/** The page's policy at `url`: it may also frame the HTML embed's document, from the app's own host and from the embeds' host when `EMBED_ORIGIN` names one. */
+/**
+ * The page's policy at `url`: it may also frame the HTML embed's document, at its own address and under
+ * a token (a source that ends in / covers every address below it), from the app's own host and from
+ * the embeds' host when `EMBED_ORIGIN` names one.
+ */
 const framed = (url: URL, env: { EMBED_ORIGIN?: string }): Policy => {
   const origin = embedOrigin(env);
-  return { ...PAGE, "frame-src": [url.origin + EMBED_FRAME_PATH, ...(origin ? [origin + EMBED_FRAME_PATH] : []), ...PAGE["frame-src"]!] };
+  const hosts = [url.origin, ...(origin ? [origin] : [])];
+  return { ...PAGE, "frame-src": [...hosts.flatMap((host) => [host + EMBED_FRAME_PATH, host + GRANTED_PATH]), ...PAGE["frame-src"]!] };
 };
 
 /**

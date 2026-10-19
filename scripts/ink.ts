@@ -1,5 +1,6 @@
 // The `ink` command for an agent's shell: `node scripts/ink.ts notes` (npm run ink -- notes).
-import { open, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { run } from "./ink-cli.ts";
 
 const stdin = async () => {
@@ -11,9 +12,11 @@ const stdin = async () => {
 
 // `wx` fails when the file is there, so the check and the write are one step.
 const write = (path: string, bytes: Uint8Array, replace: boolean) =>
-  writeFile(path, bytes, { flag: replace ? "w" : "wx" }).then(
-    () => true,
-    (err: NodeJS.ErrnoException) => (err.code === "EEXIST" ? false : Promise.reject(err)),
+  mkdir(dirname(path), { recursive: true }).then(() =>
+    writeFile(path, bytes, { flag: replace ? "w" : "wx" }).then(
+      () => true,
+      (err: NodeJS.ErrnoException) => (err.code === "EEXIST" ? false : Promise.reject(err)),
+    ),
   );
 
 async function readPart(path: string, offset: number, length: number) {
@@ -27,4 +30,4 @@ async function readPart(path: string, offset: number, length: number) {
   }
 }
 
-process.exitCode = await run(process.argv.slice(2), { fetch, env: process.env, stdin, out: (line) => console.log(line), sizeOf: async (path) => (await stat(path)).size, readPart, writeFile: write });
+process.exitCode = await run(process.argv.slice(2), { fetch, env: process.env, stdin, out: (line) => console.log(line), readFile, sizeOf: async (path) => (await stat(path)).size, readPart, writeFile: write });

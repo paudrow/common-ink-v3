@@ -123,7 +123,7 @@ test("with Note info turned off a member who has used no panel is shown none, so
   await page.getByRole("checkbox", { name: "Note info", exact: true }).setChecked(false);
   await page.goto(`/note/${id}`);
 
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Sample calendar"]);
   await expect(inspector(page)).toHaveCount(0);
   const historyTab = panelIcon(page, "History");
   await expect(historyTab).toHaveAccessibleDescription(UNSEEN);

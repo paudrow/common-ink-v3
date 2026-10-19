@@ -60,7 +60,8 @@ test("a PDF on a line of its own shows its first three pages drawn in the note a
   await expect(shown.locator(".upload-card-head")).toContainText("5 pages, the first 3 shown");
   for (let n = 0; n < 3; n++) await expect.poll(() => blueIn(shown.locator("canvas").nth(n)), `page ${n + 1} is drawn`).toBeGreaterThan(0.1);
   await expect(shown.locator("canvas").first()).toHaveAttribute("aria-label", "Page 1");
-  await expect(page.locator("iframe, object, embed")).toHaveCount(0);
+  // Nothing in the note is the browser's own PDF viewer. The app's plugins have frames of their own elsewhere on the page (#55).
+  await expect(page.locator(".cm-editor").locator("iframe, object, embed")).toHaveCount(0);
 
   await shown.getByRole("button", { name: "Preview paper.pdf" }).click();
   const larger = overlay(page, "paper.pdf");

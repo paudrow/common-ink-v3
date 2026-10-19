@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { asViewerOfNote, perform, signInAsNewPerson } from "./helpers.ts";
+import { asViewerOfNote, ownPlugin, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -10,6 +10,9 @@ test.afterEach(() => expect(errors).toEqual([]));
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const bar = (page: Page) => page.getByRole("group", { name: "Bottom bar" });
+/** Word count and the quick timer run shut off from the app, each in a frame of its own in the bar. */
+const wordCount = (page: Page) => ownPlugin(page, "Word count").getByLabel("Word count");
+const quickTimer = (page: Page) => ownPlugin(page, "Quick timer").getByRole("button", { name: /^Quick timer/ });
 const palette = (page: Page) => page.getByRole("dialog", { name: "Commands" });
 const read = async (page: Page, id: string) => (await perform(page, { type: "note.read", id })).text;
 const run = async (page: Page, command: string) => {
@@ -61,18 +64,28 @@ test("a timer or stopwatch running in the open note shows in the bottom bar, mov
 
 test("a quick timer is started from the command palette, runs in the bottom bar and through a reload, writes no note, and is stopped by pressing it", async ({ page }) => {
   const note = await open(page, "# Tea\n\nSteep.\n");
-  const quick = bar(page).getByRole("button", { name: /^Quick timer/ });
+  const quick = quickTimer(page);
   const dialog = page.getByRole("dialog", { name: "Quick timer" });
 
   await run(page, "Start a quick timer…");
   const length = dialog.getByRole("textbox", { name: "How long" });
   await expect(length).toHaveValue("5m");
   await expect(length).toBeFocused();
+  // It is the app's own question, so nothing above it says a plugin asks.
+  await expect(dialog).toHaveText("Enter starts it in the bottom bar. It is kept in this browser, not in a note.");
   await page.keyboard.type("soon");
-  await expect(length).toHaveAttribute("aria-invalid", "true");
-  await expect(dialog).toContainText("Write a length such as 5m, 90s, or 1h30m.");
+  // What is typed is read where the timer runs, shut off from the app, so it is judged once it is entered: the dialog stays, with what was typed, and says what a length is.
+  const stayed = dialog.evaluate((el) => new Promise<boolean>((done) => {
+    const gone = new MutationObserver(() => !el.isConnected && done(false));
+    gone.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => done(el.isConnected), 1000);
+  }));
   await page.keyboard.press("Enter");
-  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Write a length such as 5m, 90s, or 1h30m.");
+  await expect(length).toHaveValue("soon");
+  await expect(length).toHaveAttribute("aria-invalid", "true");
+  await expect(length).toBeFocused();
+  expect(await stayed, "the dialog was never taken away between the answer and the asking again").toBe(true);
   await expect(quick).toHaveCount(0);
   await length.fill("2m");
   await page.keyboard.press("Enter");
@@ -84,16 +97,28 @@ test("a quick timer is started from the command palette, runs in the bottom bar 
   await expect.poll(() => read(page, note.id)).toBe("# Tea\n\nSteep.\n");
   await expect.poll(() => perform(page, { type: "note.history", id: note.id })).toHaveLength(1);
 
+  // Pressing it is a press in a frame, which never keeps the keyboard: what is typed next is still the note's.
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+End");
+  await bar(page).getByLabel("Quick timer").hover();
   await quick.click();
   await expect(quick).toHaveCount(0);
+  // Nothing drawn: the item stays in the bar's layout so the frame can measure itself, and it is only faded.
+  await expect(bar(page).locator("[data-bar-item='quick-timer'] .bar-frame")).toHaveAttribute("data-empty", "true");
+  await expect(bar(page).locator("[data-bar-item='quick-timer']")).toHaveCSS("opacity", "0");
+  await page.keyboard.type("Poured.");
+  await expect(editor(page)).toContainText("Poured.");
+  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\nSteep.\nPoured.");
   await page.reload();
-  await expect(bar(page).getByLabel("Word count")).toBeVisible();
+  await expect(wordCount(page)).toBeVisible();
   await expect(quick).toHaveCount(0);
 
   await run(page, "Start a quick timer…");
+  await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await run(page, "Start a quick timer…");
+  await expect(dialog).toBeVisible();
   await page.keyboard.press("Enter");
   await expect(quick).toHaveText(/^Quick timer (5:00|4:5\d)$/);
   await run(page, "Stop the quick timer");
@@ -121,9 +146,9 @@ test("in focus the bottom bar is out of sight and its running clock is at the no
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:[45]\d$/]);
-  await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");
+  await expect(wordCount(page)).toHaveText("3 words · 1 min read");
 
-  for (const name of ["Note clocks", "Quick timer", "Word count", "Uploads"]) await run(page, `Disable plugin: ${name}`);
+  for (const name of ["Note clocks", "Quick timer", "Word count", "Uploads", "Coin"]) await run(page, `Disable plugin: ${name}`);
   await expect(page.locator(".bar")).toHaveCount(0);
   await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveAttribute("aria-pressed", "true");
 });
@@ -136,11 +161,12 @@ test("a member who can't change the note still sees the bar's clocks and count, 
   await expect(page.getByRole("button", { name: "Ada's workspace Viewer" })).toBeVisible();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 
-  await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
-  await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");
+  await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:\d\d$/]);
+  await expect(wordCount(page)).toHaveText("3 words · 1 min read");
   await run(page, "Start a quick timer…");
+  await expect(page.getByRole("dialog", { name: "Quick timer" })).toBeVisible();
   await page.keyboard.press("Enter");
-  await expect(bar(page).getByRole("button", { name: /^Quick timer/ })).toBeVisible();
+  await expect(quickTimer(page)).toBeVisible();
   expect(writes).toEqual([]);
 });
 

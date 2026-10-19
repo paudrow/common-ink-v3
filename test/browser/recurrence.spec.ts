@@ -1008,6 +1008,8 @@ test("Undo of a recurring todo's completion changes nothing when its line was wr
 
   await line(page, "Stretch").getByRole("checkbox").click();
   await expect(toast(page)).toHaveText("Task completedUndo");
+  // The pointer keeps the notice up while the line is reworded, which on a slow run takes longer than the notice would stay.
+  await toast(page).hover();
   const rolled = `- [ ] Stretch due:${addDays(today, 1)} every:1d done:${today}x1`;
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(rolled);
   // The line is reworded before Undo is pressed, here and on the Todos page alike.
@@ -1015,6 +1017,7 @@ test("Undo of a recurring todo's completion changes nothing when its line was wr
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("End");
   await page.keyboard.type(" slowly");
+  await toast(page).hover();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(`${rolled} slowly`);
   const after = await completionOf(page, note.id, today);
 

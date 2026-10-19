@@ -521,7 +521,7 @@ test("a note a member had Who wrote this on for, kept by History before Blame wa
   await expect(page.locator(".who-hunk")).toHaveCount(3);
   const kept = (key: string) => page.evaluate((key) => localStorage.getItem(key), key);
   expect(await kept(now)).toBe(JSON.stringify([id]));
-  expect(await kept(old), "moved once, and not again").toBe("null");
+  expect(await kept(old), "moved once, and not again").toBeNull();
 
   await runCommand(page, "Toggle blame mode");
   await expect(page.locator(".who-hunk")).toHaveCount(0);
