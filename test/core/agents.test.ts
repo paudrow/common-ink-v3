@@ -127,6 +127,7 @@ describe("MCP protocol", () => {
       "note_syntax",
       "create_note",
       "write_note",
+      "edit_note",
       "backlinks",
       "rebuild_links",
       "list_todos",

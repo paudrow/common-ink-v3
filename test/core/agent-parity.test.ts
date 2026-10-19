@@ -39,6 +39,7 @@ const COMMANDS: Record<string, string[][]> = {
   note_syntax: [["note-syntax"]],
   create_note: [["create", "--text", "# Hi", "--folder", ID, "--link-titles", "keep", "--mention-names", "keep"]],
   write_note: [["write", ID, "--base", "1", "--text", "# Hi", "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--on", "2026-10-11"]],
+  edit_note: [["edit", ID, "--base", "1", "--edits", '[{"from":1,"to":2,"text":"Hi"}]', "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--on", "2026-10-11"]],
   backlinks: [["backlinks", ID]],
   rebuild_links: [["links-rebuild"]],
   list_todos: [["todos", "due:<today -tag:someday", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--assignee", "Sam Okafor", "--assigned-to-me", "true", "--completed", "true", "--archived", "true", "--note", ID, "--sort", "priority", "--limit", "5", "--offset", "5"]],
@@ -329,7 +330,7 @@ describe("what each argument is called", () => {
         expect(opArguments(tool, { [field]: ID }).fields).toEqual(opArguments(tool, { [name]: ID }).fields);
       }
     }
-    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(39);
+    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(40);
   });
 
   it("ends every description with an example call the tool takes as it stands", () => {

@@ -299,6 +299,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.create": { on: "folder", needs: "E", args: (folderId) => ({ folderId, text: "# Made" }) },
   "note.read": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.write": { on: "note", needs: "E", trashed: "refused", args: (id, w, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, text: note === "secret" ? textOf("secret", `[[${w.notes.open}]] more`) : textOf(note) }) },
+  "note.edit": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, edits: [{ from: 1, to: 1, text: "edited" }] }) },
   "note.backlinks": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.history": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.diff": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, revision: 1 }) },

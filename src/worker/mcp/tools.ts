@@ -290,7 +290,7 @@ export const TOOLS: Tool[] = [
   {
     name: "write_note",
     description:
-      `${ASK_NOTE_SYNTAX} Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `${ASK_NOTE_SYNTAX} To change some lines and leave the rest, use edit_note. Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         noteId,
@@ -306,6 +306,41 @@ export const TOOLS: Tool[] = [
     renames: { noteId: "id" },
     op: "note.write",
     example: { noteId: NOTE, baseRevision: 3, text: "# Plan\n\nStep one\nStep two" },
+  },
+  {
+    name: "edit_note",
+    description:
+      `Change lines of a note and leave the rest. Give the revision you read as baseRevision. Each edit replaces the lines from its from up to and not including its to, counted from 0 in the note at that revision: from equal to to inserts, and an empty text deletes. A newline after the note's last line is not a line of its own. Every range is counted in that revision, so one edit is not shifted by another, and two that overlap are refused. There may be 50 edits. Edits made since baseRevision are merged in, as write_note merges them, and a line you left out is left as it was. Send the same writeId again after a failed call and the edit is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+    inputSchema: object(
+      {
+        noteId,
+        baseRevision: { type: "integer", minimum: 0, description: "The revision you read. Line numbers are counted in the note as it was then" },
+        edits: {
+          type: "array",
+          minItems: 1,
+          maxItems: 50,
+          description: "The lines to change, each counted in the note at baseRevision",
+          items: {
+            type: "object",
+            properties: {
+              from: { type: "integer", minimum: 0, description: "The first line to replace, counted from 0. Equal to to inserts there" },
+              to: { type: "integer", minimum: 0, description: "The line to stop before. One past the last line adds after it" },
+              text: { type: "string", description: "The lines to put there. Empty deletes. A newline after the last of them is not kept" },
+            },
+            required: ["from", "to", "text"],
+            additionalProperties: false,
+          },
+        },
+        writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
+        linkTitles,
+        mentionNames,
+        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+      },
+      ["noteId", "baseRevision", "edits"],
+    ),
+    renames: { noteId: "id" },
+    op: "note.edit",
+    example: { noteId: NOTE, baseRevision: 3, edits: [{ from: 1, to: 2, text: "Step one, revised" }] },
   },
   {
     name: "backlinks",
