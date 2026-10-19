@@ -268,6 +268,13 @@ describe("an upload's bytes over HTTP, with an agent's token", () => {
   });
 });
 
+/** The signature with a middle character changed: the last base64url character carries unused bits, so changing it can leave the signature the same. */
+function tampered(signed: string): string {
+  const dot = signed.lastIndexOf(".");
+  const at = dot + 1 + Math.floor((signed.length - dot - 1) / 2);
+  return `${signed.slice(0, at)}${signed[at] === "A" ? "B" : "A"}${signed.slice(at + 1)}`;
+}
+
 describe("a PDF opened in a tab, from the site kept for files", () => {
   const FILES = "https://files.ink-files.test";
   const at = (url: string, init: RequestInit = {}, more: Partial<Env> = { FILE_ORIGIN: FILES }) => worker.fetch(new Request(url, init) as never, { ...env, SESSION_SECRET: SECRET, ...more });
@@ -300,7 +307,7 @@ describe("a PDF opened in a tab, from the site kept for files", () => {
     expect([part.status, await bytesIn(part)]).toEqual([206, [...bytesOf("%PDF")]]);
 
     // The file site is no app: not its pages, its API, its sign-in, or an address it didn't give out.
-    for (const path of ["/", "/api/me", `/api/workspaces/x/uploads/${pdf.id}`, "/auth/dev", "/file/forged.sig", `/file/${address.split("/file/")[1]!.replace(/.$/, (last) => (last === "A" ? "B" : "A"))}`]) {
+    for (const path of ["/", "/api/me", `/api/workspaces/x/uploads/${pdf.id}`, "/auth/dev", "/file/forged.sig", `/file/${tampered(address.split("/file/")[1]!)}`]) {
       const other = await at(`${FILES}${path}`);
       expect([path, other.status], path).toEqual([path, 404]);
     }
