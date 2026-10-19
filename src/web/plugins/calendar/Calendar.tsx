@@ -169,9 +169,12 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linked]);
   useEffect(() => () => lastOpened(null), []);
-  // Brought back to another view or day, as by a step back, the Calendar shows it.
+  /** The address the Calendar last wrote of itself, which says where it was and is no reason to move. */
+  const wrote = useRef<string | null>(null);
+  // Brought back to another view or day, as by a step back, the Calendar shows it. Not by its own address: written half a second after a
+  // press, it can name the day the press before went to, after the member has pressed again.
   useEffect(() => {
-    if (!named || (named.view === view && named.day === anchor)) return;
+    if (!named || app.query === wrote.current || (named.view === view && named.day === anchor)) return;
     if (named.view === view && isGrid(view)) return glide({ to: indexOf(named.day) });
     setGoal(null);
     setView(named.view);
@@ -186,7 +189,9 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
       const front = host.app().opened;
       if (front?.kind !== "page" || front.id !== "calendar" || new URLSearchParams(app.query).has("event")) return;
       const query = todayShown && view === keptView() ? "" : `?${new URLSearchParams({ view, day: anchor })}`;
-      if (query !== app.query) app.go(`${app.path}${query}`, { replace: true });
+      if (query === app.query) return;
+      wrote.current = query;
+      app.go(`${app.path}${query}`, { replace: true });
     }, SETTLED_MS);
     return () => clearTimeout(timer);
     // Only when what is on show changes.
