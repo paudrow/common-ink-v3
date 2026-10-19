@@ -273,6 +273,13 @@ describe("listing todos", () => {
     expect(await words(ada, { query: "is:open OR is:done sort:due-desc" })).toEqual(["apples", "feed the cats", "zebra tickets", "Buy hay", "Clean up"]);
   });
 
+  it("sorts A to Z by the words, so a due date after them does not change the order", async () => {
+    const ada = await newMember();
+    await create(ada, "- [ ] Man due:2020-01-01\n- [ ] Man apple");
+    expect(await words(ada, { sort: "text" })).toEqual(["Man", "Man apple"]);
+    expect(await words(ada, { query: "sort:text-asc" })).toEqual(["Man", "Man apple"]);
+  });
+
   it("says nothing of a todo in a note the asker can't see: not the todo, its note's tag, or a count", async () => {
     const ada = await newMember("Ada Lovelace");
     const eve = await addMember(ada, "editor", "Eve Editor");
