@@ -942,6 +942,8 @@ export interface ListedTodo {
   lastDone: LastDone | null;
   /** The tags of the note it is in. The ones written on its own line are those `text` has. */
   tags: string[];
+  /** The note's tags written on its other lines, which stay with the note whatever this line becomes. */
+  tagsElsewhere: string[];
   /** Who it is assigned to: each person mentioned on its line. */
   assignees: Mentioned[];
   /** The line without its list mark, checkbox, importance, due date and assignees. */

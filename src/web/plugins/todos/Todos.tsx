@@ -9,7 +9,7 @@ import { ChipMenu, MoreTags, TagMenu, type PlacedTag } from "./ChipMenu.tsx";
 import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery } from "./dates.ts";
-import { leaving, narrowingOf, tagsLeft } from "./leaving.ts";
+import { leaving, narrowingOf } from "./leaving.ts";
 import { CHIP_NAMES, PRIORITY, pickerLabel, picking, tagged, type Opened, type PickingEvent, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
@@ -72,7 +72,7 @@ function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
   const known = [...todo.assignees, ...(change.assign ? [change.assign] : [])];
   const assignees = new Map(read.assignees.map((a) => [mentionKey(a), known.find((person) => sameWho(person, mentionKey(a))) ?? { id: isPersonId(a.target) ? a.target : null, name: mentionName(a), member: false }]));
-  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, tags: tagsLeft(todo.tags, todo.text, text), assignees: [...assignees.values()], words: read.words };
+  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */

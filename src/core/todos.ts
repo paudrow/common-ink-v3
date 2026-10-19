@@ -338,6 +338,14 @@ export function tagsIn(text: string): string[] {
   return [...tags.values()];
 }
 
+/** The tags a note has on its lines but one, each once ignoring case, outside code. */
+export function tagsBesides(text: string, line: number): string[] {
+  if (!text.includes("#")) return [];
+  const tags = new Map<string, string>();
+  for (const { line: written, index } of linesOutsideCode(text)) if (index !== line) for (const { name } of tagsOn(written)) if (!tags.has(nameKey(name))) tags.set(nameKey(name), name);
+  return [...tags.values()];
+}
+
 /**
  * Where to look for the todo that was listed as line `at.line` reading `at.text`, in a note that
  * may have been written since: the todo on that line when it still reads the same, and otherwise

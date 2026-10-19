@@ -156,6 +156,7 @@ describe("listing todos", () => {
       recurs: null,
       lastDone: null,
       tags: ["work", "garden"],
+      tagsElsewhere: ["work"],
       assignees: [],
       words: "Water plants +home #garden",
       access: "edit",
@@ -201,6 +202,11 @@ describe("listing todos", () => {
     // A listed todo says its note's tags, and its own are the ones its text writes.
     expect((await list(ada, { tag: "outside" })).map((t) => [t.text, t.tags])).toEqual([
       ["- [ ] Water plants #weekly", ["outside", "weekly", "someday"]],
+      ["- [ ] Mow", ["outside", "weekly", "someday"]],
+    ]);
+    // What the rest of the note tags it with, so taking #weekly off the first line is not taking it off the note when another line has it.
+    expect((await list(ada, { tag: "outside" })).map((t) => [t.text, t.tagsElsewhere])).toEqual([
+      ["- [ ] Water plants #weekly", ["outside", "someday"]],
       ["- [ ] Mow", ["outside", "weekly", "someday"]],
     ]);
     expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["outside", "someday", "weekly"], assignees: [] });

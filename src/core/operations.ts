@@ -71,7 +71,7 @@ import { referencesIn } from "./references.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
-import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, todoIndex, todosIn, type Completed } from "./todos.ts";
+import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed } from "./todos.ts";
 
 /** Who is performing an operation, and where. */
 export type Actor =
@@ -1810,6 +1810,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       ).all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
       const page = results.slice(0, op.limit).map((r) => ({ r, todo: parseTodo(r.text) }));
       const members = (await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []))).byId;
+      const tagged = page.filter(({ r }) => r.tags !== "[]").map(({ r }) => r.note_id);
+      const texts = new Map(
+        tagged.length === 0 ? [] : (await ctx.db.prepare("SELECT id, text FROM notes WHERE id IN (SELECT value FROM json_each(?1))").bind(JSON.stringify([...new Set(tagged)])).all<{ id: string; text: string }>()).results.map((n) => [n.id, n.text]),
+      );
       return {
         todos: page.map(({ r, todo }) => {
           return {
@@ -1825,6 +1829,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             recurs: todo?.every ? ruleLabel(todo.every.rule) : null,
             lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
             tags: JSON.parse(r.tags) as string[],
+            tagsElsewhere: tagsBesides(texts.get(r.note_id) ?? "", r.line),
             assignees: mentionedIn(members, todo?.assignees ?? []),
             words: todo?.words ?? r.text,
             access: itemLevel(ctx.sight, { id: r.note_id, folder_id: r.folder_id, private_owner: r.private_owner }) === "edit" ? "edit" : "view",
