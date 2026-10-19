@@ -36,6 +36,13 @@ export const whoOf = (to: Person) => to.name ?? to.email ?? "Someone";
 /** Who or what a grant is to, in a few words. */
 export const toOf = (grant: Grant) => (grant.to.kind === "person" ? whoOf(grant.to) : LINK_LABEL[grant.to.link]);
 
+/** Whether the asker can take this grant off. A member's grant is an admin's, except on the owner's own private note. */
+export function canRevoke(grant: Grant, as: { role: string; personId: string }, note: { private: boolean; ownerId: string | null } | null): boolean {
+  if (grant.to.kind !== "person" || grant.to.role === null) return true;
+  if (as.role === "admin") return true;
+  return note?.private === true && note.ownerId === as.personId;
+}
+
 /** The link on the item itself. A link on a folder above is listed with what is inherited. */
 export const linkOf = (sharing: Sharing) => sharing.grants.find((g) => g.to.kind === "link")?.to as Extract<Grant["to"], { kind: "link" }> | undefined;
 
@@ -47,6 +54,7 @@ export function summaryOf(sharing: Sharing, access: GrantAccess): string {
   const isPrivate = sharing.note?.private ?? false;
   if (!sharing.canShare) return `${isPrivate ? "Private. " : ""}You can ${access} this note`;
   const people = new Set([...sharing.grants, ...(isPrivate ? [] : sharing.inherited)].filter(isPerson).map((g) => g.to.personId ?? g.to.email));
-  const link = linkOf(sharing);
+  const above = sharing.inherited.find((g) => g.to.kind === "link");
+  const link = linkOf(sharing) ?? (above?.to.kind === "link" ? above.to : undefined);
   return [isPrivate ? "Private" : "Everyone in this workspace", ...(people.size ? [people.size === 1 ? "1 person" : `${people.size} people`] : []), link ? `Link on: ${LINK_LABEL[link.link].toLowerCase()}` : "Link off"].join(" · ");
 }

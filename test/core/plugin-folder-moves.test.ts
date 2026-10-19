@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ListedFolder } from "../../src/core/protocol.ts";
 import { folderTree } from "../../src/web/folders.ts";
-import { canMove, movable, placesFor } from "../../src/web/plugins/lib/folderMoves.ts";
+import { canMove, canRename, movable, placesFor } from "../../src/web/plugins/lib/folderMoves.ts";
 
 const folder = (id: string, parentId: string | null, access: "view" | "edit" = "edit"): ListedFolder => ({ id, name: id, parentId, noteCount: 0, uploadCount: 0, access, path: id });
 
@@ -41,6 +41,15 @@ describe("where a folder can be moved", () => {
     expect(placesFor(tree, "gone", true)).toEqual([]);
     expect(canMove(tree, "app", "reference", true)).toBe(false);
     expect(canMove(tree, "app", "gone", true)).toBe(false);
+  });
+
+  it("is offered for a folder whose parent the member can see, and not for one a guest was handed at the top", () => {
+    expect(canRename(tree, "app", true)).toBe(true);
+    expect(canRename(tree, "projects", true)).toBe(true);
+    expect(canRename(tree, "projects", false)).toBe(false);
+    expect(canRename(tree, "app", false)).toBe(true);
+    expect(canRename(tree, "unsorted", true)).toBe(false);
+    expect(canRename(tree, "reference", true)).toBe(false);
   });
 
   it("names, in tree order, the folders that can go somewhere", () => {

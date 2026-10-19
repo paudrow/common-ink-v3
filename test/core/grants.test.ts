@@ -703,7 +703,7 @@ describe("what an editor is told of a folder they cannot share", () => {
     const inheritedLink = seen.inherited.find((g) => g.to.kind === "link");
     const inheritedPerson = seen.inherited.find((g) => g.to.kind === "person");
     expect(seen.canShare).toBe(true);
-    expect(inheritedLink?.to.kind === "link" ? inheritedLink.to.token : "missing").toBe("");
+    expect(inheritedLink?.to.kind === "link" ? inheritedLink.to.token : "missing").toBeNull();
     expect(inheritedPerson?.to.kind === "person" ? inheritedPerson.to.email : "missing").toBeNull();
     expect(await perform(env.DB, eve, { type: "grant.list", folderId: projects.id })).toMatchObject({ canShare: false, grants: [], inherited: [] });
     const adaLink = (await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).inherited.find((g) => g.to.kind === "link");

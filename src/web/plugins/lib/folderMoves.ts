@@ -9,6 +9,14 @@ export type Place = string | null;
  * isn't there already. `top` is whether they have the top of the workspace, which a guest hasn't;
  * without it, nor may they move a folder that sits there for them, among folders they can't see.
  */
+/** Whether the member may rename folder `id`, as the server decides it: they can edit it, it isn't Unsorted, and they can see the folder it is in. A guest's shared folder sits at the top for them, among folders they can't see, and they can't rename that one. */
+export function canRename(tree: Folders, id: string, top: boolean): boolean {
+  const folder = tree.byId.get(id);
+  if (!folder || folder.access !== "edit" || id === tree.unsortedId) return false;
+  if (folder.parentId === null) return top;
+  return tree.byId.has(folder.parentId);
+}
+
 export function canMove(tree: Folders, id: string, place: Place, top: boolean): boolean {
   const folder = tree.byId.get(id);
   if (!folder || folder.access !== "edit" || id === tree.unsortedId || folder.parentId === place) return false;
