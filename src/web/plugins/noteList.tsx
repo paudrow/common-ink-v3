@@ -359,8 +359,9 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
 
   const listedIds = notes.map((n) => n.id).join();
   /**
-   * Which cards are near the window, and what a card above the window does to the list when its
-   * height changes, as when its note arrives: the list scrolls by as much, so what is being read stays where it is.
+   * Which cards are near the window, and what a card does to the list when its height changes, as
+   * when its note arrives. A card above the window scrolls the list by as much, so what is being
+   * read stays where it is. The card with the keyboard keeps its bottom on screen.
    */
   useEffect(() => {
     const el = scroller.current;
@@ -381,7 +382,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
         const was = heights.get(entry.target);
         heights.set(entry.target, height);
         if (was === undefined || was === height || returning.current !== null || (entry.target as HTMLElement).dataset.card === toggled.current) continue;
-        if (entry.target.getBoundingClientRect().top < el.getBoundingClientRect().top) el.scrollTop += height - was;
+        const box = entry.target.getBoundingClientRect();
+        const listBox = el.getBoundingClientRect();
+        if (box.top < listBox.top) el.scrollTop += height - was;
+        else if (entry.target.contains(document.activeElement) && box.bottom > listBox.bottom) el.scrollTop += box.bottom - listBox.bottom;
       }
     });
     for (const item of el.querySelectorAll("li[data-card]")) {
