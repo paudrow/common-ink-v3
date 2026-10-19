@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { authenticateAgent, connectAgent, disconnectAgent, editAgent, hashToken, listAgents, MAX_ACTIVE_AGENTS } from "../../src/core/agents.ts";
-import { MAX_PENDING_PER_ADDRESS, MAX_PENDING_PER_CLIENT, MAX_PENDING_REQUESTS, MAX_REGISTRATIONS_PER_HOUR, MAX_UNUSED_CLIENTS, consent, deny, exchangeCode, openRequest, redirectBack, registerClient, sweep } from "../../src/core/oauth.ts";
+import { MAX_PENDING_PER_CLIENT, MAX_PENDING_PER_PERSON, MAX_PENDING_REQUESTS, MAX_REGISTRATIONS_PER_HOUR, MAX_UNUSED_CLIENTS, consent, deny, exchangeCode, openRequest, redirectBack, registerClient, sweep } from "../../src/core/oauth.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { b64url, sign } from "../../src/worker/session.ts";
 import * as people from "./members.ts";
@@ -171,20 +171,20 @@ describe("registering an app", () => {
     expect((await send("/oauth/register", { method: "POST", body, ...from("203.0.113.7") })).status).toBe(201);
   });
 
-  it("counts an IPv6 address by its /64, so one host can't register more by changing its address", async () => {
+  it("counts an IPv6 address by its /48, so one site can't register more by changing its address", async () => {
     const from = (ip: string) => send("/oauth/register", { method: "POST", body: JSON.stringify({ client_name: "Chat", redirect_uris: [REDIRECT] }), headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip } });
-    for (let i = 1; i <= MAX_REGISTRATIONS_PER_HOUR; i++) expect((await from(`2001:db8:1:2::${i.toString(16)}`)).status).toBe(201);
-    for (const same of ["2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:0DB8:0001:0002:0:0:0:abcd"]) {
+    for (let i = 1; i <= MAX_REGISTRATIONS_PER_HOUR; i++) expect((await from(`2001:db8:1:${i.toString(16)}::1`)).status).toBe(201);
+    for (const same of ["2001:db8:1:ffff:ffff:ffff:ffff:ffff", "2001:0DB8:0001:0002:0:0:0:abcd", "2001:db8:1::"]) {
       const refused = await from(same);
       expect([same, refused.status, await errorOf(refused)]).toEqual([same, 429, "temporarily_unavailable"]);
     }
-    for (const other of ["2001:db8:1:3::1", "::ffff:203.0.113.77", "203.0.113.78"]) expect((await from(other)).status, other).toBe(201);
+    for (const other of ["2001:db8:2::1", "::ffff:203.0.113.77", "203.0.113.78"]) expect((await from(other)).status, other).toBe(201);
   });
 
   it("forgets within the hour an app that never sent anyone to sign in, and gives one that did the day", async () => {
     const idle = (await register({ client_name: "Idle" })).body.client_id;
     const started = (await register({ client_name: "Started" })).body.client_id;
-    await authorize(started, (await pkce()).challenge);
+    await authorize(started, (await pkce()).challenge, await newMember());
     const age = (id: string, by: number) => env.DB.prepare("UPDATE oauth_clients SET created_at = ? WHERE id = ?").bind(Date.now() - by, id).run();
     const left = async () => (await env.DB.prepare("SELECT id FROM oauth_clients WHERE id IN (?, ?)").bind(idle, started).all<{ id: string }>()).results.map((r) => r.id);
     await age(idle, 2 * HOUR);
@@ -229,7 +229,7 @@ describe("registering an app", () => {
     expect((await send("/oauth/register")).status).toBe(405);
   });
 
-  it("forgets an app that got no grant within a day, keeps one that did, and refuses more once too many wait", async () => {
+  it("forgets an app that got no grant within a day, keeps one that did, and once too many wait, makes room from the oldest that never started or refuses", async () => {
     const ada = await newMember();
     const old = (await register({ client_name: "Old" })).body.client_id;
     const used = await connect(ada);
@@ -242,7 +242,14 @@ describe("registering an app", () => {
     expect(left).toContain(fresh);
     expect(left).not.toContain(old);
 
-    await env.DB.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO oauth_clients (id, name, redirect_uris, created_at) SELECT 'filler' || i, 'Filler', '[]', ? FROM n").bind(MAX_UNUSED_CLIENTS, Date.now()).run();
+    // Full of apps that never sent anyone to sign in, the oldest of them makes room.
+    await env.DB.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO oauth_clients (id, name, redirect_uris, created_at) SELECT 'filler' || i, 'Filler', '[]', ? - i FROM n").bind(MAX_UNUSED_CLIENTS, Date.now()).run();
+    const oldest = `filler${MAX_UNUSED_CLIENTS}`;
+    expect((await register()).res.status).toBe(201);
+    expect(await env.DB.prepare("SELECT id FROM oauth_clients WHERE id = ?").bind(oldest).first()).toBeNull();
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM oauth_clients WHERE id LIKE 'filler%'").first<{ n: number }>())!.n).toBe(MAX_UNUSED_CLIENTS - 1);
+    // Full of apps that did, none is pushed out, and more are refused.
+    await env.DB.prepare("UPDATE oauth_clients SET requested_at = created_at WHERE requested_at IS NULL").run();
     const refused = await register();
     expect([refused.res.status, refused.body.error]).toEqual([503, "temporarily_unavailable"]);
     await env.DB.prepare("DELETE FROM oauth_clients WHERE id LIKE 'filler%'").run();
@@ -250,11 +257,14 @@ describe("registering an app", () => {
   });
 
   it("does nothing but read when it refuses for being full, and counts only the apps that are live", async () => {
-    await env.DB.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO oauth_clients (id, name, redirect_uris, created_at) SELECT 'filler' || i, 'Filler', '[]', ? FROM n").bind(MAX_UNUSED_CLIENTS, Date.now()).run();
+    // Every app here has sent someone to sign in, so none makes room.
+    await env.DB.prepare("UPDATE oauth_clients SET requested_at = created_at WHERE requested_at IS NULL").run();
+    await env.DB.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1) INSERT INTO oauth_clients (id, name, redirect_uris, created_at, requested_at) SELECT 'filler' || i, 'Filler', '[]', ?2, ?2 FROM n").bind(MAX_UNUSED_CLIENTS, Date.now()).run();
     const client = (await register()).body;
     void client;
     // A request that lapsed, which a sweep would remove: the refusal leaves it.
-    await env.DB.prepare("INSERT INTO oauth_requests (id, client_id, redirect_uri, code_challenge, created_at) SELECT 'lapsed', id, 'https://chat.example/cb', 'c', ? FROM oauth_clients LIMIT 1").bind(Date.now() - 3_600_000).run();
+    const ada = await newMember();
+    await env.DB.prepare("INSERT INTO oauth_requests (id, client_id, redirect_uri, code_challenge, person_id, created_at) SELECT 'lapsed', id, 'https://chat.example/cb', 'c', ?, ? FROM oauth_clients LIMIT 1").bind(ada.personId, Date.now() - 3_600_000).run();
     const refused = await registerClient(env.DB, { redirect_uris: [REDIRECT] }, Date.now() + 5 * 60_000).catch((e: { error: string }) => e.error);
     expect(refused).toBe("temporarily_unavailable");
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM oauth_requests WHERE id = 'lapsed'").first<{ n: number }>())!.n).toBe(1);
@@ -267,19 +277,40 @@ describe("registering an app", () => {
 });
 
 describe("authorizing", () => {
-  it("sends a browser with no session to sign in, and back to the consent page", async () => {
+  it("sends a browser with no session to sign in and back to the same address, and keeps nothing for it", async () => {
     const client = (await register()).body.client_id;
     const { challenge } = await pkce();
+    const before = await pending();
     const { res, to } = await authorize(client, challenge);
     expect(res.status).toBe(302);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const next = new URL(to!, ORIGIN);
-    expect([next.pathname, next.searchParams.get("next")]).toEqual(["/auth/google", expect.stringMatching(/^\/connect\?request=[A-Za-z0-9_-]{40,}$/)]);
+    const query = new URLSearchParams({ response_type: "code", client_id: client, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", state: "xyz" });
+    expect([next.pathname, next.searchParams.get("next")]).toEqual(["/auth/google", `/oauth/authorize?${query}`]);
+    expect(await pending()).toBe(before);
 
     // Sign-in takes that address as it is: dev sign-in follows next the way Google's does.
     const onThisMachine = await worker.fetch(new Request(`http://localhost/auth/dev?next=${encodeURIComponent(next.searchParams.get("next")!)}`, { redirect: "manual" }) as never, { ...env, SESSION_SECRET: SECRET, DEV_SIGN_IN: "1" });
     expect(onThisMachine.status).toBe(302);
     expect(onThisMachine.headers.get("Location")).toBe(next.searchParams.get("next"));
+  });
+
+  it("asks a browser with no session to sign in first when the request is too long to come back to, and keeps nothing", async () => {
+    const client = (await register()).body.client_id;
+    const before = await pending();
+    const { res, to } = await authorize(client, (await pkce()).challenge, undefined, { state: "s".repeat(1500) });
+    expect([res.status, to]).toEqual([401, null]);
+    expect(await pending()).toBe(before);
+  });
+
+  it("keeps nothing for a crowd of browsers with no session, so they can't fill the room members need", async () => {
+    const ada = await newMember();
+    const client = (await register()).body.client_id;
+    const { challenge } = await pkce();
+    const before = await pending();
+    for (let i = 0; i < MAX_PENDING_PER_CLIENT + 5; i++) expect((await authorize(client, challenge)).res.status).toBe(302);
+    expect(await pending()).toBe(before);
+    expect((await authorize(client, challenge, ada)).to).toMatch(/^\/connect\?request=/);
   });
 
   it("sends a browser with a session to the consent page, and makes nothing but the request", async () => {
@@ -379,18 +410,20 @@ describe("authorizing", () => {
     await expect(consent(env.DB, ada.personId, { requestId: requestOf(to) })).rejects.toMatchObject({ code: "not_found" });
     await expect(openRequest(env.DB, ada.personId, requestOf(to))).rejects.toMatchObject({ code: "not_found" });
 
-    await env.DB.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO oauth_requests (id, client_id, redirect_uri, code_challenge, created_at) SELECT 'waiting' || i, ?, ?, ?, ? FROM n").bind(MAX_PENDING_REQUESTS, client, REDIRECT, challenge, Date.now()).run();
-    const full = await authorize(client, challenge, ada);
+    await env.DB.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO oauth_requests (id, client_id, redirect_uri, code_challenge, person_id, created_at) SELECT 'waiting' || i, ?, ?, ?, ?, ? FROM n").bind(MAX_PENDING_REQUESTS, client, REDIRECT, challenge, ada.personId, Date.now()).run();
+    const someoneElse = await newMember();
+    const full = await authorize(client, challenge, someoneElse);
     expect(full.res.status).toBe(503);
     expect(full.res.headers.get("Content-Type")).toContain("text/html");
     await env.DB.prepare("DELETE FROM oauth_requests WHERE id LIKE 'waiting%'").run();
   });
 
   it("holds only so many for one app, as a page, and leaves the room for other apps", async () => {
-    const ada = await newMember();
+    const people = [await newMember(), await newMember(), await newMember()];
+    const ada = people[2]!;
     const [busy, quiet] = [(await register()).body.client_id, (await register()).body.client_id];
     const { challenge } = await pkce();
-    for (let i = 0; i < MAX_PENDING_PER_CLIENT; i++) expect((await authorize(busy, challenge, ada)).res.status).toBe(302);
+    for (let i = 0; i < MAX_PENDING_PER_CLIENT; i++) expect((await authorize(busy, challenge, people[i % 2])).res.status).toBe(302);
     const refused = await authorize(busy, challenge, ada);
     expect(refused.res.status).toBe(429);
     expect(refused.res.headers.get("Content-Type")).toContain("text/html");
@@ -401,22 +434,17 @@ describe("authorizing", () => {
   });
 });
 
-describe("waiting requests from one address", () => {
-  it("holds only so many from one address, across apps, fewer than one app's room, and leaves the room for other addresses", async () => {
-    expect(MAX_PENDING_PER_ADDRESS).toBeLessThan(MAX_PENDING_PER_CLIENT);
-    const ada = await newMember();
+describe("waiting requests from one person", () => {
+  it("holds only so many for one person, across apps, fewer than one app's room, and leaves the room for other people", async () => {
+    expect(MAX_PENDING_PER_PERSON).toBeLessThan(MAX_PENDING_PER_CLIENT);
+    const [ada, grace] = [await newMember(), await newMember("Grace Hopper")];
     const apps = [(await register()).body.client_id, (await register()).body.client_id];
     const { challenge } = await pkce();
-    const from = async (ip: string, client: string) => {
-      const query = new URLSearchParams({ response_type: "code", client_id: client, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", state: "xyz" });
-      const res = await send(`/oauth/authorize?${query}`, { redirect: "manual", headers: { ...(await session(ada)), "CF-Connecting-IP": ip } });
-      await res.body?.cancel();
-      return res.status;
-    };
-    for (let i = 0; i < MAX_PENDING_PER_ADDRESS; i++) expect(await from(`2001:db8:9:9::${i + 1}`, apps[i % 2]!)).toBe(302);
-    expect(await from("2001:db8:9:9::ffff", apps[0]!)).toBe(429);
-    expect(await from("198.51.100.4", apps[0]!)).toBe(302);
-    expect(await from("2001:db8:9:a::1", apps[1]!)).toBe(302);
+    for (let i = 0; i < MAX_PENDING_PER_PERSON; i++) expect((await authorize(apps[i % 2]!, challenge, ada)).res.status).toBe(302);
+    const refused = await authorize(apps[0]!, challenge, ada);
+    expect(refused.res.status).toBe(429);
+    expect(refused.res.headers.get("Content-Type")).toContain("text/html");
+    expect((await authorize(apps[0]!, challenge, grace)).res.status).toBe(302);
   });
 });
 
@@ -505,7 +533,7 @@ describe("consent", () => {
     expect((await listAgents(env.DB, ada.personId)).length).toBe(0);
   });
 
-  it("belongs to the first person to open it, or to answer it: no one else opens it, answers it or refuses it", async () => {
+  it("belongs to the person who started it: no one else opens it, answers it or refuses it", async () => {
     const ada = await newMember();
     const grace = await newMember("Grace Hopper");
     const client = (await register()).body.client_id;
@@ -519,10 +547,10 @@ describe("consent", () => {
     expect(await listAgents(env.DB, grace.personId)).toEqual([]);
     await expect(consent(env.DB, ada.personId, { requestId: opened })).resolves.toMatchObject({ redirectUri: REDIRECT });
 
-    // Not opened first, it is the first to answer who has it, and the other can't take it from them.
+    // Not opened yet, it is still theirs alone.
     const unopened = requestOf((await authorize(client, challenge, ada)).to);
-    await expect(deny(env.DB, grace.personId, unopened)).resolves.toBeTruthy();
-    await expect(consent(env.DB, ada.personId, { requestId: unopened })).rejects.toMatchObject({ code: "not_found" });
+    await expect(deny(env.DB, grace.personId, unopened)).rejects.toMatchObject({ code: "not_found" });
+    await expect(consent(env.DB, ada.personId, { requestId: unopened })).resolves.toMatchObject({ redirectUri: REDIRECT });
     // A request that was never there is answered as one that isn't theirs.
     const missing = await consent(env.DB, ada.personId, { requestId: "nothing" }).catch((e: Error) => e.message);
     const taken = await consent(env.DB, grace.personId, { requestId: opened }).catch((e: Error) => e.message);
@@ -1163,7 +1191,8 @@ describe("clearing out", () => {
   });
 
   it("runs at most once a minute unless it is made to, and the Worker's timer makes it", async () => {
-    const lapse = (id: string) => env.DB.prepare("INSERT OR REPLACE INTO oauth_requests (id, client_id, redirect_uri, code_challenge, created_at) SELECT ?, id, 'https://chat.example/cb', 'c', ? FROM oauth_clients LIMIT 1").bind(id, Date.now() - 3_600_000).run();
+    const ada = await newMember();
+    const lapse = (id: string) => env.DB.prepare("INSERT OR REPLACE INTO oauth_requests (id, client_id, redirect_uri, code_challenge, person_id, created_at) SELECT ?, id, 'https://chat.example/cb', 'c', ?, ? FROM oauth_clients LIMIT 1").bind(id, ada.personId, Date.now() - 3_600_000).run();
     const there = async (id: string) => (await env.DB.prepare("SELECT COUNT(*) AS n FROM oauth_requests WHERE id = ?").bind(id).first<{ n: number }>())!.n;
     await register();
     const start = Date.now() + 10 * 60_000;

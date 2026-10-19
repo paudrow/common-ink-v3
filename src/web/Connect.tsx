@@ -67,9 +67,9 @@ export function Connect({ me }: { me: MeHere }) {
 
   return (
     <main className="connect">
-      <h1>{asking.clientName} wants to connect</h1>
+      <h1>An app at {asking.redirectHost} wants to connect</h1>
       <p>
-        It will be able to do what you allow here, as you. After you answer, Common Ink sends you back to {asking.redirectHost}. You can disconnect it later from Agents.
+        It calls itself &ldquo;{asking.clientName}&rdquo;, a name it chose and Common Ink has not checked. It will be able to do what you allow here, as you. After you answer, Common Ink sends you back to {asking.redirectHost}. You can disconnect it later from Agents.
       </p>
       <form onSubmit={allow}>
         <label>

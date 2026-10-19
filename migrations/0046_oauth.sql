@@ -20,7 +20,7 @@ CREATE TABLE oauth_clients (
 );
 
 -- An authorization that was asked for and not yet answered: what /oauth/authorize was sent, kept for the
--- consent page. It is bound to the first person who opens it, and good for ten minutes and one answer.
+-- consent page. It belongs to the signed-in person who started it, and is good for ten minutes and one answer.
 -- Its id is in the consent page's address, so only a hash of it is kept, as for a code.
 CREATE TABLE oauth_requests (
   id TEXT PRIMARY KEY,
@@ -29,9 +29,7 @@ CREATE TABLE oauth_requests (
   state TEXT,
   code_challenge TEXT NOT NULL,
   resource TEXT,
-  person_id TEXT REFERENCES people (id),
-  -- A hash of the network the browser came from, to count waiting requests by and for nothing else.
-  requested_from TEXT,
+  person_id TEXT NOT NULL REFERENCES people (id),
   created_at INTEGER NOT NULL
 );
 
@@ -67,7 +65,7 @@ CREATE INDEX oauth_tokens_by_end ON oauth_tokens (expires_at);
 CREATE INDEX oauth_requests_by_age ON oauth_requests (created_at);
 CREATE INDEX oauth_codes_by_end ON oauth_codes (expires_at);
 CREATE INDEX oauth_clients_unused ON oauth_clients (created_at) WHERE last_used_at IS NULL;
-CREATE INDEX oauth_requests_by_source ON oauth_requests (requested_from, created_at) WHERE requested_from IS NOT NULL;
+CREATE INDEX oauth_requests_by_person ON oauth_requests (person_id, created_at);
 CREATE INDEX oauth_clients_by_source ON oauth_clients (registered_from, created_at) WHERE registered_from IS NOT NULL;
 
 -- The app an agent was connected from, or null for an agent connected on the Agents page. `token_hash`

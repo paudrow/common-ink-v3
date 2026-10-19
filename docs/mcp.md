@@ -121,9 +121,10 @@ What ends a connection:
 
 Limits, since anyone can register an app and start a sign-in:
 
-- 20 registrations an hour from one address. An IPv6 address counts as its /64. Addresses are counted by a salted hash, logged nowhere.
-- 1,000 apps waiting for a grant in all. An app that never sends anyone to sign in is forgotten after an hour, and one that never gets a grant after a day.
-- 2,000 sign-ins waiting in all, 20 for one app and 10 from one address. Each lapses after ten minutes.
+- 20 registrations an hour from one address. An IPv6 address counts as its /48. Addresses are counted by a salted hash, logged nowhere.
+- 1,000 apps waiting for a grant in all. An app that never sends anyone to sign in is forgotten after an hour, and one that never gets a grant after a day. When 1,000 wait, a new app takes the place of the oldest that never sent anyone to sign in, and is refused only when every one has.
+- A sign-in is kept only for a member who is signed in. A browser that isn't is sent to sign in and back to the same `/oauth/authorize` address, and nothing is kept for it.
+- 2,000 sign-ins waiting in all, 20 for one app and 10 for one member. Each lapses after ten minutes.
 - Bodies past 16 KB are refused.
 
 The discovery documents and `/oauth/{register,token,revoke}` allow any origin, with no credentials. Nothing there reads a cookie. `/mcp`, `/oauth/authorize` and the consent API (`/api/oauth/{request,consent,deny}`) allow none.

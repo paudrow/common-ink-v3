@@ -31,7 +31,8 @@ async function answerInBrowser(page: Page, clientId: string, challenge: string, 
   const query = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", state: "s-123" });
   await signInAs(page, newEmail(), "Ada Lovelace", `/oauth/authorize?${query}`);
   await expect(page).toHaveURL(/\/connect\?request=/);
-  await expect(page.getByRole("heading", { name: `${appName} wants to connect` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "An app at 127.0.0.1:9 wants to connect" })).toBeVisible();
+  await expect(page.getByRole("main")).toContainText(`It calls itself “${appName}”, a name it chose and Common Ink has not checked.`);
   await expect(page.getByRole("main")).toContainText("sends you back to 127.0.0.1:9");
   await page.getByRole("button", { name: answer, exact: true }).click();
   await page.waitForURL((url) => url.href.startsWith(REDIRECT));

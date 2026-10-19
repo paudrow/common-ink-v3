@@ -26,14 +26,14 @@ export const REFRESH_MS = 30 * DAY;
 /** Anyone can register an app, so one that never sends anyone to sign in is forgotten after an hour, and one that never gets a grant after a day. */
 export const UNSTARTED_CLIENT_MS = HOUR;
 export const UNUSED_CLIENT_MS = DAY;
-/** How many apps that never got a grant there can be, and how many requests waiting for a member. Past either, more are refused. */
+/** How many apps that never got a grant there can be, and how many requests waiting for a member. Past the first, the oldest app that never sent anyone to sign in makes room; past the second, more are refused. */
 export const MAX_UNUSED_CLIENTS = 1000;
 export const MAX_PENDING_REQUESTS = 2000;
 /** And per app, so one app can't fill the room for all, and per address an app is registered from, per hour. */
 export const MAX_PENDING_PER_CLIENT = 20;
 export const MAX_REGISTRATIONS_PER_HOUR = 20;
-/** Per address a browser comes from, fewer than an app's room, so one address can't fill an app's. */
-export const MAX_PENDING_PER_ADDRESS = 10;
+/** Per person, fewer than an app's room, so one member can't fill an app's. */
+export const MAX_PENDING_PER_PERSON = 10;
 /** A refresh token that is used again within this long of its use is a retry after a lost answer, not a copy. */
 export const RETRY_MS = 30_000;
 /** How often a sweep runs at most. */
@@ -164,8 +164,8 @@ export async function sweep(db: D1Database, now = Date.now(), force = false): Pr
  * Registers an app as RFC 7591 describes, for a public client only: one with no secret, which proves
  * itself with PKCE. An app that asks for another way to authenticate is registered as `none`, which
  * the answer says (the RFC lets a server choose). Anyone can register, so an app that never gets a
- * grant is forgotten (see UNSTARTED_CLIENT_MS), only so many wait at once, and one address registers only so many an
- * hour: `from` is a hash of it, kept to count by and for nothing else. What the app calls itself is kept as
+ * grant is forgotten (see UNSTARTED_CLIENT_MS), only so many wait at once (a new one takes the place of the
+ * oldest that never sent anyone to sign in), and one address registers only so many an hour: `from` is a hash of it, kept to count by and for nothing else. What the app calls itself is kept as
  * given and shown as unverified.
  */
 export async function registerClient(db: D1Database, body: unknown, now = Date.now(), from: string | null = null): Promise<Client> {
@@ -198,11 +198,18 @@ export async function registerClient(db: D1Database, body: unknown, now = Date.n
   }
 
   // Refused before anything is written, counting only what is live, so a flood of refusals costs reads alone.
-  const waiting = await db.prepare(`SELECT COUNT(*) AS n FROM oauth_clients WHERE ${WAITING_CLIENT}`).bind(now - UNSTARTED_CLIENT_MS, now - UNUSED_CLIENT_MS).first<{ n: number }>();
-  if ((waiting?.n ?? 0) >= MAX_UNUSED_CLIENTS) throw new OAuthError("temporarily_unavailable", "Too many apps have registered and not yet connected. Try again later", 503);
   if (from) {
     const lately = await db.prepare("SELECT COUNT(*) AS n FROM oauth_clients WHERE registered_from = ? AND created_at > ?").bind(from, now - HOUR).first<{ n: number }>();
     if ((lately?.n ?? 0) >= MAX_REGISTRATIONS_PER_HOUR) throw new OAuthError("temporarily_unavailable", "This address has registered too many apps this hour. Try again later", 429);
+  }
+  const waiting = await db.prepare(`SELECT COUNT(*) AS n FROM oauth_clients WHERE ${WAITING_CLIENT}`).bind(now - UNSTARTED_CLIENT_MS, now - UNUSED_CLIENT_MS).first<{ n: number }>();
+  if ((waiting?.n ?? 0) >= MAX_UNUSED_CLIENTS) {
+    // An app that is used sends someone to sign in as soon as it registers, so the oldest that hasn't is the one least likely to.
+    const evicted = await db
+      .prepare("DELETE FROM oauth_clients WHERE id = (SELECT id FROM oauth_clients WHERE last_used_at IS NULL AND requested_at IS NULL AND created_at > ? ORDER BY created_at LIMIT 1) RETURNING id")
+      .bind(now - UNSTARTED_CLIENT_MS)
+      .first();
+    if (!evicted) throw new OAuthError("temporarily_unavailable", "Too many apps have registered and not yet connected. Try again later", 503);
   }
   await sweep(db, now);
   const id = b64url(crypto.getRandomValues(new Uint8Array(16)));
@@ -234,24 +241,24 @@ export interface AuthRequest {
 const keyOf = (requestId: string) => hashToken(requestId);
 
 /**
- * Keeps what /oauth/authorize was sent (already checked there), for the page where the member answers.
- * Gives the request's id: 256 random bits, good for ten minutes. Too many waiting, in all, for this app
- * or from this address, is refused. `from` is a hash of the browser's network, kept to count by.
+ * Keeps what /oauth/authorize was sent (already checked there), for the page where `personId`, who is
+ * signed in, answers it. Gives the request's id: 256 random bits, good for ten minutes, and theirs alone.
+ * Too many waiting, in all, for this app or for this person, is refused.
  */
-export async function startRequest(db: D1Database, r: AuthRequest, now = Date.now(), from: string | null = null): Promise<string> {
+export async function startRequest(db: D1Database, personId: string, r: AuthRequest, now = Date.now()): Promise<string> {
   const pending = await db
-    .prepare("SELECT COUNT(*) AS n, COUNT(CASE WHEN client_id = ?1 THEN 1 END) AS mine, COUNT(CASE WHEN requested_from = ?2 THEN 1 END) AS here FROM oauth_requests WHERE created_at > ?3")
-    .bind(r.clientId, from, now - REQUEST_MS)
-    .first<{ n: number; mine: number; here: number }>();
+    .prepare("SELECT COUNT(*) AS n, COUNT(CASE WHEN client_id = ?1 THEN 1 END) AS mine, COUNT(CASE WHEN person_id = ?2 THEN 1 END) AS theirs FROM oauth_requests WHERE created_at > ?3")
+    .bind(r.clientId, personId, now - REQUEST_MS)
+    .first<{ n: number; mine: number; theirs: number }>();
   if ((pending?.n ?? 0) >= MAX_PENDING_REQUESTS) throw new OAuthError("temporarily_unavailable", "Too many sign-ins are waiting. Try again in a few minutes", 503);
   if ((pending?.mine ?? 0) >= MAX_PENDING_PER_CLIENT) throw new OAuthError("temporarily_unavailable", "This app has too many sign-ins waiting. Finish one, or try again in a few minutes", 429);
-  if ((pending?.here ?? 0) >= MAX_PENDING_PER_ADDRESS) throw new OAuthError("temporarily_unavailable", "Too many sign-ins are waiting from this address. Finish one, or try again in a few minutes", 429);
+  if ((pending?.theirs ?? 0) >= MAX_PENDING_PER_PERSON) throw new OAuthError("temporarily_unavailable", "You have too many sign-ins waiting. Finish one, or try again in a few minutes", 429);
   await sweep(db, now);
   const id = b64url(crypto.getRandomValues(new Uint8Array(32)));
   await db.batch([
     db
-      .prepare("INSERT INTO oauth_requests (id, client_id, redirect_uri, state, code_challenge, resource, requested_from, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(await keyOf(id), r.clientId, r.redirectUri, r.state, r.codeChallenge, r.resource, from, now),
+      .prepare("INSERT INTO oauth_requests (id, client_id, redirect_uri, state, code_challenge, resource, person_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(await keyOf(id), r.clientId, r.redirectUri, r.state, r.codeChallenge, r.resource, personId, now),
     db.prepare("UPDATE oauth_clients SET requested_at = ? WHERE id = ? AND requested_at IS NULL").bind(now, r.clientId),
   ]);
   return id;
@@ -265,15 +272,13 @@ export interface RequestView {
 }
 
 /**
- * The request a person opens, to show them who is asking. The first person to open it is the one it
- * belongs to: for anyone else it is as if there were none, and so is it once it has lapsed.
+ * The request a person opens, to show them who is asking. It belongs to the person who started it:
+ * for anyone else it is as if there were none, and so is it once it has lapsed.
  */
 export async function openRequest(db: D1Database, personId: string, requestId: string, now = Date.now()): Promise<RequestView> {
-  const key = await keyOf(requestId);
-  await db.prepare("UPDATE oauth_requests SET person_id = ? WHERE id = ? AND person_id IS NULL AND created_at > ?").bind(personId, key, now - REQUEST_MS).run();
   const row = await db
     .prepare("SELECT r.redirect_uri, c.name FROM oauth_requests r JOIN oauth_clients c ON c.id = r.client_id WHERE r.id = ? AND r.person_id = ? AND r.created_at > ?")
-    .bind(key, personId, now - REQUEST_MS)
+    .bind(await keyOf(requestId), personId, now - REQUEST_MS)
     .first<{ redirect_uri: string; name: string }>();
   if (!row) throw new OpError("not_found", NO_SUCH_REQUEST);
   return { clientName: row.name, redirectHost: new URL(row.redirect_uri).host };
@@ -285,24 +290,23 @@ interface RequestRow {
   redirect_uri: string;
   state: string | null;
   code_challenge: string;
-  person_id: string | null;
   name: string;
 }
 
-/** The request `personId` may answer: one nobody has opened, or that they have. Any other is no request. */
+/** The request `personId` may answer: one they started. Any other is no request. */
 async function ownRequest(db: D1Database, personId: string, requestId: string, now: number): Promise<RequestRow> {
   const row = await db
-    .prepare("SELECT r.id, r.client_id, r.redirect_uri, r.state, r.code_challenge, r.person_id, c.name FROM oauth_requests r JOIN oauth_clients c ON c.id = r.client_id WHERE r.id = ? AND (r.person_id IS NULL OR r.person_id = ?) AND r.created_at > ?")
+    .prepare("SELECT r.id, r.client_id, r.redirect_uri, r.state, r.code_challenge, c.name FROM oauth_requests r JOIN oauth_clients c ON c.id = r.client_id WHERE r.id = ? AND r.person_id = ? AND r.created_at > ?")
     .bind(await keyOf(requestId), personId, now - REQUEST_MS)
     .first<RequestRow>();
   if (!row) throw new OpError("not_found", NO_SUCH_REQUEST);
   return row;
 }
 
-/** Takes the request for `personId`, once: whoever gets this answers it, and no one after. */
+/** Takes `personId`'s request, once: whichever answer gets this is the one, and none after. */
 async function claim(db: D1Database, personId: string, requestId: string, now: number): Promise<void> {
   const taken = await db
-    .prepare("DELETE FROM oauth_requests WHERE id = ? AND (person_id IS NULL OR person_id = ?) AND created_at > ? RETURNING id")
+    .prepare("DELETE FROM oauth_requests WHERE id = ? AND person_id = ? AND created_at > ? RETURNING id")
     .bind(await keyOf(requestId), personId, now - REQUEST_MS)
     .first();
   if (!taken) throw new OpError("not_found", NO_SUCH_REQUEST);
@@ -334,8 +338,8 @@ export interface Consent {
 /**
  * A member consents to a request. `personId` is the signed-in member, from the session and never from
  * what the page sent, so it is a parameter of its own. The agent is made with the limits they chose, held to what the Agents
- * page can give, and a code for the app to trade for its tokens. The request belongs to the first person
- * to open or answer it and is answered once. Nothing is made if any option is refused, and the request
+ * page can give, and a code for the app to trade for its tokens. The request belongs to the person who
+ * started it and is answered once. Nothing is made if any option is refused, and the request
  * stays to be answered again.
  */
 export async function consent(db: D1Database, personId: string, choices: Consent & ConnectOptions, now = Date.now()): Promise<{ agentId: string; code: string; redirectUri: string; state: string | null }> {

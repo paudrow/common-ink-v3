@@ -1056,7 +1056,7 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
     const client = await registerClient(env.DB, { client_name: "Chat", redirect_uris: ["https://chat.example/cb"] });
     const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
     const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
-    const requestId = await startRequest(env.DB, { clientId: client.id, redirectUri: client.redirectUris[0]!, state: null, codeChallenge: challenge, resource: null });
+    const requestId = await startRequest(env.DB, w.ada.personId, { clientId: client.id, redirectUri: client.redirectUris[0]!, state: null, codeChallenge: challenge, resource: null });
     const granted = await consent(env.DB, w.ada.personId, { requestId, workspaceId: w.ada.workspaceId, folderIds: [w.projects] });
     const { accessToken } = await exchangeCode(env.DB, { code: granted.code, clientId: client.id, redirectUri: client.redirectUris[0]!, verifier });
     expect(await authenticateAgent(env.DB, accessToken)).toMatchObject({ folderIds: [w.projects], workspaceId: w.ada.workspaceId, readOnly: false, agentId: granted.agentId });

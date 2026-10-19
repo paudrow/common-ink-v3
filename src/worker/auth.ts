@@ -41,6 +41,9 @@ export function page(title: string, body: string, status: number): Response {
   return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
+/** The longest address sign-in sends you back to: it rides in a cookie through Google and back. */
+export const MAX_NEXT = 1000;
+
 /** Only paths on this site, read the way a browser reads a Location, so sign-in can't send you elsewhere. */
 function safeNext(next: string | null): string {
   const base = "https://next.invalid";
@@ -48,7 +51,7 @@ function safeNext(next: string | null): string {
   try {
     const u = new URL(next, base);
     const path = `${u.pathname}${u.search}${u.hash}`;
-    return u.origin === base && !path.startsWith("//") && path.length <= 1000 ? path : "/";
+    return u.origin === base && !path.startsWith("//") && path.length <= MAX_NEXT ? path : "/";
   } catch {
     return "/";
   }

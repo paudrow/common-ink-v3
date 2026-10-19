@@ -9,7 +9,7 @@
 // The consent page and the answer it posts are not here. See docs/mcp.md.
 import { hashToken } from "../core/agents.ts";
 import { CHALLENGE, MAX_STATE, OAuthError, clientOf, exchangeCode, normalized, redirectBack, refreshTokens, registerClient, revokeToken, startRequest, type Tokens } from "../core/oauth.ts";
-import { escape, page, sessionPersonId } from "./auth.ts";
+import { MAX_NEXT, escape, page, sessionPersonId } from "./auth.ts";
 
 const NO_STORE = { "Cache-Control": "no-store", Pragma: "no-cache" };
 /** The most a body of any of these is: they carry a code, a token or a few addresses. */
@@ -110,9 +110,9 @@ const needed = (p: URLSearchParams, ...names: string[]): string[] => {
 };
 
 /**
- * The network an address is in, as caps count it. One host is usually given a whole IPv6 /64, and could
- * change its address within it at will, so an IPv6 address counts as its /64. An IPv4 address, or one
- * written inside an IPv6 address, counts as itself.
+ * The network an address is in, as the registration cap counts it. One site is usually given a whole IPv6
+ * /48, and could change its address within it at will, so an IPv6 address counts as its /48. An IPv4
+ * address, or one written inside an IPv6 address, counts as itself.
  */
 function network(address: string): string {
   const v4 = /(\d{1,3}(\.\d{1,3}){3})$/.exec(address);
@@ -122,9 +122,9 @@ function network(address: string): string {
   const back = tail ? tail.split(":") : [];
   const groups = [...front, ...Array<string>(Math.max(0, 8 - front.length - back.length)).fill("0"), ...back];
   return `${groups
-    .slice(0, 4)
+    .slice(0, 3)
     .map((g) => parseInt(g, 16).toString(16))
-    .join(":")}::/64`;
+    .join(":")}::/48`;
 }
 
 /** What caps count a request's sender by: a hash of its network, salted with the session secret, kept for that and logged nowhere. Null when the address isn't known. */
@@ -190,9 +190,10 @@ async function revoke(req: Request, env: Env): Promise<Response> {
 const refusal = (what: string, status = 400) => page("Can't connect", `<p>${escape(what)}</p>`, status);
 
 /**
- * Checks the request an app sends the member's browser with and keeps it, then sends the browser to
- * Common Ink's own page for the member to answer: /connect, after signing in if need be. Nothing is
- * decided or changed by this address, so opening it again only makes another request that lapses.
+ * Checks the request an app sends the member's browser with. A browser that isn't signed in is sent to
+ * sign in and back here, and nothing is kept for it. For a member, the request is kept, and the browser
+ * sent to Common Ink's own page for them to answer, /connect. Nothing is decided by this address, so
+ * opening it again only makes another request that lapses.
  *
  * It never redirects to the app's address with an error. Registration is open, so an address that is
  * registered is not thereby trusted, and a redirect from here would be one for anyone to send a link through.
@@ -220,16 +221,21 @@ async function authorize(req: Request, env: Env, url: URL): Promise<Response> {
   const resource = q.get("resource");
   if (resource !== null && resource !== resourceOf(url)) return wrong("invalid_target", `The app asked to sign in to something that isn't Common Ink's ${resourceOf(url)}.`);
 
+  // Nothing is kept for a visitor who isn't signed in: they sign in and come back to this same address.
+  const personId = await sessionPersonId(req, env, url);
+  if (!personId) {
+    const back = `${url.pathname}${url.search}`;
+    if (back.length > MAX_NEXT) return page("Sign in, then connect again", `<p>Sign in to Common Ink first, then connect from the app again.</p><p><a href="/auth/google">Sign in</a></p>`, 401);
+    return new Response(null, { status: 302, headers: { Location: `/auth/google?${new URLSearchParams({ next: back })}`, "Cache-Control": "no-store" } });
+  }
   let id: string;
   try {
-    id = await startRequest(env.DB, { clientId: client.id, redirectUri, state, codeChallenge: challenge, resource }, Date.now(), await senderOf(req, env));
+    id = await startRequest(env.DB, personId, { clientId: client.id, redirectUri, state, codeChallenge: challenge, resource });
   } catch (err) {
     if (err instanceof OAuthError) return refusal(err.message, err.status);
     throw err;
   }
-  const connect = `/connect?request=${id}`;
-  const signedIn = await sessionPersonId(req, env, url);
-  return new Response(null, { status: 302, headers: { Location: signedIn ? connect : `/auth/google?next=${encodeURIComponent(connect)}`, "Cache-Control": "no-store" } });
+  return new Response(null, { status: 302, headers: { Location: `/connect?request=${id}`, "Cache-Control": "no-store" } });
 }
 
 /** A preflight, answered for the routes that allow other sites (their headers are added in headers.ts). */
