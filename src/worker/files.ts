@@ -59,14 +59,14 @@ function served(req: Request, { upload, body, etag, range }: OpenedUpload, more:
   return new Response(body, { status: range ? 206 : 200, headers });
 }
 
-/** Who is asking for a workspace's files: an agent by its token, a clipper allowed by the member, or else the person signed in. A token is never a cookie, so no page can send it. */
-async function asker(req: Request, env: Env, url: URL, workspaceId: string): Promise<{ actor: Actor; byToken: boolean } | Response> {
+/** Who is asking for a workspace's files: an agent by its token, a clipper allowed by the member (which may only upload), or else the person signed in. A token is never a cookie, so no page can send it. */
+async function asker(req: Request, env: Env, url: URL, workspaceId: string): Promise<{ actor: Actor; byToken: boolean; clipper?: true } | Response> {
   const token = bearerToken(req);
   if (token) {
     const agent = await authenticateAgent(env.DB, token);
     if (agent) return { byToken: true, actor: agentActor(agent, workspaceId) };
     const clipper = await authenticateClipper(env.DB, token);
-    if (clipper) return { byToken: true, actor: { kind: "member", personId: clipper.personId, workspaceId } satisfies Actor };
+    if (clipper) return { byToken: true, clipper: true, actor: { kind: "member", personId: clipper.personId, workspaceId } satisfies Actor };
     return json({ error: "unauthorized", message: "Send a Common Ink agent token or an OAuth access token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
   }
   const personId = await sessionPersonId(req, env, url);
@@ -220,6 +220,8 @@ export async function handleFiles(req: Request, env: Env, url: URL): Promise<Res
   if (!reads(req)) return json({ error: "method_not_allowed" }, 405, { Allow: "GET, HEAD" });
   const who = await asker(req, env, url, workspaceId!);
   if (who instanceof Response) return who;
+  // The clipper sends files and never reads them: its token stands for the member, who can see far more than it clipped.
+  if (who.clipper) return json({ error: "forbidden", message: "The clipper can only upload files" }, 403);
   try {
     // Asked to open in a tab: a PDF goes to the file site, where there is one, and anything else is answered here as ever.
     const site = url.searchParams.get("open") === "tab" ? await siteAddress(env, who.actor, workspaceId!, id) : null;

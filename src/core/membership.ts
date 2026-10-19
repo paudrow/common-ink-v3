@@ -142,7 +142,9 @@ export async function signOut(asking: Asking, memberId: string, agents: boolean)
              AND EXISTS (SELECT 1 FROM people p WHERE p.id = ?3 AND p.ended_by_admin_at = ?4)`,
         )
         .bind(workspaceId, personId, memberId, now);
-  const [ended] = await db.batch(agents ? [sessions, disconnected] : [sessions]);
+  // The clipper is the member's own browser, so only they sign it out, with their agents.
+  const clipper = own ? [db.prepare("UPDATE clipper_grants SET revoked_at = ?2 WHERE person_id = ?1 AND revoked_at IS NULL").bind(personId, now)] : [];
+  const [ended] = await db.batch(agents ? [sessions, disconnected, ...clipper] : [sessions]);
   if (ended!.meta.changes) return { memberId };
   const refused = await refusal(asking, "member.signOut", memberId);
   throw refused.message === LAST_ADMIN ? new OpError("invalid", "They were signed out everywhere by an admin less than a day ago. Remove them to cut them off now.") : refused;

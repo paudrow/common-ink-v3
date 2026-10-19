@@ -39,6 +39,8 @@ export interface Ink {
   createNote(input: NewNote): Promise<CreatedNote>;
   uploadImage(input: { workspaceId: string; folderId: string; name: string; bytes: Uint8Array }): Promise<PlacedUpload>;
   uploadFile(input: { workspaceId: string; folderId: string; name: string; bytes: Uint8Array }): Promise<{ id: string }>;
+  /** Ends this sign-in on the server. A pasted agent token is not ended: that is the member's, in Common Ink. */
+  signOut(): Promise<void>;
 }
 
 export function createInk(auth: { token: string; host: string }, fetchImpl: typeof fetch = fetch): Ink {
@@ -139,6 +141,9 @@ export function createInk(auth: { token: string; host: string }, fetchImpl: type
       const upload = (await response.json()) as { id?: unknown };
       if (typeof upload.id !== "string") throw new InkError("invalid", "Common Ink did not return the file.");
       return { id: upload.id };
+    },
+    async signOut() {
+      await request(`${origin}/clipper/revoke`, { method: "POST", signal: AbortSignal.timeout(5_000) });
     },
   };
 }

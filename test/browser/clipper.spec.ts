@@ -4,6 +4,46 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium, expect, test } from "@playwright/test";
+import { unpackedExtensionId } from "../../scripts/extension-id.ts";
+import { agentWith, signInAsNewPerson } from "./helpers.ts";
+
+// The dev server allows the unpacked clipper, whose id the key in extension/manifest.json fixes.
+const EXTENSION = unpackedExtensionId();
+const RETURN = `https://${EXTENSION}.chromiumapp.org/`;
+
+test("Allow sends the browser back to the clipper with its token, which Settings revokes", async ({ page }) => {
+  await signInAsNewPerson(page, "Clip Allower");
+  await page.goto(`/clipper/connect?${new URLSearchParams({ redirect: RETURN })}`);
+  await expect(page.getByText(`Extension ID ${EXTENSION}`)).toBeVisible();
+  // page.route doesn't see a redirect's request, and chromiumapp.org resolves nowhere: that the browser sets off for it shows form-action let it go.
+  const allowed = page.waitForResponse((res) => res.request().method() === "POST" && new URL(res.url()).pathname === "/clipper/connect");
+  const sent = page.waitForRequest((req) => req.isNavigationRequest() && new URL(req.url()).origin === new URL(RETURN).origin);
+  await page.getByRole("button", { name: "Allow" }).click();
+  const back = new URL((await allowed).headers()["location"] ?? "https://invalid/");
+  expect((await sent).url()).toBe(RETURN);
+  const token = new URLSearchParams(back.hash.slice(1)).get("token") ?? "";
+  expect(`${back.origin}/`).toBe(RETURN);
+  expect(token).toMatch(/^cink_[A-Za-z0-9_-]{43}$/);
+
+  const clipper = agentWith(page, token);
+  expect(await clipper.status()).toBe(200);
+  await expect(clipper.tool("list_notes", {})).rejects.toThrow(/^forbidden: /);
+
+  await page.goto("/settings/account");
+  const row = page.getByLabel("Clipper");
+  await expect(row.getByText(EXTENSION)).toBeVisible();
+  await row.getByRole("button", { name: "Revoke" }).click();
+  await expect(row.getByText("No clipper is signed in.")).toBeVisible();
+  expect(await clipper.status()).toBe(401);
+});
+
+test("an extension that isn't the clipper can't sign in", async ({ page }) => {
+  await signInAsNewPerson(page, "Clip Refuser");
+  const other = "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.chromiumapp.org/";
+  const answer = await page.goto(`/clipper/connect?${new URLSearchParams({ redirect: other })}`);
+  expect(answer?.status()).toBe(400);
+  await expect(page.getByRole("button", { name: "Allow" })).toHaveCount(0);
+});
 
 const article = `<!doctype html>
 <html>
@@ -44,6 +84,7 @@ test("clips a page into a note", async ({ baseURL }) => {
   try {
     const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
     const extensionId = new URL(worker.url()).host;
+    expect(extensionId).toBe(EXTENSION);
     const app = await context.newPage();
     await app.goto(`${baseURL}/auth/dev?${new URLSearchParams({ email: `clipper-${crypto.randomUUID()}@example.com`, name: "Clip Tester" })}`);
     const token = await app.evaluate(async () => {

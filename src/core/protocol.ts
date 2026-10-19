@@ -1718,6 +1718,15 @@ export const MAX_AGENT_NAME = 60;
 export const DEFAULT_EXPIRY_DAYS = 90;
 export const MAX_EXPIRY_DAYS = 365;
 
+/** A member's live clipper sign-in, as Settings lists it. */
+export interface ClipperGrantView {
+  id: string;
+  extensionId: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+  expiresAt: number;
+}
+
 export interface Agent {
   id: string;
   name: string;

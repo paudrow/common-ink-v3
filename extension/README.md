@@ -36,6 +36,16 @@ The toolbar icon clips the current page. The context menu clips the page, the se
 2. Choose Sign in. Common Ink asks you to allow the clipper. Allow sends a token back to this browser. It is not listed with your agents.
 3. Allowing again replaces that token, so an older sign-in on another browser stops working.
 
-A pasted token still works, under Paste a token. A read-only token can sign in, and Save stays off. Sign out in the extension drops the token from this browser. The token stays in this browser's extension storage until then.
+The clipper's token reaches only what the clipper does: it lists workspaces and folders, creates notes, and uploads files. It can't read, change or delete anything. It lasts 90 days. Sign out in the extension ends it on the server and drops it from this browser. Settings, under Account, lists it with a Revoke button, and Sign out everywhere with your agents ends it too.
+
+A pasted token still works, under Paste a token. A read-only token can sign in, and Save stays off. Sign out in the extension drops a pasted token from this browser and leaves it connected in Common Ink.
+
+## Extension ID
+
+Common Ink lets only the extension IDs in its `CLIPPER_EXTENSION_IDS` setting sign in, so another extension can't ask for a token. The sign-in page shows the ID it is for.
+
+The `key` in `manifest.json` fixes the ID of an unpacked build at `nloccbnkboaohceggkmbmkppnjjkkdkh`, wherever it is loaded from. `scripts/extension-id.ts` works the ID out from the key. The dev server and the tests allow that ID. A Preview or production allows the IDs its own setting names.
+
+The key is a public key. Anyone can copy it into an unpacked extension, so production should allow only the Chrome Web Store ID. Once the clipper is in the store, put the store's public key here as `key`, so a local build has the store's ID.
 
 Clip a page, edit the title, pick a folder, and save. The folder list is the folders you can edit, loaded again each time you open the clipper, and it opens on the folder you saved to last. Images are uploaded into that folder and embedded in the note. An image the extension cannot fetch is kept as a link, and the note is still created. A PDF or another document is uploaded and embedded on the note. A tweet keeps the post's text and its address, so the note can embed it. A YouTube page keeps the description and the watch address.

@@ -5,7 +5,9 @@ CREATE TABLE clipper_grants (
   person_id TEXT NOT NULL REFERENCES people (id),
   token_prefix TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
+  extension_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
   last_used_at INTEGER,
   revoked_at INTEGER
 );

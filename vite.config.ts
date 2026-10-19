@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { unpackedExtensionId } from "./scripts/extension-id.ts";
 
 /**
  * wrangler.jsonc names the one secret every deployment needs, and with that list in place the dev
@@ -13,6 +14,6 @@ const inDevVars = () => (existsSync(".dev.vars") ? OPTIONAL.filter((name) => new
 
 // Builds only the web app; wrangler bundles the Worker, so one wrangler.jsonc serves dev, deploys, and Previews.
 export default defineConfig(({ command }) => ({
-  plugins: [react(), command === "serve" && cloudflare({ config: { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1" }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } } })],
+  plugins: [react(), command === "serve" && cloudflare({ config: { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } } })],
   build: { outDir: "dist", emptyOutDir: true },
 }));

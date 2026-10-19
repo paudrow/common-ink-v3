@@ -1,11 +1,12 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
+import { unpackedExtensionId } from "./scripts/extension-id.ts";
 
 export default defineConfig(async () => ({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
-      miniflare: { bindings: { TEST_MIGRATIONS: await readD1Migrations("migrations") } },
+      miniflare: { bindings: { TEST_MIGRATIONS: await readD1Migrations("migrations"), CLIPPER_EXTENSION_IDS: unpackedExtensionId() } },
     }),
   ],
   test: {

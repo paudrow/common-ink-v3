@@ -36,8 +36,9 @@ import {
   layoutOf,
 } from "./settingsLayout.ts";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
-import type { UploadStorage } from "../core/protocol.ts";
+import type { ClipperGrantView, UploadStorage } from "../core/protocol.ts";
 import { formatBytes } from "./plugins/uploads/sizing.ts";
+import { listClipperGrants, revokeClipperGrant } from "./api.ts";
 
 const NOT_JSON = "Settings are one JSON object, such as {}.";
 
@@ -558,7 +559,74 @@ function AccountSection({ account }: { account: Account }) {
           </p>
         )}
       </div>
+      <ClipperRow />
     </section>
+  );
+}
+
+const shortDate = (time: number) =>
+  new Date(time).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+
+/** The Chrome clipper this member allowed, if any, and revoking it from here. */
+function ClipperRow() {
+  const [grants, setGrants] = useState<readonly ClipperGrantView[] | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    listClipperGrants().then(
+      (list) => live && setGrants(list),
+      (err: Error) => live && setError(err.message),
+    );
+    return () => void (live = false);
+  }, []);
+  const revoke = async (id: string) => {
+    setError(null);
+    try {
+      await revokeClipperGrant(id);
+      setGrants((list) => list?.filter((grant) => grant.id !== id) ?? null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <div className="setting" data-row aria-label="Clipper">
+      <div className="setting-head">
+        <span>Clipper</span>
+      </div>
+      <p className="setting-about">
+        The Chrome clipper you allowed can create notes and upload what it
+        clips, as you. Revoke it to sign it out.
+      </p>
+      {grants?.length === 0 && (
+        <p className="soon">No clipper is signed in.</p>
+      )}
+      {grants?.map((grant) => (
+        <div className="setting-control" key={grant.id}>
+          <span>
+            Extension <code>{grant.extensionId}</code>, allowed{" "}
+            {shortDate(grant.createdAt)}, until {shortDate(grant.expiresAt)}
+          </span>
+          <button
+            type="button"
+            className="button small"
+            onClick={() => void revoke(grant.id)}
+          >
+            Revoke
+          </button>
+        </div>
+      ))}
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

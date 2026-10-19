@@ -343,6 +343,8 @@ export function createClipper(): Clipper {
     }),
     disconnect: () => enqueue(async () => {
       await ready;
+      // Forgotten here whether or not the server heard, so signing out never waits on a host that is down.
+      if (auth) await createInk(auth).signOut().catch(() => undefined);
       auth = null;
       personName = null;
       readOnly = false;

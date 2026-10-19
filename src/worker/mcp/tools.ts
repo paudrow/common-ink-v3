@@ -9,6 +9,7 @@ import { ASK_NOTE_SYNTAX, syntaxDescription, syntaxText as noteSyntaxText } from
 import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
+import { CLIPPER_TOOLS } from "../../core/clipper.ts";
 import type { Sources } from "../../core/sources.ts";
 
 /** What a tool call comes back with: text for the agent, and whether it failed. */
@@ -1084,9 +1085,14 @@ The arguments beside query are from before it could say them, and narrow it furt
   },
 ];
 
+/** Who calls a tool: an agent, or the clipper as its member, which reaches only `CLIPPER_TOOLS`. */
+export type Caller = ConnectedAgent & { clipper?: true };
+
+const reaches = (caller: Caller | undefined, name: string) => !caller?.clipper || CLIPPER_TOOLS.has(name);
+
 /** A tool as an agent is shown it: its description ends with its example, and its schema still takes each argument's old name. */
-export const toolList = () =>
-  TOOLS.map((tool) => {
+export const toolList = (caller?: Caller) =>
+  TOOLS.filter((tool) => reaches(caller, tool.name)).map((tool) => {
     const schema = tool.inputSchema as { properties: Record<string, Record<string, unknown>> };
     const old = Object.entries(oldNames(tool)).map(([was, name]) => [was, { ...schema.properties[name], deprecated: true, description: `The old name of ${name}, still taken. Use ${name}` }]);
     return {
@@ -1164,9 +1170,10 @@ function fromBase64(given: unknown): Uint8Array | null {
 }
 
 /** Runs a tool as `agent`. Failures the agent can act on come back as an error result, not a protocol error. */
-export async function callTool(db: D1Database, agent: ConnectedAgent & { asMember?: boolean }, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null }): Promise<ToolResult | null> {
+export async function callTool(db: D1Database, agent: Caller, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null }): Promise<ToolResult | null> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return null;
+  if (!reaches(agent, name)) return text(`forbidden: The clipper can only list workspaces and folders and create notes. ${name} is for agents`, true);
   try {
     const { workspaceId: workspace, fields } = opArguments(tool, args);
     if (name === "note_syntax") return text(noteSyntaxText());
@@ -1183,7 +1190,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent & { asMembe
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
-    const actor: Actor = agent.asMember ? { kind: "member", personId: agent.personId, workspaceId } : agentActor(agent, workspaceId);
+    const actor: Actor = agent.clipper ? { kind: "member", personId: agent.personId, workspaceId } : agentActor(agent, workspaceId);
     const written = async (answer: unknown) => text(withTimes(answer, timeIn((await timeZoneOf(db, workspaceId, agent.personId)) ?? "UTC"), tool.times ? new Set([...TIME_KEYS, ...tool.times]) : TIME_KEYS));
     if (name === "upload_file") {
       const { name: fileName, base64, folderId } = fields;
