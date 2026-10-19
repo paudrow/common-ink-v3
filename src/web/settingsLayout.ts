@@ -46,7 +46,7 @@ const GENERAL = { id: "general", name: "General" };
 
 /** The app's own settings, by the category each is listed under. One that is in no row is under General. */
 const OWN: readonly { id: string; name: string; keys: readonly string[] }[] = [
-  { id: "editor", name: "Editor", keys: ["core.editorFont", "core.editorFontFamily", "core.editorTextSize", "core.editorLineHeight", "core.editorReadingWidth"] },
+  { id: "editor", name: "Editor", keys: ["core.editorFont", "core.editorFontFamily", "core.editorTextSize", "core.editorLineHeight", "core.editorReadingWidth", "core.keyboardPluginsOnTouch"] },
   { id: "appearance", name: "Appearance", keys: ["core.theme", "core.textSize"] },
 ];
 

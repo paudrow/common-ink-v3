@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { Icon } from "./icons.tsx";
 import { PluginDetails, type PluginsProps } from "./PluginDetails.tsx";
+import { lackingSaid } from "./device.ts";
 import { InstallForm } from "./PluginInstall.tsx";
 import { whyNotTrusted } from "./pluginRun.ts";
 import { PLUGINS_PATH, asksTrust, kindLabel, listPlugins, matchesPlugin, waitingOn, within } from "./pluginList.ts";
@@ -80,6 +81,9 @@ export function Plugins(props: PluginsProps) {
                   )}
                 </div>
                 {plugin.description && <p className="plugin-about">{plugin.description}</p>}
+                {state?.lacking && (
+                  <p className="plugin-lacking">{lackingSaid(state.lacking)}</p>
+                )}
                 {state?.error && (
                   <span role="alert" className="error">
                     {plugin.kind === "built-in" ? `Failed: ${state.error}` : state.error}
@@ -90,7 +94,7 @@ export function Plugins(props: PluginsProps) {
                 // Turning one on is decided on its own page, where what it means is said first. Its switch here goes there.
                 <input type="checkbox" className="switch" aria-label={name} checked={(state?.enabled ?? false) && whyNotTrusted(plugin.record!) === null} disabled={!state} onChange={() => go(`${PLUGINS_PATH}/${encodeURIComponent(id)}`)} />
               ) : (
-                <input type="checkbox" className="switch" aria-label={name} checked={state?.enabled ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
+                <input type="checkbox" className="switch" aria-label={name} checked={(state?.enabled || !!state?.lacking) ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
               )}
             </li>
           );

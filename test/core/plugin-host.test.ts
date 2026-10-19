@@ -222,7 +222,7 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.toggle.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, installed: false, inPage: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, lacking: null, required: true, builtIn: false, installed: false, inPage: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
   });
 
   it("says which plugins came with the app, and no others", () => {
@@ -1426,5 +1426,47 @@ describe("the plugins a workspace installed, which change while the app runs", (
       ["html", "plugin.list"],
       ["html", "plugin.frame"],
     ]);
+  });
+});
+
+describe("plugins a device can't use", () => {
+  const vimLike: Plugin = { id: "keys", name: "Keys", needs: "keyboard", activate: (h) => void h.commands.register({ id: "keys.mode", title: "Mode", run: () => {} }) };
+  const tabsLike: Plugin = { id: "wide", name: "Wide", needs: "room", activate: (h) => void h.commands.register({ id: "wide.split", title: "Split", run: () => {} }) };
+  const phone = { phone: true, touch: true, keyboard: "unknown" } as const;
+  const state = (host: Host, id: string) => {
+    const { enabled, lacking } = host.contributions().plugins.find((p) => p.id === id)!;
+    return { enabled, lacking };
+  };
+
+  it("keeps one that needs a keyboard off on a touch screen until a keyboard is attached, and says why", () => {
+    const { host, ids, stored } = hostWith([vimLike, tabsLike], { device: phone });
+    expect(ids()).not.toContain("keys.mode");
+    expect(state(host, "keys")).toEqual({ enabled: false, lacking: "keyboard" });
+    expect(state(host, "wide")).toEqual({ enabled: false, lacking: "room" });
+
+    host.deviceChanged({ ...phone, keyboard: "attached" });
+    expect(ids()).toContain("keys.mode");
+    expect(state(host, "keys")).toEqual({ enabled: true, lacking: null });
+    expect(state(host, "wide"), "a keyboard makes a phone no wider").toEqual({ enabled: false, lacking: "room" });
+
+    host.deviceChanged({ ...phone, keyboard: "onScreen" });
+    expect(ids()).not.toContain("keys.mode");
+    expect(stored(), "the member's switches are left as they were").toEqual({});
+  });
+
+  it("keeps keyboard plugins on where the member asks, and never one they turned off", () => {
+    const { host, ids, wrote } = hostWith([vimLike], { device: phone });
+    wrote({ "core.keyboardPluginsOnTouch": true });
+    expect(ids()).toContain("keys.mode");
+    wrote({ "core.keyboardPluginsOnTouch": true, "keys.enabled": false });
+    expect(ids()).not.toContain("keys.mode");
+    expect(state(host, "keys"), "off by its switch, which is no lack of the device's").toEqual({ enabled: false, lacking: null });
+  });
+
+  it("starts one that needs room when the window widens past a phone's", () => {
+    const { host, ids } = hostWith([tabsLike], { device: phone });
+    expect(ids()).not.toContain("wide.split");
+    host.deviceChanged({ phone: false, touch: false, keyboard: "unknown" });
+    expect(ids()).toContain("wide.split");
   });
 });

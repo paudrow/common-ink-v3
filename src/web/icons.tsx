@@ -212,6 +212,8 @@ const PATHS = {
   ),
   restore: <path d="M2.75 8a5.25 5.25 0 1 1 1.6 3.8M2.5 13.5v-2.25h2.25" />,
   check: <path d="m3.75 8.25 2.75 2.75 5.75-6" />,
+  indent: <path d="M2.5 3.5h11M7.5 8h6M2.5 12.5h11M2.5 6l2.5 2-2.5 2" />,
+  outdent: <path d="M2.5 3.5h11M7.5 8h6M2.5 12.5h11M5 6 2.5 8 5 10" />,
 } as const;
 
 export type IconName = keyof typeof PATHS;

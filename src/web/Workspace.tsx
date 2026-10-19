@@ -35,6 +35,8 @@ import { isOpen, openInAnotherTab } from "./openNotes.ts";
 import { commitTyping, onFiled, performInSync, saveAll, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 import { Toasts } from "./Toasts.tsx";
+import { useDevice } from "./useDevice.ts";
+import { KeyRow, NewNoteButton, TopBar, upFrom } from "./Phone.tsx";
 import { keptTravels, samePlace, stepped, travelled, type Travel, type Travels } from "./travels.ts";
 
 const FOCUS_KEY = "ink.focus";
@@ -159,7 +161,7 @@ interface Props {
   reloadWorkspaces: () => Promise<void>;
 }
 
-export function Workspace({ me, workspace, settings, place: at, navigate, onSwitch, noteIsHere, reloadWorkspaces }: Props) {
+export function Workspace({ me, workspace, settings, place: at, navigate: navigateTo, onSwitch, noteIsHere, reloadWorkspaces }: Props) {
   /** The address under /settings when the settings are open over the window. */
   const settingsPath = inSettings(at.path) ? at.path : null;
   /**
@@ -186,6 +188,19 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   /** In focus the tab in front of the focused group fills the window, over everything else, which stays as it is underneath. Which group that is, the layout already says. */
   const [focusMode, setFocusMode] = useStored(FOCUS_KEY, isBoolean, false);
   const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
+  const device = useDevice();
+  /** A phone shows one screen at a time. */
+  const { phone } = device;
+  /** Whether the sidebar is the screen in front on a phone. Going anywhere puts what is there in front instead. */
+  const [sidebarInFront, setSidebarInFront] = useState(false);
+  /** Going anywhere, even where the member already is, puts it in front of the sidebar. */
+  const navigate = useCallback<Navigate>(
+    (path, options) => {
+      setSidebarInFront(false);
+      navigateTo(path, options);
+    },
+    [navigateTo],
+  );
   /**
    * The inspector as the member last had it, kept in this browser as the widths are: which panel,
    * whether it shows, and whether it is pinned. It begins closed and unpinned. A member from before
@@ -272,6 +287,12 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
       settings: {
         theme: { type: "string", default: "system", enum: ["system", "light", "dark"], title: "Theme", description: "Light or dark, or system to follow this device." },
         ...LOOK_SETTINGS,
+        keyboardPluginsOnTouch: {
+          type: "boolean",
+          default: false,
+          title: "Keyboard plugins without a keyboard",
+          description: "On a touch screen, plugins that need a keyboard, such as Vim mode, are off until one is connected. Turn this on to keep them on.",
+        },
       },
       activate(h) {
         h.commands.register({ id: "notes.all", title: "Open All notes", group: "Navigation", run: () => h.app().openFolder(ALL_NOTES) });
@@ -313,6 +334,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
       // The member's own controls come through here: the Settings and Plugins pages, and the commands that turn a plugin on or off.
       write: (key, value) => settings.set(key, value),
       mac: MAC,
+      device,
       embedSite: me.setup.embedSite,
       provide: (plugin) => ({
         workspace,
@@ -621,7 +643,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   const unseen = !!current && others?.noteId === current.id && others.revision > (seen[current.id] ?? 0);
 
   const toggleFocus = useCallback(() => setFocusMode((on) => !on), [setFocusMode]);
-  const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), [setSidebarOpen]);
+  const toggleSidebar = useCallback(() => (phone ? setSidebarInFront((front) => !front) : setSidebarOpen((open) => !open)), [phone, setSidebarOpen]);
   /** Whether the next panel to show takes the cursor, and the next to close gives it back: so for the keys and the icons, and not for a press elsewhere or the edge. */
   const byHand = useRef(false);
   const act = useCallback(
@@ -923,6 +945,9 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     };
   }, [host]);
   useEffect(() => host.navigated(), [host, place.path]);
+  // Back and Forward arrive without going through `navigate`.
+  useEffect(() => setSidebarInFront(false), [place.path, place.query]);
+  useLayoutEffect(() => host.deviceChanged({ phone: device.phone, touch: device.touch, keyboard: device.keyboard }), [host, device.phone, device.touch, device.keyboard]);
   useEffect(() => host.notesChanged(), [host, notes]);
 
   const actions = useLatest({
@@ -977,7 +1002,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
     folders: tree,
     folderId: frontFolderId,
     focus: focusMode,
-    sidebarOpen,
+    // On a phone the sidebar is a screen of its own, drawn whole whenever it is in front.
+    sidebarOpen: phone || sidebarOpen,
     pages: contributed.views.page.toSorted((a, b) => (a.order ?? UNPLACED) - (b.order ?? UNPLACED)),
     sections: null,
     sectionNames: contributed.views.section.flatMap(({ id, label, icon }) => (label && icon ? [{ id, label, icon }] : [])),
@@ -1068,6 +1094,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
         }
         live={
           focusMode &&
+          !phone &&
           bar
             .filter((item) => item.live)
             .map((item) => (
@@ -1133,14 +1160,16 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
    * throws. At `/` it is every note, so there is a way to a note whatever is turned off.
    */
   const loneEditor = (
-    <div className="groups" data-focus-mode={focusMode || undefined}>
+    <div className="groups" data-focus-mode={(focusMode && !phone) || undefined}>
       <section className="group" data-front="">
-        <div className="tab-row">
-          {routeNoteId && renderNoteTools(routeNoteId)}
-          <button type="button" className="icon-button focus-button" aria-label="Focus" title={`${focusMode ? "Leave focus" : "Focus"} (${shortcut("view.toggleFocus")})`} aria-pressed={focusMode} onClick={toggleFocus}>
-            <Icon name="focus" />
-          </button>
-        </div>
+        {!phone && (
+          <div className="tab-row">
+            {routeNoteId && renderNoteTools(routeNoteId)}
+            <button type="button" className="icon-button focus-button" aria-label="Focus" title={`${focusMode ? "Leave focus" : "Focus"} (${shortcut("view.toggleFocus")})`} aria-pressed={focusMode} onClick={toggleFocus}>
+              <Icon name="focus" />
+            </button>
+          </div>
+        )}
         <div className="group-body">
           {routeNoteId ? renderNote(routeNoteId) : routeFolderId ? renderFolder(routeFolderId) : opened?.kind === "page" ? renderPage(opened.id, opened.path) : home ? renderPage(home.id, "/") : renderFolder(ALL_NOTES)}
         </div>
@@ -1149,17 +1178,28 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   );
 
   /** Focus is of a group, and the way out of it is in that group. With none drawn the window stays whole, so nothing is hidden with no way back. */
-  const focusable = !!editorArea || !passing;
+  const focusable = (!!editorArea || !passing) && !phone;
+
+  const up = upFrom(route, current ? current.folderId : routeNoteId ? undefined : null, tree);
+  const goUp = () => (up.to === "sidebar" ? setSidebarInFront(true) : navigate(folderPath(up.folderId)));
+  const frontTitle = route.kind === "note" ? null : routeFolderId ? ((tree && folderTitle(tree, routeFolderId)) ?? "") : ((page ?? home)?.label ?? "");
+  const inspector = inspectorViews.length > 0 && (
+    <>
+      {shownView && <InspectorPanel ref={panel} id={panelId} host={host} view={shownView} subject={subject} pinned={side.pinned} onPin={() => act({ type: "pin" })} />}
+      <InspectorBar ref={inspectorBar} views={inspectorViews} app={app} shown={shownPanel} panelId={panelId} onPick={togglePanel} />
+    </>
+  );
 
   // Every session ends, this one with them, so the page is read again signed out.
   const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
 
   return (
-    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || !!saved || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
-      {contributed.views.column.map((column) => (
-        <Drawn key={column.id} host={host} view={column} />
-      ))}
-      {contributed.views.column.length > 0 && (
+    <div className="app" data-phone={phone || undefined} data-sidebar-in-front={(phone && sidebarInFront) || undefined} data-keys={(phone && device.covered > 0) || undefined} data-focus-mode={(focusMode && focusable) || undefined} data-bar={(!phone && (bar.length > 0 || !!saved)) || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px`, "--covered": `${device.covered}px` } as CSSProperties}>
+      {(!phone || sidebarInFront) &&
+        contributed.views.column.map((column) => (
+          <Drawn key={column.id} host={host} view={column} />
+        ))}
+      {!phone && contributed.views.column.length > 0 && (
         <ResizeHandle
           label="Resize sidebar"
           orientation="vertical"
@@ -1172,7 +1212,17 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
         />
       )}
 
-      <main className="main" aria-label="Editor">
+      <main className="main" aria-label="Editor" inert={(phone && sidebarInFront) || undefined}>
+        {phone && (
+          <TopBar
+            up={up}
+            onUp={goUp}
+            title={frontTitle}
+            tools={routeNoteId && renderNoteTools(routeNoteId)}
+            inspector={inspectorViews.length > 0 ? { open: layout !== "closed", toggle: toggleInspector } : null}
+            failed={saved?.failed ? saved.label : null}
+          />
+        )}
         {passing && (
           <div className="passing">
             <Drawn key={passing.id} host={host} view={passing} />
@@ -1188,7 +1238,16 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
         )}
       </main>
 
-      {inspectorViews.length > 0 && (
+      {phone && layout !== "closed" && (
+        // The inspector is a sheet from the bottom on a phone, its panels as tabs along its top, with the page still in view above it.
+        <>
+          <div className="phone-scrim" aria-hidden="true" onPointerDown={() => act({ type: "fold", folded: true })} />
+          <div className="phone-sheet">{inspector}</div>
+        </>
+      )}
+      {phone && !sidebarInFront && !settingsPath && !device.covered && canEdit && <NewNoteButton onCreate={() => void createNote().catch((err: Error) => app.notify({ message: err.message }))} refused={canCreateNote ? null : "Open a folder you can change to add a note to it"} />}
+      {phone && device.covered > 0 && <KeyRow covered={device.covered} run={(id) => host.run(id)} has={(id) => contributed.commands.some((c) => c.id === id)} />}
+      {!phone && inspectorViews.length > 0 && (
         <>
           <ResizeHandle
             label="Resize inspector"
@@ -1201,11 +1260,10 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
             onReset={() => setWidths(({ inspector: _, ...w }) => w)}
             fold={{ folded: layout !== "pinned", size: 0, onFold: (folded) => act({ type: "fold", folded }) }}
           />
-          {shownView && <InspectorPanel ref={panel} id={panelId} host={host} view={shownView} subject={subject} pinned={side.pinned} onPin={() => act({ type: "pin" })} />}
-          <InspectorBar ref={inspectorBar} views={inspectorViews} app={app} shown={shownPanel} panelId={panelId} onPick={togglePanel} />
+          {inspector}
         </>
       )}
-      {(bar.length > 0 || saved) && (
+      {!phone && (bar.length > 0 || saved) && (
         <div className="bar" role="group" aria-label="Bottom bar">
           {(["left", "right"] as const).map((side) => (
             <div key={side} className="bar-side" data-side={side}>

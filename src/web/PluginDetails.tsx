@@ -10,6 +10,7 @@ import { PLUGINS_PATH, asksTrust, kindLabel, within, type Listed } from "./plugi
 import { FullTrustLead, FullTrustReason, FullTrustSwitch } from "./PluginTrust.tsx";
 import { byWhom, PermissionRow, sitesIn, useRecordChanges, type RecordChanges } from "./PluginPermissions.tsx";
 import { PluginSource } from "./PluginSource.tsx";
+import { lackingSaid } from "./device.ts";
 import { SettingRow } from "./SettingRow.tsx";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
 
@@ -144,12 +145,13 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
           <FullTrustSwitch plugin={trusting} host={host} workspaceId={workspaceId} enabled={state?.enabled ?? false} admin={admin} adminElsewhere={adminElsewhere} onRecord={onRecord} />
         ) : (
           <label className="plugin-switch">
-            <span>{state?.enabled ? "On" : "Off"}</span>
-            <input type="checkbox" className="switch" aria-label={name} checked={state?.enabled ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
+            <span>{state?.enabled || state?.lacking ? "On" : "Off"}</span>
+            <input type="checkbox" className="switch" aria-label={name} checked={(state?.enabled || !!state?.lacking) ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
           </label>
         )}
       </header>
       {plugin.description && <p className="plugin-lead">{plugin.description}</p>}
+      {state?.lacking && <p className="plugin-lacking">{lackingSaid(state.lacking)}</p>}
       {trusting && <FullTrustReason plugin={trusting} />}
       {state?.error && (
         <p role="alert" className="error">
