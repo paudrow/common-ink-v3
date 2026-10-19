@@ -11578,3 +11578,200 @@ button.crumb[aria-expanded="true"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/*
+ * Night shift (the plugin of that name): red light on black, over whichever theme the member has. The plugin sets the tokens above on the
+ * root, inline, so every rule drawn from them follows. This is what it takes for what the stylesheet colors by hand, so that nothing in
+ * the app is left blue or green. It comes last so that it wins a tie; every selector begins with the attribute the plugin sets, and so
+ * nothing here applies with it off.
+ */
+:root[data-night-shift] {
+  accent-color: var(--accent);
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+:where(:root[data-night-shift]) ::selection {
+  background: var(--selection);
+  color: var(--ink);
+}
+
+:where(:root[data-night-shift]) :focus-visible {
+  outline-color: var(--accent);
+}
+
+:where(:root[data-night-shift]) ::placeholder {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+:where(:root[data-night-shift]) :is(input, textarea, select) {
+  color: var(--ink);
+}
+
+/* A browser draws its own checkbox and radio in grays, and a check in white. These are drawn in the theme's colors, at the size the browser gives them: it is the drawing that has the size, so it is said here, where a rule of the app's own for it is still the one that holds. */
+:where(:root[data-night-shift] input[type="checkbox"]:not(.switch, .todo-box), :root[data-night-shift] input[type="radio"]) {
+  width: 13px;
+  height: 13px;
+}
+
+:root[data-night-shift] input[type="checkbox"]:not(.switch, .todo-box),
+:root[data-night-shift] input[type="radio"] {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-elev) center / 100% no-repeat;
+}
+
+:root[data-night-shift] input[type="radio"] {
+  border-radius: 50%;
+}
+
+:root[data-night-shift] input[type="checkbox"]:not(.switch, .todo-box):checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4l2.6 2.6L12 5.5' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+:root[data-night-shift] input[type="radio"]:checked {
+  border-color: var(--accent);
+  background-image: radial-gradient(circle, var(--accent) 0 38%, transparent 44%);
+}
+
+:root[data-night-shift] :is(input[type="checkbox"], input[type="radio"]):disabled {
+  opacity: 0.5;
+}
+
+:root[data-night-shift] .todo-box:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4l2.6 2.6L12 5.5' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+:where(:root[data-night-shift]) hr {
+  color: var(--line-strong);
+}
+
+:root[data-night-shift] .embed-card {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+}
+
+:root[data-night-shift] option {
+  background: var(--bg-elev);
+  color: var(--ink);
+}
+
+/* The colors an embed asks for by name, and the colors of the people who wrote a note: a brightness each, since there is only one hue. */
+:root[data-night-shift] [data-colour="red"] {
+  --swatch: var(--night-swatch-red);
+}
+
+:root[data-night-shift] [data-colour="orange"] {
+  --swatch: var(--night-swatch-orange);
+}
+
+:root[data-night-shift] [data-colour="yellow"] {
+  --swatch: var(--night-swatch-yellow);
+}
+
+:root[data-night-shift] [data-colour="green"] {
+  --swatch: var(--night-swatch-green);
+}
+
+:root[data-night-shift] [data-colour="blue"] {
+  --swatch: var(--night-swatch-blue);
+}
+
+:root[data-night-shift] [data-colour="purple"] {
+  --swatch: var(--night-swatch-purple);
+}
+
+:root[data-night-shift] [data-colour="pink"] {
+  --swatch: var(--night-swatch-pink);
+}
+
+:root[data-night-shift] [data-colour="gray"] {
+  --swatch: var(--night-swatch-gray);
+}
+
+:root[data-night-shift] .who-hunk:is([data-tone="member-0"], [data-tone="agent-0"]) {
+  --who: var(--night-swatch-red);
+}
+
+:root[data-night-shift] .who-hunk:is([data-tone="member-1"], [data-tone="member-4"], [data-tone="agent-1"]) {
+  --who: var(--night-swatch-orange);
+}
+
+:root[data-night-shift] .who-hunk:is([data-tone="member-2"], [data-tone="agent-2"]) {
+  --who: var(--night-swatch-yellow);
+}
+
+:root[data-night-shift] .who-hunk:is([data-tone="member-3"], [data-tone="agent-3"]) {
+  --who: var(--night-swatch-green);
+}
+
+:root[data-night-shift] .who-avatar,
+:root[data-night-shift] .who-hunk:is([data-tone="member-4"], [data-tone="agent-0"], [data-tone="agent-3"]) .who-avatar {
+  color: var(--on-accent);
+}
+
+:root[data-night-shift] .who-hunk[data-tone="self"] .who-avatar {
+  color: var(--ink);
+}
+
+/* A person's initials, which are colored by a hue of their own. */
+:root[data-night-shift] .avatar {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* A calendar's own color, which a calendar chooses and may be any. */
+:root[data-night-shift] [style*="--c:"] {
+  --c: var(--accent) !important;
+}
+
+:root[data-night-shift] .hist-skip {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+}
+
+:root[data-night-shift] .media-title {
+  color: var(--ink);
+}
+
+:root[data-night-shift] .upload-size::before {
+  border-color: var(--ink);
+  background: rgb(0 0 0 / 0.7);
+}
+
+/* The app's own pictures: its mark, and the plugins' screenshots of the app. They are tinted whether or not pictures in notes are. */
+:root[data-night-shift] :is(img[src="/favicon.svg"], .plugin-shots img) {
+  filter: url(#night-shift-tint);
+}
+
+:root[data-night-shift] .plugin-shots .shot-light {
+  display: none;
+}
+
+:root[data-night-shift] .plugin-shots .shot-dark {
+  display: block;
+}
+
+/* Pictures, videos and embeds, when the member has asked for them to be tinted. A picture and a video are changed by a filter, which keeps their brightness and has them in red and nothing else. */
+:root[data-night-tint] :is(img, video, canvas) {
+  filter: url(#night-shift-tint);
+}
+
+/* A frame from another site is sandboxed, and can't be restyled inside. It is covered instead: first made gray, then multiplied by the tint. The cover lets every press through to the frame. */
+:root[data-night-tint] .embed-below:has(iframe)::before,
+:root[data-night-tint] .embed-below:has(iframe)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+:root[data-night-tint] .embed-below:has(iframe)::before {
+  backdrop-filter: grayscale(1);
+}
+
+:root[data-night-tint] .embed-below:has(iframe)::after {
+  background: var(--night-overlay);
+  mix-blend-mode: multiply;
+}

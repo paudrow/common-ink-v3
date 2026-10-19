@@ -447,6 +447,10 @@ One named thing a plugin can be permitted, which opens a fixed list of operation
 **Plugin record**:
 What a workspace keeps of its plugins: which are installed, what each is permitted, and the requests waiting. Every member reads it and only an admin changes it. It is not settings.
 
+**Night shift**:
+A built-in plugin, off until a member turns it on, that draws the whole app in red light on black instead of the light or dark theme, which it sits on top of: turning it off brings back whichever the member had. Its colors have no blue, and green only as far as its strength lets in, from deep red to warm amber. It is turned on and off by hand with the command Toggle night shift and its key. It can also tint pictures, videos and embeds red, off unless the member asks for it.
+_Avoid_: Dark mode, red mode
+
 **Plugin permission**:
 An admin's decision on one capability of one plugin, for every member of the workspace: allowed or off, and locked or not. A locked permission takes no requests and stays as it is until an admin unlocks it. An approval is of the plugin as it was: new code voids every approval, and a capability declared another way voids its own. HTML embeds have one permission in the same record, the network, with the sites an admin lists. This is not settings.
 _Avoid_: Setting
