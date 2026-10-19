@@ -5,6 +5,7 @@ import { parseForm } from "../../src/web/plugins/forms/form.ts";
 import { parseBoard } from "../../src/web/plugins/kanban/board.ts";
 import { readClock } from "../../src/web/plugins/lib/clock.ts";
 import { formulasIn, mathBlocksIn } from "../../src/web/plugins/math/syntax.ts";
+import { writtenReference } from "../../src/web/plugins/lib/references.tsx";
 import { BUILT_INS } from "../../src/web/plugins/index.ts";
 import { createPluginHost, type HostOptions } from "../../src/web/pluginHost.ts";
 import type { App, PluginHost } from "../../src/web/plugin-api.ts";
@@ -61,6 +62,10 @@ describe("what a note can hold", () => {
     const board = parseBoard(blocksIn(NOTE_SYNTAX.find((row) => row.name === "kanban")!.example)[0]!.body);
     expect(board.columns.map((column) => column.title)).toEqual(["To do", "Doing", "Done"]);
     expect(readClock(inlineIn(NOTE_SYNTAX.find((row) => row.name === "timer" && row.kind === "embed")!.example)[0]!.config, "timer")?.length).toBe("5m");
+    expect(readClock(inlineIn(NOTE_SYNTAX.find((row) => row.name === "stopwatch")!.example)[0]!.config, "stopwatch")).toEqual({ length: null, run: { is: "idle" } });
+    expect(blocksIn(NOTE_SYNTAX.find((row) => row.name === "html")!.example)[0]!.body).toContain("<p>Hello</p>");
+    expect(writtenReference(inlineIn(NOTE_SYNTAX.find((row) => row.name === "event")!.example)[0]!.config)).toEqual({ ref: "aaaaaaaaaaaa", label: "Lunch" });
+    expect(writtenReference(inlineIn(NOTE_SYNTAX.find((row) => row.name === "contact")!.example)[0]!.config)).toEqual({ ref: "aaaaaaaaaaaa", label: "Ada Lovelace" });
     const math = NOTE_SYNTAX.find((row) => row.name === "math")!.example;
     expect(formulasIn(math.split("\n")[0]!)).toHaveLength(1);
     expect(mathBlocksIn(math.split("\n"))).toHaveLength(1);

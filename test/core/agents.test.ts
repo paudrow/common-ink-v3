@@ -203,7 +203,7 @@ describe("MCP protocol", () => {
     expect(isError).toBe(false);
     expect(text).toContain(":::form{}");
     expect(text).toContain('"answers": {}');
-    expect(await tool(token, "note_syntax", { form: true })).toMatchObject({ isError: true, text: expect.stringContaining('takes no "form"') });
+    expect(await tool(token, "note_syntax", { form: true })).toMatchObject({ isError: true, text: 'invalid: note_syntax takes no "form". It takes no arguments.' });
   });
 
   it("reports unknown methods and tools, and bad requests, as JSON-RPC errors", async () => {

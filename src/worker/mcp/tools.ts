@@ -256,7 +256,7 @@ export const TOOLS: Tool[] = [
   {
     name: "note_syntax",
     description: syntaxDescription(),
-    inputSchema: object({}),
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
     example: {},
   },
   {
