@@ -512,8 +512,9 @@ function AccountSection({ account }: { account: Account }) {
         <p className="setting-about">
           Signs you out of Common Ink in every browser you are signed in on,
           this one too, in every workspace. Use it after signing in on a
-          computer that isn't yours, or losing one. It disconnects your agents
-          too, unless you say otherwise: connect again the ones you still trust.
+          computer that isn't yours, or losing one. It signs your clipper out
+          too, and disconnects your agents unless you say otherwise: connect
+          again the ones you still trust.
         </p>
         <div className="setting-control">
           {asked ? (

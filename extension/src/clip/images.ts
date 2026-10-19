@@ -119,9 +119,10 @@ export async function fetchImage(url: string, fetchImpl: typeof fetch = fetch): 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30_000);
   try {
-    const response = await fetchImpl(parsed.href, { credentials: "omit", redirect: "follow", signal: controller.signal });
-    // A redirect is followed before the extension can see where to, so a private address is caught here, before its body is read.
-    if (!response.ok || (response.url && !fetchable(new URL(response.url)))) {
+    // A redirect is not followed: it would be asked before its address could be checked, and an
+    // extension's fetch hides where a redirect points, so an image behind one stays a link.
+    const response = await fetchImpl(parsed.href, { credentials: "omit", redirect: "manual", signal: controller.signal });
+    if (!response.ok) {
       void response.body?.cancel();
       return null;
     }

@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { signIn, whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent, listAgents } from "../../src/core/agents.ts";
-import { authenticateClipper, clipperRedirect, connectClipper } from "../../src/core/clipper.ts";
+import { authenticateClipper, clipperRedirect, connectClipper, listClipperGrants } from "../../src/core/clipper.ts";
+import { addMember } from "./members.ts";
 import { PRIOR_WRITE, perform } from "../../src/core/operations.ts";
 import { sign } from "../../src/worker/session.ts";
 
@@ -215,13 +216,27 @@ describe("revoking a clipper", () => {
     expect(await (await settings(ada.cookie)).json()).toEqual({ grants: [] });
   });
 
-  it("ends when the member signs out everywhere with their agents", async () => {
-    const ada = await member();
-    const { token } = await allow(ada.cookie);
-    await perform(env.DB, { kind: "member", personId: ada.personId, workspaceId: ada.workspaceId }, { type: "member.signOut", memberId: ada.personId, agents: false });
+  for (const agents of [false, true]) {
+    it(`ends when the member signs out everywhere, ${agents ? "with" : "without"} their agents, and Settings no longer lists it`, async () => {
+      const ada = await member();
+      const { token } = await allow(ada.cookie);
+      await perform(env.DB, { kind: "member", personId: ada.personId, workspaceId: ada.workspaceId }, { type: "member.signOut", memberId: ada.personId, agents });
+      expect(await authenticateClipper(env.DB, token)).toBeNull();
+      expect((await rpc(token, "tools/list")).status).toBe(401);
+      expect(await listClipperGrants(env.DB, ada.personId)).toEqual([]);
+    });
+  }
+
+  it("ends when an admin signs the member out everywhere, and works again once the member allows it again", async () => {
+    const admin = await member("Grace Hopper");
+    const ada = await addMember({ kind: "member", personId: admin.personId, workspaceId: admin.workspaceId }, "editor", "Ada Lovelace");
+    const cookie = `__Host-ink_session=${encodeURIComponent(await sign({ personId: ada.personId }, SECRET, 3600))}`;
+    const { token } = await allow(cookie);
     expect((await authenticateClipper(env.DB, token))?.personId).toBe(ada.personId);
-    await perform(env.DB, { kind: "member", personId: ada.personId, workspaceId: ada.workspaceId }, { type: "member.signOut", memberId: ada.personId, agents: true });
+    await perform(env.DB, { kind: "member", personId: admin.personId, workspaceId: admin.workspaceId }, { type: "member.signOut", memberId: ada.personId, agents: false });
     expect(await authenticateClipper(env.DB, token)).toBeNull();
+    const { token: again } = await allow(`__Host-ink_session=${encodeURIComponent(await sign({ personId: ada.personId, ended: 1 }, SECRET, 3600))}`);
+    expect((await authenticateClipper(env.DB, again))?.personId).toBe(ada.personId);
   });
 });
 
@@ -237,6 +252,17 @@ describe("a clip sent twice", () => {
     const writeId = crypto.randomUUID();
     const first = await tool(token, "create_note", { text: "# Once", writeId });
     const again = await tool(token, "create_note", { text: "# Once", writeId });
-    expect(again.json().id).toBe(first.json().id);
+    expect(again.json()).toEqual({ id: first.json().id });
+  });
+
+  it("finds only a note the clipper made, so a write id the member used elsewhere reads nothing", async () => {
+    const ada = await member();
+    const { token } = await allow(ada.cookie);
+    const writeId = crypto.randomUUID();
+    const own = await perform(env.DB, { kind: "member", personId: ada.personId, workspaceId: ada.workspaceId }, { type: "note.create", text: "# Private plans\n\nNot for the clipper", writeId });
+    const clipped = await tool(token, "create_note", { text: "# Clipped", writeId });
+    expect(clipped.json().id).not.toBe(own.id);
+    expect(clipped.text).not.toContain("Private plans");
+    expect((await tool(token, "create_note", { text: "# Clipped", writeId: "x".repeat(57) })).text).toBe("invalid: The clipper's writeId is at most 56 characters");
   });
 });

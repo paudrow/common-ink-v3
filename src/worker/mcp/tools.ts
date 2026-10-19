@@ -1,6 +1,6 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { timeIn } from "../../core/history.ts";
-import { agentActor, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
+import { PRIOR_WRITE, agentActor, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
 import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
 import { CAPABILITY_NAMES } from "../../core/plugins.ts";
 import { MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
@@ -1085,6 +1085,9 @@ The arguments beside query are from before it could say them, and narrow it furt
   },
 ];
 
+const MAX_WRITE_ID = 64;
+const CLIPPER_WRITE = "clipper:";
+
 /** Who calls a tool: an agent, or the clipper as its member, which reaches only `CLIPPER_TOOLS`. */
 export type Caller = ConnectedAgent & { clipper?: true };
 
@@ -1199,6 +1202,13 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       if (bytes.byteLength > MAX_INLINE_UPLOAD_BYTES) throw new OpError("invalid", `upload_file takes at most ${MAX_INLINE_UPLOAD_BYTES / 1024 / 1024} MB. Send a larger file with start_upload`);
       const upload = await perform(db, actor, { type: "upload.create", name: fileName as string, size: bytes.byteLength, ...(folderId === undefined ? {} : { folderId: folderId as string }) }, Date.now(), sources, { bucket: reached.bucket, body: new Response(bytes).body });
       return written(withLine(upload));
+    }
+    if (agent.clipper && name === "create_note" && typeof fields.writeId === "string") {
+      // The clipper writes as its member, so its write ids are its own, and a replay finds only a note it made. It can't read notes, so it is told the id alone.
+      if (fields.writeId.length > MAX_WRITE_ID - CLIPPER_WRITE.length) throw new OpError("invalid", `The clipper's writeId is at most ${MAX_WRITE_ID - CLIPPER_WRITE.length} characters`);
+      fields.writeId = CLIPPER_WRITE + fields.writeId;
+      const prior = await db.prepare(PRIOR_WRITE).bind(fields.writeId, workspaceId, "member", agent.personId).first<{ id: string }>();
+      if (prior) return text({ id: prior.id });
     }
     const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
     return written(tool.told ? tool.told(answer as never, reached.origin) : answer);

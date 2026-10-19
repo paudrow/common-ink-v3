@@ -47,24 +47,34 @@ export function clipperRedirect(value: string | null, allowed: readonly string[]
   return { redirect: `${url.origin}/`, extensionId };
 }
 
-/** Allows the clipper for `personId`. A previous grant stops working. The token is shown only this once. */
+/**
+ * Allows the clipper for `personId`. A previous grant stops working. The token is shown only this once.
+ * The grant holds the person's sign-out count, so it ends when they are signed out everywhere, by
+ * themselves or by an admin, as their browser sessions do.
+ */
 export async function connectClipper(db: D1Database, personId: string, extensionId: string, now = Date.now()): Promise<{ grantId: string; token: string }> {
   const token = TOKEN_PREFIX + b64url(crypto.getRandomValues(new Uint8Array(32)));
   const grantId = newId();
   await db.batch([
     db.prepare("UPDATE clipper_grants SET revoked_at = ? WHERE person_id = ? AND revoked_at IS NULL").bind(now, personId),
     db
-      .prepare("INSERT INTO clipper_grants (id, person_id, token_prefix, token_hash, extension_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(grantId, personId, token.slice(0, TOKEN_PREFIX.length + 4), await hashToken(token), extensionId, now, now + CLIPPER_MS),
+      .prepare(
+        `INSERT INTO clipper_grants (id, person_id, token_prefix, token_hash, extension_id, created_at, expires_at, sessions_ended)
+           SELECT ?, id, ?, ?, ?, ?, ?, sessions_ended FROM people WHERE id = ?`,
+      )
+      .bind(grantId, token.slice(0, TOKEN_PREFIX.length + 4), await hashToken(token), extensionId, now, now + CLIPPER_MS, personId),
   ]);
   return { grantId, token };
 }
 
-/** The member a clipper token stands for, or null when it is unknown, malformed, revoked, or past its time. */
+/** What makes a grant work: not revoked, not past its time, and the person not signed out everywhere since. */
+const LIVE = "g.revoked_at IS NULL AND g.expires_at > ? AND g.sessions_ended = (SELECT sessions_ended FROM people p WHERE p.id = g.person_id)";
+
+/** The member a clipper token stands for, or null when it is unknown, malformed, revoked, past its time, or signed out everywhere since. */
 export async function authenticateClipper(db: D1Database, token: string, now = Date.now()): Promise<ClipperGrant | null> {
   if (!token.startsWith(TOKEN_PREFIX) || token.length > 200) return null;
   const row = await db
-    .prepare("SELECT id, person_id, last_used_at FROM clipper_grants WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?")
+    .prepare(`SELECT g.id, g.person_id, g.last_used_at FROM clipper_grants g WHERE g.token_hash = ? AND ${LIVE}`)
     .bind(await hashToken(token), now)
     .first<{ id: string; person_id: string; last_used_at: number | null }>();
   if (!row) return null;
@@ -77,7 +87,7 @@ export async function authenticateClipper(db: D1Database, token: string, now = D
 /** The member's own clipper grants that still work. */
 export async function listClipperGrants(db: D1Database, personId: string, now = Date.now()): Promise<ClipperGrantView[]> {
   const { results } = await db
-    .prepare("SELECT id, extension_id, created_at, last_used_at, expires_at FROM clipper_grants WHERE person_id = ? AND revoked_at IS NULL AND expires_at > ? ORDER BY created_at DESC")
+    .prepare(`SELECT g.id, g.extension_id, g.created_at, g.last_used_at, g.expires_at FROM clipper_grants g WHERE g.person_id = ? AND ${LIVE} ORDER BY g.created_at DESC`)
     .bind(personId, now)
     .all<{ id: string; extension_id: string; created_at: number; last_used_at: number | null; expires_at: number }>();
   return results.map((row) => ({ id: row.id, extensionId: row.extension_id, createdAt: row.created_at, lastUsedAt: row.last_used_at, expiresAt: row.expires_at }));

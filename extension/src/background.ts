@@ -1,4 +1,5 @@
 import type { ClipMode } from "./clip/types.ts";
+import { answers } from "./sender.ts";
 import { createClipper, type ExtensionState } from "./store.ts";
 
 type MenuContext = `${chrome.contextMenus.ContextType}`;
@@ -34,8 +35,8 @@ chrome.commands.onCommand.addListener((command) => {
   void clipActive("page");
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || typeof message !== "object") return;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message !== "object" || !answers(message.type, sender, chrome.runtime.id)) return;
   const respond = (state: Promise<ExtensionState>) => {
     void state.then(sendResponse).catch((err: unknown) => sendResponse({ notice: err instanceof Error ? err.message : "Something went wrong." }));
     return true;

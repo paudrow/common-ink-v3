@@ -83,13 +83,17 @@ describe("fetchImage", () => {
     expect(asked).toEqual(["http://172.32.0.1/a.png", "http://[2606:4700::1111]/a.png"]);
   });
 
-  it("drops a redirect that landed on a private host", async () => {
-    const fetchImpl = (async () => {
-      const response = new Response(png, { status: 200 });
-      Object.defineProperty(response, "url", { value: "http://192.168.1.1/admin.png" });
+  it("follows no redirect, so it never asks where one points, and leaves that image a link", async () => {
+    const asked: [string, RequestRedirect | undefined][] = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      asked.push([String(input), init?.redirect]);
+      // What Chrome gives an extension for a redirect it was told not to follow: no status and no Location.
+      const response = new Response(null, { status: 200 });
+      Object.defineProperties(response, { type: { value: "opaqueredirect" }, status: { value: 0 }, ok: { value: false } });
       return response;
     }) as typeof fetch;
     expect(await fetchImage("https://example.com/moved.png", fetchImpl)).toBeNull();
+    expect(asked).toEqual([["https://example.com/moved.png", "manual"]]);
   });
 
   it("stops reading a body that runs past the cap, without a length to say so", async () => {
