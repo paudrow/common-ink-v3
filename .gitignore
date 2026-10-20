@@ -1,6 +1,7 @@
 node_modules/
 dist/
 extension/dist/
+cli/dist/
 .wrangler/
 .dev.vars
 test-results/

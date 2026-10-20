@@ -1,0 +1,5 @@
+[
+  { "group": "Start here", "pages": ["index", "agents"] },
+  { "group": "Using Common Ink", "pages": ["notes", "todos", "search", "sharing", "history", "calendar-contacts", "clipper", "plugins"] },
+  { "group": "Reference", "pages": ["cli", "mcp-tools"] }
+]

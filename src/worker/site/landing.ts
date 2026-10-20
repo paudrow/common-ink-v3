@@ -44,6 +44,7 @@ const agents = `
   <p>Claude, ChatGPT, Cursor or any MCP client connects in a minute, with only the access you give it.</p>
   <pre class="terminal"><code>claude mcp add --scope user --transport http common-ink \\
   https://commonink.app/mcp --header "Authorization: Bearer cink_…"</code></pre>
+  <p><a href="/docs/agents">Set up any client</a> or see <a href="/docs/mcp-tools">every tool an agent gets</a>.</p>
 </section>`;
 
 const history = `

@@ -205,6 +205,8 @@ An export is a copy of every live and archived note and upload the token can see
 
 ## The `ink` command
 
+`cli/` packages the same command for npm as `commonink`, which is not published yet. The examples below run it from a checkout.
+
     INK_TOKEN=cink_... INK_URL=https://commonink.app npm run ink -- notes [--folder <id>] [--since 2026-10-01]
     npm run ink -- read <id> [--revision N]
     echo "# Title" | npm run ink -- create [--folder <id>] [--link-titles resolve-strict|keep]
