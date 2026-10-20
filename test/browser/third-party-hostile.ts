@@ -23,7 +23,7 @@ function hostile(APP: string) {
   addEventListener("message", (event) => atWindow.push(JSON.stringify(event.data)));
   void stolen.then((port) => port.addEventListener("message", (event) => heard.push(event.data)));
   ink.perform({ type: "note.list" }).then(
-    (notes: any[]) => (w.started = "listed " + notes.length),
+    ({ notes }: any) => (w.started = "listed " + notes.length),
     (err: any) => (w.started = "refused: " + err.code),
   );
 
@@ -346,7 +346,7 @@ const out = ink.root.appendChild(document.createElement("p"));
 out.id = "out";
 let rounds = 0;
 const round = () => ink.perform({ type: "note.list" }).then(
-  (notes) => { out.textContent = ink.plugin.name + " " + ink.context.kind + " listed " + notes.length + " round " + ++rounds; },
+  ({ notes }) => { out.textContent = ink.plugin.name + " " + ink.context.kind + " listed " + notes.length + " round " + ++rounds; },
   (err) => { out.textContent = "refused: " + err.code; },
 );
 round();

@@ -224,7 +224,7 @@ describe("finding the daily note", () => {
   it("answers the member's daily note for a day when there is one, and makes nothing when there isn't", async () => {
     const ada = await newMember();
     const grace = await addMember(ada, "editor");
-    const notes = async () => (await perform(env.DB, ada, { type: "note.list" })).length;
+    const notes = async () => (await perform(env.DB, ada, { type: "note.list" })).notes.length;
 
     expect(await perform(env.DB, ada, { type: "daily.find", on: "2026-10-11" })).toEqual({ note: null });
     expect(await notes()).toBe(0);

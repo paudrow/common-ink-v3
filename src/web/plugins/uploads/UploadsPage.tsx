@@ -3,6 +3,7 @@ import { Icon, ago, useNow, type App, type Folders, type PluginHost, type Result
 import { opening, reasonOf } from "../lib/FoundNote.tsx";
 import { restoredMessage } from "../lib/lifecycle.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
+import { ShowMore, usePaged } from "../lib/paged.tsx";
 import { QueryBar } from "../lib/QueryBar.tsx";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "../sharing/Summary.tsx";
 import { toldOf } from "./drawing.ts";
@@ -15,10 +16,13 @@ import { formatBytes, KIND_LABEL } from "./sizing.ts";
 import { Thumb } from "./Thumb.tsx";
 
 type Read = Results["upload.read"];
-type Listed = Results["upload.list"][number];
+type Listed = Results["upload.list"]["uploads"][number];
 
 /** How long typing in the query rests before the list is asked for again. */
 const PAUSE_MS = 200;
+/** How many uploads a read lists, and the most it lists read again after Show more. They are upload.list's own. */
+const PAGE = 100;
+const MOST = 500;
 
 /** Every folder the member can put a file in, outermost first, each by its path. */
 function foldersIn(folders: Folders | null): { id: string; name: string }[] {
@@ -50,8 +54,6 @@ export function UploadsPage({ host, app, sender }: Props) {
   const selectedId = selectedIn(app.path);
   const [typed, setTyped] = useState("");
   const [query, setQuery] = useState("");
-  const [listed, setListed] = useState<Listed[] | null>(null);
-  const [problem, setProblem] = useState<{ query: string; message: string } | null>(null);
   const [asked, setAsked] = useState(0);
   const [over, setOver] = useState(false);
   const reload = useCallback(() => setAsked((n) => n + 1), []);
@@ -64,16 +66,12 @@ export function UploadsPage({ host, app, sender }: Props) {
     return () => clearTimeout(timer);
   }, [wanted, query]);
 
-  useEffect(() => {
-    let live = true;
-    host.perform({ type: "upload.list", query }).then(
-      (uploads) => live && (setListed(uploads), setProblem(null)),
-      (err: unknown) => live && setProblem({ query, message: reasonOf(err) }),
-    );
-    return () => {
-      live = false;
-    };
-  }, [host, query, asked]);
+  const paged = usePaged<Listed>(
+    (page) => host.perform({ type: "upload.list", query, ...page }).then(({ uploads, next }) => ({ rows: uploads, next })),
+    (upload) => upload.id,
+    { of: query, again: asked, page: PAGE, most: MOST },
+  );
+  const { rows: listed, problem } = paged;
 
   const mine = onlyMine(typed);
   const choose = (wantMine: boolean) => {
@@ -138,7 +136,7 @@ export function UploadsPage({ host, app, sender }: Props) {
             value={typed}
             label="Find uploads"
             placeholder="Find uploads: name, type:image, uploader:@me, used:no"
-            problem={problem?.query === query ? problem.message : null}
+            problem={problem}
             onChange={(text, how) => {
               setTyped(text);
               if (how === "set" || !text.trim()) run(text);
@@ -181,6 +179,7 @@ export function UploadsPage({ host, app, sender }: Props) {
             ))}
           </ul>
         )}
+        <ShowMore paged={paged} />
       </div>
       {selectedId && <Detail key={selectedId} host={host} app={app} id={selectedId} listed={asked} onChanged={reload} />}
       {over && <div className="uploads-drop">Drop to upload</div>}

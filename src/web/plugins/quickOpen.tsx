@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { folderTitle, type App, type CalendarEvent, type Opened, type Plugin, type PluginHost, type Upload, type ViewProps } from "../plugin-api.ts";
+import { allPages, folderTitle, type App, type CalendarEvent, type Opened, type Plugin, type PluginHost, type Upload, type ViewProps } from "../plugin-api.ts";
 import { eventsToFind, finding, listedAs } from "./calendar/finding.ts";
 import { eventAddress } from "./calendar/linking.ts";
 import { listable } from "./lib/listable.ts";
@@ -88,7 +88,8 @@ function QuickOpen({ host, app, close }: ViewProps & { host: PluginHost; close: 
   useEffect(() => {
     if (!hasUploads) return;
     let live = true;
-    host.perform({ type: "upload.list", includeArchived: archived }).then(
+    // Quick open finds an upload by any part of its name, so it reads every one the member can see.
+    allPages((after) => host.perform({ type: "upload.list", includeArchived: archived, limit: 500, after }), (page) => page.uploads).then(
       (listed) => live && setUploads(listed),
       () => {},
     );

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { DraftSummary, PluginRecord } from "../core/plugins.ts";
+import { allPages } from "../core/allPages.ts";
 import type { MeHere, Note, NoteSummary, Results, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, readUpload, sendUpload, signOut, uploadAddress } from "./api.ts";
@@ -161,6 +162,28 @@ interface Props {
   reloadWorkspaces: () => Promise<void>;
 }
 
+/**
+ * The app holds every note the member can see, so it asks for each page in turn, as many to a page
+ * as a page holds. A note changed while it pages may be missed, and the next ask for those changed
+ * since the latest it knows finds it.
+ */
+const everyNote = (workspaceId: string, updatedSince?: number) => allPages((after) => perform(workspaceId, { type: "note.list", includeArchived: true, updatedSince, limit: 1000, after }), (page) => page.notes);
+const everyTrashed = (workspaceId: string) => allPages((after) => perform(workspaceId, { type: "trash.list", limit: 500, after }), (page) => page.notes);
+
+/** The person signed in, as Settings shows them, in the workspace open now. */
+function accountOf(me: MeHere, workspaceId: string): Account {
+  const here = me.workspaces.find((w) => w.id === workspaceId);
+  return {
+    email: me.person.email,
+    // Every session ends, this one with them, so the page is read again signed out.
+    signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")),
+    deletion: () => perform(workspaceId, { type: "account.read" }),
+    // The session's person is gone, so the page is read again signed out, as after signing out everywhere.
+    deleteAccount: (confirm) => perform(workspaceId, { type: "account.delete", confirm }).then(() => location.assign("/")),
+    workspace: here?.role === "admin" ? { name: here.name, delete: (confirm) => perform(workspaceId, { type: "workspace.delete", confirm }).then(() => location.assign("/")) } : null,
+  };
+}
+
 export function Workspace({ me, workspace, settings, place: at, navigate: navigateTo, onSwitch, noteIsHere, reloadWorkspaces }: Props) {
   /** The address under /settings when the settings are open over the window. */
   const settingsPath = inSettings(at.path) ? at.path : null;
@@ -278,8 +301,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   const panelId = useId();
   const [host] = useState(() => {
     let created: Host;
-    // Every session ends, this one with them, so the page is read again signed out.
-    const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
+    const account = accountOf(me, workspaceId);
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} adminElsewhere={me.workspaces.some((w) => w.id !== workspaceId && w.role === "admin")} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
@@ -507,7 +529,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   useEffect(() => {
     let live = true;
     const since = (learned.current = new Map());
-    Promise.all([perform(workspaceId, { type: "note.list", includeArchived: true }), perform(workspaceId, { type: "trash.list" })]).then(
+    Promise.all([everyNote(workspaceId), everyTrashed(workspaceId)]).then(
       ([kept, trash]) => {
         if (!live) return;
         const { notes: listed, gone: lost } = relisted(kept, trash, listedNotes.current, since);
@@ -553,8 +575,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       if (document.visibilityState !== "visible" || !known) return;
       // A note moved to Trash since is in no listing but Trash's own.
       const [changed, trash] = await Promise.all([
-        perform(workspaceId, { type: "note.list", includeArchived: true, updatedSince: lastChange(known) }).catch(() => []),
-        perform(workspaceId, { type: "trash.list" }).catch(() => []),
+        everyNote(workspaceId, lastChange(known)).catch(() => []),
+        everyTrashed(workspaceId).catch(() => []),
       ]);
       setNotes((all) => all && withChanged([...changed, ...trash], all));
     };
@@ -1191,8 +1213,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     </>
   );
 
-  // Every session ends, this one with them, so the page is read again signed out.
-  const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
+  const account = accountOf(me, workspaceId);
 
   return (
     <div className="app" data-phone={phone || undefined} data-sidebar-in-front={(phone && sidebarInFront) || undefined} data-keys={(phone && device.covered > 0) || undefined} data-focus-mode={(focusMode && focusable) || undefined} data-bar={(!phone && (bar.length > 0 || !!saved)) || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px`, "--covered": `${device.covered}px` } as CSSProperties}>
@@ -1292,6 +1313,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
           path={settingsPath}
           go={navigate}
           storage={() => perform(workspaceId, { type: "upload.storage" })}
+          exportPlan={() => perform(workspaceId, { type: "export.plan" })}
           account={account}
           onClose={() => navigate(under.current.path + under.current.query, { replace: true })}
         >

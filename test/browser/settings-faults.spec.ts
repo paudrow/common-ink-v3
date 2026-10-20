@@ -211,7 +211,7 @@ test("a key that types is a keybinding only where nothing is being typed, so Ent
   await expect(text(page)).toContainText("The first lines of Alpha.x");
   await expect(page).toHaveURL(new RegExp(`${note.id}$`));
   await expect(page.locator(".app")).not.toHaveAttribute("data-focus-mode");
-  await expect.poll(async () => (await perform(page, { type: "note.list" })).map((n) => n.title)).toEqual(["Alpha"]);
+  await expect.poll(async () => (await perform(page, { type: "note.list" })).notes.map((n) => n.title)).toEqual(["Alpha"]);
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await expect(inspector).toBeVisible();
@@ -225,7 +225,7 @@ test("a key that types is a keybinding only where nothing is being typed, so Ent
   await page.keyboard.press("Backspace");
   await expect(page.locator(".app")).not.toHaveAttribute("data-focus-mode");
   await page.keyboard.press("Enter");
-  await expect.poll(async () => (await perform(page, { type: "note.list" })).length).toBe(2);
+  await expect.poll(async () => (await perform(page, { type: "note.list" })).notes.length).toBe(2);
 });
 
 test("settings the server refuses are put back as they were, with its reason and no promise to retry", async ({ page }) => {

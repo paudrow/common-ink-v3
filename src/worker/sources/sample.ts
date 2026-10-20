@@ -276,5 +276,7 @@ export function sample(db: D1Database, now: () => number): Provider {
     async disconnect(personId) {
       await db.batch([db.prepare("DELETE FROM sample_records WHERE person_id = ?").bind(personId), db.prepare("DELETE FROM source_connections WHERE person_id = ? AND provider = ?").bind(personId, PROVIDER)]);
     },
+    // Nothing outside Common Ink holds it.
+    ending: async () => null,
   };
 }

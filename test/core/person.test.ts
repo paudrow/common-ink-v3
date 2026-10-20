@@ -25,6 +25,7 @@ function contactsOf(byPerson: Map<string, ContactCard[]>) {
     },
     connect: async () => ({ redirect: null }),
     disconnect: async () => {},
+    ending: async () => async () => {},
   };
   return { sources, read };
 }

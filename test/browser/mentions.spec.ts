@@ -472,7 +472,7 @@ test("a click on a mention opens that person's page: my contact's details for me
   await personPage(page, "Grace Hopper").getByRole("button", { name: "New note about Grace Hopper" }).click();
   await expect(page).toHaveURL(/\/note\//);
   await expect(editor(page)).toContainText("Grace Hopper");
-  const made = (await perform(page, { type: "note.list" }, workspaceId)).find((note) => note.title === "Grace Hopper")!;
+  const made = (await perform(page, { type: "note.list" }, workspaceId)).notes.find((note) => note.title === "Grace Hopper")!;
   expect((await perform(page, { type: "note.read", id: made.id }, workspaceId)).text).toBe(`# Grace Hopper\n\n@[[${graceId}|Grace Hopper]] `);
 });
 

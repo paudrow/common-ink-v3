@@ -165,7 +165,7 @@ describe("a draft is its author's own copy", () => {
     for (const other of [ada, vera]) {
       const draft = pluginOf(other, id, true);
       expect(await outcome(draft, { type: "note.read", id: secret })).toBe("not_found: No such note");
-      expect(JSON.stringify([await perform(env.DB, draft, { type: "note.list" }), await perform(env.DB, draft, { type: "search", query: "only-eve-knows" }), await perform(env.DB, draft, { type: "note.backlinks", id: shared }).catch(() => null)])).not.toContain("secret");
+      expect(JSON.stringify([(await perform(env.DB, draft, { type: "note.list" })).notes, await perform(env.DB, draft, { type: "search", query: "only-eve-knows" }), await perform(env.DB, draft, { type: "note.backlinks", id: shared }).catch(() => null)])).not.toContain("secret");
     }
     // A viewer's draft may ask to write, and writes nothing: it has its member's standing and the plugin's permission, whichever is less.
     expect(await outcome(pluginOf(vera, id, true), { type: "note.write", id: shared, baseRevision: 1, text: "# Taken" })).toBe("forbidden: A viewer can't note.write");

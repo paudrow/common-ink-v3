@@ -115,7 +115,7 @@ test("with vim on, a new note starts in insert mode, so its first words are type
 
 const gone = async (page: Page, id: string) => {
   await expect.poll(() => read(page, id).then(() => "there", (err: Error) => err.message)).toMatch(/No such note/);
-  expect((await perform(page, { type: "trash.list" })).map((n) => n.id)).not.toContain(id);
+  expect((await perform(page, { type: "trash.list" })).notes.map((n) => n.id)).not.toContain(id);
 };
 
 test("a new note left with nothing in it is gone when its tab closes, not put in Trash, and one that ever had words stays", async ({ page }) => {

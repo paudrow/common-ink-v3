@@ -86,6 +86,7 @@ function world(options: { readOnly?: boolean; fails?: SourceError } = {}) {
     },
     connect: async () => ({ redirect: "/somewhere" }),
     disconnect: async () => {},
+    ending: async () => async () => {},
   };
   const ask = <T extends OpInput>(actor: Actor, op: T) => perform(env.DB, actor, op, T0, sources);
   return { events, calendars, contacts, asked, updates, creates, state, sources, ask };

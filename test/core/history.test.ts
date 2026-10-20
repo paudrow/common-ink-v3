@@ -1006,7 +1006,7 @@ describe("reverting an author", () => {
 
     expect([first.reverted.length, second.reverted.length, second.next]).toEqual([10, 2, null]);
     expect(first.next).toBe(first.reverted.map((r) => r.note.id).sort().at(-1));
-    expect((await perform(env.DB, ada, { type: "note.list" })).map((n) => n.snippet)).toEqual(Array(12).fill(""));
+    expect((await perform(env.DB, ada, { type: "note.list" })).notes.map((n) => n.snippet)).toEqual(Array(12).fill(""));
   });
 
   it("reads only the notes of the page it covers, however many more the author changed", async () => {

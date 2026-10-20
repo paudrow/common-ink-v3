@@ -10,7 +10,7 @@
     "extension:build": "node --experimental-strip-types extension/build.ts",
     "typecheck": "wrangler types --check && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p extension/tsconfig.json",
     "types": "wrangler types",
-    "test": "vitest run && vitest run -c vitest.extension.config.ts && node --test test/zones/recurrence-zones.test.ts",
+    "test": "vitest run && vitest run -c vitest.extension.config.ts && node --test test/zones/recurrence-zones.test.ts test/node/zip.test.ts test/node/restore-drill.test.ts test/node/scripts-load.test.ts",
     "test:browser": "playwright test",
     "check": "npm run typecheck && npm test && npm run build",
     "preview": "node scripts/preview.ts",

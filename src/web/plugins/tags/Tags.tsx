@@ -1,6 +1,7 @@
-import { useEffect, useId, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { useId, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { useNow, type App, type ListedTag, type NoteSummary, type PluginHost } from "../../plugin-api.ts";
-import { FoundNote, IncludeArchived, opening, reasonOf } from "../lib/FoundNote.tsx";
+import { FoundNote, IncludeArchived, opening } from "../lib/FoundNote.tsx";
+import { ShowMore, usePaged } from "../lib/paged.tsx";
 import { TAGS_PATH, tagOfPath, tagPath } from "./path.ts";
 
 /** The workspace's tags as the plugin last read them, and a count that goes up each time the notes have changed and settled. */
@@ -8,6 +9,8 @@ export interface TagStore {
   subscribe(listener: () => void): () => void;
   /** Null until they have been read once. */
   tags(): readonly ListedTag[] | null;
+  /** Whether there are tags after the ones read, which `more` reads. */
+  more(): (() => void) | null;
   /** Whether the server said it hasn't read every note yet, so tags and their notes may be missing. They are read again until it has. */
   indexing(): boolean;
   version(): number;
@@ -15,6 +18,9 @@ export interface TagStore {
 
 /** How many tags the sidebar lists before it leaves the rest to the page of every tag. */
 const MOST_IN_SECTION = 12;
+/** How many notes a tag's page lists, and the most it lists read again after Show more. They are note.list's own. */
+const PAGE = 200;
+const MOST = 1000;
 
 function StillIndexing({ store }: { store: TagStore }) {
   const indexing = useSyncExternalStore(store.subscribe, store.indexing);
@@ -55,6 +61,7 @@ function TagLinks({ app, tags, labelledBy }: { app: App; tags: readonly ListedTa
 export function TagSection({ app, store }: { app: App; store: TagStore }) {
   const ids = useId();
   const tags = useSyncExternalStore(store.subscribe, store.tags);
+  const more = useSyncExternalStore(store.subscribe, store.more);
   if (!tags) return null;
   return (
     <nav className="tags" aria-labelledby={`${ids}-label`}>
@@ -62,34 +69,26 @@ export function TagSection({ app, store }: { app: App; store: TagStore }) {
         <span id={`${ids}-label`}>Tags</span>
       </div>
       {tags && (tags.length ? <TagLinks app={app} tags={tags.slice(0, MOST_IN_SECTION)} labelledBy={`${ids}-label`} /> : <p className="tags-hint">Write #tag in a note to tag it.</p>)}
-      {tags && tags.length > MOST_IN_SECTION && (
+      {tags && (tags.length > MOST_IN_SECTION || more) && (
         <a className="tag-row tags-all" {...going(app, TAGS_PATH)}>
-          All {tags.length} tags
+          {more ? "All tags" : `All ${tags.length} tags`}
         </a>
       )}
     </nav>
   );
 }
 
-type Listing = { notes: readonly NoteSummary[] | null; problem: string | null };
-
 /** The notes with one tag. The tag is whatever the address says, drawn as text and asked of the server as a name. */
 function TagNotes({ host, app, store, tag }: { host: PluginHost; app: App; store: TagStore; tag: string }) {
   const now = useNow();
   const version = useSyncExternalStore(store.subscribe, store.version);
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [{ notes, problem }, setListing] = useState<Listing>({ notes: null, problem: null });
-
-  useEffect(() => {
-    let stale = false;
-    host.perform({ type: "note.list", tag, includeArchived }).then(
-      (listed) => !stale && setListing({ notes: listed, problem: null }),
-      (err: unknown) => !stale && setListing({ notes: null, problem: reasonOf(err) }),
-    );
-    return () => {
-      stale = true;
-    };
-  }, [host, tag, includeArchived, version]);
+  const paged = usePaged<NoteSummary>(
+    (page) => host.perform({ type: "note.list", tag, includeArchived, ...page }).then(({ notes, next }) => ({ rows: notes, next })),
+    (note) => note.id,
+    { of: `${tag}/${includeArchived}`, again: version, page: PAGE, most: MOST },
+  );
+  const { rows: notes, problem } = paged;
 
   return (
     <section className="search-page" aria-label={`Tag ${tag}`}>
@@ -116,6 +115,7 @@ function TagNotes({ host, app, store, tag }: { host: PluginHost; app: App; store
           ))}
         </ul>
       )}
+      <ShowMore paged={paged} />
     </section>
   );
 }
@@ -124,12 +124,20 @@ function TagNotes({ host, app, store, tag }: { host: PluginHost; app: App; store
 function AllTags({ app, store }: { app: App; store: TagStore }) {
   const ids = useId();
   const tags = useSyncExternalStore(store.subscribe, store.tags);
+  const more = useSyncExternalStore(store.subscribe, store.more);
   return (
     <section className="search-page" aria-labelledby={`${ids}-heading`}>
       <h1 id={`${ids}-heading`}>Tags</h1>
       <StillIndexing store={store} />
       {tags && !tags.length && <p className="search-status">No tags yet. Write #tag anywhere in a note to tag it.</p>}
       {tags && tags.length > 0 && <TagLinks app={app} tags={tags} labelledBy={`${ids}-heading`} />}
+      {more && (
+        <div className="search-more">
+          <button type="button" className="found-more" onClick={more}>
+            Show more
+          </button>
+        </div>
+      )}
     </section>
   );
 }

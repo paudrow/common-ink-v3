@@ -204,7 +204,7 @@ test("a person's open todos are the Todos page's rows: checked off there, a chip
 
   await boiler.getByRole("checkbox", { name: "Not done" }).check();
   await expect.poll(async () => (await perform(page, { type: "todo.list", query: "assignee:\"Sam Okafor\"" })).todos.map((t) => t.words)).toEqual(["Bleed the radiators"]);
-  const note = (await perform(page, { type: "note.list" })).find((n) => n.title === "Boiler")!;
+  const note = (await perform(page, { type: "note.list" })).notes.find((n) => n.title === "Boiler")!;
   expect((await perform(page, { type: "note.read", id: note.id })).text).toMatch(/- \[x\] !!! Fix the boiler @\[\[Sam Okafor\]\] #home/);
   expect((await perform(page, { type: "note.read", id: note.id })).text).toContain("- [ ] ! Bleed the radiators @[[Sam Okafor]]");
 

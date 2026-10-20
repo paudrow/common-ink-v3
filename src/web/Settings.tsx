@@ -36,7 +36,7 @@ import {
   layoutOf,
 } from "./settingsLayout.ts";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
-import type { ClipperGrantView, UploadStorage } from "../core/protocol.ts";
+import type { AccountDeletion, ClipperGrantView, ExportPlan, UploadStorage } from "../core/protocol.ts";
 import { formatBytes } from "./plugins/uploads/sizing.ts";
 import { clipperTarget } from "./plugins/lib/clipperLink.ts";
 import { listClipperGrants, revokeClipperGrant } from "./api.ts";
@@ -53,16 +53,23 @@ interface Props {
   go: (path: string, options?: { replace?: boolean }) => void;
   /** How much the workspace's uploads take, asked each time the page opens. */
   storage: () => Promise<UploadStorage>;
+  /** The parts an export of what the member can see here comes in, asked each time the page opens. */
+  exportPlan: () => Promise<ExportPlan>;
   onClose: () => void;
   /** What is opened over the settings, such as the command palette: inside their dialog, so it is above it and takes the keys. */
   children?: ReactNode;
   account: Account;
 }
 
-/** The person signed in, and ending every session they have. */
+/** The person signed in, ending every session they have, and deleting their account or the workspace open now. */
 export interface Account {
   email: string;
   signOutEverywhere: (agents: boolean) => Promise<void>;
+  /** What deleting the account would take with it, asked before the person confirms. */
+  deletion: () => Promise<AccountDeletion>;
+  deleteAccount: (email: string) => Promise<void>;
+  /** The workspace open now, for an admin of it. Null for anyone else, who can't delete it. */
+  workspace: { name: string; delete: (name: string) => Promise<void> } | null;
 }
 
 export const ROOT = "/settings";
@@ -74,7 +81,7 @@ export const JSON_VIEW = "json";
  * app, so it is here whatever is turned off. It opens over whatever the member is doing, as a dialog,
  * and Escape closes it: it is never a tab, so it moves nothing of the window under it.
  */
-export function Settings({ host, store, mac, path, go, storage, onClose, children, account }: Props) {
+export function Settings({ host, store, mac, path, go, storage, exportPlan, onClose, children, account }: Props) {
   const { settings } = useSyncExternalStore(host.subscribe, host.contributions);
   const text = useSyncExternalStore(store.subscribe, store.text);
   const status = useSyncExternalStore(store.subscribe, store.status);
@@ -175,6 +182,7 @@ export function Settings({ host, store, mac, path, go, storage, onClose, childre
         )}
         {!asJson && problemList}
         <Storage storage={storage} />
+        <Export exportPlan={exportPlan} />
       </section>
       {children}
     </dialog>
@@ -202,6 +210,44 @@ function Storage({ storage }: Pick<Props, "storage">) {
             ? "How much this workspace's files take couldn't be read just now."
             : `This workspace's files take ${formatBytes(told.bytes)}, ${told.files} file${told.files === 1 ? "" : "s"} from every member${told.trashedBytes ? `, ${formatBytes(told.trashedBytes)} of it in Trash` : ""}.${told.pendingBytes ? ` ${formatBytes(told.pendingBytes)} more is on its way.` : ""} There is no limit: a file can be up to 25 GB.`}
       </p>
+    </section>
+  );
+}
+
+/** A copy of everything the member can see here, to keep: one zip, or for a workspace with many files one zip a part. */
+function Export({ exportPlan }: Pick<Props, "exportPlan">) {
+  const [plan, setPlan] = useState<ExportPlan | "failed" | null>(null);
+  useEffect(() => {
+    let current = true;
+    exportPlan().then(
+      (got) => current && setPlan(got),
+      () => current && setPlan("failed"),
+    );
+    return () => void (current = false);
+  }, []);
+  const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  return (
+    <section aria-label="Export" className="settings-group settings-storage">
+      <h2>Export</h2>
+      <p>
+        {plan === null
+          ? "Counting what there is to export…"
+          : plan === "failed"
+            ? "What there is to export couldn't be read just now."
+            : `Every note and file you can see in this workspace, archived ones too, as Markdown and files in their folders: ${count(plan.notes, "note")} and ${count(plan.uploads, "file")}.${plan.parts.length > 1 ? ` That is more than one download takes, so it comes in ${plan.parts.length} parts, each a zip of its own.` : ""}`}
+      </p>
+      {plan !== null && plan !== "failed" && (
+        <ul aria-label="Downloads" className="settings-export">
+          {plan.parts.map((part) => (
+            <li key={part.number}>
+              <a className="button small" href={part.address} download>
+                {plan.parts.length === 1 ? "Download" : `Part ${part.number} of ${plan.parts.length}`}
+              </a>{" "}
+              {plan.parts.length === 1 ? formatBytes(part.bytes) : [part.notes ? count(part.notes, "note") : "", part.uploads ? count(part.uploads, "file") : "", formatBytes(part.bytes)].filter(Boolean).join(", ")}
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -562,7 +608,143 @@ function AccountSection({ account }: { account: Account }) {
         )}
       </div>
       <ClipperRow />
+      {account.workspace && <DeleteWorkspaceRow workspace={account.workspace} />}
+      <DeleteAccountRow account={account} />
     </section>
+  );
+}
+
+const BACKUPS = "Backups of Common Ink keep it for up to 30 days more, and then it is gone from them too.";
+
+/** Asks for `expected` to be typed before `run` is let go: the last step of something nothing undoes. */
+function Retyped({ label, expected, prompt, action, run, onCancel }: { label: string; expected: string; prompt: ReactNode; action: string; run: (typed: string) => Promise<void>; onCancel: () => void }) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const matches = typed.trim().toLowerCase() === expected.trim().toLowerCase();
+  return (
+    <form
+      className="confirm retype"
+      aria-label={label}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!matches || busy) return;
+        setBusy(true);
+        setError(null);
+        run(typed).catch((err: Error) => {
+          setBusy(false);
+          setError(err.message);
+        });
+      }}
+    >
+      <span>{prompt}</span>
+      <input type="text" aria-label={`Type ${expected} to confirm`} autoFocus spellCheck={false} autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+      <button type="submit" className="button small danger" disabled={!matches || busy}>
+        {busy ? "Deleting…" : action}
+      </button>
+      <button type="button" className="link" onClick={onCancel}>
+        Cancel
+      </button>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}
+
+/** Deleting the workspace open now, for an admin of it. */
+function DeleteWorkspaceRow({ workspace }: { workspace: NonNullable<Account["workspace"]> }) {
+  const [asked, ask] = useState(false);
+  return (
+    <div className="setting" data-row>
+      <div className="setting-head">
+        <span>Delete workspace</span>
+      </div>
+      <p className="setting-about">
+        Deletes {workspace.name} for everyone in it: every note, folder, file and change, its plugins, and its links and invites. Its members lose it at once, and
+        their own workspaces and accounts are left as they are. Nothing brings it back. {BACKUPS}
+      </p>
+      <div className="setting-control">
+        {asked ? (
+          <Retyped
+            label="Delete workspace"
+            expected={workspace.name}
+            prompt={
+              <>
+                Type <strong>{workspace.name}</strong> to delete it and everything in it.
+              </>
+            }
+            action="Delete workspace"
+            run={workspace.delete}
+            onCancel={() => ask(false)}
+          />
+        ) : (
+          <button type="button" className="button small danger" onClick={() => ask(true)}>
+            Delete workspace…
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Deleting the person's own account, which says first what goes with it and what waits on them. */
+function DeleteAccountRow({ account }: { account: Account }) {
+  const [plan, setPlan] = useState<AccountDeletion | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const open = () => {
+    setError(null);
+    account.deletion().then(setPlan, (err: Error) => setError(err.message));
+  };
+  const names = (workspaces: AccountDeletion["deletes"]) => workspaces.map((w) => w.name).join(", ");
+  return (
+    <div className="setting" data-row>
+      <div className="setting-head">
+        <span>Delete account</span>
+      </div>
+      <p className="setting-about">
+        Deletes your account, and with it everything that was yours alone: your private notes and files, your daily notes that are private, your settings, agents,
+        clipper and data sources, and every workspace you are the only member of. In workspaces you share, what you wrote stays, said to be by a former member, and
+        what you shared stays shared. You are signed out everywhere at once. Nothing brings it back. {BACKUPS}
+      </p>
+      <div className="setting-control">
+        {plan === null ? (
+          <button type="button" className="button small danger" onClick={open}>
+            Delete account…
+          </button>
+        ) : plan.blocking.length ? (
+          <span className="confirm" role="group" aria-label="Delete account">
+            <span>
+              You are the only admin of {names(plan.blocking)}, where others are members. Make someone else an admin on Members, or delete the workspace, first.
+            </span>
+            <button type="button" className="link" onClick={() => setPlan(null)}>
+              Close
+            </button>
+          </span>
+        ) : (
+          <Retyped
+            label="Delete account"
+            expected={plan.email}
+            prompt={
+              <>
+                {plan.deletes.length > 0 && <>{names(plan.deletes)} {plan.deletes.length === 1 ? "is" : "are"} deleted with it, since nobody else is in {plan.deletes.length === 1 ? "it" : "them"}. </>}
+                Type <strong>{plan.email}</strong> to delete your account.
+              </>
+            }
+            action="Delete my account"
+            run={account.deleteAccount}
+            onCancel={() => setPlan(null)}
+          />
+        )}
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 

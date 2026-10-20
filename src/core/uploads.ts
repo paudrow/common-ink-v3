@@ -5,6 +5,8 @@ import { newId } from "./ids.ts";
 import { purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
 import { OLD, agentActor, archiving, authorId, authorOf, finding, intoFolder, loadFolder, loadNote, mend, restoring, seenAmong, toSummary, trashing, unnamed, type Actor, type Context } from "./operations.ts";
 import { MAX_UPLOAD_BYTES, OpError, PART_BYTES, type AuthorRef, type ListedUpload, type Op, type OpenedUpload, type ReferredUpload, type Results, type SendingUpload, type TrashedUpload, type Upload, type UploadStorage } from "./protocol.ts";
+import { asc } from "./order.ts";
+import { paging } from "./paging.ts";
 import { orderOf } from "./query.ts";
 import { partSpan, partsLeft, planParts } from "./parts.ts";
 import { finishRemoving, removeUpload } from "./purge.ts";
@@ -454,23 +456,25 @@ export async function uploadStorage(ctx: Context): Promise<UploadStorage> {
  * The uploads a query finds, each with how many notes show it: only notes the asker can see in the
  * upload's own workspace are counted, archived ones too, as `upload.read`'s `usedIn` lists them.
  */
-export async function listUploads(ctx: Context, op: Extract<Op, { type: "upload.list" }>): Promise<ListedUpload[]> {
+export async function listUploads(ctx: Context, op: Extract<Op, { type: "upload.list" }>): Promise<Results["upload.list"]> {
   // The folder narrows inside what the asker sees and never widens it: one they can't see is no folder.
   if (op.folderId !== undefined) await loadFolder(ctx, op.folderId, "view");
-  const { query, covering, condition, prepare, bind } = await finding(ctx, "uploads", op, [
+  const { query, covering, condition, bind, prepare } = await finding(ctx, "uploads", op, [
     // The folder's own uploads, not those of the folders inside it, which `folder:` in the query covers.
     ...(op.folderId === undefined ? [] : [{ kind: "filter", key: "folder", cmp: "=", value: op.folderId, ids: [op.folderId] } as const]),
     ...OLD.archived(op.includeArchived),
   ]);
   // Which notes show an upload is read from their text, so notes written before that was kept are read in first.
   await mend(ctx);
+  const pages = paging([...orderOf(query.sort ?? "uploaded-desc"), asc("u.id")], op.after, bind);
   const { results } = await prepare(
-    `SELECT (SELECT COUNT(*) FROM upload_refs r CROSS JOIN notes rn ON rn.id = r.note_id WHERE r.upload_id = u.id AND rn.workspace_id = ?1 AND ${SEEN("rn", "?2", "kept")}) AS uses, ${UPLOAD_COLUMNS}
-     WHERE u.workspace_id = ?1 AND ${SEEN("u", "?2", covering)} AND ${condition}
-     ORDER BY ${orderOf(query.sort ?? "uploaded-desc")}, u.id
-     LIMIT ${bind(op.limit ?? -1)} OFFSET ${bind(op.offset)}`,
+    `SELECT ${pages.keys}, (SELECT COUNT(*) FROM upload_refs r CROSS JOIN notes rn ON rn.id = r.note_id WHERE r.upload_id = u.id AND rn.workspace_id = ?1 AND ${SEEN("rn", "?2", "kept")}) AS uses, ${UPLOAD_COLUMNS}
+     WHERE u.workspace_id = ?1 AND ${SEEN("u", "?2", covering)} AND ${condition} AND ${pages.where}
+     ORDER BY ${pages.orderBy}
+     LIMIT ${bind(op.limit + 1)}`,
   ).all<UploadRow & { uses: number }>();
-  return results.map((row) => ({ ...toUpload(ctx, row), uses: row.uses }));
+  const { page, next } = pages.page(results, op.limit);
+  return { uploads: page.map((row) => ({ ...toUpload(ctx, row), uses: row.uses })), next };
 }
 
 /**

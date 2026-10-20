@@ -20,7 +20,7 @@ async function typed(by: Actor, id: string, ...texts: string[]) {
 
 async function gone(by: Actor, id: string) {
   expect(await refusal(perform(env.DB, by, { type: "note.read", id }))).toBe("not_found: No such note");
-  expect((await perform(env.DB, by, { type: "trash.list" })).map((n) => n.id)).not.toContain(id);
+  expect((await perform(env.DB, by, { type: "trash.list" })).notes.map((n) => n.id)).not.toContain(id);
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM changes WHERE note_id = ?").bind(id).first("n")).toBe(0);
 }
 
@@ -83,7 +83,7 @@ describe("an empty note the member leaves", () => {
     const { id } = await perform(env.DB, ada, { type: "note.create" });
     await perform(env.DB, ada, { type: "note.trash", id });
     expect(await refusal(perform(env.DB, ada, { type: "note.discard", id }))).toMatch(/^conflict/);
-    expect((await perform(env.DB, ada, { type: "trash.list" })).map((n) => n.id)).toContain(id);
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes.map((n) => n.id)).toContain(id);
   });
 
   it("is never a note from before who made it was kept, empty or not", async () => {

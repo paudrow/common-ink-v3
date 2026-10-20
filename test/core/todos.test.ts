@@ -6,6 +6,7 @@ import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, TODO_SORT_WORDS, type OpInput } from "../../src/core/protocol.ts";
 import { todoIndex } from "../../src/core/todos.ts";
 import { addMember, newMember } from "./members.ts";
+import { walk } from "./walking.ts";
 
 type Listing = Omit<Extract<OpInput, { type: "todo.list" }>, "type">;
 
@@ -253,9 +254,31 @@ describe("listing todos", () => {
     await create(ada, `# Many\n\n${Array.from({ length: 5 }, (_, i) => `- [ ] t${i} due:2026-01-0${i + 1}`).join("\n")}`);
 
     const first = await perform(env.DB, ada, { type: "todo.list", limit: 2 });
-    const second = await perform(env.DB, ada, { type: "todo.list", limit: 2, offset: first.next! });
-    const third = await perform(env.DB, ada, { type: "todo.list", limit: 2, offset: second.next! });
-    expect([first, second, third].map((page) => [page.todos.map((t) => t.words), page.next])).toEqual([[["t0", "t1"], 2], [["t2", "t3"], 4], [["t4"], null]]);
+    const second = await perform(env.DB, ada, { type: "todo.list", limit: 2, after: first.next! });
+    const third = await perform(env.DB, ada, { type: "todo.list", limit: 2, after: second.next! });
+    expect([first, second, third].map((page) => [page.todos.map((t) => t.words), page.next === null])).toEqual([[["t0", "t1"], false], [["t2", "t3"], false], [["t4"], true]]);
+  });
+
+  it("pages through each order, ties broken by note and line and the done ones last, each todo once, and says nothing of a todo the asker can't see", async () => {
+    const ada = await newMember();
+    const eve = await addMember(ada, "editor", "Eve");
+    const a = await create(ada, "# A\n\n- [ ] a1 due:2026-01-02\n- [ ] a2\n- [ ] !!! a3 due:2026-01-02\n- [ ] a4 due:2026-01-01\n- [x] a5 due:2025-12-01");
+    const b = await create(ada, "# B\n\n- [ ] b1 due:2026-01-03\n- [ ] b2\n- [ ] b3 due:2026-01-02");
+    const walked = (limit: number, more: Listing = {}) => walk((after) => perform(env.DB, ada, { type: "todo.list", includeCompleted: true, limit, after, ...more }));
+    const flat = async (limit: number, more: Listing = {}) => (await walked(limit, more)).flatMap((page) => page.todos.map((t) => t.words));
+
+    const due = ["a4", "a3", "a1", "b3", "b1", "a2", "b2", "a5"];
+    for (const limit of [1, 2, 3]) expect(await flat(limit), `${limit} a page`).toEqual(due);
+    for (const limit of [1, 3]) expect(await flat(limit, { sort: "text" }), `by words, ${limit} a page`).toEqual(["a1", "a2", "a3", "a4", "b1", "b2", "b3", "a5"]);
+    // A sort: of the query breaks its ties by note, by id, and then by line.
+    const [inA, inB] = a.id < b.id ? [0, 1] : [1, 0];
+    const byNote = (...groups: string[][]) => [groups[inA]!, groups[inB]!].flat();
+    for (const limit of [1, 3]) expect(await flat(limit, { query: "sort:due-desc" }), `latest due, ${limit} a page`).toEqual(["b1", ...byNote(["a1", "a3"], ["b3"]), "a4", ...byNote(["a2"], ["b2"]), "a5"]);
+
+    const before = await walked(3);
+    const hidden = await create(eve, "# Aa\n\n- [ ] eve1 due:2026-01-02\n- [ ] eve2\n- [ ] eve3 due:2026-01-01");
+    await perform(env.DB, eve, { type: "note.setPrivate", id: hidden.id, private: true });
+    expect(await walked(3), "the same pages, and the same cursors, with Eve's private todos among them").toEqual(before);
   });
 
   it("sorts by due date, priority, when the note changed, the note's title or the words, the done ones always last", async () => {

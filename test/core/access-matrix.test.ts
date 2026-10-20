@@ -357,6 +357,10 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "member.signOut": { on: "workspace", who: ADMINS, args: () => ({ memberId: "aaaaaaaaaaaa" }) },
   "invite.list": { on: "workspace", who: ADMINS, args: () => ({}) },
   "invite.revoke": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },
+  "account.read": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  // Asked with a confirmation that is never right, so nothing is deleted: test/core/erase.test.ts deletes for real.
+  "account.delete": { on: "workspace", who: [], args: () => ({ confirm: "not-their-email" }) },
+  "workspace.delete": { on: "workspace", who: [], args: () => ({ confirm: "not its name" }) },
   "grant.list": { on: "note", needs: "V", trashed: "opens", args: (noteId) => ({ noteId }) },
   "grant.set": { on: "note", needs: "V", trashed: "opens", share: true, args: (noteId) => ({ noteId, email: address(), access: "view" }) },
   "grant.link": { on: "folder", needs: "V", share: true, args: (folderId) => ({ folderId, link: "signed_in" }) },
@@ -384,6 +388,9 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "upload.restore": { on: "upload", needs: "E", trashed: "opens", args: (id) => ({ id }) },
   "upload.trashed": { on: "everything", covers: "trashed", args: () => ({}) },
   "upload.setPrivate": { on: "upload", needs: "V", trashed: "opens", members: true, args: (id, _, note) => ({ id, private: OWNER[note] !== undefined }) },
+  // An export's parts are told by their addresses, which name only uploads the asker can see. Its bytes, the notes and every upload up to a place after all of them, are read as text in `ask`, so every title, word and file name in them is held to the table.
+  "export.plan": { on: "everything", covers: "kept", args: () => ({}) },
+  "export.open": { on: "everything", covers: "kept", args: () => ({ notes: true, through: "9999999999999.zzzzzzzzzzzz" }) },
   // A data source is the asker's own, so each of these is let through for anyone in the workspace, and with nothing connected here finds nothing.
   // Whose records each answers is asked in test/core/sources.test.ts, where there are records to keep apart.
   // An agent limited to folders is refused each (OWN below): what it would read is in no folder.
@@ -443,6 +450,8 @@ type Outcome = "done" | "forbidden" | "in trash" | `not_found: ${string}` | `oth
 async function ask(actor: Actor | Visitor, op: OpInput): Promise<{ outcome: Outcome; answer?: unknown }> {
   try {
     const answer: unknown = await perform(env.DB, actor, op, Date.now(), undefined, { bucket: env.FILES, body: op.type === "upload.create" ? new Response(PNG).body : null });
+    // An export is a zip of files stored as they are, so its bytes read as text say every title, word and file name in it.
+    if (op.type === "export.open") return { outcome: "done", answer: await new Response((answer as Results["export.open"]).body).text() };
     // An upload's bytes are let go of here. What was told of the upload is kept, to be read for what it gives away.
     if (answer && typeof answer === "object" && "body" in answer) await (answer as { body?: ReadableStream }).body?.cancel();
     return { outcome: "done", answer: answer && typeof answer === "object" && "body" in answer ? { ...answer, body: undefined } : answer };
@@ -630,8 +639,8 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
           } else if (plan.on === "workspace") {
             let allowed = (plan.who as readonly string[]).includes(role);
             if ((type === "history.revertAuthor" || type === "history.revert" || SENDING.includes(type)) && role === "guest") allowed = ACTORS[name].notes.includes("E");
-            // The one admin can't leave, and nobody here asks to: leaving is checked in members.test.ts.
-            if (type === "member.leave") continue;
+            // The one admin can't leave, and nobody here asks to: leaving is checked in members.test.ts, and deleting an account or a workspace in erase.test.ts.
+            if (type === "member.leave" || type === "account.delete" || type === "workspace.delete") continue;
             // Who is in the workspace is told to whoever sees all of it.
             // A daily note is in a folder at the top of the workspace, or makes one there: a member's, and their agent's when it sees all of it.
             if ((type === "member.list" || type === "plugin.list" || PLUGIN_WORK(type) || type === "daily.open" || type === "daily.find" || OWN.includes(type)) && within) allowed = false;
@@ -719,7 +728,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         const beyond = listings.flatMap(({ key, covers, said }) => seen.filter((note) => !COVERED[covers].includes(STATE_OF[note])).flatMap((note) => w.marks[note].filter((mark) => said.includes(mark)).map((mark) => `${key}: ${note}: ${mark}`)));
         expect(beyond).toEqual([]);
         // And each one that names notes names every note it covers, so an include that did nothing would fail here.
-        const NAMES: readonly string[] = ["note.list", "todo.list", "todo.filters", "tag.list", "search", "trash.list", "history.summary", "history.list", "upload.list", "upload.trashed", "pin.list"];
+        const NAMES: readonly string[] = ["export.open", "note.list", "todo.list", "todo.filters", "tag.list", "search", "trash.list", "history.summary", "history.list", "upload.list", "upload.trashed", "pin.list"];
         const lacking = listings
           .filter(({ key }) => NAMES.includes(key.replace(/ with archived( only)?$/, "")))
           .flatMap(({ key, covers, said }) => seen.filter((note) => COVERED[covers].includes(STATE_OF[note]) && !w.marks[note].some((mark) => said.includes(mark))).map((note) => `${key}: ${note}`));
@@ -1009,10 +1018,12 @@ describe("every filter, by every actor", { timeout: 30_000 }, () => {
             const answer = (await perform(env.DB, actor, input)) as Results["search" | "todo.list" | "upload.list"];
             const truth = typeof row.finds === "function" ? row.finds({ name, agent: as !== "themself", sees }) : row.finds;
             const expected = truth.filter((note) => sees(note) && COVERED[covered(row.query)].includes(STATE_OF[note])).map((note) => (type === "upload.list" ? w.uploads : w.notes)[note]).sort();
-            if (Array.isArray(answer)) {
-              expect(answer.map((u) => u.id).sort(), key).toEqual(expected);
+            if ("uploads" in answer) {
+              const { uploads } = answer;
+              expect(uploads.map((u) => u.id).sort(), key).toEqual(expected);
               // How many notes show each is counted among the notes the actor sees, and no others.
-              expect(answer.filter((u) => u.uses > 0).map((u) => [u.id, u.uses]), `${key}: uses`).toEqual(sees("open") && answer.some((u) => u.id === w.uploads.team) ? [[w.uploads.team, 1]] : []);
+              expect(uploads.filter((u) => u.uses > 0).map((u) => [u.id, u.uses]), `${key}: uses`).toEqual(sees("open") && uploads.some((u) => u.id === w.uploads.team) ? [[w.uploads.team, 1]] : []);
+              expect(answer.next, `${key}: next`).toBeNull();
             } else {
               const found = "results" in answer ? answer.results.map((r) => r.note.id) : answer.todos.map((t) => t.noteId);
               expect([...found].sort(), key).toEqual(expected);
@@ -1045,6 +1056,7 @@ describe("the notes about an event on a calendar everyone has, by every actor", 
     ],
     connect: async () => ({ redirect: null }),
     disconnect: async () => {},
+    ending: async () => async () => {},
   });
 
   for (const name of Object.keys(ACTORS) as ActorName[]) {

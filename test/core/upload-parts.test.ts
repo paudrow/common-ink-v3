@@ -95,7 +95,7 @@ describe("a file sent in parts", () => {
       expect((await toolJson<{ uploads: unknown[] }>(token, "list_uploads")).uploads).toEqual([]);
       expect(await tool(token, "read_upload", { uploadId: sending.id })).toEqual({ isError: true, text: "not_found: No such upload" });
       expect((await get(workspace, token, sending.id)).status).toBe(404);
-      expect(await perform(env.DB, ada, { type: "upload.list" })).toEqual([]);
+      expect((await perform(env.DB, ada, { type: "upload.list" })).uploads).toEqual([]);
     };
     await hidden();
 

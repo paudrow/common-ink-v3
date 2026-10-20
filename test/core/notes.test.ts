@@ -1,8 +1,10 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { allPages } from "../../src/core/allPages.ts";
 import { perform } from "../../src/core/operations.ts";
 import { MAX_NOTE_LENGTH } from "../../src/core/protocol.ts";
 import { addMember, newMember } from "./members.ts";
+import { walk } from "./walking.ts";
 
 describe("notes", () => {
   it("can be created, edited, and reopened with their text intact", async () => {
@@ -61,11 +63,63 @@ describe("notes", () => {
     const edited = await perform(env.DB, ada, { type: "note.create", text: "# Edited" }, 2000);
     await perform(env.DB, ada, { type: "note.write", id: edited.id, baseRevision: 1, text: "# Edited again" }, 5000);
     await perform(env.DB, ada, { type: "note.create", text: "# New" }, 6000);
-    const titles = async (updatedSince?: number) => (await perform(env.DB, ada, { type: "note.list", updatedSince })).map((n) => n.title);
+    const titles = async (updatedSince?: number) => (await perform(env.DB, ada, { type: "note.list", updatedSince })).notes.map((n) => n.title);
 
     expect(await titles(5000)).toEqual(["New", "Edited again"]);
     expect(await titles(6001)).toEqual([]);
     expect(await titles()).toEqual(["New", "Edited again", "Old"]);
+  });
+
+  it("comes a page at a time, latest changed first and a tie by id, each note once, and says nothing of a note the asker can't see", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve");
+    const id: Record<string, string> = {};
+    for (const [title, at] of [["N1", 1000], ["N2", 2000], ["N3", 3000], ["Tie", 3000], ["N4", 4000], ["N5", 5000]] as const) id[title] = (await perform(env.DB, ada, { type: "note.create", text: `# ${title}` }, at)).id;
+    const [tieFirst, tieSecond] = id.N3! < id.Tie! ? ["N3", "Tie"] : ["Tie", "N3"];
+    const pages = (limit: number) => walk((after) => perform(env.DB, ada, { type: "note.list", limit, after }));
+    const before = await pages(2);
+
+    expect(before.map((page) => page.notes.map((n) => n.title))).toEqual([["N5", "N4"], [tieFirst, tieSecond], ["N2", "N1"]]);
+    expect(before.at(-1)!.next).toBeNull();
+    for (let i = 0; i < 6; i++) {
+      const hidden = await perform(env.DB, eve, { type: "note.create", text: `# Hidden ${i}` }, 500 + i * 1000);
+      await perform(env.DB, eve, { type: "note.setPrivate", id: hidden.id, private: true });
+    }
+    expect(await pages(2), "the same pages, and the same cursors, with Eve's private notes among them").toEqual(before);
+    expect((await perform(env.DB, ada, { type: "note.list", limit: 6 })).next, "a full page of all she can see is the last").toBeNull();
+    const refused = { code: "invalid", message: "after is not a next this list gave: start again without it" };
+    await expect(perform(env.DB, ada, { type: "note.list", after: "no such page" })).rejects.toMatchObject(refused);
+    await perform(env.DB, ada, { type: "note.create", text: "# Todos\n\n- [ ] one\n- [ ] two" });
+    const otherList = (await perform(env.DB, ada, { type: "todo.list", limit: 1 })).next!;
+    await expect(perform(env.DB, ada, { type: "note.list", after: otherList }), "the next of another list").rejects.toMatchObject(refused);
+  });
+
+  it("is read whole a page at a time, as the app reads every note", async () => {
+    const ada = await newMember("Ada Lovelace");
+    for (let i = 1; i <= 5; i++) await perform(env.DB, ada, { type: "note.create", text: `# N${i}` }, i * 1000);
+    const asked: (string | undefined)[] = [];
+    const every = await allPages(
+      (after) => (asked.push(after), perform(env.DB, ada, { type: "note.list", limit: 2, after })),
+      (page) => page.notes,
+    );
+    expect(every.map((n) => n.title)).toEqual(["N5", "N4", "N3", "N2", "N1"]);
+    expect(asked.length, "three pages: two, two and one").toBe(3);
+  });
+
+  it("lists, from a page on, the notes after that page's last as the order is now: a note changed meanwhile is found by asking for what changed since", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const id: Record<string, string> = {};
+    for (const [title, at] of [["N1", 1000], ["N2", 2000], ["N3", 3000], ["N4", 4000], ["N5", 5000]] as const) id[title] = (await perform(env.DB, ada, { type: "note.create", text: `# ${title}` }, at)).id;
+    const first = await perform(env.DB, ada, { type: "note.list", limit: 2 });
+
+    await perform(env.DB, ada, { type: "note.write", id: id.N2!, baseRevision: 1, text: "# N2 again" }, 9000);
+    await perform(env.DB, ada, { type: "note.write", id: id.N5!, baseRevision: 1, text: "# N5 again" }, 9100);
+    await perform(env.DB, ada, { type: "note.create", text: "# N6" }, 9500);
+    const rest = await walk((after) => perform(env.DB, ada, { type: "note.list", limit: 2, after: after ?? first.next! }));
+
+    expect(first.notes.map((n) => n.title)).toEqual(["N5", "N4"]);
+    expect(rest.flatMap((page) => page.notes.map((n) => n.title))).toEqual(["N3", "N1"]);
+    expect((await perform(env.DB, ada, { type: "note.list", updatedSince: 5001 })).notes.map((n) => n.title)).toEqual(["N6", "N5 again", "N2 again"]);
   });
 
   it("records each save as a change with its author and the revision it was based on", async () => {
@@ -184,9 +238,9 @@ describe("notes", () => {
     const grace = await addMember(ada, "editor", "Grace Hopper");
     const note = await perform(env.DB, ada, { type: "note.create", text: "# Plan\n\n- [ ] book a room" }, 1000);
 
-    const [created] = await perform(env.DB, ada, { type: "note.list" });
+    const [created] = (await perform(env.DB, ada, { type: "note.list" })).notes;
     await perform(env.DB, grace, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\n- [x] book a room\n- [ ] send [[invites]]", linkTitles: "keep" }, 2000);
-    const [written] = await perform(env.DB, ada, { type: "note.list" });
+    const [written] = (await perform(env.DB, ada, { type: "note.list" })).notes;
 
     expect(created).toEqual({
       id: note.id,
@@ -229,6 +283,6 @@ describe("notes", () => {
 
     await expect(perform(env.DB, { ...grace, workspaceId: ada.workspaceId }, { type: "note.read", id: note.id })).rejects.toMatchObject({ code: "not_found" });
     await expect(perform(env.DB, grace, { type: "note.read", id: note.id })).rejects.toMatchObject({ code: "not_found" });
-    expect(await perform(env.DB, grace, { type: "note.list" })).toEqual([]);
+    expect((await perform(env.DB, grace, { type: "note.list" })).notes).toEqual([]);
   });
 });

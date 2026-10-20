@@ -10,6 +10,8 @@ export interface Provider {
   of(personId: string): Promise<DataSource[]>;
   connect(personId: string, sourceId: string, back: string, edit?: boolean): Promise<{ redirect: string | null }>;
   disconnect(personId: string): Promise<void>;
+  /** What tells the provider to end the person's connection, or null when there is nothing to tell it. Deletes nothing here. */
+  ending(personId: string): Promise<(() => Promise<void>) | null>;
 }
 
 /**
@@ -28,5 +30,11 @@ export function sourcesFor(env: Env, url: URL, outbound: typeof fetch = (input, 
     of: async (personId) => (await Promise.all(providers.map((p) => p.of(personId)))).flat(),
     connect: async (personId, sourceId, back, edit) => (await owner(sourceId)?.connect(personId, sourceId, back, edit)) ?? { redirect: null },
     disconnect: async (personId, sourceId) => owner(sourceId)?.disconnect(personId),
+    ending: async (personId) => {
+      const ends = (await Promise.all(providers.map((p) => p.ending(personId)))).filter((end) => end !== null);
+      return async () => {
+        for (const end of ends) await end();
+      };
+    },
   };
 }

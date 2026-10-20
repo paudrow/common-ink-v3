@@ -331,9 +331,9 @@ test("a guest has the three too, as that guest: nothing of a note they weren't s
   await expect(wordCount(grace)).toHaveText("6 words · 1 min read");
   await showPanel(grace, "Backlinks");
   await expect(ownPlugin(grace, "Backlinks").locator("body")).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
-  expect(await inside(ownPlugin(grace, "Backlinks"), "(ink) => ink.perform({ type: 'note.list' }).then((notes) => notes.map((n) => n.title))")).toBe('done: ["Shared plan"]');
+  expect(await inside(ownPlugin(grace, "Backlinks"), "(ink) => ink.perform({ type: 'note.list' }).then(({ notes }) => notes.map((n) => n.title))")).toBe('done: ["Shared plan"]');
   expect(await inside(ownPlugin(grace, "Backlinks"), "(ink) => ink.perform({ type: 'search', query: 'Secret' }).then((found) => JSON.stringify(found).includes('Not for Grace'))")).toBe("done: false");
-  expect((await asPlugin(grace, workspaceId, "word-count", { type: "note.list" })).body).toHaveLength(1);
+  expect((await asPlugin(grace, workspaceId, "word-count", { type: "note.list" })).body.notes).toHaveLength(1);
   const draft = await grace.evaluate(
     async (workspaceId) => (await fetch(`/api/workspaces/${workspaceId}/plugins/word-count/draft/ops`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "note.list" }) })).status,
     workspaceId,

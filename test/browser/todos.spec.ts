@@ -2202,7 +2202,7 @@ test("the Sort is kept with the account: another browser signed in as the same m
 
   const grace = await anotherPerson(page, "Grace Hopper");
   await join(grace, page, "editor");
-  const zoo = (await perform(page, { type: "note.list" })).find((n) => n.title === "Zoo")!;
+  const zoo = (await perform(page, { type: "note.list" })).notes.find((n) => n.title === "Zoo")!;
   await grace.goto(`/note/${zoo.id}`);
   await expect(grace.locator(".workspace-button")).toContainText("Ada");
   await grace.goto("/todos");

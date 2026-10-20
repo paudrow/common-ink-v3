@@ -21,7 +21,7 @@ async function newPerson(host: Actor, name: string) {
 
 const note = (by: Actor, text: string, folderId?: string) => perform(env.DB, by, { type: "note.create", text, folderId });
 const folder = (by: Actor, name: string, parentId?: string) => perform(env.DB, by, { type: "folder.create", name, parentId });
-const titles = async (as: Actor) => (await perform(env.DB, as, { type: "note.list" })).map((n) => n.title).sort();
+const titles = async (as: Actor) => (await perform(env.DB, as, { type: "note.list" })).notes.map((n) => n.title).sort();
 const read = (as: Actor, id: string) => perform(env.DB, as, { type: "note.read", id });
 const write = (as: Actor, id: string, baseRevision: number, text: string) => perform(env.DB, as, { type: "note.write", id, baseRevision, text });
 const share = (by: Actor, on: { noteId: string } | { folderId: string }, email: string, access: "view" | "edit") => perform(env.DB, by, { type: "grant.set", ...on, email, access });
@@ -44,7 +44,7 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     await share(ada, { noteId: plan.id }, gus.email, "view");
 
     expect((await whoAmI(env.DB, gus.personId)).workspaces.map((w) => `${w.name}: ${w.role}`)).toEqual(["Gus's workspace: admin", "Ada's workspace: guest"]);
-    expect(await perform(env.DB, gus.actor, { type: "note.list" })).toMatchObject([{ id: plan.id, title: "Plan", folderId: null, access: "view", private: false }]);
+    expect((await perform(env.DB, gus.actor, { type: "note.list" })).notes).toMatchObject([{ id: plan.id, title: "Plan", folderId: null, access: "view", private: false }]);
     expect(await perform(env.DB, gus.actor, { type: "folder.list" })).toEqual({ unsortedId: null, folders: [] });
     expect((await read(gus.actor, plan.id)).text).toBe("# Plan\n\nfor the launch");
     expect(await workspaceOfNote(env.DB, gus.personId, plan.id)).toBe(ada.workspaceId);
@@ -109,7 +109,7 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     // Renaming the shared folder itself could collide with a folder beside it that the guest can't see, which would name it.
     await expect(perform(env.DB, gus.actor, { type: "folder.rename", id: shared.id, name: "Elsewhere" })).rejects.toMatchObject({ code: "forbidden", message: "A guest can rename only the folders inside one shared with them" });
     await expect(perform(env.DB, gus.actor, { type: "folder.rename", id: nested.id, name: "Renamed" })).resolves.toMatchObject({ name: "Renamed" });
-    await expect(perform(env.DB, gus.actor, { type: "note.list", folderId: elsewhere.id })).resolves.toEqual([]);
+    await expect(perform(env.DB, gus.actor, { type: "note.list", folderId: elsewhere.id })).resolves.toEqual({ notes: [], next: null });
     await expect(share(gus.actor, { noteId: made.id }, address(), "view")).rejects.toMatchObject({ code: "forbidden", message: "A guest can't grant.set" });
     await expect(perform(env.DB, gus.actor, { type: "grant.link", noteId: made.id, link: "public" })).rejects.toMatchObject({ code: "forbidden" });
   });
@@ -126,7 +126,7 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
 
     expect(await read(gus.actor, secret.id)).toMatchObject({ id: secret.id, folderId: null });
     expect(await titles(gus.actor)).toEqual(["Secret"]);
-    expect(await perform(env.DB, gus.actor, { type: "note.list", folderId: child.id })).toEqual([]);
+    expect((await perform(env.DB, gus.actor, { type: "note.list", folderId: child.id })).notes).toEqual([]);
     await expect(perform(env.DB, gus.actor, { type: "todo.list", folderId: child.id })).rejects.toMatchObject(NO_FOLDER);
     await expect(perform(env.DB, gus.actor, { type: "search", query: "Secret", folderId: child.id })).rejects.toMatchObject(NO_FOLDER);
   });
@@ -138,7 +138,7 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     const low = await folder(ada, "Low", mid.id);
     const [inTop, inMid, inLow, raised] = await Promise.all([note(ada, "# In top", top.id), note(ada, "# In mid", mid.id), note(ada, "# In low", low.id), note(ada, "# Raised", low.id)]);
     const gus = await newPerson(ada, "Gus Guest");
-    const access = async () => Object.fromEntries((await perform(env.DB, gus.actor, { type: "note.list" })).map((n) => [n.title, n.access]));
+    const access = async () => Object.fromEntries((await perform(env.DB, gus.actor, { type: "note.list" })).notes.map((n) => [n.title, n.access]));
 
     await share(ada, { folderId: top.id }, gus.email, "edit");
     expect(await access()).toEqual({ "In top": "edit", "In mid": "edit", "In low": "edit", Raised: "edit" });
@@ -376,7 +376,7 @@ describe("a private note", () => {
       expect((await perform(env.DB, other, { type: "history.authors" })).map((a) => a.name)).toEqual(["Ada Lovelace"]);
       expect((await perform(env.DB, other, { type: "history.summary", authors: [{ kind: "member", id: eve.personId }] })).notes).toEqual([]);
       expect((await perform(env.DB, other, { type: "folder.list" })).folders.find((f) => f.id === team.id)!.noteCount).toBe(0);
-      expect((await perform(env.DB, other, { type: "note.list", folderId: team.id }))).toEqual([]);
+      expect((await perform(env.DB, other, { type: "note.list", folderId: team.id })).notes).toEqual([]);
       expect(await perform(env.DB, other, { type: "history.revertAuthor", author: { kind: "agent", id: zed.agent.id } })).toEqual({ reverted: [], emptied: [], failed: [], next: null });
     }
     expect(await perform(env.DB, ada, { type: "links.rebuild" })).toEqual({ done: true });

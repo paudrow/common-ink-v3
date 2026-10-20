@@ -30,7 +30,8 @@ export async function signIn(db: D1Database, identity: SignInIdentity, now = Dat
       throw err;
     }
   }
-  const person = await db.prepare("SELECT id, sessions_ended, google_sub FROM people WHERE email = ?").bind(email).first<{ id: string; sessions_ended: number; google_sub: string | null }>();
+  // A former member stands in for someone who deleted their account, and is nobody to sign in as.
+  const person = await db.prepare("SELECT id, sessions_ended, google_sub FROM people WHERE email = ? AND former = 0").bind(email).first<{ id: string; sessions_ended: number; google_sub: string | null }>();
   if (!person) throw new Error("no person for that email after sign-in");
   if (identity.sub && person.google_sub !== identity.sub) throw new NotThatPerson("This email belongs to another Google account here");
   await arrive(db, person.id, now);

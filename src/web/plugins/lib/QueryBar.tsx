@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { HelpOverlay, Icon, MAX_SEARCH_LENGTH, fieldMeans, fieldName, fieldsOf, filterOf, keyNamed, keyOf, keysFor, keysStarting, parseQuery, querySyntax, typingAt, wordsFor, wordsIn, writtenValue, type App, type Cmp, type PluginHost, type QueryField, type QueryIn, type QueryScope, type SortKey, type SyntaxRow } from "../../plugin-api.ts";
+import { HelpOverlay, Icon, allPages, MAX_SEARCH_LENGTH, fieldMeans, fieldName, fieldsOf, filterOf, keyNamed, keyOf, keysFor, keysStarting, parseQuery, querySyntax, typingAt, wordsFor, wordsIn, writtenValue, type App, type Cmp, type PluginHost, type QueryField, type QueryIn, type QueryScope, type SortKey, type SyntaxRow } from "../../plugin-api.ts";
 import { builderReducer, readBuilder, termOf, withField, type BuilderEvent, type Row, type RowField } from "./queryRows.ts";
 
 /** How long the field rests before a query that can't be read says so: a filter half typed is no mistake yet. */
@@ -30,16 +30,15 @@ function useNames(host: PluginHost, app: App, scope: QueryScope, wanted: boolean
     if (!wanted) return;
     let left = false;
     if (scope === "uploads") {
-      // Who uploaded is offered from the uploads the member can list, as who changed notes is from the history they can read.
-      void host
-        .perform({ type: "upload.list", includeArchived: true })
+      // Who uploaded is offered from every upload the member can list, as who changed notes is from the history they can read.
+      void allPages((after) => host.perform({ type: "upload.list", includeArchived: true, limit: 500, after }), (page) => page.uploads)
         .then((uploads) => [...new Set(uploads.map((u) => u.uploadedBy.name))].sort((a, b) => a.localeCompare(b)), () => [])
         .then((people) => !left && setRead({ tags: [], people, mentioned: [] }));
       return () => {
         left = true;
       };
     }
-    const tags = scope === "todos" ? host.perform({ type: "todo.filters", includeArchived: true }).then((r) => [...r.tags]) : host.perform({ type: "tag.list", includeArchived: true }).then((r) => r.tags.map((t) => t.name));
+    const tags = scope === "todos" ? host.perform({ type: "todo.filters", includeArchived: true }).then((r) => [...r.tags]) : allPages((after) => host.perform({ type: "tag.list", includeArchived: true, limit: 1000, after }), (page) => page.tags).then((tags) => tags.map((t) => t.name));
     const people = host.perform({ type: "history.authors" }).then((authors) => [...new Set(authors.map((a) => a.name))]);
     const members = host.perform({ type: "member.list" }).then((r) => r.map((m) => m.name));
     const assigned = host.perform({ type: "todo.filters", includeArchived: true }).then((r) => r.assignees.map((a) => a.name));

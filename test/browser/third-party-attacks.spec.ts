@@ -181,7 +181,7 @@ test("over its own port a plugin is answered only for what it was permitted: wha
   expect(JSON.stringify((await perform(admin, { type: "plugin.list" })).plugins), "what each plugin is permitted is as it was").toBe(record);
   await expect.poll(() => read(admin, note.id)).toBe("# Shared\n\nwritten by Ada\n");
   await expect.poll(() => read(admin, other.id)).toBe("# Other\n");
-  await expect.poll(async () => (await perform(admin, { type: "note.list" })).map((n) => n.title).sort()).toEqual(["Ada's secret", "Other", "Shared"]);
+  await expect.poll(async () => (await perform(admin, { type: "note.list" })).notes.map((n) => n.title).sort()).toEqual(["Ada's secret", "Other", "Shared"]);
   await expect.poll(async () => (await perform(admin, { type: "member.list" })).map((m) => m.name).sort()).toEqual(["Ada Lovelace", "Mel Member"]);
 
   // The harmless plugin is running beside it, to show what the flood leaves alone: pinned, so typing in the note leaves its panel there.

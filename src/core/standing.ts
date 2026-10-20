@@ -41,7 +41,8 @@ const MOST: Record<Role, Standing["most"]> = { admin: "manage", editor: "edit", 
  */
 export async function standingIn(db: D1Database, personId: string, workspaceId: string, limit: readonly string[] | null = null): Promise<Standing | null> {
   const [who, granted] = await db.batch<{ name: string; role: Role | null } & GrantRow>([
-    db.prepare("SELECT p.name, m.role FROM people p LEFT JOIN members m ON m.person_id = p.id AND m.workspace_id = ?2 WHERE p.id = ?1").bind(personId, workspaceId),
+    // A workspace being deleted is no workspace to anyone, though its members are already gone: this says so whatever is still there.
+    db.prepare("SELECT p.name, m.role FROM people p LEFT JOIN members m ON m.person_id = p.id AND m.workspace_id = ?2 WHERE p.id = ?1 AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = ?2 AND w.deleting_at IS NOT NULL)").bind(personId, workspaceId),
     db.prepare("SELECT note_id, folder_id, upload_id, access FROM grants WHERE workspace_id = ?2 AND person_id = ?1 AND kind = 'person'").bind(personId, workspaceId),
   ]);
   const person = who!.results[0];
@@ -74,7 +75,7 @@ export const BY_TOKEN = (g: string) => `(${g}.token_hash = ?1 OR (${g}.token_has
 export async function standingByLink(db: D1Database, token: string, personId: string | null): Promise<Standing> {
   const link = await db
     // A link on a note in Trash opens nothing until the note is restored.
-    .prepare(`SELECT workspace_id, note_id, folder_id, upload_id, access, kind FROM grants WHERE ${BY_TOKEN("grants")} AND kind IN ('public', 'signed_in') AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.state = 'trashed')`)
+    .prepare(`SELECT workspace_id, note_id, folder_id, upload_id, access, kind FROM grants WHERE ${BY_TOKEN("grants")} AND kind IN ('public', 'signed_in') AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.state = 'trashed') AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = grants.workspace_id AND w.deleting_at IS NOT NULL)`)
     .bind(await linkHash(token), token)
     .first<GrantRow & { workspace_id: string; kind: "public" | "signed_in" }>();
   if (!link) throw new OpError("not_found", NO_SUCH_LINK);

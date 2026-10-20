@@ -4086,6 +4086,16 @@ kbd {
   margin: 0;
 }
 
+.settings-export {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-export li + li {
+  margin-top: 6px;
+}
+
 .settings-group h2 {
   display: flex;
   gap: 10px;

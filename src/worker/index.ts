@@ -5,6 +5,7 @@ import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../
 import { logFault } from "../core/logs.ts";
 import { sealLinksWith, sealOldLinks } from "../core/linkSeal.ts";
 import { sweep } from "../core/oauth.ts";
+import { eraseWorkspaces, pruneDeletions, redoRequested } from "../core/erase.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
@@ -58,7 +59,7 @@ async function handleShared(req: Request, env: Env, url: URL, token: string, not
 }
 
 /** Operations whose bytes come or go with the request, each at an address of its own in files.ts. */
-const CARRIES_BYTES: ReadonlySet<unknown> = new Set(["upload.create", "upload.open", "upload.part", "shared.upload"]);
+const CARRIES_BYTES: ReadonlySet<unknown> = new Set(["upload.create", "upload.open", "upload.part", "shared.upload", "export.open"]);
 
 async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   const files = await handleFiles(req, env, url);
@@ -112,7 +113,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       if (err instanceof TooLarge) return json({ error: "invalid", message: `An operation is at most ${MAX_OP_BYTES / 1_000_000} MB` }, 413);
       return json({ error: "invalid", message: "The body isn't JSON" }, 400);
     }
-    if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, and a part of one at the address upload.start gives" }, 400);
+    if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, a part of one at the address upload.start gives, and an export's at the addresses export.plan gives" }, 400);
     try {
       return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
     } catch (err) {
@@ -147,6 +148,19 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
   if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
   if (url.pathname === "/clipper/connect" || url.pathname === "/clipper/revoke") return handleClipper(req, env, url);
+  // Making deletions again after a restore, as asked by scripts/redo-deletions.ts. The address names a request it put in the bucket, so only someone who can write there can ask.
+  const redo = /^\/redo-deletions\/([0-9a-f]{64})$/.exec(url.pathname);
+  if (redo && req.method === "POST") {
+    return answered(url.pathname, async () => {
+      try {
+        const done = await redoRequested({ db: env.DB, bucket: env.FILES, sources: sourcesFor(env, url), now: Date.now() }, redo[1]!);
+        return done ? json(done) : json({ error: "not_found" }, 404);
+      } catch (err) {
+        if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
+        throw err;
+      }
+    }, () => json({ error: "unknown", message: BROKE }, 500));
+  }
   if (url.pathname === "/mcp") {
     const busy = await overLimit(env, url, "MCP_LIMIT", await tokenKey(bearerToken(req)));
     return busy ?? answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
@@ -182,7 +196,7 @@ export default {
     const answer = await answered(url.pathname, async () => route(req, env, url), () => new Response("Common Ink broke. Try again in a moment.", { status: 500 }));
     return secured(crossOrigin(answer, req, url), url, env);
   },
-  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, and uploads that never finished. A run that doesn't finish is carried on by the next.
+  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env) {
     keyLinks(env);
     let purged;
@@ -200,6 +214,18 @@ export default {
       if (sealed) console.log(`Sealed ${sealed} links kept from before links were sealed`);
     } catch (err) {
       logFault("Sealing old links", err);
+    }
+    try {
+      const { erased, more } = await eraseWorkspaces(env.DB, env.FILES);
+      if (erased.length || more) console.log(`Erased ${erased.length} deleted workspaces${more ? ", with more waiting" : ""}`);
+    } catch (err) {
+      logFault("Erasing deleted workspaces", err);
+    }
+    try {
+      const pruned = await pruneDeletions(env.FILES, controller.scheduledTime);
+      if (pruned) console.log(`Removed ${pruned} records of deletions too old for a restore to bring back`);
+    } catch (err) {
+      logFault("Removing old records of deletions", err);
     }
     // What OAuth sign-ins left behind that nobody came back to. Also done when someone starts one, so this is for a quiet day.
     try {

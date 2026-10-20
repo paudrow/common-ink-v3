@@ -36,7 +36,7 @@ const COUNTER: Written = {
 const COUNTER_CODE = `
 ink.onCommand("count", async () => {
   try {
-    const notes = await ink.perform({ type: "note.list" });
+    const { notes } = await ink.perform({ type: "note.list" });
     await ink.notify("Counted " + notes.length + " notes");
   } catch (err) {
     await ink.notify("Refused: " + err.code + ": " + err.message);
@@ -44,7 +44,7 @@ ink.onCommand("count", async () => {
 });
 ink.onCommand("stamp", async () => {
   try {
-    const plan = (await ink.perform({ type: "note.list" })).find((n) => n.title === "Plan");
+    const plan = (await ink.perform({ type: "note.list" })).notes.find((n) => n.title === "Plan");
     if (!plan) return void (await ink.notify("Stamped " + (await ink.perform({ type: "note.create", text: "# Stamped\\n" })).id));
     const note = await ink.perform({ type: "note.read", id: plan.id });
     await ink.perform({ type: "note.write", id: note.id, baseRevision: note.revision, text: note.text + "\\n\\nThe counter's step" });

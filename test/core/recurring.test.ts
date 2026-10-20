@@ -240,7 +240,7 @@ describe("checking off a recurring todo", () => {
 
     expect((await dailies(eve)).map((d) => d.text)).toEqual([`# ${SUNDAY}\n\n${FILED} [[${note.id}]]\n`]);
     expect((await dailies(ada)).map((d) => d.text)).toEqual([`# ${SUNDAY}\n\n- [x] Bins [[${note.id}]]\n`]);
-    expect((await perform(env.DB, eve, { type: "note.list" })).some((n) => n.title === SUNDAY && n.private)).toBe(true);
+    expect((await perform(env.DB, eve, { type: "note.list" })).notes.some((n) => n.title === SUNDAY && n.private)).toBe(true);
     // A daily note is private, so the todo's words go no further than the one who checked it.
     expect((await perform(env.DB, eve, { type: "todo.list", includeCompleted: true })).todos.filter((t) => t.done).map((t) => t.text)).toEqual([`${FILED} [[${note.id}]]`]);
   });

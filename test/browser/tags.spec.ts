@@ -163,7 +163,7 @@ test("a tag in a note is drawn as a tag where its characters were: nothing moves
   const tags = editor(page).locator(".md-tag");
   // What the server takes for a tag and nothing else: not `#12`, code, a fence, or a link's address.
   await expect(tags).toHaveText(["#alpha", "#beta-2", "#alpha"]);
-  await expect.poll(() => perform(page, { type: "tag.list" })).toEqual({ tags: [{ name: "alpha", notes: 1 }, { name: "beta-2", notes: 1 }], indexing: false });
+  await expect.poll(() => perform(page, { type: "tag.list" })).toEqual({ tags: [{ name: "alpha", notes: 1 }, { name: "beta-2", notes: 1 }], next: null, indexing: false });
 
   const look = (el: Element) => {
     const { color, fontSize, fontFamily, fontWeight, padding, margin, borderWidth, letterSpacing } = getComputedStyle(el);
@@ -216,7 +216,7 @@ test("a tag in a note is drawn as a tag where its characters were: nothing moves
   expectUnmoved(await placeOf(line(page, PROSE)), off.prose, "after typing elsewhere");
 
   // With the Tags plugin off the note is as it was before there was any drawing of tags: every letter is where the drawing has it, to the grid the browser places a run of text on.
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: (await perform(page, { type: "note.list" })).find((n) => n.title === "Tagged")!.id })).text).toBe(NOTE);
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: (await perform(page, { type: "note.list" })).notes.find((n) => n.title === "Tagged")!.id })).text).toBe(NOTE);
   await perform(page, { type: "settings.write", text: JSON.stringify({ "tags.enabled": false }), baseRevision: 0 });
   await page.reload();
   await expect(editor(page)).toContainText("Last line");
@@ -253,7 +253,7 @@ test("tags that may be missing some say the server is still indexing, and are re
   // Until the note is "indexed", each answer is made to be one from a server that hasn't read it yet. After that they are the server's own.
   await page.route("**/ops", async (route) => {
     if (indexed || !route.request().postData()?.includes('"type":"tag.list"')) return route.continue();
-    await route.fulfill({ response: await route.fetch(), json: { tags: [], indexing: true } });
+    await route.fulfill({ response: await route.fetch(), json: { tags: [], next: null, indexing: true } });
   });
   await page.goto("/tags");
   const all = page.getByRole("region", { name: "Tags" });

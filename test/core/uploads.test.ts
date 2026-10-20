@@ -9,6 +9,7 @@ import { PENDING_MS, clearUploads } from "../../src/core/purge.ts";
 import worker from "../../src/worker/index.ts";
 import { addMember, newMember } from "./members.ts";
 import { FILES, PNG, bytesFor, bytesOf, carrying, upload } from "./uploading.ts";
+import { walk } from "./walking.ts";
 
 const T0 = Date.UTC(2026, 9, 11);
 const HTML = bytesOf("<!doctype html><script>alert(document.cookie)</script>");
@@ -41,8 +42,8 @@ describe("uploading a file", () => {
     expect(loose).toMatchObject({ name: "dot.png", type: "image/png", kind: "image", size: PNG.byteLength, width: 1, height: 1, state: "live", private: false, access: "edit", folderId: unsortedId });
     expect(filed.folderId).toBe(folder.id);
     expect(await bytesFor(ada, loose.id)).toEqual(PNG);
-    expect((await perform(env.DB, ada, { type: "upload.list" })).map((u) => u.name).sort()).toEqual(["dot.png", "filed.png"]);
-    expect((await perform(env.DB, ada, { type: "upload.list", folderId: folder.id })).map((u) => u.name)).toEqual(["filed.png"]);
+    expect((await perform(env.DB, ada, { type: "upload.list" })).uploads.map((u) => u.name).sort()).toEqual(["dot.png", "filed.png"]);
+    expect((await perform(env.DB, ada, { type: "upload.list", folderId: folder.id })).uploads.map((u) => u.name)).toEqual(["filed.png"]);
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", PNG)), (b) => b.toString(16).padStart(2, "0")).join("");
     expect(await env.DB.prepare("SELECT hash, state FROM uploads WHERE id = ?").bind(loose.id).first()).toEqual({ hash: digest, state: "live" });
   });
@@ -84,7 +85,7 @@ describe("uploading a file", () => {
     await expect(sent(PART_BYTES + 1, PNG)).rejects.toMatchObject({ code: "invalid", message: "A file sent in one request can be at most 80 MB. Send a larger one in parts, up to 25 GB" });
     await expect(perform(env.DB, ada, { type: "upload.create", name: "a.png", size: 0 }, T0, undefined, carrying(new Uint8Array()))).rejects.toMatchObject({ code: "invalid" });
     await expect(perform(env.DB, ada, { type: "upload.create", name: "a.png", size: 4 })).rejects.toMatchObject({ code: "unavailable" });
-    expect(await perform(env.DB, ada, { type: "upload.list", includeArchived: true })).toEqual([]);
+    expect((await perform(env.DB, ada, { type: "upload.list", includeArchived: true })).uploads).toEqual([]);
     // What a refused file left is unread, and is cleared away with whatever of it reached the bucket.
     const left = (await env.DB.prepare("SELECT id, state FROM uploads WHERE workspace_id = ?").bind(ada.workspaceId).all<{ id: string; state: string }>()).results;
     expect(left.map((row) => row.state)).toEqual(["removing", "removing"]);
@@ -102,7 +103,7 @@ describe("uploading a file", () => {
     expect((await sent(ed, "w1")).id).not.toBe(first.id);
     await expect(sent(ada, "w2", bytesOf("short"))).rejects.toMatchObject({ code: "invalid" });
     const again = await sent(ada, "w2");
-    expect((await perform(env.DB, ada, { type: "upload.list" })).map((u) => u.id).sort()).toEqual([first.id, again.id, (await sent(ed, "w1")).id].sort());
+    expect((await perform(env.DB, ada, { type: "upload.list" })).uploads.map((u) => u.id).sort()).toEqual([first.id, again.id, (await sent(ed, "w1")).id].sort());
     // A try cut off mid-file leaves its row pending: a retry is told to wait while it may still be arriving, and takes its place after.
     await env.DB.prepare("INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, created_at, created_by, uploaded_by, uploaded_by_kind, state, touched_at, write_id) SELECT 'cutoffupload', workspace_id, folder_id, 'a.png', '', 4, ?, ?, ?, 'member', 'pending', ?, 'w3' FROM uploads WHERE id = ?").bind(T0, ada.personId, ada.personId, T0, first.id).run();
     const later = (minutes: number) => perform(env.DB, ada, { type: "upload.create", name: "a.png", size: PNG.byteLength, writeId: "w3" }, T0 + minutes * 60_000, undefined, carrying(PNG));
@@ -221,7 +222,7 @@ describe("an upload's life", () => {
   it("archives, trashes and restores as a note does", async () => {
     const ada = await newMember();
     const { id } = await upload(ada, "a.png");
-    const listed = async (includeArchived = false) => (await perform(env.DB, ada, { type: "upload.list", includeArchived })).map((u) => u.state);
+    const listed = async (includeArchived = false) => (await perform(env.DB, ada, { type: "upload.list", includeArchived })).uploads.map((u) => u.state);
     await perform(env.DB, ada, { type: "upload.archive", id, archived: true });
     expect([await listed(), await listed(true)]).toEqual([[], ["archived"]]);
     expect(await bytesFor(ada, id)).toEqual(PNG);
@@ -295,7 +296,7 @@ describe("an upload's life", () => {
       .bind(id, ada.workspaceId, unsortedId, T0, ada.personId, ada.personId)
       .run();
     await env.FILES.put(id, PNG);
-    expect(await perform(env.DB, ada, { type: "upload.list", includeArchived: true })).toEqual([]);
+    expect((await perform(env.DB, ada, { type: "upload.list", includeArchived: true })).uploads).toEqual([]);
     expect((await perform(env.DB, ada, { type: "folder.list" })).folders.map((f) => f.uploadCount)).toEqual([0]);
     await expect(bytesFor(ada, id)).rejects.toMatchObject({ code: "not_found" });
     expect(await clearUploads(env.DB, env.FILES, T0 + PENDING_MS - 1)).toMatchObject({ removed: 0 });
@@ -352,7 +353,7 @@ describe("who an upload is shown to", () => {
     const guest: Actor = { kind: "member", personId: (await signIn(env.DB, { email, name: "Gus" })).personId, workspaceId: ada.workspaceId };
     const grant = await perform(env.DB, ada, { type: "grant.set", uploadId: id, email, access: "view" });
     expect(grant.on).toEqual({ kind: "upload", id, name: "shared.png" });
-    expect((await perform(env.DB, guest, { type: "upload.list" })).map((u) => [u.name, u.access, u.folderId])).toEqual([["shared.png", "view", null]]);
+    expect((await perform(env.DB, guest, { type: "upload.list" })).uploads.map((u) => [u.name, u.access, u.folderId])).toEqual([["shared.png", "view", null]]);
     expect(await bytesFor(guest, id)).toEqual(PNG);
     await expect(bytesFor(guest, other.id)).rejects.toMatchObject({ code: "not_found" });
     await expect(perform(env.DB, guest, { type: "upload.trash", id })).rejects.toMatchObject({ code: "forbidden" });
@@ -429,12 +430,30 @@ describe("finding uploads", () => {
     return { ada, eve, projects, scribe, asScribe, files };
   }
 
-  const names = (listed: { name: string }[]) => listed.map((u) => u.name);
+  const names = ({ uploads }: { uploads: { name: string }[] }) => uploads.map((u) => u.name);
+
+  it("comes a page at a time in each order, a tie by id, each upload once, and says nothing of an upload the asker can't see", async () => {
+    const { ada, eve, files } = await shelf();
+    const tie = await upload(ada, "Notes.md", bytesOf("# Notes"), {}, T0 + 2 * 86_400_000);
+    const walked = (limit: number, query = "") => walk((after) => perform(env.DB, ada, { type: "upload.list", query, limit, after }));
+    const flat = async (limit: number, query = "") => (await walked(limit, query)).flatMap(names);
+
+    const [tieFirst, tieSecond] = tie.id < files.notes.id ? ["Notes.md", "notes.md"] : ["notes.md", "Notes.md"];
+    for (const limit of [1, 2, 5]) expect(await flat(limit), `${limit} a page`).toEqual(["by-agent.png", "eve.png", "50%_off.zip", tieFirst, tieSecond, "Q2-report.pdf", "dot.png"]);
+    for (const limit of [1, 3]) expect(await flat(limit, "sort:name-asc"), `by name, ${limit} a page`).toEqual(["50%_off.zip", "by-agent.png", "dot.png", "eve.png", tieFirst, tieSecond, "Q2-report.pdf"]);
+    // The three pictures are the same size, so they go by id.
+    const pictures = [[files.agents.id, "by-agent.png"], [files.dot.id, "dot.png"], [files.theirs.id, "eve.png"]].sort(([x], [y]) => (x! < y! ? -1 : 1)).map(([, name]) => name);
+    for (const limit of [1, 4]) expect(await flat(limit, "sort:size-desc type:image"), `largest pictures, ${limit} a page`).toEqual(pictures);
+
+    const before = await walked(2, "sort:name-asc");
+    for (const name of ["a-secret.png", "dots-secret.png", "zz-secret.png"]) await upload(eve, name, PNG, { private: true }, T0 + 86_400_000);
+    expect(await walked(2, "sort:name-asc"), "the same pages, and the same cursors, with Eve's private uploads among them").toEqual(before);
+  });
 
   it("reads the query language over the uploads the asker can see, each with who uploaded it and how many of their notes show it", async () => {
     const { ada, eve, projects, files } = await shelf();
     const find = (query: string, as: Actor = ada) => perform(env.DB, as, { type: "upload.list", query, today: "2026-10-20", zone: "UTC" }).then(names);
-    const listed = await perform(env.DB, ada, { type: "upload.list" });
+    const listed = (await perform(env.DB, ada, { type: "upload.list" })).uploads;
     expect(listed.map((u) => [u.name, u.uploadedBy.name, u.uses])).toEqual([
       ["by-agent.png", "Scribe", 0],
       ["eve.png", "Eve Editor", 0],
@@ -444,7 +463,7 @@ describe("finding uploads", () => {
       ["dot.png", "Ada Lovelace", 1],
     ]);
     // Eve sees her private note too, so for her the picture is in two notes and the report in one.
-    expect((await perform(env.DB, eve, { type: "upload.list", query: "used:yes" })).map((u) => [u.name, u.uses])).toEqual([
+    expect((await perform(env.DB, eve, { type: "upload.list", query: "used:yes" })).uploads.map((u) => [u.name, u.uses])).toEqual([
       ["Q2-report.pdf", 1],
       ["dot.png", 2],
     ]);
@@ -539,7 +558,7 @@ describe("putting an upload in a note", () => {
     const loose = await upload(ada, "loose.png", PNG, { private: true });
     const kept = await upload(ada, "kept.png", PNG, { private: true });
     const team = await upload(ada, "team.png", PNG);
-    const seenByEd = async () => names(await perform(env.DB, ed, { type: "upload.list" }));
+    const seenByEd = async () => names((await perform(env.DB, ed, { type: "upload.list" })).uploads);
     const names = (listed: { name: string }[]) => listed.map((u) => u.name).sort();
     expect(await seenByEd()).toEqual(["team.png"]);
 

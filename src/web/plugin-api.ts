@@ -62,6 +62,8 @@ export {
 } from "../core/query.ts";
 /** Where two lists of lines differ, for a view that marks what changed inside a line. */
 export { lineHunks } from "../core/text.ts";
+/** Every row of a list that pages, a page at a time. */
+export { allPages } from "../core/allPages.ts";
 /** Who wrote each line, moved over an edit as the note's history moves it: for a view that marks lines by the change that last wrote them, as `note.blame` answers. */
 export { reline } from "../core/blame.ts";
 
@@ -200,8 +202,9 @@ export type SettingValue = boolean | string | number | readonly string[];
  * The operations `host.perform` won't take: the member's settings, every change to who is in the
  * workspace, which goes through `host.members`, who a note, folder or upload is shared with, which
  * goes through `host.sharing`, an upload's bytes, which go through `host.uploads`, what a link's
- * holder asks, which nobody signed in does, and every change to which plugins a workspace has and
- * what they are permitted, which is the Plugins page's and no plugin's.
+ * holder asks, which nobody signed in does, every change to which plugins a workspace has and
+ * what they are permitted, which is the Plugins page's and no plugin's, and deleting an account or
+ * a workspace, which only the person does.
  */
 export type KeptFromPerform =
   | `settings.${string}`
@@ -211,6 +214,8 @@ export type KeptFromPerform =
   | "member.remove"
   | "member.leave"
   | "member.signOut"
+  | `account.${string}`
+  | "workspace.delete"
   | `grant.${string}`
   | "note.setPrivate"
   | "upload.setPrivate"

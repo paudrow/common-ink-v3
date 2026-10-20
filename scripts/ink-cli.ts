@@ -19,6 +19,8 @@ export interface Io {
   wait?: (ms: number) => Promise<void>;
   /** Writes a file on this machine, for download. Answers false, and writes nothing, when there is one at `path` and `replace` is false. */
   writeFile?: (path: string, bytes: Uint8Array, replace: boolean) => Promise<boolean>;
+  /** Writes a file on this machine as its bytes come, for export, so a part of gigabytes is never all in memory. Answers false, and writes nothing, as writeFile does. */
+  saveStream?: (path: string, body: ReadableStream<Uint8Array>, replace: boolean) => Promise<boolean>;
 }
 
 export const USAGE = `Usage: ink [--workspace ID] <command>
@@ -44,20 +46,21 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   draft-save ID --manifest TEXT --code TEXT --running true|false [--base-hash HASH|none]
                                       keep your member's draft; running runs it for them alone
   draft-discard ID                    remove your member's draft for good
-  notes [--folder ID] [--since TIME] [--tag NAME] [--archived true|only]
+  notes [--folder ID] [--since TIME] [--tag NAME] [--archived true|only] [--limit N] [--after NEXT]
                                       the notes in a workspace, in one folder, with a tag, or changed since a time
   search QUERY [--today DAY] [--zone ZONE] [--folder ID] [--archived true|only] [--has-todos true]
-        [--sort match|recent|created|title] [--limit N] [--offset N]
+        [--sort match|recent|created|title] [--limit N] [--after NEXT]
                                       the notes a query finds: words, "a phrase", and filters such as
                                       folder:Plans, #tag, editor:@me, updated:>=7d, is:archived, has:link,
                                       with -, OR, NOT and ( ). "ink syntax" lists every one. --today and
                                       --zone are this machine's unless given
-  tags [--archived true]              the tags of the notes you can see, and how many notes have each
+  tags [--archived true] [--limit N] [--after NEXT]
+                                      the tags of the notes you can see, and how many notes have each
   archive ID                          archive a note: kept, and left out of listings
   unarchive ID                        bring an archived note back
   trash ID                            move a note to Trash, where it waits 30 days
   restore ID                          bring a note back from Trash, to the folder it was in
-  trashed                             the notes in Trash, and when each is removed for good
+  trashed [--limit N] [--after NEXT]  the notes in Trash, and when each is removed for good
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
   create [--text TEXT] [--folder ID] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep]
                                       a new note (text from stdin if --text is left out). The same --write-id again returns the first note
@@ -71,7 +74,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   links-rebuild                       make backlinks and the index of todos again from the notes' text
   todos [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY]
         [--no-due true] [--importance N,N] [--assignee WHO]
-        [--assigned-to-me true] [--completed true] [--archived true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
+        [--assigned-to-me true] [--completed true] [--archived true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--after NEXT]
                                       the todos a query finds, such as "due:<today priority:>=medium", or every
                                       open one with none; --query QUERY is the same. "ink syntax todos" lists
                                       what a query can say
@@ -93,7 +96,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   visit                               how far your member has read the changes in the workspace
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
-  uploads [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--archived true]
+  uploads [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--archived true] [--limit N] [--after NEXT]
                                       the uploads a query finds, such as "type:image uploader:@me", each
                                       with how many notes show it, or every live one with none; --query
                                       QUERY is the same. "ink syntax uploads" lists what a query can say
@@ -110,6 +113,11 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       put a small file (4 MB at most), given as base64, in a folder
   download ID [--out PATH] [--force true]
                                       save an upload's bytes under its name here, or at PATH
+  export [--out DIR] [--force true] [--part-bytes N] [--part-files N]
+                                      save a copy of every note and upload you can see, in their folders,
+                                      as zips in DIR: one, or a part each for a large workspace
+  export-plan [--part-bytes N] [--part-files N]
+                                      the parts an export comes in, and the address of each
   upload-info ID                      one upload, and the notes that refer to it
   upload-move ID --folder ID          put an upload in another folder
   upload-place ID --note ID           put an upload in a note before writing its line there: one private
@@ -489,24 +497,56 @@ export async function run(argv: string[], io: Io): Promise<number> {
       return 0;
     }
 
+    /** The workspace an address of bytes names: --workspace, or the one the token reaches. */
+    const reached = async () => {
+      const named = flags.get("workspace");
+      if (named !== undefined) return named;
+      const listed = await call("list_workspaces", {});
+      const reach = ((JSON.parse(listed.answer) as { workspaces?: Array<{ id: string }> }).workspaces ?? []).map((w) => w.id);
+      if (reach.length !== 1) throw new UsageError(`Pass --workspace: you can reach ${reach.length} (${reach.join(", ")})`);
+      return reach[0]!;
+    };
+    const refusal = async (res: Response) => {
+      if (res.status === 401) throw new UsageError(UNKNOWN_TOKEN);
+      const told = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+      io.out(told?.error ? `${told.error}: ${told.message ?? ""}`.trim() : `Common Ink answered ${res.status}`);
+      return 1;
+    };
+
+    // An export comes in parts, each a zip at an address plan_export gives, saved to disk as it arrives.
+    if (command === "export") {
+      const { saveStream } = io;
+      if (!saveStream) throw new UsageError(`${command} needs files, which this ink has none of`);
+      const dir = flags.get("out") ?? ".";
+      const replace = flags.get("force") === "true";
+      const caps = given({ partBytes: ["part-bytes", integer], partFiles: ["part-files", integer] });
+      const unread = flags.unread();
+      if (unread.length) throw new UsageError(`export doesn't take ${unread.map((name) => `--${name}`).join(" or ")}: nothing was sent`);
+      const workspaceId = await reached();
+      const plan = await answered<{ notes: number; uploads: number; parts: Array<{ number: number; address: string }> }>("plan_export", { ...caps, workspaceId });
+      const of = plan.parts.length;
+      io.out(`Exporting ${plan.notes} notes and ${plan.uploads} uploads in ${of} part${of === 1 ? "" : "s"}`);
+      for (const part of plan.parts) {
+        // The token goes only to the server it is for, whatever an answer says.
+        if (!part.address.startsWith(`${base}/api/`)) throw new Failed(`Part ${part.number}'s address isn't on ${base}: ${part.address}`);
+        const path = `${dir}/common-ink-${workspaceId}${of > 1 ? `-part-${part.number}-of-${of}` : ""}.zip`;
+        const res = await io.fetch(part.address, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status !== 200 || !res.body) return refusal(res);
+        if (!(await saveStream(path, res.body, replace))) {
+          void res.body.cancel();
+          throw new UsageError(`${path} is already there. Pass --force true to replace it, or --out for another place`);
+        }
+        io.out(`Saved part ${part.number} of ${of}: ${path}`);
+      }
+      return 0;
+    }
+
     // A file's bytes come over HTTP and not through a tool, at an address that names the workspace.
     if (command === "download") {
       const { writeFile } = io;
       if (!writeFile) throw new UsageError(`${command} needs files, which this ink has none of`);
-      let workspaceId = flags.get("workspace");
-      if (workspaceId === undefined) {
-        const listed = await call("list_workspaces", {});
-        const reach = ((JSON.parse(listed.answer) as { workspaces?: Array<{ id: string }> }).workspaces ?? []).map((w) => w.id);
-        if (reach.length !== 1) throw new UsageError(`Pass --workspace: you can reach ${reach.length} (${reach.join(", ")})`);
-        workspaceId = reach[0]!;
-      }
+      const workspaceId = await reached();
       const uploads = `${base}/api/workspaces/${encodeURIComponent(workspaceId)}/uploads`;
-      const refusal = async (res: Response) => {
-        if (res.status === 401) throw new UsageError(UNKNOWN_TOKEN);
-        const told = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
-        io.out(told?.error ? `${told.error}: ${told.message ?? ""}`.trim() : `Common Ink answered ${res.status}`);
-        return 1;
-      };
 
       const uploadId = need("an upload id");
       const info = await call("read_upload", { uploadId, workspaceId });
@@ -591,15 +631,15 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "notes":
         tool = "list_notes";
-        args = given({ folderId: ["folder"], updatedSince: ["since", time], tag: ["tag"], includeArchived: ["archived", archivedToo] });
+        args = given({ folderId: ["folder"], updatedSince: ["since", time], tag: ["tag"], includeArchived: ["archived", archivedToo], limit: ["limit", integer], after: ["after"] });
         break;
       case "search":
         tool = "search";
-        args = { query: need("what to find"), ...days(), ...given({ folderId: ["folder"], includeArchived: ["archived", archivedToo], hasTodos: ["has-todos", truth], sort: ["sort"], limit: ["limit", integer], offset: ["offset", integer] }) };
+        args = { query: need("what to find"), ...days(), ...given({ folderId: ["folder"], includeArchived: ["archived", archivedToo], hasTodos: ["has-todos", truth], sort: ["sort"], limit: ["limit", integer], after: ["after"] }) };
         break;
       case "tags":
         tool = "list_tags";
-        args = given({ includeArchived: ["archived", truth] });
+        args = given({ includeArchived: ["archived", truth], limit: ["limit", integer], after: ["after"] });
         break;
       case "archive":
       case "unarchive":
@@ -613,6 +653,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "trashed":
         tool = "list_trash";
+        args = given({ limit: ["limit", integer], after: ["after"] });
         break;
       case "read":
         tool = "read_note";
@@ -666,7 +707,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
             noteId: ["note"],
             sort: ["sort"],
             limit: ["limit", integer],
-            offset: ["offset", integer],
+            after: ["after"],
           }),
         };
         break;
@@ -720,7 +761,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "uploads":
         tool = "list_uploads";
         if (id !== undefined && flags.has("query")) throw new UsageError("uploads takes its query once: after the command, or as --query");
-        args = { ...(id !== undefined && { query: id }), ...days(), ...given({ query: ["query"], folderId: ["folder"], includeArchived: ["archived", truth] }) };
+        args = { ...(id !== undefined && { query: id }), ...days(), ...given({ query: ["query"], folderId: ["folder"], includeArchived: ["archived", truth], limit: ["limit", integer], after: ["after"] }) };
         break;
       case "upload-place":
         tool = "place_upload";
@@ -760,6 +801,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "uploads-trashed":
         tool = "list_trashed_uploads";
+        break;
+      case "export-plan":
+        tool = "plan_export";
+        args = given({ partBytes: ["part-bytes", integer], partFiles: ["part-files", integer] });
         break;
       case "folders":
         tool = "list_folders";
@@ -954,15 +999,16 @@ export async function run(argv: string[], io: Io): Promise<number> {
       return 0;
     }
 
-    const paged = PAGED[tool];
+    // Without --limit or --after, a list is printed whole: every page, as one list.
+    const paged = args.limit === undefined && args.after === undefined ? PAGED[tool] : undefined;
     if (paged) {
       const all: unknown[] = [];
-      for (let offset: number | null = 0; offset !== null; ) {
-        const { answer, failed } = await call(tool, { ...args, limit: LISTED_A_CALL, offset });
+      for (let after: string | null | undefined; after !== null; ) {
+        const { answer, failed } = await call(tool, { ...args, limit: LISTED_A_CALL, ...(after && { after }) });
         if (failed) return (io.out(answer), 1);
         const page = json(`${tool}'s answer`, answer) as Record<string, unknown>;
         all.push(...((page[paged] as unknown[] | undefined) ?? []));
-        offset = (page.next as number | null | undefined) ?? null;
+        after = (page.next as string | null | undefined) ?? null;
       }
       io.out(JSON.stringify(all, null, 2));
       return 0;

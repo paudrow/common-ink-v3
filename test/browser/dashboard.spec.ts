@@ -50,7 +50,7 @@ test("the app opens to the dashboard, which makes nothing: no daily note until t
   await expect(pinned(page)).toContainText("Nothing is pinned.");
   await expect(changes(page)).toContainText("Nothing has changed.");
   await expect(changes(page).getByRole("button", { name: "Mark as read" })).toBeDisabled();
-  await expect.poll(() => perform(page, { type: "note.list", includeArchived: true })).toEqual([]);
+  await expect.poll(async () => (await perform(page, { type: "note.list", includeArchived: true })).notes).toEqual([]);
   await expect.poll(async () => (await perform(page, { type: "folder.list" })).folders.map((f) => f.name)).toEqual(["Unsorted"]);
 
   const today = await page.evaluate(() => {

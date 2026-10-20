@@ -430,7 +430,7 @@ describe("what full trust reaches on the server is what its member reaches, and 
     for (const other of [vera, ada]) {
       expect(await outcome(pluginOf(other, id), { type: "note.read", id: secret })).toBe("not_found: No such note");
       const said = JSON.stringify([
-        await perform(env.DB, pluginOf(other, id), { type: "note.list" }),
+        (await perform(env.DB, pluginOf(other, id), { type: "note.list" })).notes,
         await perform(env.DB, pluginOf(other, id), { type: "search", query: "only-eve-knows" }),
         await perform(env.DB, pluginOf(other, id), { type: "history.list", limit: 100 }),
         await perform(env.DB, pluginOf(other, id), { type: "note.backlinks", id: shared }),
