@@ -23,6 +23,7 @@ export const tabs: Plugin = {
   name: "Tabs and splits",
   description: "Open notes in tabs, and side by side in splits.",
   icon: "tabs",
+  needs: "room",
   activate(host) {
     let layout = keptLayout(host.storage.get("layout"));
     /** Each page's name as it last was, by its id, so a tab left on a page that has gone since still says what it was. */

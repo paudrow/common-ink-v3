@@ -15,6 +15,7 @@ export const lineNumbers: Plugin = {
   description: "Each line's number beside it, in every note's editor.",
   icon: "numbers",
   enabledByDefault: false,
+  needs: "keyboard",
   activate(host) {
     host.editorExtensions.register({ id: "lineNumbers", extension: (editor) => (editor.reading ? [] : [numbered(), look]) });
   },

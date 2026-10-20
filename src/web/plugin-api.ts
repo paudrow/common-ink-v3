@@ -118,6 +118,9 @@ export { noteJump } from "./openNotes.ts";
  */
 export { NOTE_DRAG, carried, carriesTab, carry } from "./dragged.ts";
 
+/** What a plugin can't do without: a keyboard with keys, or more room than a phone's width. */
+export type Need = "keyboard" | "room";
+
 export interface Plugin {
   /** What the plugin is known by in storage and in what it contributes. It never changes. */
   id: string;
@@ -135,6 +138,12 @@ export interface Plugin {
    * `enabled` is taken: it is the setting that turns the plugin on and off.
    */
   settings?: Readonly<Record<string, Setting>>;
+  /**
+   * What the plugin can't do without. On a device that lacks it the plugin is off, and its switch
+   * stays as the member set it: `keyboard` is a keyboard with keys, which a touch screen has only
+   * once one is attached; `room` is more than a phone has.
+   */
+  needs?: Need;
   /**
    * Called when the plugin is turned on. Everything it registers here is taken back out when it is
    * turned off. A plugin that starts anything else, such as a timer or a listener, returns a

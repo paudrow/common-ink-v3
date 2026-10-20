@@ -16,6 +16,7 @@ export const vim: Plugin = {
   description: "Vim's modes, motions and operators in every note's editor.",
   icon: "keyboard",
   enabledByDefault: false,
+  needs: "keyboard",
   settings: {
     screenLines: {
       type: "boolean",

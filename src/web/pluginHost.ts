@@ -1,12 +1,15 @@
 import { bind, chordLabel, chordsForFrames, frameCommand, onPlatform, rememberFrameKeys } from "./keybindings.ts";
-import type { AddressEmbed, App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, Setting, SettingValue, Slots } from "./plugin-api.ts";
+import type { AddressEmbed, App, Need, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, Setting, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 import { OWN_NAMES, takenName } from "../core/plugins.ts";
+import { lacks, type Device } from "./device.ts";
 
 export interface PluginState {
   id: string;
   name: string;
   enabled: boolean;
+  /** What this device lacks that the plugin needs, which keeps it off though its switch is on. */
+  lacking: Need | null;
   /** A required plugin can't be turned off. */
   required: boolean;
   /** Whether it came with the app, and wasn't added to it. */
@@ -108,6 +111,8 @@ export interface HostOptions {
   write(key: string, value: SettingValue | undefined): boolean;
   /** Whether chords are labelled for a Mac. */
   mac: boolean;
+  /** The device the app runs on. A plugin that needs what it lacks is off. Without one, nothing is lacking. */
+  device?: Device;
   /** Whether HTML embeds have a host of their own on this server, as the server says. A setting's `defaultWithoutEmbedSite` is its default where they don't. */
   embedSite?: boolean;
   provide(plugin: PluginHost["plugin"]): Provided;
@@ -130,6 +135,8 @@ export interface Host {
   setSetting(key: string, value: SettingValue | undefined): boolean;
   /** Tells the host the member's document is now this one. Plugins it turns on or off start and stop. */
   settingsChanged(document: SettingsDocument): void;
+  /** Tells the host the device changed. Plugins that need what it now lacks stop; ones that needed what it now has start. */
+  deviceChanged(device: Device): void;
   /** Tells the host the app has arrived at an address. */
   navigated(): void;
   /** Tells the host the notes the member can see have changed. */
@@ -145,6 +152,9 @@ export interface Host {
 
 /** The setting that turns a plugin on and off. */
 export const enabledKey = (pluginId: string) => `${pluginId}.enabled`;
+/** The member's setting that keeps plugins that need a keyboard on where none has been seen. */
+export const KEEP_KEYBOARD_PLUGINS = "core.keyboardPluginsOnTouch";
+const EVERYTHING: Device = { phone: false, touch: false, keyboard: "attached" };
 
 interface Owned<T> {
   plugin: number;
@@ -214,7 +224,7 @@ const ownOnly = (type: string): string | null =>
           ? "a workspace's record of its plugins is read only by Common Ink's own plugins"
           : null;
 
-export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn: cameWith = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
+export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn: cameWith = [], settings, write, mac, device: startedOn = EVERYTHING, embedSite = false, provide }: HostOptions): Host {
   const builtIn = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
   /** The plugins that run shut off: the app's own, and the third-party ones the workspace has installed. */
   let installed: readonly Installed[] = [];
@@ -245,11 +255,14 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
   /** What each plugin had registered when contributions were last read with it on. */
   const added = new Map<string, Added>();
   let document = settings;
+  let device = startedOn;
   /** A switch that isn't true or false reads as its default, as any setting does. */
-  const isOff = (p: Plugin) => {
+  const switchedOn = (p: Plugin) => {
     const written = document[enabledKey(p.id)];
-    return !required.includes(p.id) && !(typeof written === "boolean" ? written : (p.enabledByDefault ?? true));
+    return typeof written === "boolean" ? written : (p.enabledByDefault ?? true);
   };
+  const lacking = (p: Plugin) => lacks(p.needs, device, document[KEEP_KEYBOARD_PLUGINS] === true);
+  const isOff = (p: Plugin) => !required.includes(p.id) && (!switchedOn(p) || lacking(p) !== null);
   const off = new Set(plugins.filter(isOff).map((p) => p.id));
   const listeners = new Set<() => void>();
   /** Which plugin registered a view or an embed, and the reach that plugin was given. */
@@ -509,6 +522,20 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
 
   function settingsChanged(next: SettingsDocument) {
     document = next;
+    reconsider();
+    // The frames are told the chords as they are after this change, which means working them out before the telling.
+    contributions();
+    for (const heard of [...watching]) heard();
+  }
+
+  function deviceChanged(next: Device) {
+    if (next.phone === device.phone && next.touch === device.touch && next.keyboard === device.keyboard) return;
+    device = next;
+    reconsider();
+  }
+
+  /** Starts each plugin that should now be on and stops each that should now be off. */
+  function reconsider() {
     for (const plugin of plugins) {
       if (isOff(plugin) === off.has(plugin.id)) continue;
       if (off.delete(plugin.id)) {
@@ -519,9 +546,6 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       }
     }
     changed();
-    // The frames are told the chords as they are after this change, which means working them out before the telling.
-    contributions();
-    for (const heard of [...watching]) heard();
   }
 
   /** A place right after a built-in plugin's and before the next one's, or after everything for one that names none. */
@@ -596,7 +620,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       // One that can't start under its name gets no command either, which would read as turning one of the app's own on or off.
       .filter((p) => !required.includes(p.id) && !misnamed(p))
       .map((p): Command => {
-        const enable = off.has(p.id);
+        const enable = !switchedOn(p);
         // One id whichever way it goes, so a key given to it turns the plugin off and then on again. Only its title says which.
         return { id: `plugins.toggle.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
       });
@@ -617,6 +641,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         id: p.id,
         name: p.name,
         enabled: !off.has(p.id),
+        lacking: required.includes(p.id) || !switchedOn(p) ? null : lacking(p),
         required: required.includes(p.id),
         builtIn: cameWith.includes(p.id) || about(p)?.origin === "own",
         installed: theirs(p),
@@ -643,6 +668,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     dispose,
     setSetting,
     settingsChanged,
+    deviceChanged,
     navigated() {
       arrived = true;
       for (const heard of [...arriving]) heard();
