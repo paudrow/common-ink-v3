@@ -1,4 +1,4 @@
-# 9. A big file goes in parts, each to an address that takes it once
+# 13. A big file goes in parts, each to an address that takes it once
 
 Status: accepted by the owner of #84 on 2026-10-16. The maintainer asked for 25 GB ("I'd like to be able to upload podcast episodes") and approved the approach in #84.
 
