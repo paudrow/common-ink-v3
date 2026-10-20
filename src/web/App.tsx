@@ -89,6 +89,11 @@ function SignIn() {
       <a className="button primary" href={`/auth/google?next=${next}`}>
         Sign in with Google
       </a>
+      <nav className="sign-in-links" aria-label="About Common Ink">
+        <a href="/welcome">What is Common Ink?</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </nav>
     </main>
   );
 }

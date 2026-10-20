@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /s/
+Disallow: /auth/
+Disallow: /oauth/
+Disallow: /mcp
+
+Sitemap: https://commonink.app/sitemap.xml

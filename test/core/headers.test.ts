@@ -16,8 +16,8 @@ const sent = async (path: string, init?: RequestInit) => {
 };
 
 describe("what the Worker tells a browser about each response", () => {
-  it("gives the app's pages, the sign-in pages and the retiring service worker the app's policy", async () => {
-    for (const path of ["/", "/note/abcdefghijkl", "/settings", "/auth/google", "/auth/nothing", "/sw.js"]) {
+  it("gives the app's pages, the site's pages, the sign-in pages and the retiring service worker the app's policy", async () => {
+    for (const path of ["/", "/note/abcdefghijkl", "/settings", "/welcome", "/privacy", "/sitemap.xml", "/auth/google", "/auth/nothing", "/sw.js"]) {
       expect(await sent(path)).toEqual([path, PAGE, "nosniff", "strict-origin-when-cross-origin"]);
     }
   });

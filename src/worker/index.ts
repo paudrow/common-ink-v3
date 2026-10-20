@@ -21,6 +21,7 @@ import { redirectFor } from "./hosts.ts";
 import { addressOf, limitByAddress, overLimit, tokenKey } from "./limits.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 import { handleClientFault, opName, report, reportOf, told, traceOf, type Report, type Trace } from "./report.ts";
+import { siteResponse } from "./site/index.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 import { vault } from "./vault.ts";
@@ -191,6 +192,8 @@ async function route(req: Request, env: Env, url: URL, trace: Trace, tell: (repo
   if (url.pathname === "/api/oauth/request" || url.pathname === "/api/oauth/consent" || url.pathname === "/api/oauth/deny") return answered(trace, () => handleOAuthConsent(req, env, url), broke);
   if (url.pathname === "/api/faults") return answered(trace, () => handleClientFault(req, env, url, tell), broke);
   if (url.pathname.startsWith("/api/")) return answered(trace, () => handleApi(req, env, url, trace), broke);
+  const site = await siteResponse(req, env, url);
+  if (site) return site;
   return SHARED_PAGE.test(url.pathname) ? env.ASSETS.fetch(req).then(unlistedPage) : env.ASSETS.fetch(req);
 }
 
