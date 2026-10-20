@@ -1,6 +1,6 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { Me, Note, OpInput } from "../../src/core/protocol.ts";
-import { anotherPerson, asViewerOfNote, connectAgent, editOf, join, listedNote, openAllNotes, panelIcon, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, connectAgent, editOf, join, listedNote, openAllNotes, panelIcon, panelIcons, perform, pinPanel, shownPanel, showPanel, signInAsNewPerson, test, toggleInspector } from "./helpers.ts";
 
 const UNSEEN = "Changes you haven't seen";
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });

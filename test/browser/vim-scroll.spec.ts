@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { perform, signInAsNewPerson, test } from "./helpers.ts";
 
 /** A built-in plugin that runs in its own frame, as the word count and the quick timer do. */
 const pluginIn = (root: Page | Locator, view: string) => root.locator(`.plugin-frame[aria-label="${view}"] > iframe`).contentFrame().locator("iframe").contentFrame();

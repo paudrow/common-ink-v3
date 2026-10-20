@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, join, perform, signInAsNewPerson, test } from "./helpers.ts";
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const crumbs = (page: Page) => page.getByRole("navigation", { name: "Breadcrumbs" });

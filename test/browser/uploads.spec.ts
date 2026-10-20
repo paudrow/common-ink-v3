@@ -1,7 +1,7 @@
 import { crc32, deflateSync } from "node:zlib";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
-import { anotherPerson, join, listedNotes, openAllNotes, perform, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, join, listedNotes, openAllNotes, perform, signInAsNewPerson, test, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {

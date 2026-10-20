@@ -3,6 +3,7 @@ import type { Me, MeHere } from "../core/protocol.ts";
 import { ApiError, getMe, onRefused, perform, session, signOut, workspaceOfInvite, workspaceOfNote } from "./api.ts";
 import { showing, targetOf, type Target } from "./leads.ts";
 import { useRoute, type Place } from "./router.ts";
+import { retryAfter } from "./retry.ts";
 import { createSettingsStore, type SettingsStore } from "./settingsStore.ts";
 import { isString, useStored } from "./stored.ts";
 import { Connect } from "./Connect.tsx";
@@ -15,16 +16,24 @@ const same = (a: Me, b: Me) => JSON.stringify(a) === JSON.stringify(b);
 export function App() {
   const [session, setSession] = useState<Session>({ kind: "loading" });
   const reading = useRef<Promise<void> | null>(null);
+  /** How many readings in a row have failed. */
+  const failures = useRef(0);
   /** Reads who the person is and which workspaces they are in. A reading that fails leaves a signed-in person as they were. */
   const load = useCallback(() => {
     reading.current ??= getMe()
       .then(
-        (me) => setSession((was) => (was.kind === "signed-in" && same(was.me, me) ? was : { kind: "signed-in", me })),
-        (err) =>
+        (me) => {
+          failures.current = 0;
+          setSession((was) => (was.kind === "signed-in" && same(was.me, me) ? was : { kind: "signed-in", me }));
+        },
+        (err) => {
+          const signedOut = err instanceof ApiError && err.status === 401;
+          failures.current = signedOut ? 0 : failures.current + 1;
           setSession((was) => {
-            if (err instanceof ApiError && err.status === 401) return { kind: "signed-out" };
+            if (signedOut) return { kind: "signed-out" };
             return was.kind === "signed-in" ? was : { kind: "error", message: String(err.message ?? err) };
-          }),
+          });
+        },
       )
       .finally(() => (reading.current = null));
     return reading.current;
@@ -43,11 +52,25 @@ export function App() {
     };
   }, [load]);
 
+  // Until the first reading comes back, it is asked for again, waiting longer each time.
+  useEffect(() => {
+    if (session.kind !== "error") return;
+    const timer = setTimeout(load, retryAfter(failures.current));
+    return () => clearTimeout(timer);
+  }, [session, load]);
+
   switch (session.kind) {
     case "loading":
       return null;
     case "error":
-      return <p className="notice">Common Ink couldn't load: {session.message}</p>;
+      return (
+        <div className="notice" role="alert">
+          <p>Common Ink couldn't load: {session.message}</p>
+          <button type="button" className="button small" onClick={() => void load()}>
+            Try again
+          </button>
+        </div>
+      );
     case "signed-out":
       return <SignIn />;
     case "signed-in":

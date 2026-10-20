@@ -1,6 +1,6 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { todosIn } from "../../src/core/todos.ts";
-import { anotherPerson, asViewerOfNote, connectAgent, join, me, perform, pinPanel, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, connectAgent, join, me, perform, pinPanel, signInAs, signInAsNewPerson, test } from "./helpers.ts";
 import { closeSettings, group } from "./settings-helpers.ts";
 
 let errors: string[];

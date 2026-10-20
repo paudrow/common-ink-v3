@@ -1,6 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Upload } from "../../src/core/protocol.ts";
-import { editOf, openAllNotes, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { editOf, openAllNotes, perform, runCommand, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {

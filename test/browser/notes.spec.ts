@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { editOf, listedNotes, me, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { editOf, listedNotes, me, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 const history = (page: Page, id: string) => perform(page, { type: "note.history", id });
 

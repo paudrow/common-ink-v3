@@ -152,7 +152,10 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
     if (!devSignIn(env, url)) return new Response("Not found", { status: 404 });
     const site = req.headers.get("Sec-Fetch-Site");
     if (site && site !== "same-origin" && site !== "none") return new Response("Switch people from Common Ink itself", { status: 403 });
+    if (req.method !== "GET" && req.method !== "HEAD") return new Response("Sign in as someone with GET", { status: 405, headers: { Allow: "GET, HEAD" } });
     const identity = { email: url.searchParams.get("email") || DEV_USER.email, name: url.searchParams.get("name") || DEV_USER.name };
+    if (identity.email.length > 254 || !identity.email.includes("@")) return new Response("An email has an @ and at most 254 characters", { status: 400 });
+    if (identity.name.length > 100) return new Response("A name has at most 100 characters", { status: 400 });
     return startSession(env, identity, url.searchParams.get("next") ?? "/");
   }
 

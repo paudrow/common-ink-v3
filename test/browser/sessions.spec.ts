@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, join, me, newEmail, signInAs } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, connectAgent, join, me, newEmail, signInAs, test } from "./helpers.ts";
 
 const signInLink = (page: Page) => page.getByRole("link", { name: "Sign in with Google" });
 const whoAmI = (page: Page) => page.evaluate(async () => (await fetch("/api/me")).status);

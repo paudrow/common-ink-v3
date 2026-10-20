@@ -1,6 +1,6 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { Note } from "../../src/core/protocol.ts";
-import { connectAgent, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, perform, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
 const editorLines = (page: Page) => page.locator(".cm-line");

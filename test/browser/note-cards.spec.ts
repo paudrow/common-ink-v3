@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, editOf, folderRow, join, listedNotes, me, noteCard, openAllNotes, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { anotherPerson, connectAgent, editOf, folderRow, join, listedNotes, me, noteCard, openAllNotes, perform, signInAs, signInAsNewPerson, test } from "./helpers.ts";
 
 const tabs = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group).getByRole("tab");
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });

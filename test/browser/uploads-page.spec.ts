@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
-import { anotherPerson, join, perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, perform, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {

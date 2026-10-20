@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { listedNote, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { listedNote, noteIdIn, openAllNotes, perform, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, join, me, perform, pinPanel, signInAsNewPerson, visitor } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, connectAgent, join, me, perform, pinPanel, signInAsNewPerson, test, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {

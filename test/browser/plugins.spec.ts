@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { connectAgent, editOf, folderRow, openAllNotes, openKept, ownPlugin, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { connectAgent, editOf, folderRow, openAllNotes, openKept, ownPlugin, panelIcons, perform, pinPanel, shownPanel, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 import { openDetails, pluginRow } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });

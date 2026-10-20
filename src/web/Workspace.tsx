@@ -34,6 +34,7 @@ import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { isOpen, openInAnotherTab } from "./openNotes.ts";
 import { commitTyping, onFiled, performInSync, saveAll, saveNow, undoOrRedo } from "./sync.ts";
+import { retryAfter } from "./retry.ts";
 import { ago, useNow } from "./time.ts";
 import { Toasts } from "./Toasts.tsx";
 import { useDevice } from "./useDevice.ts";
@@ -415,24 +416,25 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     read();
     return settings.subscribe(read);
   }, [host, settings]);
+  // A guest has no record of plugins, and keeps no drafts: each would be refused, and a refusal reads again who the member is.
+  const guest = role === "guest";
   const readRecord = useCallback(() => {
+    if (guest) return;
     const asked = ++recordAsked.current;
     perform(workspaceId, { type: "plugin.list" }).then(
       (now) => asked === recordAsked.current && setRecord(now),
       () => {},
     );
-  }, [workspaceId]);
+  }, [workspaceId, guest]);
   useEffect(readRecord, [readRecord]);
   reread.current = readRecord;
-  // A guest keeps no drafts, and is refused the asking.
-  useEffect(
-    () =>
-      void perform(workspaceId, { type: "draft.list" }).then(
-        (mine) => setDrafts(mine.drafts),
-        () => {},
-      ),
-    [workspaceId],
-  );
+  useEffect(() => {
+    if (guest) return;
+    void perform(workspaceId, { type: "draft.list" }).then(
+      (mine) => setDrafts(mine.drafts),
+      () => {},
+    );
+  }, [workspaceId, guest]);
   relist.current = () => host.setInstalled(installer.list());
   useEffect(() => host.setInstalled(installer.list()), [host, installer, record, drafts]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
@@ -509,12 +511,20 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     return chord && chordLabel(chord, MAC);
   };
 
-  // A listing that fails, as a request can under load, is asked for again at the next refresh, and leaves what was listed as it was.
+  /**
+   * How many first listings of the folders, and of the notes, have failed in a row. A listing that
+   * fails once there is one, as a request can under load, is asked for again at the next refresh, and
+   * leaves what was listed as it was. Until there is one, it is asked for again sooner, waiting longer each time.
+   */
+  const [unlisted, setUnlisted] = useState({ folders: 0, notes: 0 });
+  const failedFirst = (what: "folders" | "notes") => setUnlisted((was) => ({ ...was, [what]: was[what] + 1 }));
+  const listedTree = useRef(tree);
+  listedTree.current = tree;
   const loadFolders = useCallback(
     () =>
       perform(workspaceId, { type: "folder.list" }).then(
         (r) => setTree(folderTree(r)),
-        () => {},
+        () => !listedTree.current && failedFirst("folders"),
       ),
     [workspaceId],
   );
@@ -540,12 +550,22 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
         });
         setNotes(listed);
       },
-      () => {},
+      () => live && !listedNotes.current && failedFirst("notes"),
     );
     return () => {
       live = false;
     };
   }, [workspaceId, listVersion]);
+  useEffect(() => {
+    if (!unlisted.folders || tree) return;
+    const timer = setTimeout(loadFolders, retryAfter(unlisted.folders));
+    return () => clearTimeout(timer);
+  }, [unlisted.folders, tree, loadFolders]);
+  useEffect(() => {
+    if (!unlisted.notes || notes) return;
+    const timer = setTimeout(() => setListVersion((v) => v + 1), retryAfter(unlisted.notes));
+    return () => clearTimeout(timer);
+  }, [unlisted.notes, notes]);
 
   const refresh = useCallback(() => {
     void loadFolders();
@@ -1023,6 +1043,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     notes: kept,
     trashed,
     folders: tree,
+    listingFailed: (unlisted.notes > 0 && !notes) || (unlisted.folders > 0 && !tree),
     folderId: frontFolderId,
     focus: focusMode,
     // On a phone the sidebar is a screen of its own, drawn whole whenever it is in front.

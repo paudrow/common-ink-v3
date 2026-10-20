@@ -979,6 +979,8 @@ export interface App {
   trashed: readonly NoteSummary[];
   /** Null while they load. */
   folders: Folders | null;
+  /** Whether the first listing of the notes or of the folders failed. It is asked for again on its own, and `refresh` asks now. */
+  listingFailed: boolean;
   /**
    * The folder in front: the one whose list the address names, {@link ALL_NOTES} and
    * {@link SHARED_WITH_ME} among them, or the folder of the note it names. Null on a page, and when

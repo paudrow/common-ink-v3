@@ -53,13 +53,15 @@ export const mentions: Plugin = {
     let membersAt = 0;
     const readMembers = () => {
       membersAt = Date.now();
+      // A guest is told nothing of who is in the workspace, and a refusal reads again who they are: every mention is then a name as written.
+      if (host.workspace.role === "guest") return;
       host.perform({ type: "member.list" }).then(
         (list) => {
           const was = JSON.stringify([...people.members.values()]);
           people = { ...people, members: new Map(list.map((m) => [m.personId, m])) };
           if (JSON.stringify(list) !== was) for (const view of editors.values()) view.dispatch({ effects: redraw.of(null) });
         },
-        // A guest, and whoever reads a link's page, is told nothing of who is in the workspace: every mention is then a name as written.
+        // Whoever reads a link's page is told nothing of who is in the workspace either.
         () => {},
       );
     };

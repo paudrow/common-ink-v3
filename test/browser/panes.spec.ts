@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, noteCard, openAllNotes, openKept, ownPlugin, panelIcons, perform, pinPanel, runCommand, showPanel, shownPanel, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { folderRow, noteCard, openAllNotes, openKept, ownPlugin, panelIcons, perform, pinPanel, runCommand, shownPanel, showPanel, signInAsNewPerson, test, toggleSidebar } from "./helpers.ts";
 
 const tabBar = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group);
 const tabs = (page: Page, group = 0) => tabBar(page, group).getByRole("tab");

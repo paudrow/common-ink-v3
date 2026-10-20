@@ -783,8 +783,13 @@ describe("what an editor is told of a folder they cannot share", () => {
     const plan = await note(eve, "# Plan");
     const sam = address();
     await share(eve, { noteId: plan.id }, sam, "view");
+    // Deeper than folders may now be made, as a workspace's folders could be before there was a limit.
     let parent = narrow.id;
-    for (let i = 0; i < 101; i++) parent = (await folder(ada, `L${i}`, parent)).id;
+    for (let i = 0; i < 101; i++) {
+      const id = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+      await env.DB.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, ?, ?, ?)").bind(id, ada.workspaceId, parent, `L${i}`, `l${i}`).run();
+      parent = id;
+    }
     await perform(env.DB, ada, { type: "note.move", id: plan.id, folderId: parent });
 
     const { personId } = await signIn(env.DB, { email: sam, name: "Sam Waiting" });

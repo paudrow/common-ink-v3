@@ -1,5 +1,5 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
-import { anotherPerson, join, me, perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page, type Route } from "@playwright/test";
+import { anotherPerson, join, me, perform, signInAsNewPerson, test } from "./helpers.ts";
 import { asPlugin, codeHashOf, install, openDetails, openPlugins, pluginRow, relist, runCommand, running, toast, type Written } from "./third-party-helpers.ts";
 
 /*

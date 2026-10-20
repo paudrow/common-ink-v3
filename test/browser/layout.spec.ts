@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, shownPanel, showPanel, signInAsNewPerson, test, toggleInspector, toggleSidebar } from "./helpers.ts";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });

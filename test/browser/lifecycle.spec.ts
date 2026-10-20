@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, asViewerOfNote, join, listedNotes, me, noteCard, openAllNotes, ownPlugin, perform, pinPanel, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, asViewerOfNote, join, listedNotes, me, noteCard, openAllNotes, ownPlugin, perform, pinPanel, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const lines = (page: Page) => editor(page).locator(".cm-line");

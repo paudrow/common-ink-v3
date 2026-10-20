@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, editOf, folderRow, join, listedNote, listedNotes, me, noteCard, openAllNotes, ownPlugin, perform, pinPanel, showPanel, signInAsNewPerson, visitor } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, connectAgent, editOf, folderRow, join, listedNote, listedNotes, me, noteCard, openAllNotes, ownPlugin, perform, pinPanel, showPanel, signInAsNewPerson, test, visitor } from "./helpers.ts";
 import { standIns } from "./media-helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
@@ -272,8 +272,10 @@ test("a folder's link lists and opens its notes, and not a private note inside i
   await list.getByRole("link", { name: /^Welcome/ }).click();
   await expect(editor(anyone)).toContainText("Read Holidays and not Unavailable note.");
   await expect(editor(anyone)).toHaveAttribute("contenteditable", "false");
+  await expect(anyone).toHaveTitle("Welcome");
   await list.getByRole("link", { name: /^Holidays/ }).click();
   await expect(editor(anyone)).toContainText("Twenty five days.");
+  await expect(anyone).toHaveTitle("Holidays");
 
   await anyone.goto(`${address}#${hidden.id}`);
   await expect(anyone.getByText("This link doesn't open that note.")).toBeVisible();

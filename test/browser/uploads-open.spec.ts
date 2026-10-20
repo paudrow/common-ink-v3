@@ -1,6 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
-import { anotherPerson, join, perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, perform, signInAsNewPerson, test } from "./helpers.ts";
 import { pdf as scriptedPdf } from "./pdfs.ts";
 
 // Chromium as it ships, with its own PDF viewer, which the headless shell Playwright starts by default doesn't have.

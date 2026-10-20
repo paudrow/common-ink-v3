@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { editOf, folderRow, openAllNotes, ownPlugin, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { editOf, folderRow, openAllNotes, ownPlugin, perform, runCommand, signInAsNewPerson, test } from "./helpers.ts";
 import { settingsDialog } from "./settings-helpers.ts";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Inspector" });

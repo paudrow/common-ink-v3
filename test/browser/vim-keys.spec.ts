@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 import { settingsDialog } from "./settings-helpers.ts";
 
 let errors: string[];

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, panelIcon, perform, showPanel, signInAsNewPerson, THEIR_FRAMES } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, join, panelIcon, perform, showPanel, signInAsNewPerson, test, THEIR_FRAMES } from "./helpers.ts";
 import { asPlugin, codeHashOf, frameFor, install, openDetails, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn, type Written } from "./third-party-helpers.ts";
 
 let errors: string[];

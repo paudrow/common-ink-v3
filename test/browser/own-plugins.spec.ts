@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, me, newEmail, ownFrame, ownPlugin, perform, showPanel, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, join, me, newEmail, ownFrame, ownPlugin, perform, showPanel, signInAs, signInAsNewPerson, test } from "./helpers.ts";
 import { asPlugin, frameFor, install, openDetails, pluginRow, relist, runCommand, toast, turnOn, type Written } from "./third-party-helpers.ts";
 
 /*

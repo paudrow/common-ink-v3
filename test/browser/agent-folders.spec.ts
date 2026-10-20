@@ -1,6 +1,6 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { Note } from "../../src/core/protocol.ts";
-import { agentWith, perform, shownToken, signInAsNewPerson } from "./helpers.ts";
+import { agentWith, perform, shownToken, signInAsNewPerson, test } from "./helpers.ts";
 
 const connected = (page: Page) => page.getByRole("list", { name: "Connected agents" }).getByRole("listitem");
 const connectForm = (page: Page) => page.getByRole("form", { name: "Connect an agent" });

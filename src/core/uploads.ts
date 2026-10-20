@@ -567,7 +567,8 @@ export async function archiveUpload(ctx: Context, id: string, archived: boolean)
   const row = await loadUpload(ctx, id, "edit", "refused");
   const state = archived ? "archived" : "live";
   if (row.state === state) return toUpload(ctx, row);
-  await archiving(ctx, "uploads", row.id, state);
+  // Trashed or removed in the moment since it was read: read again, it is refused as it is now.
+  if (!(await archiving(ctx, "uploads", row.id, state))) return toUpload(ctx, await loadUpload(ctx, id, "edit", "refused"));
   return toUpload(ctx, { ...row, state, state_at: ctx.now });
 }
 
