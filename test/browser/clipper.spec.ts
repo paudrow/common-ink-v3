@@ -161,6 +161,11 @@ test("clips a page into a note", async ({ baseURL }) => {
     await expect(save).toBeEnabled();
     await save.click();
     await expect(popup.getByText("Saved.")).toBeVisible();
+    // The popup that asked for the capture is open already: another one, opened out of sight, would reset its Saved when it woke.
+    // Chrome says it failed to open one and opens it anyway, most of a second later, so the count waits past that.
+    await popup.waitForTimeout(1_500);
+    const popups = await worker.evaluate(() => (globalThis as unknown as { chrome: { runtime: { getContexts(filter: { contextTypes: string[] }): Promise<unknown[]> } } }).chrome.runtime.getContexts({ contextTypes: ["POPUP"] }));
+    expect(popups).toHaveLength(0);
     const href = await popup.locator("a").getAttribute("href");
     const noteId = href?.match(/([a-z0-9]{12})$/)?.[1];
     expect(noteId).toBeTruthy();
