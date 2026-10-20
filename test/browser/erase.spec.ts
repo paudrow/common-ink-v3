@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, me, newEmail, perform, signInAs } from "./helpers.ts";
+import { anotherPerson, join, me, newEmail, perform, signInAs, signInLink } from "./helpers.ts";
 
-const signInLink = (page: Page) => page.getByRole("link", { name: "Sign in with Google" });
 const account = (page: Page) => page.getByRole("region", { name: "Account" });
 
 async function switchTo(page: Page, workspace: string) {

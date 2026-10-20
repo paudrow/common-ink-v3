@@ -1,4 +1,4 @@
-// The `ink` command for an agent's shell: `node scripts/ink.ts notes` (npm run ink -- notes).
+// The `ink` command for an agent's shell: `node scripts/ink.ts notes` (npm run ink -- notes). cli/ packages it for npm as `commonink`, not yet published.
 import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Readable } from "node:stream";

@@ -9,13 +9,18 @@ export interface Visit {
   signIn: string;
 }
 
-export interface SitePage {
+/** The docs' pages in the order they are read, under the headings they are grouped by. */
+export type DocsNav = ReadonlyArray<{ group: string; pages: ReadonlyArray<{ path: `/${string}`; title: string }> }>;
+
+interface Page {
   path: `/${string}`;
   title: string;
   description: string;
-  kind: "landing" | "prose";
   body: (visit: Visit) => string;
 }
+
+/** A doc is a prose page with every doc beside it. */
+export type SitePage = Page & ({ kind: "landing" | "prose" } | { kind: "docs"; nav: DocsNav });
 
 export const SUPPORT = "support@commonink.app";
 const NAME = "Common Ink";
@@ -29,10 +34,44 @@ export const wayIn = (visit: Visit, className = "button") =>
 
 const FONTS = ["ia-writer-mono/ia-writer-mono-latin-400-normal", "source-serif-4/source-serif-4-latin-400-normal"];
 
+const docsLinks = (nav: DocsNav, here: string) =>
+  `<nav aria-label="Docs">${nav.map(({ group, pages }) => `<p class="docs-group">${escape(group)}</p><ul>${pages.map(({ path, title }) => `<li><a href="${path}"${path === here ? ' aria-current="page"' : ""}>${escape(title)}</a></li>`).join("")}</ul>`).join("")}</nav>`;
+
+/** The docs before and after this one, in the order the nav reads them. */
+function pager(nav: DocsNav, here: string): string {
+  const pages = nav.flatMap((g) => g.pages);
+  const at = pages.findIndex((p) => p.path === here);
+  const link = (rel: "prev" | "next", label: string) => {
+    const page = pages[rel === "prev" ? at - 1 : at + 1];
+    return page ? `<a rel="${rel}" href="${page.path}"><span>${label}</span>${escape(page.title)}</a>` : "";
+  };
+  return `<nav class="docs-pager" aria-label="Previous and next">${link("prev", "Previous")}${link("next", "Next")}</nav>`;
+}
+
+/** The page's title, and what is in its main. */
+function framed(page: SitePage, visit: Visit): { title: string; main: string } {
+  const article = (after = "") => `<article class="prose"><h1>${escape(page.title)}</h1>${page.body(visit)}${after}</article>`;
+  switch (page.kind) {
+    case "landing":
+      return { title: `${NAME} | Notes you write with your agent`, main: page.body(visit) };
+    case "prose":
+      return { title: `${page.title} | ${NAME}`, main: article() };
+    case "docs":
+      // The nav is written twice: beside the text on a wide screen, and folded above it on a phone.
+      return {
+        title: `${page.title} | ${NAME} docs`,
+        main: `<div class="docs">
+<div class="docs-side">${docsLinks(page.nav, page.path)}</div>
+<details class="docs-menu"><summary>All docs</summary>${docsLinks(page.nav, page.path)}</details>
+${article(pager(page.nav, page.path))}
+</div>`,
+      };
+  }
+}
+
 export function renderPage(page: SitePage, visit: Visit): string {
   const canonical = `${visit.origin}${page.path}`;
-  const title = page.kind === "landing" ? `${NAME} | Notes you write with your agent` : `${page.title} | ${NAME}`;
-  const main = page.kind === "prose" ? `<article class="prose"><h1>${escape(page.title)}</h1>${page.body(visit)}</article>` : page.body(visit);
+  const { title, main } = framed(page, visit);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -62,14 +101,15 @@ ${FONTS.map((font) => `<link rel="preload" href="/fonts/${font}.woff2" as="font"
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-head">
   <a class="brand" href="/">${MARK}${NAME}</a>
-  <nav aria-label="Site">${wayIn(visit, "head-link")}</nav>
+  <nav aria-label="Site"><a class="head-link" href="/docs">Docs</a>${wayIn(visit, "head-link")}</nav>
 </header>
 <main id="main">
 ${main}
 </main>
 <footer class="site-foot">
   <a class="brand" href="/">${MARK}${NAME}</a>
-  <nav aria-label="Legal and contact">
+  <nav aria-label="Docs, legal and contact">
+    <a href="/docs">Docs</a>
     <a href="/privacy">Privacy</a>
     <a href="/terms">Terms</a>
     <a href="https://github.com/paudrow/common-ink-v3/blob/main/SECURITY.md">Security</a>

@@ -173,6 +173,11 @@ main,
   color: var(--accent);
 }
 
+.site-head nav {
+  display: flex;
+  gap: 1.5rem;
+}
+
 .head-link {
   display: inline-flex;
   align-items: center;
@@ -638,6 +643,10 @@ details p {
 
 .prose h2 {
   margin-top: 2.75rem;
+}
+
+.prose h2,
+.prose h3 {
   scroll-margin-top: 1rem;
 }
 
@@ -651,10 +660,14 @@ details p {
   margin-bottom: 0.35rem;
 }
 
+.table-scroll {
+  overflow-x: auto;
+  margin: 0 0 1.25rem;
+}
+
 .prose table {
   border-collapse: collapse;
   width: 100%;
-  margin: 0 0 1.25rem;
   font-size: 0.95rem;
 }
 
@@ -682,6 +695,98 @@ details p {
   padding-left: 1rem;
   border-left: 3px solid var(--rule);
   color: var(--muted);
+}
+
+/* Docs: the prose column, with every doc listed in the margin beside it. */
+
+.site-docs {
+  --gutter: 12rem;
+}
+
+.docs {
+  display: grid;
+  grid-template-columns: var(--gutter) minmax(0, var(--measure));
+  gap: var(--gap);
+  align-items: start;
+}
+
+.docs .prose {
+  margin-left: 0;
+  min-width: 0;
+}
+
+.docs-side {
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: clamp(1rem, 5vh, 3rem) 0 2rem;
+}
+
+.docs-side nav,
+.docs-menu nav {
+  font: 0.82rem/1.45 var(--mono);
+}
+
+.docs-group {
+  margin: 1.5rem 0 0.4rem;
+  color: var(--faint);
+}
+
+.docs-group:first-child {
+  margin-top: 0;
+}
+
+.docs nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.docs nav li a {
+  display: block;
+  padding: 0.2rem 0;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.docs nav li a:hover {
+  color: var(--ink);
+}
+
+.docs nav a[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.docs-menu {
+  display: none;
+}
+
+.docs-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 3.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+  font: 0.9rem/1.4 var(--mono);
+}
+
+.docs-pager a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.docs-pager a[rel="next"] {
+  margin-left: auto;
+  text-align: right;
+}
+
+.docs-pager span {
+  font-size: 0.78rem;
+  color: var(--faint);
 }
 
 .site-foot {
@@ -780,6 +885,56 @@ details p {
 
   .prose {
     margin-left: 0;
+  }
+
+  .docs {
+    display: block;
+  }
+
+  .docs-side {
+    display: none;
+  }
+
+  .docs-menu {
+    display: block;
+    margin-top: 0.5rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .docs-menu summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    font: 0.9rem var(--mono);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .docs-menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .docs-menu summary::after {
+    content: "+" / "";
+    color: var(--faint);
+  }
+
+  .docs-menu[open] summary::after {
+    content: "\2212" / "";
+  }
+
+  /* Wide enough that a column of words reads as lines, so the table scrolls in its box instead of growing tall. */
+  .table-scroll table {
+    min-width: 34rem;
+  }
+
+  .docs-menu nav {
+    padding-bottom: 1rem;
+  }
+
+  .docs-menu nav li a {
+    padding: 0.45rem 0;
   }
 
   .history-panel li {

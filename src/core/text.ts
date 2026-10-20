@@ -12,7 +12,7 @@ export const applyChanges = (changes: ChangeSet, text: string) => changes.apply(
  * lines.
  */
 
-const NEWLINE = Text.of(["", ""]);
+const NEWLINE = /* @__PURE__ */ Text.of(["", ""]);
 
 export const terminated = (doc: Text) => (doc.length ? doc.append(NEWLINE) : doc);
 

@@ -1,4 +1,4 @@
-// The app on this machine: the site's pages written from site/*.md, local D1 migrated, then Vite with the Worker inside it and dev sign-in on.
+// The app on this machine: the site's pages written from site/, local D1 migrated, then Vite with the Worker inside it and dev sign-in on.
 //
 //   npm run dev -- [--port 5173] [--host] [--state .wrangler/state]
 //
@@ -22,9 +22,11 @@ const args = process.argv.slice(2);
 const at = args.indexOf("--state");
 const state = at === -1 ? ".wrangler/state" : args.splice(at, 2)[1];
 if (!state || state.startsWith("--")) throw new Error("--state takes a directory: --state .wrangler/test-state");
-execFileSync("node", ["scripts/site.ts"], { stdio: "inherit" });
+const SITE = ["run", "--silent", "site"];
+execFileSync("npm", SITE, { stdio: "inherit" });
 // A page of the site that is being written is seen as it is saved. One that doesn't make a page says why and leaves the last one.
-for (const source of ["site", "docs/legal"]) if (existsSync(source)) watch(source, () => spawnSync("node", ["scripts/site.ts"], { stdio: "inherit" }));
+// So is a reference written from the code it documents, as that code changes.
+for (const [path, recursive] of [["site", true], ["docs/legal", false], ["scripts/ink-cli.ts", false], ["src/worker/mcp/tools.ts", false], ["src/core/query.ts", false]] as const) watch(path, { recursive }, () => spawnSync("npm", SITE, { stdio: "inherit" }));
 execFileSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state], { stdio: "inherit", env: { ...process.env, CI: "1" } });
 // Miniflare's Local Explorer answers raw SQL on the bucket and database to anyone who reaches the server, with no sign-in.
 spawn("npx", ["vite", "dev", ...args], { stdio: "inherit", env: { ...process.env, X_LOCAL_EXPLORER: "false", INK_STATE: state } }).on("exit", (code) => process.exit(code ?? 0));

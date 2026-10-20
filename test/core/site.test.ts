@@ -3,6 +3,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { sign } from "../../src/worker/session.ts";
+import { TOOLS } from "../../src/worker/mcp/tools.ts";
 import { SITE, SITEMAP_PATH } from "../../src/worker/site/index.ts";
 import { newMember } from "./members.ts";
 
@@ -73,7 +74,10 @@ describe("the site, for visitors", () => {
   it("lists every page once in the sitemap, at the address it is asked from, and the landing at /", async () => {
     const res = await send(SITEMAP_PATH);
     expect([res.status, res.headers.get("Content-Type")]).toEqual([200, "application/xml; charset=utf-8"]);
-    expect([...res.text.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1])).toEqual(["https://ink.test/", "https://ink.test/privacy", "https://ink.test/terms"]);
+    const locs = [...res.text.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
+    expect(locs.slice(0, 3)).toEqual(["https://ink.test/", "https://ink.test/privacy", "https://ink.test/terms"]);
+    expect(locs).toEqual(expect.arrayContaining(["https://ink.test/docs", "https://ink.test/docs/agents", "https://ink.test/docs/mcp-tools"]));
+    expect(new Set(locs).size).toBe(locs.length);
   });
 
   it("leaves a request that is not GET or HEAD to the app", async () => {
@@ -84,6 +88,59 @@ describe("the site, for visitors", () => {
   });
 });
 
+describe("the docs", () => {
+  const sources = import.meta.glob<string>("../../site/docs/*.md", { query: "?raw", import: "default", eager: true });
+  /** A doc's title as its file's first line says it. */
+  const headingOf = (slug: string) => /^# (.*)$/m.exec(sources[`../../site/docs/${slug}.md`]!)![1];
+  const current = (html: string) => [...new Set([...html.matchAll(/<a href="([^"]*)" aria-current="page">/g)].map((m) => m[1]))];
+
+  it("shows index.md at /docs and each other doc at /docs/<its name>, titled as a doc", async () => {
+    for (const [path, slug] of [["/docs", "index"], ["/docs/agents", "agents"]]) {
+      const res = await send(path!);
+      expect([path, res.status, titleOf(res.text), canonicalOf(res.text)]).toEqual([path, 200, `${headingOf(slug!)} | Common Ink docs`, `https://ink.test${path}`]);
+    }
+  });
+
+  it("lists every doc beside it and marks the one being read", async () => {
+    const res = await send("/docs/agents");
+    expect(current(res.text)).toEqual(["/docs/agents"]);
+    expect([...res.text.matchAll(/<summary>([^<]*)<\/summary>/g)].map((m) => m[1])).toEqual(["All docs"]);
+    for (const path of ["/docs", "/docs/cli", "/docs/mcp-tools"]) expect(res.text).toContain(`<a href="${path}">`);
+    expect(current((await send("/docs")).text)).toEqual(["/docs"]);
+  });
+
+  it("links each doc to the one before and after it in the nav, and the first to none before it", async () => {
+    const first = await send("/docs");
+    expect([/rel="prev"/.test(first.text), /<a rel="next" href="\/docs\/agents">/.test(first.text)]).toEqual([false, true]);
+    expect(/<a rel="prev" href="\/docs">/.test((await send("/docs/agents")).text)).toBe(true);
+  });
+
+  it("writes the ink command's usage into /docs/cli", async () => {
+    const res = await send("/docs/cli");
+    expect(res.text).toContain("Usage: ink [--workspace ID] &lt;command&gt;");
+    expect(res.text).toMatch(/\n {2}folder-find PATH +the folder at a path/);
+  });
+
+  it("writes every agent tool into /docs/mcp-tools, under its own heading, in the order agents are given them", async () => {
+    const res = await send("/docs/mcp-tools");
+    const headings = [...res.text.matchAll(/<h3 id="([^"]*)"><code>([^<]*)<\/code><\/h3>/g)];
+    expect(headings.map((m) => m[2])).toEqual(TOOLS.map((tool) => tool.name));
+    expect(headings.map((m) => m[1])).toEqual(TOOLS.map((tool) => tool.name));
+    expect(res.text).toContain('<h3 id="list_workspaces"><code>list_workspaces</code></h3>');
+    expect(res.text).toContain("<li><code>noteId</code> · <code>string</code> · required<br>");
+  });
+
+  it("writes the search filters into /docs/search, each table scrolling in a box of its own", async () => {
+    const res = await send("/docs/search");
+    expect(res.text).toContain('<div class="table-scroll"><table>');
+    expect(res.text).toContain("<td><code>#NAME</code></td>");
+  });
+
+  it("is linked from every page's header and footer", async () => {
+    for (const path of ["/welcome", "/privacy", "/docs/cli"]) expect([path, (await send(path)).text.match(/<a (?:class="head-link" )?href="\/docs">Docs<\/a>/g)?.length]).toEqual([path, 2]);
+  });
+});
+
 describe("where the site's pages are", () => {
   const plugins = import.meta.glob<string>("../../src/web/plugins/**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true });
   const appPages = new Set(Object.values(plugins).flatMap((source) => [...source.matchAll(/\bpath:\s*"(\/[^"]*)"/g)].map((m) => m[1]!)));
@@ -91,14 +148,14 @@ describe("where the site's pages are", () => {
   it("takes no address a page of the app is at, but / from visitors", () => {
     expect(["/calendar", "/dashboard", "/todos"].every((path) => appPages.has(path))).toBe(true);
     const always = [...SITE].filter(([, route]) => !route.signedOutOnly).map(([path]) => path);
-    expect(always).toContain("/privacy");
+    expect(always).toEqual(expect.arrayContaining(["/privacy", "/docs", "/docs/cli"]));
     expect(always.filter((path) => appPages.has(path))).toEqual([]);
   });
 
   it("is under no address the app, links, sign-in or agents answer", () => {
     const taken = ["/note/", "/folder/", "/person/", "/s/", "/api/", "/auth/", "/oauth/"];
     const paths = [...SITE.keys(), SITEMAP_PATH];
-    expect(paths).toContain("/terms");
+    expect(paths).toEqual(expect.arrayContaining(["/terms", "/docs", "/docs/mcp-tools"]));
     expect(paths.filter((path) => taken.some((prefix) => path.startsWith(prefix)))).toEqual([]);
   });
 });

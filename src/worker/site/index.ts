@@ -1,7 +1,7 @@
 import { devSignIn, sessionOf } from "../auth.ts";
 import { landing } from "./landing.ts";
-import { renderPage, type SitePage } from "./layout.ts";
-import { PROSE } from "./pages.gen.ts";
+import { renderPage, type DocsNav, type SitePage } from "./layout.ts";
+import { DOCS, PROSE } from "./pages.gen.ts";
 
 /** A page of the site at an address. At `/` the site answers only someone signed out: anyone else is shown the app there. */
 interface SiteRoute {
@@ -11,12 +11,16 @@ interface SiteRoute {
 
 const prose = Object.entries(PROSE).map(([slug, { title, description, html }]): SitePage => ({ path: `/${slug}`, title, description, kind: "prose", body: () => html }));
 
+const docPath = (slug: string): `/${string}` => (slug === "index" ? "/docs" : `/docs/${slug}`);
+const nav: DocsNav = DOCS.map(({ group, pages }) => ({ group, pages: pages.map(({ slug, title }) => ({ path: docPath(slug), title })) }));
+const docs = DOCS.flatMap(({ pages }) => pages).map(({ slug, title, description, html }): SitePage => ({ path: docPath(slug), title, description, kind: "docs", nav, body: () => html }));
+
 /** Every address the site answers with a page. Routing, the sitemap and the test that no page of the app is shadowed all read this. */
 export const SITE: ReadonlyMap<string, SiteRoute> = new Map<string, SiteRoute>([
   ["/", { page: landing, signedOutOnly: true }],
   // The landing for anyone, so it can be seen signed in, and on this machine and Previews, where nobody is signed out.
   ["/welcome", { page: landing, signedOutOnly: false }],
-  ...prose.map((page): [string, SiteRoute] => [page.path, { page, signedOutOnly: false }]),
+  ...[...prose, ...docs].map((page): [string, SiteRoute] => [page.path, { page, signedOutOnly: false }]),
 ]);
 
 export const SITEMAP_PATH = "/sitemap.xml";
