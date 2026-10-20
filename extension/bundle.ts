@@ -102,16 +102,23 @@ function png(width: number, height: number, rgba: Buffer): Buffer {
   }
   const chunk = (type: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(type), data]);
-    const out = Buffer.alloc(12 + body.length);
-    out.writeUInt32BE(body.length - 4, 0);
-    body.copy(out, 4);
-    out.writeUInt32BE(crc32(body), 8 + body.length);
-    return out;
+    const [length, sum] = [Buffer.alloc(4), Buffer.alloc(4)];
+    length.writeUInt32BE(data.length);
+    sum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, sum]);
   };
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 6;
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+  ihdr.set([8, 6, 0, 0, 0], 8);
+  const gama = Buffer.alloc(4);
+  gama.writeUInt32BE(45455, 0);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", ihdr),
+    chunk("gAMA", gama),
+    chunk("sRGB", Buffer.from([0])),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
