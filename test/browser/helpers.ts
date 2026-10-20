@@ -20,6 +20,9 @@ export async function signInAs(page: Page, email: string, name: string, next = "
 
 export const newEmail = () => `browser-${crypto.randomUUID()}@example.com`;
 
+/** Google sign-in, as a signed-out person is offered it: the app's sign-in page has one, and the landing page at `/` several. */
+export const signInLink = (page: Page) => page.getByRole("link", { name: "Sign in with Google" }).first();
+
 export async function signInAsNewPerson(page: Page, name: string) {
   await signInAs(page, newEmail(), name);
 }

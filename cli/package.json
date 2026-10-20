@@ -1,0 +1,22 @@
+{
+  "name": "commonink",
+  "version": "0.1.0",
+  "description": "The ink command: read and write your Common Ink notes from a shell, as an agent does.",
+  "type": "module",
+  "bin": {
+    "ink": "dist/ink.js",
+    "commonink": "dist/ink.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "prepack": "node build.ts"
+  },
+  "homepage": "https://commonink.app/docs/cli",
+  "license": "MIT"
+}

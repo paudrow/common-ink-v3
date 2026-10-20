@@ -1,8 +1,6 @@
 import { expect, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, join, me, newEmail, signInAs, test } from "./helpers.ts";
+import { anotherPerson, connectAgent, join, me, newEmail, signInAs, signInLink, test } from "./helpers.ts";
 
-// Signed out at `/`, a person is shown the landing page, which offers sign-in more than once.
-const signInLink = (page: Page) => page.getByRole("link", { name: "Sign in with Google" }).first();
 const whoAmI = (page: Page) => page.evaluate(async () => (await fetch("/api/me")).status);
 
 async function switchTo(page: Page, workspace: string) {
