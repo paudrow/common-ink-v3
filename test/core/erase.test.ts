@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { sessionHolds, signIn, whoAmI } from "../../src/core/accounts.ts";
 import { authenticateAgent, b64url, connectAgent } from "../../src/core/agents.ts";
@@ -306,7 +306,7 @@ describe("deleting a workspace", () => {
     expect(await outcome(agentActor(free, w.ada.workspaceId), { type: "note.list" })).toBe("not_found: No such workspace");
     expect(await env.FILES.head(w.uploads[0]!)).not.toBeNull();
 
-    await worker.scheduled!({ scheduledTime: Date.now(), cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env);
+    await worker.scheduled!({ scheduledTime: Date.now(), cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env, createExecutionContext());
     expect((await holding(w.ids)).filter((at) => !(at in KEPT_OF_WORKSPACE))).toEqual([]);
     for (const id of w.uploads) expect(await env.FILES.head(id)).toBeNull();
 
@@ -350,7 +350,7 @@ describe("deleting a workspace", () => {
     await cutOff({ db: env.DB, workspaceId: w.ada.workspaceId, personId: w.ada.personId, now: Date.now() }, await nameOf(w.ada.workspaceId));
     await env.DB.batch(rows.map(([table, row]) => env.DB.prepare(`INSERT INTO ${table} (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map(() => "?").join(", ")})`).bind(...Object.values(row))));
 
-    await worker.scheduled!({ scheduledTime: Date.now(), cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env);
+    await worker.scheduled!({ scheduledTime: Date.now(), cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env, createExecutionContext());
     expect(await env.DB.prepare("SELECT id FROM workspaces WHERE id = ?").bind(w.ada.workspaceId).first(), "the workspace is gone").toBeNull();
     expect((await holding(w.ids)).filter((at) => !(at in KEPT_OF_WORKSPACE))).toEqual([]);
   });

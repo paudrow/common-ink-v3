@@ -24,6 +24,8 @@ const ROUTES: [string, string][] = [
   ["dev sign-in", "/auth/dev"],
   ["signing out", "/auth/sign-out"],
   ["who is signed in", "/api/me"],
+  ["telling of a fault the page saw", "/api/faults"],
+  ["uptime checks", "/health"],
   ["a note's workspace", "/api/notes/abcdefghijkl"],
   ["operations", "/api/workspaces/aaaaaaaaaaaa/ops"],
   ["agents", "/api/agents"],

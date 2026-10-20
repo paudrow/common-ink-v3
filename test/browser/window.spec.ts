@@ -307,7 +307,7 @@ test("a width kept from before the sides folded by their edges is the width they
 test("the tab row has its tabs and Focus and no button for either side, whose commands and keys still close and open them", async ({ page }) => {
   await withNote(page);
   await pinPanel(page, "Info");
-  const controls = (part: Locator) => part.locator("a, button:not(.tab-close)").evaluateAll((els) => els.filter((el) => el.getClientRects().length).map((el) => el.getAttribute("aria-label") ?? el.textContent));
+  const controls = (part: Locator) => part.locator("a, button").evaluateAll((els) => els.filter((el) => el.getClientRects().length).map((el) => el.getAttribute("aria-label") ?? el.textContent));
   // A note in front has its own buttons before Focus: the pin, Archive and its menu.
   expect(await controls(page.locator(".tab-row"))).toEqual(["Pin to dashboard", "Archive", "Note menu", "Focus"]);
   await expect(page.getByRole("group", { name: "Window" })).toHaveCount(0);
@@ -699,7 +699,7 @@ test("the inspector's bar has an icon for each panel whatever is in front, with 
 test("with nothing open Focus and both edges are still there", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   // The app opens to the Dashboard, in a tab. With that closed nothing is open.
-  await page.getByRole("button", { name: "Close Dashboard" }).click();
+  await page.getByTitle("Close Dashboard", { exact: true }).click();
   await expect(page.getByRole("tab")).toHaveCount(0);
   await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();

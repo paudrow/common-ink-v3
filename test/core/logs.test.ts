@@ -1,7 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { logFault, redact } from "../../src/core/logs.ts";
-
-afterEach(() => vi.restoreAllMocks());
+import { describe, expect, it } from "vitest";
+import { redact } from "../../src/core/logs.ts";
 
 describe("what goes into the Worker's logs", () => {
   it("keeps out tokens, sessions, cookies, emails and link addresses", () => {
@@ -47,16 +45,5 @@ describe("what goes into the Worker's logs", () => {
     expect(redact(`Unexpected token in JSON "Dear diary\nline two" at 3`)).toBe(`Unexpected token in JSON "…" at 3`);
     expect(redact("Bad title «Dear diary» and “my secret”")).toBe("Bad title «…» and “…”");
     expect(redact("Couldn't remove note abcdefghijkl from Trash: it's locked")).toBe("Couldn't remove note abcdefghijkl from Trash: it's locked");
-  });
-
-  it("logs a fault as one redacted line with its stack, never the error object itself", () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const err = new SyntaxError(`Unexpected token 'D', "Dear diary" is not valid JSON`);
-    logFault("/api/shared/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg", err);
-    expect(logged).toHaveBeenCalledTimes(1);
-    const [line, ...rest] = logged.mock.calls[0]!;
-    expect(rest).toEqual([]);
-    expect(line).toMatch(/^\/api\/shared\/… broke: SyntaxError: Unexpected token '…', "…" is not valid JSON\n\s+at /);
-    expect(line).not.toContain("Dear diary");
   });
 });

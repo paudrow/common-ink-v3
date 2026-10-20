@@ -540,7 +540,7 @@ test("a tab's menu opens from the keyboard, and a tab moves to the next pane and
   await withNotes(page, "Alpha", "Beta");
   await keep(page, "Alpha");
   await keep(page, "Beta");
-  await tabBar(page).getByRole("button", { name: "Close All notes" }).click();
+  await tabBar(page).getByTitle("Close All notes", { exact: true }).click();
   await expect(tabs(page)).toHaveText(["Alpha", "Beta"]);
 
   // The menu of the tab in front, with its first item ready for Enter.

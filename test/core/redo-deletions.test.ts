@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { deletionsSince } from "../../src/core/erase.ts";
@@ -134,7 +134,7 @@ describe("the hourly run", () => {
     const DAY = 86_400_000;
     const records = { old: now - 31 * DAY - 1, edge: now - 31 * DAY, recent: now - DAY };
     for (const [id, at] of Object.entries(records)) await env.FILES.put(`deletions/account/prune${id}`, JSON.stringify({ kind: "account", id: `prune${id}`, at }), { customMetadata: { at: String(at) } });
-    await worker.scheduled!({ scheduledTime: now, cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env);
+    await worker.scheduled!({ scheduledTime: now, cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env, createExecutionContext());
     const left = (await env.FILES.list({ prefix: "deletions/account/prune" })).objects.map((o) => o.key).sort();
     expect(left).toEqual(["deletions/account/pruneedge", "deletions/account/prunerecent"]);
   });

@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { env, createExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { whoAmI } from "../../src/core/accounts.ts";
@@ -1207,7 +1207,7 @@ describe("clearing out", () => {
     expect(await there("lapsed-2")).toBe(0);
 
     await lapse("lapsed-3");
-    await worker.scheduled({ scheduledTime: Date.now(), cron: "17 * * * *", type: "scheduled", noRetry() {} } as never, { ...env, SESSION_SECRET: SECRET });
+    await worker.scheduled({ scheduledTime: Date.now(), cron: "17 * * * *", type: "scheduled", noRetry() {} } as never, { ...env, SESSION_SECRET: SECRET }, createExecutionContext());
     expect(await there("lapsed-3")).toBe(0);
   });
 });

@@ -30,11 +30,5 @@ const RULES: readonly [RegExp, string][] = [
 /** `text` with every secret and every quotation in it replaced by an ellipsis. */
 export const redact = (text: string): string => RULES.reduce((out, [rule, to]) => out.replace(rule, to), text);
 
-/** Logs a fault no request caused, redacted: what broke, the error's name, its message and its stack. */
-export function logFault(what: string, err: unknown): void {
-  const told = err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err);
-  console.error(redact(`${what} broke: ${told}`));
-}
-
 /** Logs a line, redacted. */
 export const logLine = (line: string): void => console.error(redact(line));

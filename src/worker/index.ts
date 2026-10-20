@@ -2,7 +2,6 @@ import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/acco
 import { perform, trustedCode, type Actor, type Visitor } from "../core/operations.ts";
 import { redeemFrame } from "../core/pluginRecord.ts";
 import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../core/protocol.ts";
-import { logFault } from "../core/logs.ts";
 import { sealLinksWith, sealOldLinks } from "../core/linkSeal.ts";
 import { sweep } from "../core/oauth.ts";
 import { eraseWorkspaces, pruneDeletions, redoRequested } from "../core/erase.ts";
@@ -21,6 +20,7 @@ import { crossOrigin, secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
 import { addressOf, limitByAddress, overLimit, tokenKey } from "./limits.ts";
 import { bearerToken } from "./mcp/mcp.ts";
+import { handleClientFault, opName, report, reportOf, told, traceOf, type Report, type Trace } from "./report.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 import { vault } from "./vault.ts";
@@ -61,7 +61,7 @@ async function handleShared(req: Request, env: Env, url: URL, token: string, not
 /** Operations whose bytes come or go with the request, each at an address of its own in files.ts. */
 const CARRIES_BYTES: ReadonlySet<unknown> = new Set(["upload.create", "upload.open", "upload.part", "shared.upload", "export.open"]);
 
-async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
+async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promise<Response> {
   const files = await handleFiles(req, env, url);
   if (files) return files;
   const shared = SHARED_API.exec(url.pathname);
@@ -113,6 +113,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       if (err instanceof TooLarge) return json({ error: "invalid", message: `An operation is at most ${MAX_OP_BYTES / 1_000_000} MB` }, 413);
       return json({ error: "invalid", message: "The body isn't JSON" }, 400);
     }
+    trace.op = opName((op as { type?: unknown } | null)?.type);
     if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, a part of one at the address upload.start gives, and an export's at the addresses export.plan gives" }, 400);
     try {
       return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
@@ -125,22 +126,38 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   return json({ error: "not_found" }, 404);
 }
 
-/** A fault that is no request's doing is logged, and answered in the shape its client reads: a bare 500 is a page of HTML to a client that asked for JSON. */
-async function answered(what: string, answer: () => Promise<Response>, broke: () => Response): Promise<Response> {
+/** A fault that is no request's doing is kept on the request's trace to be reported, and answered in the shape its client reads: a bare 500 is a page of HTML to a client that asked for JSON. */
+async function answered(trace: Trace, answer: () => Promise<Response>, broke: () => Response): Promise<Response> {
   try {
     return await answer();
   } catch (err) {
-    logFault(what, err);
+    trace.fault = err;
     return broke();
   }
 }
 
-async function route(req: Request, env: Env, url: URL): Promise<Response> {
+/**
+ * For uptime checks: 200 with the Worker's version when it can reach its database, 503 when it can't.
+ * It needs no sign-in and says nothing else, and costs one `SELECT 1`.
+ */
+async function health(env: Env, trace: Trace): Promise<Response> {
+  const version = env.CF_VERSION_METADATA.id;
+  try {
+    await env.DB.prepare("SELECT 1").first();
+    return json({ ok: true, version });
+  } catch (err) {
+    trace.fault = err;
+    return json({ ok: false, version }, 503);
+  }
+}
+
+async function route(req: Request, env: Env, url: URL, trace: Trace, tell: (report: Report) => void): Promise<Response> {
   const moved = redirectFor(url);
   if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
   const byAddress = limitByAddress(url.pathname);
   const limited = byAddress && (await overLimit(env, url, byAddress, addressOf(req)));
   if (limited) return limited;
+  if (url.pathname === "/health" && (req.method === "GET" || req.method === "HEAD")) return health(env, trace);
   const embed = await embedResponse(url, env, (token) => redeemFrame(env.DB, token, Date.now()));
   if (embed) return embed;
   const fileSite = fileSiteResponse(req, env, url);
@@ -151,7 +168,7 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   // Making deletions again after a restore, as asked by scripts/redo-deletions.ts. The address names a request it put in the bucket, so only someone who can write there can ask.
   const redo = /^\/redo-deletions\/([0-9a-f]{64})$/.exec(url.pathname);
   if (redo && req.method === "POST") {
-    return answered(url.pathname, async () => {
+    return answered(trace, async () => {
       try {
         const done = await redoRequested({ db: env.DB, bucket: env.FILES, sources: sourcesFor(env, url), now: Date.now() }, redo[1]!);
         return done ? json(done) : json({ error: "not_found" }, 404);
@@ -163,16 +180,17 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   }
   if (url.pathname === "/mcp") {
     const busy = await overLimit(env, url, "MCP_LIMIT", await tokenKey(bearerToken(req)));
-    return busy ?? answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
+    return busy ?? answered(trace, () => handleMcp(req, env, sourcesFor(env, url), trace), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
   }
   if (url.pathname.startsWith("/oauth/") || url.pathname.startsWith("/.well-known/oauth-")) {
-    return answered(url.pathname, () => handleOAuth(req, env, url), () => json({ error: "server_error", error_description: BROKE }, 500));
+    return answered(trace, () => handleOAuth(req, env, url), () => json({ error: "server_error", error_description: BROKE }, 500));
   }
   const broke = () => json({ error: "unknown", message: BROKE }, 500);
-  if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(url.pathname, () => handleAgentsApi(req, env, url), broke);
-  if (url.pathname === "/api/clipper" || url.pathname.startsWith("/api/clipper/")) return answered(url.pathname, () => handleClipperApi(req, env, url), broke);
-  if (url.pathname === "/api/oauth/request" || url.pathname === "/api/oauth/consent" || url.pathname === "/api/oauth/deny") return answered(url.pathname, () => handleOAuthConsent(req, env, url), broke);
-  if (url.pathname.startsWith("/api/")) return answered(url.pathname, () => handleApi(req, env, url), broke);
+  if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(trace, () => handleAgentsApi(req, env, url), broke);
+  if (url.pathname === "/api/clipper" || url.pathname.startsWith("/api/clipper/")) return answered(trace, () => handleClipperApi(req, env, url), broke);
+  if (url.pathname === "/api/oauth/request" || url.pathname === "/api/oauth/consent" || url.pathname === "/api/oauth/deny") return answered(trace, () => handleOAuthConsent(req, env, url), broke);
+  if (url.pathname === "/api/faults") return answered(trace, () => handleClientFault(req, env, url, tell), broke);
+  if (url.pathname.startsWith("/api/")) return answered(trace, () => handleApi(req, env, url, trace), broke);
   return SHARED_PAGE.test(url.pathname) ? env.ASSETS.fetch(req).then(unlistedPage) : env.ASSETS.fetch(req);
 }
 
@@ -189,49 +207,60 @@ function keyLinks(env: Env): void {
 }
 
 export default {
-  async fetch(req, env) {
+  // Tests call it without a context, and a report's send then runs unwaited.
+  async fetch(req, env, ctx?: ExecutionContext) {
     keyLinks(env);
     const url = new URL(req.url);
-    // Whatever breaks is logged redacted here, and not by the runtime as it was thrown.
-    const answer = await answered(url.pathname, async () => route(req, env, url), () => new Response("Common Ink broke. Try again in a moment.", { status: 500 }));
+    const trace = traceOf(req, url);
+    const tell = (fault: Report) => report(env, (sent) => ctx?.waitUntil(sent), fault);
+    // Whatever breaks is reported redacted here, and not by the runtime as it was thrown.
+    const answer = await answered(trace, async () => route(req, env, url, trace, tell), () => new Response("Common Ink broke. Try again in a moment.", { status: 500 }));
+    const fault = reportOf(trace, answer.status);
+    if (fault) tell(fault);
     return secured(crossOrigin(answer, req, url), url, env);
   },
   // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
-  async scheduled(controller, env) {
+  async scheduled(controller, env, ctx) {
+    const broke = (what: string, err: unknown) => report(env, (sent) => ctx.waitUntil(sent), { source: "job", route: "cron", requestId: null, op: what, status: null, ...told(err) });
     keyLinks(env);
     let purged;
     try {
       purged = await purgeTrash(env.DB, controller.scheduledTime);
     } catch (err) {
-      return logFault("Removing notes from Trash", err);
+      return broke("purgeTrash", err);
     }
     const { removed, failed, more } = purged;
     if (removed || failed.length) console.log(`Removed ${removed} notes from Trash${failed.length ? `, and couldn't remove ${failed.length}` : ""}${more ? ", with more waiting" : ""}`);
-    const uploads = await clearUploads(env.DB, env.FILES, controller.scheduledTime);
+    let uploads;
+    try {
+      uploads = await clearUploads(env.DB, env.FILES, controller.scheduledTime);
+    } catch (err) {
+      return broke("clearUploads", err);
+    }
     if (uploads.removed || uploads.failed.length) console.log(`Removed ${uploads.removed} uploads${uploads.failed.length ? `, and couldn't remove ${uploads.failed.length}` : ""}${uploads.more ? ", with more waiting" : ""}`);
     try {
       const sealed = await sealOldLinks(env.DB);
       if (sealed) console.log(`Sealed ${sealed} links kept from before links were sealed`);
     } catch (err) {
-      logFault("Sealing old links", err);
+      broke("sealOldLinks", err);
     }
     try {
       const { erased, more } = await eraseWorkspaces(env.DB, env.FILES);
       if (erased.length || more) console.log(`Erased ${erased.length} deleted workspaces${more ? ", with more waiting" : ""}`);
     } catch (err) {
-      logFault("Erasing deleted workspaces", err);
+      broke("eraseWorkspaces", err);
     }
     try {
       const pruned = await pruneDeletions(env.FILES, controller.scheduledTime);
       if (pruned) console.log(`Removed ${pruned} records of deletions too old for a restore to bring back`);
     } catch (err) {
-      logFault("Removing old records of deletions", err);
+      broke("pruneDeletions", err);
     }
     // What OAuth sign-ins left behind that nobody came back to. Also done when someone starts one, so this is for a quiet day.
     try {
       await sweep(env.DB, controller.scheduledTime, true);
     } catch (err) {
-      logFault("Clearing out OAuth sign-ins", err);
+      broke("oauth.sweep", err);
     }
   },
 } satisfies ExportedHandler<Env>;

@@ -94,7 +94,7 @@ jobs:
           if [ -n "$id" ]; then gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" > /dev/null
           else gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" > /dev/null; fi
 
-  # The browser tests run in six parts at once. Each part builds the app and runs its own Worker on its
+  # The browser tests run in Chromium in six parts at once. Each part builds the app and runs its own Worker on its
   # runner, with a local D1 and R2 (scripts/built-worker.ts), so no part waits on a server the others
   # load. They don't use the Preview, which is for people to look at.
   browser-shard:
@@ -133,7 +133,7 @@ jobs:
             sleep 2
           done
           cat worker.log; echo "::error::The built Worker didn't answer"; exit 1
-      - run: npx playwright test --shard=${{ matrix.shard }}/6 --workers=2
+      - run: npx playwright test --project=chromium --shard=${{ matrix.shard }}/6 --workers=2
         env:
           BASE_URL: http://localhost:8787
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -143,14 +143,59 @@ jobs:
           path: blob-report/
           retention-days: 1
 
+  # Firefox and WebKit run only the smoke test, in one job beside the shards, so CI takes about as long as
+  # before. Their browsers are cached under their own key: the shards' cache holds only Chromium.
+  browser-others:
+    needs: check
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    name: browser (Firefox and WebKit)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - id: playwright
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+      - id: browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-firefox-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps firefox webkit
+      - if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps firefox webkit
+      - run: npm run build
+      # On https, with wrangler's own certificate: WebKit keeps the Secure session cookie only from https, even on localhost.
+      - name: Start the built Worker
+        run: |
+          node scripts/built-worker.ts --port 8787 --https > worker.log 2>&1 &
+          for _ in $(seq 60); do
+            [ "$(curl -sk -o /dev/null -w '%{http_code}' https://localhost:8787/health)" = 200 ] && exit 0
+            sleep 2
+          done
+          cat worker.log; echo "::error::The built Worker didn't answer"; exit 1
+      - run: npx playwright test --project=firefox --project=webkit --workers=2
+        env:
+          BASE_URL: https://localhost:8787
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: blob-report-others
+          path: blob-report/
+          retention-days: 1
+
   # The one check called `browser`, which branch protection can require: it passes only when every part
   # passed, and when one failed it merges their reports, traces included, into the `playwright-report` artifact.
   browser:
-    needs: browser-shard
+    needs: [browser-shard, browser-others]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.action != 'closed' }}
     runs-on: ubuntu-latest
     env:
-      FAILED: ${{ needs.browser-shard.result != 'success' }}
+      FAILED: ${{ needs.browser-shard.result != 'success' || needs.browser-others.result != 'success' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.FAILED == 'true'
@@ -177,7 +222,7 @@ jobs:
           retention-days: 7
       - name: Every part passed
         run: |
-          echo "The browser parts finished with: ${{ needs.browser-shard.result }}"
+          echo "The Chromium parts finished with ${{ needs.browser-shard.result }}, Firefox and WebKit with ${{ needs.browser-others.result }}"
           [ "$FAILED" = false ]
 
   cleanup:

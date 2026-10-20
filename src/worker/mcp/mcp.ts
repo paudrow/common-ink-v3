@@ -3,12 +3,12 @@
 // params._meta, beside the earlier versions that begin with initialize. An agent signs in with the bearer
 // token its member made for it; it never has a session cookie, so a web page can't make it act. See docs/mcp.md.
 import type { Sources } from "../../core/sources.ts";
-import { logFault } from "../../core/logs.ts";
 import { BROKE } from "../../core/protocol.ts";
 import { ASK_NOTE_SYNTAX } from "../../core/noteSyntax.ts";
 import { tokenHolder } from "../auth.ts";
 import { TooLarge, cappedJson } from "../body.ts";
 import { metadataUrl } from "../oauth.ts";
+import { opName, report, told, type Trace } from "../report.ts";
 import { callTool, toolList, type Caller, type Reached } from "./tools.ts";
 
 const SUPPORTED = { modern: ["2026-07-28"], legacy: ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] };
@@ -107,7 +107,7 @@ const unauthorized = (url: URL, sent: boolean) =>
 
 export const bearerToken = (req: Request): string | null => /^Bearer\s+(\S+)$/i.exec(req.headers.get("Authorization") ?? "")?.[1] ?? null;
 
-export async function handleMcp(req: Request, env: Env, sources?: Sources): Promise<Response> {
+export async function handleMcp(req: Request, env: Env, sources: Sources | undefined, trace: Trace): Promise<Response> {
   const token = bearerToken(req);
   const url = new URL(req.url);
   const holder = token ? await tokenHolder(env, url, token) : null;
@@ -144,7 +144,8 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   for (const m of messages.map(asRequest)) {
     // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
     const answer = await handleMessage(env, caller, m, sources, { origin: url.origin, bucket: env.FILES }, req.headers).catch((err: unknown) => {
-      logFault("An MCP message", err);
+      trace.fault = err;
+      trace.op = opName(m.method === "tools/call" ? `tools/call:${String((m.params as { name?: unknown } | undefined)?.name)}` : m.method);
       return finish(eraOf(m), fail(typeof m.id === "string" || typeof m.id === "number" ? m.id : null, -32603, BROKE));
     });
     if (answer.message) out.push(answer);
@@ -197,7 +198,7 @@ async function answerMethod(env: Env, agent: Caller, era: Era, id: Id, method: s
       // A fault in the limiter lets the call through: it guards against a runaway agent, and isn't worth every agent's calls.
       const allowed = await env.MCP_CALLS.limit({ key: agent.agentId }).then(
         (outcome) => outcome.success,
-        (err: unknown) => (logFault("The MCP_CALLS rate limit", err), true),
+        (err: unknown) => (report(env, (sent) => void sent.catch(() => {}), { source: "worker", route: "/mcp", requestId: null, op: "MCP_CALLS", status: null, ...told(err) }), true),
       );
       if (!allowed) return reply(id, { content: [{ type: "text", text: RATE_LIMITED }], isError: true });
       const result = await callTool(env.DB, agent, params.name, args as Record<string, unknown>, sources, reached);
