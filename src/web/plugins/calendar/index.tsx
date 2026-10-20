@@ -79,7 +79,7 @@ export const calendar: Plugin = {
         host,
         kind: "event",
         title: "Event",
-        hint: "copy a reference from an event on the Calendar page, and paste it over this",
+        hint: "open an event on the Calendar page, run Copy event reference, and paste it over this",
         // The title alone: adding the time as the details arrive would widen the chip, and a line that just fit would gain a row.
         shown: ({ event }) => ({ text: event.title || "Untitled", title: `${whenLabel(event.when, zone())} · ${event.calendar}${event.location ? ` · ${event.location}` : ""}` }),
         details: ({ event }, { noteId, close }) => <EventLink host={host} event={event} noteId={noteId} close={close} />,

@@ -377,7 +377,8 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await expect(chips(page)).toHaveAttribute("title", "Reconnect Sample calendar first to see this event as it is now");
 });
 
-test("a reference to a contact shows its owner the contact, and every other member the name alone", async ({ page }) => {
+test("a reference to a contact, copied from the contact on their page, shows its owner the contact, and every other member the name alone", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAsNewPerson(page, "Ada Lovelace");
   const grace = await anotherPerson(page, "Grace Hopper");
   const { workspaceId } = await join(grace, page, "editor");
@@ -385,10 +386,13 @@ test("a reference to a contact shows its owner the contact, and every other memb
   const note = await perform(page, { type: "note.create", text: "# Plumbing\n\nCall " });
   await page.goto("/contacts");
 
-  // Contacts lists people and copies nothing: a reference to one is written by an agent, or by `record.refer` as here.
+  // Contacts lists people and copies nothing: Copy reference is on the person's page, beside what the contact holds.
   await expect(contact(page, "Sam Okafor")).toContainText("+1 555 0142");
   await expect(page.getByRole("button", { name: "Copy reference" })).toHaveCount(0);
-  const { text: written } = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
+  await page.goto("/person/Sam%20Okafor");
+  await page.getByRole("region", { name: "Your contact Sam Okafor" }).getByRole("button", { name: "Copy reference" }).click();
+  await expect(page.locator(".toast-card").last()).toHaveText("Copied the reference to Sam Okafor. Paste it into a note.");
+  const written = await page.evaluate(() => navigator.clipboard.readText());
   expect(written).toMatch(/^::contact\{[a-z0-9]{12} Sam Okafor\}$/);
 
   await openNote(page, note.id, "Call");

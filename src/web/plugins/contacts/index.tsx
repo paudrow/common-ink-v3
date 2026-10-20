@@ -22,7 +22,7 @@ export const contacts: Plugin = {
         host,
         kind: "contact",
         title: "Contact",
-        hint: "copy a reference from a contact on the Contacts page, and paste it over this",
+        hint: "open a contact, choose Copy reference, and paste it over this",
         shown: ({ contact }) => ({ text: contact.name || "No name", title: [contact.organization, ...[...contact.emails, ...contact.phones].map((line) => line.value)].filter(Boolean).join(" · ") || "Contact" }),
         details: ({ contact }) => (
           <dl className="ref-details">

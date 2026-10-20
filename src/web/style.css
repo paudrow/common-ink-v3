@@ -10547,6 +10547,12 @@ a.file-chip:hover .file-chip-name {
   gap: 4px 12px;
 }
 
+.person-contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .person-not-contact {
   display: flex;
   flex-wrap: wrap;

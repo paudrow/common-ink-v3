@@ -1,4 +1,5 @@
 import type { CalendarEvent, PluginHost } from "../../plugin-api.ts";
+import { copyReference } from "../lib/references.tsx";
 import { dayIn, dayLabel } from "./dates.ts";
 
 /**
@@ -21,17 +22,10 @@ export async function referTo(host: PluginHost, event: Pick<CalendarEvent, "sour
 
 /** Copies the reference to the event open on the Calendar page, to be pasted into a note, and says so. */
 export async function copyEventReference(host: PluginHost): Promise<void> {
-  const event = last;
-  const app = host.app();
-  if (!event) return void app.notify({ message: "Open an event on the Calendar first, then copy its reference.", icon: "calendar" });
-  const text = await referTo(host, event);
-  if (text === null) return;
-  const day = dayLabel(event.when.allDay ? event.when.from : dayIn(event.when.from, Intl.DateTimeFormat().resolvedOptions().timeZone), "short");
-  try {
-    await navigator.clipboard.writeText(text);
-    app.notify({ message: `Copied the reference to ${event.title || "Untitled"}, ${day}. Paste it into a note.`, icon: "calendar" });
-  } catch {
-    // A page served over plain http has no clipboard to write to, so the reference is said to be copied by hand.
-    app.notify({ message: `The reference to ${event.title || "Untitled"}, ${day}, to copy into a note: ${text}`, icon: "calendar" });
-  }
+  if (!last) return void host.app().notify({ message: "Open an event on the Calendar first, then copy its reference.", icon: "calendar" });
+  await copyReference(host, last, eventNamed(last), "calendar");
 }
+
+/** How a notice names an event: its title and its day, since a title alone can be many events. */
+const eventNamed = (event: CalendarEvent) =>
+  `${event.title || "Untitled"}, ${dayLabel(event.when.allDay ? event.when.from : dayIn(event.when.from, Intl.DateTimeFormat().resolvedOptions().timeZone), "short")}`;
