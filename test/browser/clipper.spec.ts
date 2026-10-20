@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium, expect, test, type Download } from "@playwright/test";
 import { unpackedExtensionId } from "../../scripts/extension-id.ts";
-import { CLIPPER_STORE_URL } from "../../src/web/plugins/lib/clipperLink.ts";
 import { agentWith, signInAsNewPerson } from "./helpers.ts";
+
+const STORE = "https://chromewebstore.google.com/detail/fcppkekegajpfdoilfhhohoilkbleiih";
 
 // The dev server allows the unpacked clipper, whose id the key in extension/manifest.json fixes.
 const EXTENSION = unpackedExtensionId();
@@ -82,10 +83,10 @@ test("Get the Chrome Extension downloads the clipper on the dev server and opens
   await palette.getByRole("combobox").fill("Chrome Extension");
   await expect(palette.getByRole("option").first()).toHaveText(/^Get the Chrome Extension/);
   if (process.env.BASE_URL) {
-    await page.context().route(`${CLIPPER_STORE_URL}*`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<title>store</title>" }));
+    await page.context().route(`${STORE}*`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<title>store</title>" }));
     const popup = page.waitForEvent("popup");
     await page.keyboard.press("Enter");
-    await expect(await popup).toHaveURL(CLIPPER_STORE_URL);
+    await expect(await popup).toHaveURL(STORE);
     return;
   }
   const download = page.waitForEvent("download");
