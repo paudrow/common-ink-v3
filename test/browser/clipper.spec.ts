@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 import { chromium, expect, test, type Download } from "@playwright/test";
 import { unpackedExtensionId } from "../../scripts/extension-id.ts";
 import { agentWith, signInAsNewPerson } from "./helpers.ts";
@@ -89,6 +90,27 @@ test("Get the Chrome Extension in the command palette downloads the clipper on t
   expect(await unzipped(await download)).toBe(EXTENSION);
 });
 
+/** A real PNG of noise, about 15 KB, so its data URL is about 20,000 characters: longer than the 8,000 any other attribute is cut to. */
+function noisyPng(side: number): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, sum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(side, 0);
+  header.writeUInt32BE(side, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  const rows = Buffer.alloc(side * (side * 3 + 1));
+  let seed = 7;
+  for (let i = 0; i < rows.length; i++) rows[i] = i % (side * 3 + 1) === 0 ? 0 : (seed = (seed * 1103515245 + 12345) % 2 ** 31) >> 16;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
+}
+const MAP = noisyPng(128);
+
 const article = `<!doctype html>
 <html>
   <head><title>Harbor lights</title></head>
@@ -99,6 +121,7 @@ const article = `<!doctype html>
     <article>
       <h1>Harbor lights</h1>
       <p>The council kept the harbor lights on through winter.</p>
+      <img src="data:image/png;base64,${MAP.toString("base64")}" alt="Harbor map">
       <ul>
         <li><input type="checkbox" checked> Lamps</li>
         <li><input type="checkbox"> Buoys</li>
@@ -183,6 +206,18 @@ test("clips a page into a note", async ({ baseURL }) => {
     expect(text).not.toContain("Cookie banner");
     expect(text).not.toContain("Copyright footer");
     expect(text).toContain(pageUrl);
+
+    // The map was written into the page as a data URL, and is saved whole.
+    const uploadId = /::image\{([a-z0-9]{12})/.exec(text)?.[1];
+    expect(uploadId, text).toBeTruthy();
+    const listed = await context.request.post(`${baseURL}/mcp`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_workspaces", arguments: {} } },
+    });
+    const workspaceId = (JSON.parse(((await listed.json()) as { result: { content: { text: string }[] } }).result.content[0]!.text) as { workspaces: { id: string }[] }).workspaces[0]!.id;
+    const saved = await context.request.get(`${baseURL}/api/workspaces/${workspaceId}/uploads/${uploadId}`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(saved.status()).toBe(200);
+    expect(Buffer.compare(await saved.body(), MAP), `${(await saved.body()).length} bytes saved of ${MAP.length}`).toBe(0);
   } finally {
     await context.close();
     server.close();
