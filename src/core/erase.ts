@@ -1,3 +1,4 @@
+import { NOT_CANCELLED, type Charging } from "./billing.ts";
 import { newId } from "./ids.ts";
 import { logLine } from "./logs.ts";
 import { NO_SUCH_WORKSPACE, OpError, type AccountDeletion, type WorkspaceRef } from "./protocol.ts";
@@ -16,9 +17,10 @@ import type { Sources } from "./sources.ts";
  * `delete`: the rows go. `former`: it is set to the former member who stands in for them, so what
  * they did in a workspace they shared is still said to be someone's. `note` and `upload`: the item
  * goes, with everything kept by its id, and an upload's bytes. `agent`: the agent stays as the former
- * member's, so history can still name it, and is cut off: its tokens go.
+ * member's, so history can still name it, and is cut off: its tokens go. `owner`: a workspace they pay
+ * for passes to whoever pays for it next (`NEXT_OWNER`).
  */
-export type AccountFate = "delete" | "former" | "note" | "upload" | "agent" | { kept: string };
+export type AccountFate = "delete" | "former" | "note" | "upload" | "agent" | "owner" | { kept: string };
 
 export interface PersonColumn {
   at: `${string}.${string}`;
@@ -47,6 +49,8 @@ export const PERSON_COLUMNS: readonly PersonColumn[] = [
   { at: "uploads.private_owner", fate: "upload" },
   { at: "agents.person_id", fate: "agent" },
   { at: "members.person_id", fate: "delete" },
+  // After their membership, so whoever is next is someone who stays.
+  { at: "workspaces.owner_id", fate: "owner" },
   { at: "settings.person_id", fate: "delete" },
   { at: "daily_notes.person_id", fate: "delete" },
   { at: "pins.person_id", fate: "delete" },
@@ -66,6 +70,8 @@ export const PERSON_COLUMNS: readonly PersonColumn[] = [
   { at: "sample_records.person_id", fate: "delete" },
   { at: "clipper_grants.person_id", fate: "delete" },
   { at: "oauth_requests.person_id", fate: "delete" },
+  // Their trial and what Stripe last said of their subscription, which was ended at Stripe before the batch.
+  { at: "billing.person_id", fate: "delete" },
   { at: "notes.created_by", fate: "former" },
   { at: "notes.updated_by", fate: "former", where: MEMBER("updated_by_kind") },
   { at: "notes.updated_by_owner", fate: "former" },
@@ -321,6 +327,13 @@ export const onlyAdminOf = (workspaces: readonly WorkspaceRef[]) =>
  * the same batch, which the first statement does only while nothing keeps the account from going.
  */
 const GO = "EXISTS (SELECT 1 FROM people WHERE id = ?2 AND former = 1)";
+/**
+ * Who pays for a workspace once its owner's account is gone: its earliest admin by when they joined,
+ * then by id, as migrations/0059_billing.sql chose for a workspace made before there were owners. Only
+ * the workspaces deleted with the account have no admin left by then, and pass to the former member
+ * until they are erased.
+ */
+const NEXT_OWNER = "COALESCE((SELECT m.person_id FROM members m WHERE m.workspace_id = workspaces.id AND m.role = 'admin' AND m.person_id <> ?1 ORDER BY m.joined_at, m.person_id LIMIT 1), ?2)";
 export const FORMER_NAME = "A former member";
 export const FORMER_AGENT = "A former member's agent";
 
@@ -331,6 +344,7 @@ function erasingPerson(): string[] {
     const is = `${column} = ${byEmail ? "?4" : "?1"}${where ? ` AND ${where}` : ""}`;
     if (fate === "delete") statements.push(`DELETE FROM ${table} WHERE ${is} AND ${GO}`);
     if (fate === "former") statements.push(`UPDATE ${table} SET ${column} = ?2 WHERE ${is} AND ${GO}`);
+    if (fate === "owner") statements.push(`UPDATE ${table} SET ${column} = ${NEXT_OWNER} WHERE ${is} AND ${GO}`);
     if (fate === "note") statements.push(...removalsOf(`(SELECT id FROM ${table} WHERE ${is} AND ${GO})`));
     if (fate === "upload") statements.push(`UPDATE ${table} SET state = 'removing', ${column} = ?2 WHERE ${is} AND ${GO}`);
     if (fate === "agent") {
@@ -363,6 +377,8 @@ export interface AccountDeleting {
   now: number;
   sources: Sources;
   bucket: R2Bucket | null;
+  /** Billing, when it is on: their subscription is ended at Stripe before anything is deleted. */
+  charging: Charging | null;
   log?: (message: string) => void;
 }
 
@@ -370,7 +386,8 @@ export interface AccountDeleting {
  * Deletes a person's account, for the person, who typed their email. Refused while they are the only
  * admin of a workspace others are in. One batch makes a former member to stand in for them, deletes
  * the workspaces they are alone in, takes out everything that was theirs alone, points what they did
- * in shared workspaces at the former member, and deletes their row: from that statement no session,
+ * in shared workspaces at the former member, hands the workspaces they paid for that stay to the next
+ * owner, and deletes their row: from that statement no session,
  * agent, OAuth app or clipper of theirs works. Then their data sources are ended at their provider.
  * Their private uploads' bytes and the workspaces deleted with them are erased after, as much as fits
  * here, and the hourly run carries on with the rest.
@@ -381,11 +398,18 @@ export async function deleteAccount(deleting: AccountDeleting, confirm: string):
   return carryOut(deleting, plan);
 }
 
-async function carryOut({ db, personId, now, sources, bucket, log = logLine }: AccountDeleting, plan: AccountDeletion): Promise<{ deleted: WorkspaceRef[] }> {
+async function carryOut({ db, personId, now, sources, bucket, charging, log = logLine }: AccountDeleting, plan: AccountDeletion): Promise<{ deleted: WorkspaceRef[] }> {
   if (plan.blocking.length) throw new OpError("invalid", onlyAdminOf(plan.blocking));
 
   // Read before the batch, which deletes the connections, and told to their providers only after it: an account the batch refuses keeps them.
   const endSources = await sources.ending(personId);
+  // Ended before the batch, which deletes the customer's id: an account Stripe would go on charging isn't deleted.
+  const billing = charging && (await db.prepare("SELECT customer_id FROM billing WHERE person_id = ?").bind(personId).first<{ customer_id: string | null }>());
+  if (charging && billing?.customer_id) {
+    await charging.endSubscriptions(billing.customer_id).catch(() => {
+      throw new OpError("unavailable", NOT_CANCELLED);
+    });
+  }
   const formerId = newId();
   const args = [personId, formerId, now, plan.email];
   const [made] = await db.batch(ACCOUNT.map((sql) => bound(db, sql, args)));
@@ -470,12 +494,13 @@ export interface Redoing {
   db: D1Database;
   bucket: R2Bucket;
   sources: Sources;
+  charging: Charging | null;
   now: number;
   log?: (message: string) => void;
 }
 
 /** Makes a deletion again, with nobody asked: it was asked for once already. Run twice, the second time answers `gone`. */
-export async function redoDeletion({ db, bucket, sources, now, log = logLine }: Redoing, { kind, id }: Pick<Deletion, "kind" | "id">): Promise<Redone> {
+export async function redoDeletion({ db, bucket, sources, charging, now, log = logLine }: Redoing, { kind, id }: Pick<Deletion, "kind" | "id">): Promise<Redone> {
   if (kind === "account") {
     const plan = await accountDeletion(db, id).catch((err: unknown) => {
       if (err instanceof OpError && err.code === "not_found") return null;
@@ -483,10 +508,10 @@ export async function redoDeletion({ db, bucket, sources, now, log = logLine }: 
     });
     if (!plan) return "gone";
     try {
-      await carryOut({ db, personId: id, now, sources, bucket, log }, plan);
+      await carryOut({ db, personId: id, now, sources, bucket, charging, log }, plan);
       return "deleted";
     } catch (err) {
-      if (err instanceof OpError && err.code === "invalid") return `refused: ${err.message}`;
+      if (err instanceof OpError && (err.code === "invalid" || err.code === "unavailable")) return `refused: ${err.message}`;
       throw err;
     }
   }

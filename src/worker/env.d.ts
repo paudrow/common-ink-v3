@@ -20,6 +20,18 @@ interface InkSettings {
   CLIPPER_EXTENSION_IDS?: string;
   /** A Sentry project's DSN. With it, every fault the Worker reports is also sent to Sentry; without it, faults go only to Workers Logs (src/worker/report.ts). */
   SENTRY_DSN?: string;
+  /**
+   * Stripe's secret key, the webhook's signing secret, and the prices of the plan by the month and the year.
+   * Billing is on, and ALLOWED_EMAILS keeps nobody out, only once all four are set. See src/worker/billing.ts.
+   */
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  STRIPE_PRICE_MONTH?: string;
+  STRIPE_PRICE_YEAR?: string;
+  /** How many days a new person's trial lasts. 14 without it. */
+  TRIAL_DAYS?: string;
+  /** Where Stripe's API is, for tests. https://api.stripe.com without it. */
+  STRIPE_API?: string;
 }
 
 interface Env extends InkSettings {}

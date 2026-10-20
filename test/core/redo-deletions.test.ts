@@ -1,10 +1,12 @@
 import { createExecutionContext, env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { deletionsSince } from "../../src/core/erase.ts";
 import { perform } from "../../src/core/operations.ts";
+import { chargingOf } from "../../src/worker/billing.ts";
 import worker from "../../src/worker/index.ts";
 import { addMember, newMember } from "./members.ts";
+import { STRIPE, fakeStripe, subscription } from "./stripe.ts";
 import { FILES } from "./uploading.ts";
 
 // Long ago, and each test's apart from the last, as the bucket is kept from one test to the next: `since` finds only the test's own, and nothing deleted again just now.
@@ -27,10 +29,10 @@ async function snapshot(): Promise<() => Promise<void>> {
 }
 
 /** What scripts/redo-deletions.ts does: puts the request in the bucket, then asks the Worker to carry it out. */
-async function redo(request: { accounts?: string[]; workspaces?: string[]; since?: number | null }) {
+async function redo(request: { accounts?: string[]; workspaces?: string[]; since?: number | null }, settings = env as unknown as Env) {
   const name = crypto.randomUUID().replaceAll("-", "").repeat(2);
   await env.FILES.put(`redo-deletions/${name}.json`, JSON.stringify({ accounts: [], workspaces: [], since: null, ...request }));
-  const res = await worker.fetch!(new Request(`https://ink.test/redo-deletions/${name}`, { method: "POST" }) as never, env as unknown as Env);
+  const res = await worker.fetch!(new Request(`https://ink.test/redo-deletions/${name}`, { method: "POST" }) as never, settings);
   return { status: res.status, body: await res.json(), left: await env.FILES.head(`redo-deletions/${name}.json`) };
 }
 
@@ -125,6 +127,51 @@ describe("making deletions again after a restore", () => {
       body: { error: "invalid", message: "A request is { accounts, workspaces, since }: two lists of ids, and a time in milliseconds or null" },
       left: null,
     });
+  });
+});
+
+describe("making an account's deletion again while billing is on", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("hands the workspace it paid for to the next admin, deletes its billing row, and cancels nothing twice at Stripe", async () => {
+    T += 1_000_000;
+    const settings = { ...env, ...STRIPE } as unknown as Env;
+    const ada = await newMember("Ada Lovelace");
+    const grace = await addMember(ada, "admin");
+    await env.DB.prepare("INSERT INTO billing (person_id, trial_ends, customer_id, subscription_id, status, updated_at) VALUES (?, 0, 'cus_redo', 'sub_1', 'active', 0)").bind(ada.personId).run();
+    const restore = await snapshot();
+    const owner = async () => (await env.DB.prepare("SELECT owner_id FROM workspaces WHERE id = ?").bind(ada.workspaceId).first<{ owner_id: string }>())!.owner_id;
+    const billing = () => env.DB.prepare("SELECT customer_id FROM billing WHERE person_id = ?").bind(ada.personId).first();
+
+    const first = fakeStripe([subscription("cus_redo", "active", 1_800_000_000)]);
+    await perform(env.DB, ada, { type: "account.delete", confirm: await emailOf(ada.personId) }, T, undefined, FILES, chargingOf(settings));
+    expect(first.map((s) => `${s.method} ${s.path}`)).toEqual(["GET /v1/subscriptions", "DELETE /v1/subscriptions/sub_1"]);
+    expect(await owner()).toBe(grace.personId);
+
+    await restore();
+    // The snapshot only puts back rows that went, so the workspace's owner is put back as the restore of the database would.
+    await env.DB.prepare("UPDATE workspaces SET owner_id = ? WHERE id = ?").bind(ada.personId, ada.workspaceId).run();
+    expect([await owner(), await billing()], "the restore brought back her ownership and her billing row").toEqual([ada.personId, { customer_id: "cus_redo" }]);
+
+    const again = fakeStripe([subscription("cus_redo", "canceled", 1_800_000_000)]);
+    expect((await redo({ accounts: [ada.personId] }, settings)).body).toEqual([{ kind: "account", id: ada.personId, redone: "deleted" }]);
+    expect(again.map((s) => `${s.method} ${s.path}`), "Stripe is asked, and its cancelled subscription left alone").toEqual(["GET /v1/subscriptions"]);
+    expect([await owner(), await billing()]).toEqual([grace.personId, null]);
+  });
+
+  it("leaves the account, and says why, when Stripe won't cancel", async () => {
+    const settings = { ...env, ...STRIPE } as unknown as Env;
+    const ada = await newMember("Ada Lovelace");
+    await env.DB.prepare("INSERT INTO billing (person_id, trial_ends, customer_id, subscription_id, status, updated_at) VALUES (?, 0, 'cus_stuck_redo', 'sub_1', 'active', 0)").bind(ada.personId).run();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    fakeStripe([subscription("cus_stuck_redo", "active", 1_800_000_000)], { refuse: { path: "/v1/subscriptions/sub_1", message: "Try later" } });
+    expect((await redo({ accounts: [ada.personId] }, settings)).body).toEqual([
+      { kind: "account", id: ada.personId, redone: "refused: Your subscription couldn't be cancelled, so your account wasn't deleted. Try again, or write to support@commonink.app." },
+    ]);
+    expect((await whoAmI(env.DB, ada.personId)).workspaces.map((w) => w.name)).toEqual(["Ada's workspace"]);
   });
 });
 

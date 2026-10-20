@@ -9,6 +9,7 @@ import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
 import { MAX_OP_BYTES, TooLarge, cappedJson } from "./body.ts";
+import { chargingOf, handleBillingApi, handleStripeWebhook } from "./billing.ts";
 import { handleClipper, handleClipperApi } from "./clipper.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
@@ -71,10 +72,17 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
   const personId = await sessionPersonId(req, env, url);
   if (!personId) return json({ error: "signed_out" }, 401);
 
+  if (url.pathname === "/api/billing" || url.pathname.startsWith("/api/billing/")) {
+    // Each POST here asks Stripe for something, so it counts against the person's operations.
+    const busy = req.method === "POST" && (await overLimit(env, url, "OPS_LIMIT", personId));
+    if (busy) return busy;
+    return handleBillingApi(req, env, url, personId);
+  }
+
   if (url.pathname === "/api/me" && req.method === "GET") {
     // Opening the app is arriving: an invite made since the person signed in takes effect here.
     await arrive(env.DB, personId);
-    return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
+    return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url), chargingOf(env))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
   }
 
   // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
@@ -117,7 +125,7 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
     trace.op = opName((op as { type?: unknown } | null)?.type);
     if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, a part of one at the address upload.start gives, and an export's at the addresses export.plan gives" }, 400);
     try {
-      return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
+      return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }, chargingOf(env)));
     } catch (err) {
       if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
       throw err;
@@ -171,7 +179,7 @@ async function route(req: Request, env: Env, url: URL, trace: Trace, tell: (repo
   if (redo && req.method === "POST") {
     return answered(trace, async () => {
       try {
-        const done = await redoRequested({ db: env.DB, bucket: env.FILES, sources: sourcesFor(env, url), now: Date.now() }, redo[1]!);
+        const done = await redoRequested({ db: env.DB, bucket: env.FILES, sources: sourcesFor(env, url), charging: chargingOf(env), now: Date.now() }, redo[1]!);
         return done ? json(done) : json({ error: "not_found" }, 404);
       } catch (err) {
         if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
@@ -189,6 +197,8 @@ async function route(req: Request, env: Env, url: URL, trace: Trace, tell: (repo
   const broke = () => json({ error: "unknown", message: BROKE }, 500);
   if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(trace, () => handleAgentsApi(req, env, url), broke);
   if (url.pathname === "/api/clipper" || url.pathname.startsWith("/api/clipper/")) return answered(trace, () => handleClipperApi(req, env, url), broke);
+  // Stripe's webhook has no session, and is signed instead.
+  if (url.pathname === "/api/stripe/webhook") return answered(trace, () => handleStripeWebhook(req, env), broke);
   if (url.pathname === "/api/oauth/request" || url.pathname === "/api/oauth/consent" || url.pathname === "/api/oauth/deny") return answered(trace, () => handleOAuthConsent(req, env, url), broke);
   if (url.pathname === "/api/faults") return answered(trace, () => handleClientFault(req, env, url, tell), broke);
   if (url.pathname.startsWith("/api/")) return answered(trace, () => handleApi(req, env, url, trace), broke);

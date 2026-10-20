@@ -1,4 +1,6 @@
 import { sightOf, type GrantLevel, type Reaching, type Sight } from "./access.ts";
+import type { Charging } from "./billing.ts";
+import { readOnlyOf } from "./plans.ts";
 import { OpError, type Role, type Standing as StandingName } from "./protocol.ts";
 import { linkHash } from "./linkSeal.ts";
 
@@ -15,6 +17,8 @@ export interface Standing {
   /** What they are called when they are refused: "A viewer", "A guest". */
   as: StandingName | "link";
   sight: Sight;
+  /** True while the workspace's owner's plan has lapsed. Their role and grants were then taken as a viewer's, unless the operation protects. */
+  readOnly: boolean;
 }
 
 interface GrantRow {
@@ -37,18 +41,23 @@ const MOST: Record<Role, Standing["most"]> = { admin: "manage", editor: "edit", 
  * Where a person stands in a workspace: as a member with a role, or as a guest, whom at least one
  * grant names. Null for anyone else, and that says nothing about whether there is such a workspace.
  * `limit` is the folders an agent acting for them is limited to: its sight is theirs, less what is
- * outside those.
+ * outside those. While billing is on and the workspace's owner's plan has lapsed, everyone in it
+ * stands there as a viewer, whatever their role or grant, and so does every agent and plugin acting for them.
+ * For an operation that `protects`, which only takes access away, they stand where they really do.
  */
-export async function standingIn(db: D1Database, personId: string, workspaceId: string, limit: readonly string[] | null = null): Promise<Standing | null> {
+export async function standingIn(db: D1Database, personId: string, workspaceId: string, limit: readonly string[] | null = null, charging: Charging | null = null, now = Date.now(), protects = false): Promise<Standing | null> {
   const [who, granted] = await db.batch<{ name: string; role: Role | null } & GrantRow>([
     // A workspace being deleted is no workspace to anyone, though its members are already gone: this says so whatever is still there.
     db.prepare("SELECT p.name, m.role FROM people p LEFT JOIN members m ON m.person_id = p.id AND m.workspace_id = ?2 WHERE p.id = ?1 AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = ?2 AND w.deleting_at IS NOT NULL)").bind(personId, workspaceId),
     db.prepare("SELECT note_id, folder_id, upload_id, access FROM grants WHERE workspace_id = ?2 AND person_id = ?1 AND kind = 'person'").bind(personId, workspaceId),
   ]);
   const person = who!.results[0];
-  const grants = granted!.results;
-  if (!person || (!person.role && !grants.length)) return null;
-  const { role, name } = person;
+  if (!person || (!person.role && !granted!.results.length)) return null;
+  const readOnly = (await readOnlyOf(db, [workspaceId], charging, now)).has(workspaceId);
+  const asViewer = readOnly && !protects;
+  const role = asViewer && person.role ? "viewer" : person.role;
+  const grants = asViewer ? granted!.results.map((g) => ({ ...g, access: "view" as const })) : granted!.results;
+  const { name } = person;
   // A member with no grant on a folder sees every folder, so there is nothing to work out from them.
   const parents = !role || limit || grants.some((g) => g.folder_id !== null) ? await folderParents(db, workspaceId) : new Map<string, string | null>();
   return {
@@ -59,6 +68,7 @@ export async function standingIn(db: D1Database, personId: string, workspaceId: 
     most: role ? MOST[role] : grants.some((g) => g.access === "edit") ? "edit" : "view",
     as: role ?? "guest",
     sight: sightOf({ personId, role }, grants.map(reaching), parents, limit),
+    readOnly,
   };
 }
 
@@ -81,5 +91,5 @@ export async function standingByLink(db: D1Database, token: string, personId: st
   if (!link) throw new OpError("not_found", NO_SUCH_LINK);
   if (link.kind === "signed_in" && !personId) throw new OpError("forbidden", SIGN_IN_FIRST);
   const parents = link.folder_id !== null ? await folderParents(db, link.workspace_id) : new Map<string, string | null>();
-  return { workspaceId: link.workspace_id, personId: null, name: "", role: null, most: "view", as: "link", sight: sightOf({ personId: null, role: null }, [reaching(link)], parents) };
+  return { workspaceId: link.workspace_id, personId: null, name: "", role: null, most: "view", as: "link", sight: sightOf({ personId: null, role: null }, [reaching(link)], parents), readOnly: false };
 }

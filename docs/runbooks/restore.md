@@ -239,7 +239,7 @@ Use this when the whole database is wrong: a migration that damaged data, or a w
    node scripts/redo-deletions.ts --since "$T"
    ```
 
-   Each line is `<kind> <id>: <what happened>`. `deleted` is gone now. `deleting` is cut off, and the hourly job erases the rest. `gone` was gone already. `refused: ...` is an account whose person was the only admin of a shared workspace at the restore point; the script exits with 1, and that one needs a person to decide. Running it again is safe.
+   Each line is `<kind> <id>: <what happened>`. `deleted` is gone now. `deleting` is cut off, and the hourly job erases the rest. `gone` was gone already. `refused: ...` is an account whose person was the only admin of a shared workspace at the restore point, which needs a person to decide, or one whose subscription Stripe wouldn't cancel, which a second run tries again; the script exits with 1 for either. Running it again is safe.
 
    As a check, compare `kept-before.json` with a fresh `kept-after.json`, as for uploads above. An id printed there that the script didn't list is a deletion whose record wasn't kept (the Worker logs "Couldn't keep the record of a deletion"). Pass it with `--account <id>` if it is in `people`, else with `--workspace <id>`. Both flags can be given more than once.
 

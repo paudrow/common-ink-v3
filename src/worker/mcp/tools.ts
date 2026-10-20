@@ -1,4 +1,5 @@
 import { whoAmI } from "../../core/accounts.ts";
+import type { Charging } from "../../core/billing.ts";
 import { timeIn } from "../../core/history.ts";
 import { PRIOR_WRITE, agentActor, isReadOnlyOp, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
 import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
@@ -1191,10 +1192,11 @@ function withTimes(value: unknown, written: (time: number) => string, times: Rea
   );
 }
 
-/** Where a tool call came to: the server's own address, and the bucket a file sent with upload_file goes to. */
+/** Where a tool call came to: the server's own address, the bucket a file sent with upload_file goes to, and whether billing is on. */
 export interface Reached {
   origin: string;
   bucket: R2Bucket | null;
+  charging: Charging | null;
 }
 
 /** A small file's bytes from base64, or null for what isn't base64. */
@@ -1208,7 +1210,7 @@ function fromBase64(given: unknown): Uint8Array | null {
 }
 
 /** Runs a tool as `agent`. Failures the agent can act on come back as an error result, not a protocol error. */
-export async function callTool(db: D1Database, agent: Caller, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null }): Promise<ToolResult | null> {
+export async function callTool(db: D1Database, agent: Caller, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null, charging: null }): Promise<ToolResult | null> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return null;
   if (!reaches(agent, name)) return text(`forbidden: The clipper can only list workspaces and folders and create notes. ${name} is for agents`, true);
@@ -1219,7 +1221,7 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       if (!SCOPES.includes(fields.scope as Scope)) throw new OpError("invalid", `scope is ${SCOPES.join(", ")}`);
       return text(queryLanguage(fields.scope as Scope));
     }
-    const me = await whoAmI(db, agent.personId);
+    const me = await whoAmI(db, agent.personId, false, reached.charging);
     // A token pinned to one workspace sees only that one, as if the member belonged to no other.
     if (agent.workspaceId) me.workspaces = me.workspaces.filter((w) => w.id === agent.workspaceId);
     if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces, readOnly: agent.readOnly, folderIds: agent.folderIds });
@@ -1239,7 +1241,7 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       const bytes = fromBase64(base64);
       if (!bytes?.byteLength) throw new OpError("invalid", "base64 isn't a file's bytes in base64");
       if (bytes.byteLength > MAX_INLINE_UPLOAD_BYTES) throw new OpError("invalid", `upload_file takes at most ${MAX_INLINE_UPLOAD_BYTES / 1024 / 1024} MB. Send a larger file with start_upload`);
-      const upload = await perform(db, actor, { type: "upload.create", name: fileName as string, size: bytes.byteLength, ...(folderId === undefined ? {} : { folderId: folderId as string }), ...(writeId === undefined ? {} : { writeId: writeId as string }) }, Date.now(), sources, { bucket: reached.bucket, body: new Response(bytes).body });
+      const upload = await perform(db, actor, { type: "upload.create", name: fileName as string, size: bytes.byteLength, ...(folderId === undefined ? {} : { folderId: folderId as string }), ...(writeId === undefined ? {} : { writeId: writeId as string }) }, Date.now(), sources, { bucket: reached.bucket, body: new Response(bytes).body }, reached.charging);
       return written(withLine(upload));
     }
     if (agent.clipper && name === "create_note" && typeof fields.writeId === "string") {
@@ -1249,7 +1251,7 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       const prior = await db.prepare(PRIOR_WRITE).bind(fields.writeId, workspaceId, "member", agent.personId).first<{ id: string }>();
       if (prior) return text({ id: prior.id });
     }
-    const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
+    const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket }, reached.charging);
     return written(tool.told ? tool.told(answer as never, reached.origin) : answer);
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${namedAsTold(tool, err.message)}`, true);

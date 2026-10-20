@@ -19,6 +19,8 @@ export interface Asking {
 const STILL_ADMIN = "EXISTS (SELECT 1 FROM members a WHERE a.workspace_id = ?1 AND a.person_id = ?2 AND a.role = 'admin')";
 const anotherAdminThan = (member: "?2" | "?3") => `EXISTS (SELECT 1 FROM members o WHERE o.workspace_id = ?1 AND o.role = 'admin' AND o.person_id <> ${member})`;
 const ANOTHER_ADMIN = anotherAdminThan("?3");
+/** The workspace is kept payable by its owner, so they stay in it, and an admin of it, until there is a way to hand it over. */
+const notOwner = (member: "?2" | "?3") => `NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = ?1 AND w.owner_id = ${member})`;
 
 /**
  * Takes back the pending invites of a person who is no longer an admin of the workspace, and none
@@ -49,22 +51,30 @@ const released = ({ db, workspaceId, personId, now }: Asking, memberId: string, 
     .bind(workspaceId, personId, memberId, now);
 
 const LAST_ADMIN = "A workspace needs an admin. Make someone else an admin first.";
+const OWNER_STAYS = "You pay for this workspace, so you can't leave it yet. Write to support@commonink.app to hand it to another admin.";
+const ownerStays = (name: string) => `${name} pays for this workspace, so they can't be removed yet.`;
+const ownerAdmin = (name: string) => `${name} pays for this workspace, so they stay an admin.`;
 const ownsPrivate = (notes: number, trashed: number) =>
   `You have ${notes === 1 ? "a private note" : `${notes} private notes`} here besides your daily notes, which nobody else can reach. Stop ${notes === 1 ? "it" : "them"} being private first, so ${notes === 1 ? "it isn't" : "they aren't"} left with nobody.${trashed ? " Look in Trash too." : ""}`;
 /** A private note that is not one of its owner's daily notes, which go to the workspace when the owner leaves. */
 const KEPT_PRIVATE = "n.workspace_id = ?1 AND n.private_owner = ?2 AND n.id NOT IN (SELECT d.note_id FROM daily_notes d WHERE d.workspace_id = ?1 AND d.person_id = ?2)";
 
-/** Why a statement that changes a member changed nothing. */
-async function refusal({ db, workspaceId, personId }: Asking, doing: string, memberId: string, needs: "admin" | "member" = "admin"): Promise<OpError> {
+/**
+ * Why a statement that changes a member changed nothing. `owned` is what to say when the member is
+ * the workspace's owner, for a change that keeps them in it.
+ */
+async function refusal({ db, workspaceId, personId }: Asking, doing: string, memberId: string, needs: "admin" | "member" = "admin", owned?: (name: string) => string): Promise<OpError> {
   const { results } = await db
-    .prepare("SELECT person_id, role FROM members WHERE workspace_id = ? AND person_id IN (?, ?)")
+    .prepare("SELECT m.person_id, m.role, p.name, w.owner_id = m.person_id AS owns FROM members m JOIN people p ON p.id = m.person_id JOIN workspaces w ON w.id = m.workspace_id WHERE m.workspace_id = ? AND m.person_id IN (?, ?)")
     .bind(workspaceId, personId, memberId)
-    .all<{ person_id: string; role: Role }>();
+    .all<{ person_id: string; role: Role; name: string; owns: number | null }>();
   const asking = results.find((r) => r.person_id === personId);
   if (!asking) return new OpError("not_found", NO_SUCH_WORKSPACE);
   if (needs === "admin" && asking.role !== "admin") return new OpError("forbidden", `A ${asking.role} can't ${doing}`);
   if (doing === "member.remove" && memberId === personId) return new OpError("invalid", "Use Leave to leave a workspace");
-  if (!results.some((r) => r.person_id === memberId)) return new OpError("not_found", "No such member");
+  const member = results.find((r) => r.person_id === memberId);
+  if (!member) return new OpError("not_found", "No such member");
+  if (owned && member.owns) return new OpError("invalid", owned(member.name));
   const kept = needs === "member" ? await db.prepare(`SELECT COUNT(*) AS notes, COALESCE(SUM(n.state = 'trashed'), 0) AS trashed FROM notes n WHERE ${KEPT_PRIVATE}`).bind(workspaceId, personId).first<{ notes: number; trashed: number }>() : null;
   if (kept?.notes) return new OpError("invalid", ownsPrivate(kept.notes, kept.trashed));
   return new OpError("invalid", LAST_ADMIN);
@@ -84,10 +94,10 @@ const loadMember = (db: D1Database, workspaceId: string, memberId: string) =>
 export async function setRole(asking: Asking, memberId: string, role: Role): Promise<Member> {
   const { db, workspaceId, personId } = asking;
   const [changed] = await db.batch([
-    db.prepare(`UPDATE members SET role = ?4 WHERE workspace_id = ?1 AND person_id = ?3 AND ${STILL_ADMIN} AND (?4 = 'admin' OR role <> 'admin' OR ${ANOTHER_ADMIN})`).bind(workspaceId, personId, memberId, role),
+    db.prepare(`UPDATE members SET role = ?4 WHERE workspace_id = ?1 AND person_id = ?3 AND ${STILL_ADMIN} AND (?4 = 'admin' OR ((role <> 'admin' OR ${ANOTHER_ADMIN}) AND ${notOwner("?3")}))`).bind(workspaceId, personId, memberId, role),
     orphaned(asking, { id: memberId }),
   ]);
-  if (!changed!.meta.changes) throw await refusal(asking, "member.setRole", memberId);
+  if (!changed!.meta.changes) throw await refusal(asking, "member.setRole", memberId, "admin", ownerAdmin);
   const member = await loadMember(db, workspaceId, memberId);
   // Taken out between the two statements: the role was theirs for that moment.
   if (!member) throw new OpError("not_found", "No such member");
@@ -98,7 +108,7 @@ export async function removeMember(asking: Asking, memberId: string): Promise<{ 
   const { db, workspaceId, personId } = asking;
   const [removed] = await db.batch([
     // Leaving is `leave`'s, which first asks that nothing private of theirs is left with nobody.
-    db.prepare(`DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?3 AND ?3 <> ?2 AND ${STILL_ADMIN} AND (role <> 'admin' OR ${ANOTHER_ADMIN})`).bind(workspaceId, personId, memberId),
+    db.prepare(`DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?3 AND ?3 <> ?2 AND ${STILL_ADMIN} AND (role <> 'admin' OR ${ANOTHER_ADMIN}) AND ${notOwner("?3")}`).bind(workspaceId, personId, memberId),
     orphaned(asking, { id: memberId }),
     ungranted(asking, memberId),
     released(asking, memberId),
@@ -108,7 +118,7 @@ export async function removeMember(asking: Asking, memberId: string): Promise<{ 
     // Nor is anything they turned on: added again, they decide again.
     trustOfTheGone(db, workspaceId, memberId),
   ]);
-  if (!removed!.meta.changes) throw await refusal(asking, "member.remove", memberId);
+  if (!removed!.meta.changes) throw await refusal(asking, "member.remove", memberId, "admin", ownerStays);
   return { memberId };
 }
 
@@ -151,16 +161,16 @@ export async function signOut(asking: Asking, memberId: string, agents: boolean)
 }
 
 /**
- * Anyone may leave, except the workspace's only admin, and except while they have private notes:
- * those are theirs to hand to the workspace, by stopping them being private, before they go. Their
- * daily notes are the exception. They are released as a removed member's private notes are.
+ * Anyone may leave, except the workspace's owner, its only admin, and anyone while they have private
+ * notes: those are theirs to hand to the workspace, by stopping them being private, before they go.
+ * Their daily notes are the exception. They are released as a removed member's private notes are.
  */
 export async function leave(asking: Asking): Promise<{ memberId: string }> {
   const { db, workspaceId, personId } = asking;
   const [left] = await db.batch([
     db
       .prepare(
-        `DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?2 AND (role <> 'admin' OR ${anotherAdminThan("?2")})
+        `DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?2 AND (role <> 'admin' OR ${anotherAdminThan("?2")}) AND ${notOwner("?2")}
            AND NOT EXISTS (SELECT 1 FROM notes n WHERE ${KEPT_PRIVATE})`,
       )
       .bind(workspaceId, personId),
@@ -173,7 +183,7 @@ export async function leave(asking: Asking): Promise<{ memberId: string }> {
     draftsOfTheGone(db, workspaceId, personId),
     trustOfTheGone(db, workspaceId, personId),
   ]);
-  if (!left!.meta.changes) throw await refusal(asking, "member.leave", personId, "member");
+  if (!left!.meta.changes) throw await refusal(asking, "member.leave", personId, "member", () => OWNER_STAYS);
   return { memberId: personId };
 }
 

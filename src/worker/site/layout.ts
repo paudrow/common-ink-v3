@@ -7,6 +7,8 @@ export interface Visit {
   origin: string;
   /** Where Sign in goes, back to `/` once it is done. */
   signIn: string;
+  /** Whether this Common Ink charges, so anyone can sign in for a trial. Off, it is early access. */
+  billing: boolean;
 }
 
 /** The docs' pages in the order they are read, under the headings they are grouped by. */
@@ -101,7 +103,7 @@ ${FONTS.map((font) => `<link rel="preload" href="/fonts/${font}.woff2" as="font"
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-head">
   <a class="brand" href="/">${MARK}${NAME}</a>
-  <nav aria-label="Site"><a class="head-link" href="/docs">Docs</a>${wayIn(visit, "head-link")}</nav>
+  <nav aria-label="Site"><a class="head-link" href="/docs">Docs</a><a class="head-link" href="/pricing">Pricing</a>${wayIn(visit, "head-link")}</nav>
 </header>
 <main id="main">
 ${main}
@@ -110,6 +112,7 @@ ${main}
   <a class="brand" href="/">${MARK}${NAME}</a>
   <nav aria-label="Docs, legal and contact">
     <a href="/docs">Docs</a>
+    <a href="/pricing">Pricing</a>
     <a href="/privacy">Privacy</a>
     <a href="/terms">Terms</a>
     <a href="https://github.com/paudrow/common-ink-v3/blob/main/SECURITY.md">Security</a>

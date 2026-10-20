@@ -71,11 +71,20 @@ describe("the site, for visitors", () => {
     expect([res.status, res.text, res.headers.get("Content-Type"), res.headers.get("Cache-Control"), res.headers.get("Vary")]).toEqual([200, "", "text/html; charset=utf-8", "no-store", "Cookie"]);
   });
 
+  it("prices the plan on /pricing, offering the trial only where this Common Ink charges", async () => {
+    const off = await send("/pricing");
+    expect([off.status, off.text.includes("free during early access"), off.text.includes("No card needed")]).toEqual([200, true, false]);
+    const stripe = { STRIPE_SECRET_KEY: "sk_test", STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_PRICE_MONTH: "price_m", STRIPE_PRICE_YEAR: "price_y" };
+    const on = await worker.fetch(new Request(`${ORIGIN}/pricing`) as never, { ...env, SESSION_SECRET: SECRET, ...stripe });
+    const text = await on.text();
+    expect([text.includes("Start with a 14-day free trial. No card needed."), text.includes("$8<span> a month</span>"), text.includes("$60<span> a year</span>")]).toEqual([true, true, true]);
+  });
+
   it("lists every page once in the sitemap, at the address it is asked from, and the landing at /", async () => {
     const res = await send(SITEMAP_PATH);
     expect([res.status, res.headers.get("Content-Type")]).toEqual([200, "application/xml; charset=utf-8"]);
     const locs = [...res.text.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
-    expect(locs.slice(0, 3)).toEqual(["https://ink.test/", "https://ink.test/privacy", "https://ink.test/terms"]);
+    expect(locs.slice(0, 4)).toEqual(["https://ink.test/", "https://ink.test/pricing", "https://ink.test/privacy", "https://ink.test/terms"]);
     expect(locs).toEqual(expect.arrayContaining(["https://ink.test/docs", "https://ink.test/docs/agents", "https://ink.test/docs/mcp-tools"]));
     expect(new Set(locs).size).toBe(locs.length);
   });

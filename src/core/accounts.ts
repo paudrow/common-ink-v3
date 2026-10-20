@@ -1,4 +1,6 @@
 import { allows, itemLevel } from "./access.ts";
+import type { Charging } from "./billing.ts";
+import { readOnlyOf } from "./plans.ts";
 import { newId } from "./ids.ts";
 import type { Me, Standing } from "./protocol.ts";
 import { MAKER_SHARES } from "./sharing.ts";
@@ -105,28 +107,29 @@ async function createFirstWorkspace(db: D1Database, adminId: string, name: strin
   const unsortedId = newId();
   await db.batch([
     db
-      .prepare("INSERT INTO workspaces (id, name, unsorted_folder_id, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM members WHERE person_id = ?)")
+      .prepare("INSERT INTO workspaces (id, name, unsorted_folder_id, created_at, owner_id) SELECT ?1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS (SELECT 1 FROM members WHERE person_id = ?5)")
       .bind(workspaceId, name, unsortedId, now, adminId),
     db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) SELECT ?, id, NULL, 'Unsorted', 'unsorted' FROM workspaces WHERE id = ?").bind(unsortedId, workspaceId),
     db.prepare("INSERT INTO members (workspace_id, person_id, role, joined_at) SELECT id, ?, 'admin', ? FROM workspaces WHERE id = ?").bind(adminId, now, workspaceId),
   ]);
 }
 
-/** `dev` is the Worker's to say: whether this is a place where dev sign-in is on. */
-export async function whoAmI(db: D1Database, personId: string, dev = false): Promise<Me> {
+/** `dev` and `charging` are the Worker's to say: whether this is a place where dev sign-in is on, and whether billing is. */
+export async function whoAmI(db: D1Database, personId: string, dev = false, charging: Charging | null = null, now = Date.now()): Promise<Me> {
   const person = await db.prepare("SELECT id, email, name FROM people WHERE id = ?").bind(personId).first<Me["person"]>();
   if (!person) throw new Error(`no person ${personId}`);
   // The workspaces they are a member of, in the order they came to them, then those they are a guest in.
   const { results } = await db
     .prepare(
-      `SELECT w.id, w.name, COALESCE(m.role, 'guest') AS role FROM workspaces w
+      `SELECT w.id, w.name, COALESCE(m.role, 'guest') AS role, w.owner_id IS ?1 AS owned FROM workspaces w
        LEFT JOIN members m ON m.workspace_id = w.id AND m.person_id = ?1
        WHERE m.person_id IS NOT NULL OR EXISTS (SELECT 1 FROM grants g WHERE g.workspace_id = w.id AND g.person_id = ?1 AND g.kind = 'person')
        ORDER BY m.person_id IS NULL, m.joined_at, w.created_at, w.name`,
     )
     .bind(personId)
-    .all<{ id: string; name: string; role: Standing }>();
-  return { person, workspaces: results, dev };
+    .all<{ id: string; name: string; role: Standing; owned: number }>();
+  const readOnly = await readOnlyOf(db, results.map((w) => w.id), charging, now);
+  return { person, workspaces: results.map(({ owned, ...w }) => ({ ...w, ...(readOnly.has(w.id) && { readOnly: true }), ...(owned === 1 && { owned: true }) })), dev };
 }
 
 /**

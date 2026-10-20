@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { signIn, whoAmI } from "../../src/core/accounts.ts";
 
 describe("signing in", () => {
-  it("creates a workspace on first sign-in, where the person is admin", async () => {
+  it("creates a workspace on first sign-in, where the person is admin and its owner", async () => {
     const { personId } = await signIn(env.DB, { email: "ada@example.com", name: "Ada Lovelace" });
 
     const me = await whoAmI(env.DB, personId);
 
     expect(me.person).toEqual({ id: personId, email: "ada@example.com", name: "Ada Lovelace" });
-    expect(me.workspaces).toEqual([{ id: expect.any(String), name: "Ada's workspace", role: "admin" }]);
+    expect(me.workspaces).toEqual([{ id: expect.any(String), name: "Ada's workspace", role: "admin", owned: true }]);
   });
 
   it("returns to the same workspace on later sign-ins", async () => {

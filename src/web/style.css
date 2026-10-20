@@ -12167,3 +12167,15 @@ button.crumb[aria-expanded="true"] {
   font-size: calc(12px * var(--text-scale));
   white-space: pre-wrap;
 }
+
+/* Where the person's plan stands, in Settings under Plan. */
+.plan-line {
+  margin: 0;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.plan-owns {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: calc(13px * var(--text-scale));
+}
