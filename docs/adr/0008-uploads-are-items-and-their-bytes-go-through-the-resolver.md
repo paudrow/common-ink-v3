@@ -39,7 +39,7 @@ We considered serving bytes from the separate embed origin (`EMBED_ORIGIN`). A s
 
 ## Limits
 
-(Superseded by ADR 9: 25 GB a file, sent in parts, and no limit to a workspace's uploads.) 50 MB a file, checked against the declared length before a byte is read and enforced while streaming (the bucket is handed exactly the declared number of bytes). 1 GB a workspace, counted in the statement that makes the row, uploads in Trash included; at the cap an upload is refused and the message says to delete some for good.
+(Superseded by ADR 13: 25 GB a file, sent in parts, and no limit to a workspace's uploads.) 50 MB a file, checked against the declared length before a byte is read and enforced while streaming (the bucket is handed exactly the declared number of bytes). 1 GB a workspace, counted in the statement that makes the row, uploads in Trash included; at the cap an upload is refused and the message says to delete some for good.
 
 ## Two stores, no transaction
 
