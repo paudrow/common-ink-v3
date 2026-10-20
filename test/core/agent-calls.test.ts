@@ -158,6 +158,106 @@ describe("a listing an agent pages through", () => {
   });
 });
 
+describe("reading lines of a note, numbered as edit_note counts them", () => {
+  it("shows only the lines asked for, each after its number, and where they are in the note", async () => {
+    const { agent } = await connected();
+    const made = await agent.json("create_note", { text: "# T\na\nb\nc\n" });
+    const read = (args: Record<string, unknown>) => agent.json("read_note", { noteId: made.id, ...args });
+
+    expect((await read({ numbered: true })).text).toBe("0\t# T\n1\ta\n2\tb\n3\tc");
+    expect(await read({ lines: { from: 1, to: 3 } })).toMatchObject({ text: "a\nb", lines: { from: 1, to: 3, of: 4 } });
+    expect(await read({ lines: { from: 1, to: 3 }, numbered: true })).toMatchObject({ text: "1\ta\n2\tb", lines: { from: 1, to: 3, of: 4 } });
+    expect(await read({ lines: { from: 2, to: 99 } })).toMatchObject({ text: "b\nc", lines: { from: 2, to: 4, of: 4 } });
+    expect(await read({ lines: { from: 10, to: 12 } })).toMatchObject({ text: "", lines: { from: 4, to: 4, of: 4 } });
+    expect(await read({ lines: { from: 2, to: 2 }, numbered: true })).toMatchObject({ text: "", lines: { from: 2, to: 2, of: 4 } });
+  });
+
+  it("gives numbers that edit_note changes exactly those lines by", async () => {
+    const { agent } = await connected();
+    const made = await agent.json("create_note", { text: "# T\na\nb\nc\n" });
+    const read = await agent.json("read_note", { noteId: made.id, lines: { from: 2, to: 3 }, numbered: true });
+    const [number, line] = read.text.split("\t");
+    expect([number, line]).toEqual(["2", "b"]);
+
+    const edited = await agent.json("edit_note", { noteId: made.id, baseRevision: read.revision, edits: [{ from: Number(number), to: Number(number) + 1, text: line.toUpperCase() }] });
+
+    expect(edited.text).toBe("# T\na\nB\nc\n");
+
+    const end = await agent.json("read_note", { noteId: made.id, lines: { from: 99, to: 99 } });
+    expect(end.lines).toEqual({ from: 4, to: 4, of: 4 });
+    const appended = await agent.json("edit_note", { noteId: made.id, baseRevision: end.revision, edits: [{ from: end.lines.from, to: end.lines.to, text: "d" }] });
+    expect(appended.text).toBe("# T\na\nB\nc\nd\n");
+  });
+
+  it("counts no lines in an empty note", async () => {
+    const { agent } = await connected();
+    const made = await agent.json("create_note", { text: "" });
+    expect(await agent.json("read_note", { noteId: made.id, lines: { from: 0, to: 5 }, numbered: true })).toMatchObject({ text: "", lines: { from: 0, to: 0, of: 0 } });
+  });
+
+  it("pads every number to the widest shown", async () => {
+    const { agent } = await connected();
+    const made = await agent.json("create_note", { text: ["# Twelve", ...Array.from({ length: 11 }, (_, i) => `line ${i + 1}`)].join("\n") });
+    const lines = (await agent.json("read_note", { noteId: made.id, numbered: true })).text.split("\n");
+    expect([lines.length, lines[0], lines[9], lines[11]]).toEqual([12, " 0\t# Twelve", " 9\tline 9", "11\tline 11"]);
+    expect((await agent.json("read_note", { noteId: made.id, numbered: true, lines: { from: 8, to: 10 } })).text).toBe("8\tline 8\n9\tline 9");
+  });
+
+  it("reads the lines of the revision asked for, and the whole note's links whatever lines are shown", async () => {
+    const { agent } = await connected();
+    const target = await agent.json("create_note", { text: "# Target" });
+    const made = await agent.json("create_note", { text: `# T\n[[${target.id}]]\nb` });
+    await agent.json("edit_note", { noteId: made.id, baseRevision: 1, edits: [{ from: 2, to: 3, text: "B" }] });
+
+    const old = await agent.json("read_note", { noteId: made.id, revision: 1, lines: { from: 2, to: 3 }, numbered: true });
+
+    expect(old).toMatchObject({ revision: 1, text: "2\tb", lines: { from: 2, to: 3, of: 3 } });
+    expect(old.links.map((link: { id: string }) => link.id)).toEqual([target.id]);
+    expect((await agent.json("read_note", { noteId: made.id, lines: { from: 2, to: 3 } })).text).toBe("B");
+  });
+
+  it("answers as it always did when neither is passed", async () => {
+    const { agent } = await connected();
+    const made = await agent.json("create_note", { text: "# T\na\nb\nc\n" });
+
+    const plain = await agent.call("read_note", { noteId: made.id });
+
+    expect(plain).toEqual(await agent.call("read_note", { noteId: made.id, numbered: false }));
+    expect(JSON.parse(plain.text).text).toBe("# T\na\nb\nc\n");
+    expect(Object.keys(JSON.parse(plain.text))).not.toContain("lines");
+  });
+
+  it("refuses a range that runs backwards or before the first line, and a numbered that isn't true or false", async () => {
+    const { agent } = await connected();
+    const made = await agent.json("create_note", { text: "# T\na" });
+
+    expect(await agent.call("read_note", { noteId: made.id, lines: { from: 3, to: 1 } })).toEqual({ isError: true, text: 'invalid: lines is { from, to }: whole numbers counted from 0 as edit_note counts them, with to at least from and not included. {"from":3,"to":1} isn\'t' });
+    expect(await agent.call("read_note", { noteId: made.id, lines: { from: -1, to: 1 } })).toMatchObject({ isError: true, text: expect.stringMatching(/^invalid: lines is \{ from, to \}.* \{"from":-1,"to":1\} isn't$/) });
+    expect(await agent.call("read_note", { noteId: made.id, lines: { from: 1 } })).toMatchObject({ isError: true, text: expect.stringMatching(/^invalid: lines is/) });
+    expect(await agent.call("read_note", { noteId: made.id, numbered: "yes" })).toEqual({ isError: true, text: "invalid: numbered is true or false" });
+  });
+
+  it("is asked for by ink read with --from, --to and --numbered", async () => {
+    const asked: unknown[] = [];
+    const said: string[] = [];
+    const io = {
+      env: { INK_TOKEN: "cink_x" },
+      stdin: async () => "",
+      out: (line: string) => said.push(line),
+      fetch: (async (_url: string, init: RequestInit) => {
+        asked.push(JSON.parse(init.body as string).params);
+        return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "{}" }] } });
+      }) as unknown as typeof fetch,
+    };
+
+    expect(await run(["read", "aaaaaaaaaaaa", "--from", "1", "--to", "3", "--numbered", "true"], io)).toBe(0);
+    expect(asked).toEqual([{ name: "read_note", arguments: { noteId: "aaaaaaaaaaaa", numbered: true, lines: { from: 1, to: 3 } } }]);
+    expect(await run(["read", "aaaaaaaaaaaa", "--from", "1"], io)).toBe(2);
+    expect(said.at(-1)).toBe("ink: read needs --from and --to together");
+    expect(asked).toHaveLength(1);
+  });
+});
+
 describe("an agent's arguments", () => {
   it("are taken by the old name of each too: workspace for workspaceId, and id for noteId or folderId", async () => {
     const { ada, agent } = await connected();
@@ -181,7 +281,7 @@ describe("an agent's arguments", () => {
     const tools = await agent.tools();
     const read = tools.find((t) => t.name === "read_note")!;
     expect(read.inputSchema.required).toEqual(["noteId"]);
-    expect(Object.keys(read.inputSchema.properties)).toEqual(["workspaceId", "noteId", "revision"]);
+    expect(Object.keys(read.inputSchema.properties)).toEqual(["workspaceId", "noteId", "revision", "lines", "numbered"]);
     expect(read.description).toMatch(/\n\nExample: \{"noteId":"[a-z0-9]{12}"\}$/);
     expect(tools.every((t) => /\n\nExample: \{.*\}$/.test(t.description))).toBe(true);
   });

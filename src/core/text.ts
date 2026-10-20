@@ -221,7 +221,7 @@ function myers(a: string[], b: string[], maxApart: number): Run[] {
  * The lines of a note, counted from 0. A newline after the last line ends that line, so it is not
  * an empty line of its own. An empty note has no lines. `ended` is whether the note ends with a newline.
  */
-function noteLines(text: string): { lines: string[]; ended: boolean } {
+export function noteLines(text: string): { lines: string[]; ended: boolean } {
   if (text === "") return { lines: [], ended: false };
   const ended = text.endsWith("\n");
   const lines = text.split("\n");
