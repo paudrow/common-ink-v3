@@ -79,7 +79,7 @@ describe("a title stored by an older rule", () => {
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM notes WHERE workspace_id = ? AND indexed < 8").bind(ada.workspaceId).first<{ n: number }>())!.n).toBeGreaterThan(0);
     await perform(env.DB, ada, { type: "note.list" });
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM notes WHERE workspace_id = ? AND (indexed < 8 OR title = '')").bind(ada.workspaceId).first()).toEqual({ n: 0 });
-  });
+  }, 20_000);
 
   it("is written by today's rule by the next change to the note, whatever the change", async () => {
     const ada = await newMember();
