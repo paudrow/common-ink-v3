@@ -925,18 +925,29 @@ export interface Folders {
   pathName(id: string | null): string;
 }
 
+export interface NoticeAction {
+  label: string;
+  run: () => void | Notice | Promise<void | Notice | undefined>;
+}
+
 /** Something the app tells the member in a card in the window's bottom right corner, which goes after a few seconds or when pressed. */
 export interface Notice {
   message: string;
   /** The icon in the card's tile: "info" unless said. */
   icon?: IconName;
   /**
-   * A button beside the message, such as Undo. While what `run` answers is on its way the card stays,
-   * without the button. A notice it answers with is said in the card's place; nothing, and the card goes.
+   * A button beside the message, such as Undo, or a few in a row. While what one's `run` answers is on
+   * its way the card stays, without its buttons. A notice it answers with is said in the card's place;
+   * nothing, and the card goes.
    */
-  action?: { label: string; run: () => void | Notice | Promise<void | Notice | undefined> };
+  action?: NoticeAction | readonly NoticeAction[];
   /** Whether it stays until it is answered, pressed or taken down, as one that says something still true does. */
   stays?: boolean;
+  /**
+   * Whether it holds something the member would lose with it. It goes only by its buttons, never by a
+   * press on it or Escape, and a newer card neither sends it away nor takes its place.
+   */
+  keeps?: boolean;
 }
 
 /** A tab open in the editor area, and which pane it is in: 1 for the first in reading order. */

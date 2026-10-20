@@ -213,7 +213,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         });
         sync.attach(view);
         // A note that took a while to load doesn't take the cursor from a field the member has since gone to, or from a menu opened meanwhile.
-        if (!dismissing() && (!note.text || (now.current.focus && !typingIn(document.activeElement)))) view.focus();
+        if (!dismissing() && !typingIn(document.activeElement) && (!note.text || now.current.focus)) view.focus();
         if (now.current.focus) now.current.onFocused();
       },
       (err: unknown) => {

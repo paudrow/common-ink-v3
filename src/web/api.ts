@@ -1,6 +1,7 @@
 import { partSpan, partsLeft, planParts } from "../core/parts.ts";
 import { tellFault } from "./faults.ts";
 import { NO_SUCH_WORKSPACE, type Agent, type ClipperGrantView, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type SendingUpload, type Shared, type Upload } from "../core/protocol.ts";
+import { forgetAll } from "./stash.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -265,4 +266,7 @@ export const disconnectAgent = (id: string) => request<unknown>(`/api/agents/${i
 export const listClipperGrants = () => request<{ grants: ClipperGrantView[] }>("/api/clipper").then((r) => r.grants);
 export const revokeClipperGrant = (id: string) => request<unknown>(`/api/clipper/${id}`, { method: "DELETE" });
 
-export const signOut = () => fetch("/auth/sign-out", { method: "POST", credentials: "same-origin" });
+export function signOut() {
+  forgetAll();
+  return fetch("/auth/sign-out", { method: "POST", credentials: "same-origin" });
+}

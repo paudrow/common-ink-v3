@@ -60,7 +60,7 @@ export function Toasts({ told, onGone }: { told: readonly Told[]; onGone: (id: n
   );
 }
 
-/** One card. A press on it, or Escape in it, sends it away. Its button's answer, if any, is said in its place. */
+/** One card. A press on it, or Escape in it, sends it away, unless it `keeps`. Its button's answer, if any, is said in its place. */
 function Toast({ notice, leaving: takenDown, onGone }: { notice: Notice; leaving?: boolean; onGone: () => void }) {
   const [said, say] = useState<Notice>(notice);
   const [leaving, setLeaving] = useState(false);
@@ -118,7 +118,7 @@ function Toast({ notice, leaving: takenDown, onGone }: { notice: Notice; leaving
       role="group"
       aria-label="Notice"
       data-leaving={leaving || undefined}
-      onClick={(e) => (e.target as HTMLElement).closest("button") || go()}
+      onClick={(e) => (e.target as HTMLElement).closest("button") || said.keeps || go()}
       onPointerEnter={() => hold("pointer")}
       onPointerLeave={() => release("pointer")}
       onFocus={() => hold("focus")}
@@ -126,15 +126,16 @@ function Toast({ notice, leaving: takenDown, onGone }: { notice: Notice; leaving
       onKeyDown={(e) => {
         if (e.key !== "Escape") return;
         e.stopPropagation();
-        go();
+        if (!said.keeps) go();
       }}
     >
       <span className="toast-icon">
         <Icon name={icon} />
       </span>
       <span className="toast-text">{message}</span>
-      {action && (
+      {[action ?? []].flat().map((action, i) => (
         <button
+          key={i}
           type="button"
           className="toast-action"
           onClick={async (e) => {
@@ -154,7 +155,7 @@ function Toast({ notice, leaving: takenDown, onGone }: { notice: Notice; leaving
         >
           {action.label}
         </button>
-      )}
+      ))}
     </div>
   );
 }

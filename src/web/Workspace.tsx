@@ -3,6 +3,7 @@ import { EditorView } from "@codemirror/view";
 import type { DraftSummary, PluginRecord } from "../core/plugins.ts";
 import { allPages } from "../core/allPages.ts";
 import type { MeHere, Note, NoteSummary, Results, WorkspaceSummary } from "../core/protocol.ts";
+import { summarize } from "../core/markdown.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, readUpload, sendUpload, signOut, uploadAddress } from "./api.ts";
 import { Drawn } from "./Drawn.tsx";
@@ -31,9 +32,10 @@ import { folderPath, keepsATab, routeOf, type Navigate, type Place } from "./rou
 import { documentOf } from "./settings.ts";
 import { JSON_VIEW, ROOT as SETTINGS, Settings, type Account } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
+import { forgetAll } from "./stash.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { isOpen, openInAnotherTab } from "./openNotes.ts";
-import { commitTyping, onFiled, performInSync, saveAll, saveNow, undoOrRedo } from "./sync.ts";
+import { commitTyping, onFiled, onLost, performInSync, recover, saveAll, saveNow, undoOrRedo } from "./sync.ts";
 import { retryAfter } from "./retry.ts";
 import { ago, useNow } from "./time.ts";
 import { Toasts } from "./Toasts.tsx";
@@ -177,10 +179,18 @@ function accountOf(me: MeHere, workspaceId: string): Account {
   return {
     email: me.person.email,
     // Every session ends, this one with them, so the page is read again signed out.
-    signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")),
+    signOutEverywhere: (agents) =>
+      perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => {
+        forgetAll();
+        location.assign("/");
+      }),
     deletion: () => perform(workspaceId, { type: "account.read" }),
     // The session's person is gone, so the page is read again signed out, as after signing out everywhere.
-    deleteAccount: (confirm) => perform(workspaceId, { type: "account.delete", confirm }).then(() => location.assign("/")),
+    deleteAccount: (confirm) =>
+      perform(workspaceId, { type: "account.delete", confirm }).then(() => {
+        forgetAll();
+        location.assign("/");
+      }),
     workspace: here?.role === "admin" ? { name: here.name, delete: (confirm) => perform(workspaceId, { type: "workspace.delete", confirm }).then(() => location.assign("/")) } : null,
   };
 }
@@ -1032,6 +1042,33 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     reloadWorkspaces: () => void reloadWorkspaces(),
     signOut: () => void signOut().then(() => location.assign("/")),
   });
+  // Before any editor reads its note, so the read includes what an earlier page kept for it.
+  useLayoutEffect(() => {
+    const stop = onLost(workspaceId, ({ noteId, text, why, dismiss }) => {
+      const title = summarize(text).title || "Untitled";
+      // It holds the only copy of what was typed, so it goes only by its own buttons.
+      const lost: Notice = {
+        message: why === "inTrash" ? `${title} is in Trash, so it wasn't saved as you left it.` : `${title} wasn't saved as you left it.`,
+        icon: why === "inTrash" ? "trash" : "flag",
+        stays: true,
+        keeps: true,
+        action: [
+          { label: "Copy", run: () => navigator.clipboard.writeText(text).then(() => ({ ...lost, message: `Copied ${title} as you left it.` }), () => lost) },
+          {
+            label: "Open note",
+            run: () => {
+              actions.openNote(noteId);
+              return lost;
+            },
+          },
+          { label: "Dismiss", run: () => dismiss() },
+        ],
+      };
+      actions.notify(lost);
+    });
+    recover(workspaceId, me.person.id);
+    return stop;
+  }, [actions, workspaceId, me.person.id]);
   const app: App = {
     me: me.person,
     workspace,
