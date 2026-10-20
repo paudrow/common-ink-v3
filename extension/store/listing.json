@@ -1,0 +1,67 @@
+{
+  "storeListing": {
+    "name": "Common Ink Clipper",
+    "summary": "Save a page, a selection, a link or an image to your Common Ink notes, as markdown your AI agent can read.",
+    "description": [
+      "Common Ink Clipper saves what you're reading into your Common Ink notes, as clean markdown that you and your AI agent can both read.",
+      "",
+      "Clip a whole article, a selection, a link, an image, or one part of a page. Pick a folder, change the title if you like, and save. Images are saved with the note, in the same folder. A PDF or another document is saved and embedded in the note. A post on X keeps its text and its link, and a YouTube page keeps its description and a link to the video.",
+      "",
+      "HOW TO CLIP",
+      "• Click the Common Ink button in the toolbar to clip the page or your selection, or press Alt+Shift+C to clip the page.",
+      "• Right-click to clip a selection, a link, an image, or the part of the page under the pointer.",
+      "",
+      "WHAT IT CAN DO IN YOUR NOTES",
+      "The clipper signs in to Common Ink with a token that can only list your workspaces and folders, create notes, and upload files. It can't read, change or delete your notes. The token lasts 90 days. Sign out in the clipper, or revoke it in Common Ink under Settings, Account.",
+      "",
+      "YOUR DATA",
+      "The clipper reads a page only when you clip it, and sends what you clipped only to the Common Ink address you signed in to. It has no analytics and no ads.",
+      "",
+      "You need a Common Ink account. Common Ink is a markdown notebook your AI agent can read, edit and extend, in early access at https://commonink.app",
+      "",
+      "Help: https://commonink.app/docs/clipper",
+      "Privacy policy: https://commonink.app/privacy"
+    ],
+    "category": "Productivity: Tools",
+    "language": "English",
+    "homepageUrl": "https://commonink.app",
+    "supportUrl": "https://commonink.app/docs/clipper"
+  },
+  "privacyPractices": {
+    "singlePurpose": "Save web content the user chooses (a page, a selection, a link, an image or one part of a page) as a note in their Common Ink notebook.",
+    "permissions": {
+      "contextMenus": "Adds Clip page, Clip selection, Clip link, Clip image and Clip element to Common Ink to the right-click menu, so the user chooses exactly what to save.",
+      "identity": "Signs the user in to Common Ink with chrome.identity.launchWebAuthFlow. The user allows the clipper on the Common Ink site, and its token comes back to the extension. It does not read the user's Google or Chrome account.",
+      "storage": "Keeps the clipper's Common Ink token and the last folder the user saved to on this computer (chrome.storage.local), and a sign-in that is in progress (chrome.storage.session).",
+      "hostPermissions": "The clipper works on whatever page the user chooses to clip, so it can't name sites in advance. Its content script only notes which element the user right-clicked, and reads the page when the user clips. Access to the page's site lets it download the images and documents in the clip, such as a PDF the user is viewing, so they are saved with the note, and send the clip to the Common Ink address the user signed in to. Nothing is read or sent until the user clips."
+    },
+    "remoteCode": "No. All of the clipper's code is in its package.",
+    "dataUsage": {
+      "Personally identifiable information": false,
+      "Health information": false,
+      "Financial and payment information": false,
+      "Authentication information": "The clipper's Common Ink token, kept on this computer and sent only to Common Ink to save clips.",
+      "Personal communications": false,
+      "Location": false,
+      "Web history": false,
+      "User activity": false,
+      "Website content": "The text, images, documents and address of what the user chooses to clip, sent to their Common Ink account as a note."
+    },
+    "certifications": [
+      "I do not sell or transfer user data to third parties, outside of the approved use cases.",
+      "I do not use or transfer user data for purposes that are unrelated to my item's single purpose.",
+      "I do not use or transfer user data to determine creditworthiness or for lending purposes."
+    ],
+    "privacyPolicyUrl": "https://commonink.app/privacy"
+  },
+  "assets": {
+    "icon": "extension/dist/icon-128.png",
+    "screenshots": [
+      "extension/store/screenshot-1-clip.png",
+      "extension/store/screenshot-2-note.png",
+      "extension/store/screenshot-3-selection.png"
+    ],
+    "smallPromoTile": "extension/store/promo-small-440x280.png",
+    "marqueePromoTile": "extension/store/promo-marquee-1400x560.png"
+  }
+}

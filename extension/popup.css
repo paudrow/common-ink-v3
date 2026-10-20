@@ -32,6 +32,8 @@ body {
   margin: 0;
   width: 360px;
   background: var(--bg);
+  /* Chrome gives an extension page's body a font-size of 75%, which would shrink everything set on :root. */
+  font: inherit;
 }
 
 main { padding: 16px 16px 18px; }
