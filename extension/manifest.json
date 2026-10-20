@@ -3,7 +3,7 @@
   "name": "Common Ink Clipper",
   "version": "0.1.0",
   "description": "Clip a page into a Common Ink note.",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlMpUmOw2FOxNMC3mstpDf7P6ZDQOxCg5kO8p//fTzjMzZ1zrOd7TKLujwC8ThU+UI4CXbhyc5rBE1xJ60rTT2cHEO+9NCm3ab6HhDPC3vdQ/VRBwcVEOOq1D5MIMNFW70QHBkogofXKi2jA58PVW/YBXkyZ/ZEyvM5laZzTThDSknd9t65uzgOAp6yyp3T5krxVGLfdtvhPPmjheb+fVh67Jmulc8QaX/hSJBIodN+jf4kumr8dpPrvSgXGFL2P4chWlzBIO8+IIBEou/0TvPZq80zk0Rp1gwhVOi5C+89Ttyi5AyTm07iI3ABKeoQa23FqtE0M6BKwk2bkc976V4QIDAQAB",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvMVR87mB/p8ITSHDEfxzsa1jiHEbBJjB2Sw0PAcPixk5Uvj1KYte3BUYqsQhiIM20Xoc9+9xRHLURoe7FC288YAfAEjIpuSuhSJB1Yf5gcELDxNWgTUKsy5us9GBimSCITtzFDQISWjDQJEnXMw1zi5uzrcYbRW0Neel1svAZEy+2vcKUsEWUkm+wDMgWecoHDSofjmIGrAeqQZB+/Y3mdWL/Ph1NM9hbr9lyK9jNK+X9vuQVU5C6ujBWVEZJW6d9giE1yPmlIK6UcpSfgf46To9sSSK1vumz8siSU6aYmuqhdp2y3uBxVF7NyazGKgq2zydMn5rbljbiaTF1LY/bQIDAQAB",
   "permissions": ["activeTab", "contextMenus", "identity", "storage"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js" },

@@ -39,6 +39,9 @@
   // https://developers.cloudflare.com/workers/observability/logs/workers-logs/#invocation-logs
   "observability": { "enabled": true, "redact_query_string": true, "logs": { "invocation_logs": false } },
   // The optional settings are typed in src/worker/env.d.ts.
+  // The Chrome Web Store clipper. The dev server and the tests set this to the unpacked build's id, which the
+  // key in extension/manifest.json makes the same id.
+  "vars": { "CLIPPER_EXTENSION_IDS": "fcppkekegajpfdoilfhhohoilkbleiih" },
   "secrets": { "required": ["SESSION_SECRET"] }
   // scripts/preview.ts adds the Previews' settings: their own D1 database, the bucket Previews share (common-ink-v3-uploads-preview), and dev sign-in. Production
   // versions are served on the same workers.dev hosts as Previews, so dev sign-in must never be set here.
