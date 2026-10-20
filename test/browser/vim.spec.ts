@@ -493,7 +493,7 @@ test("when vim's editing can't be loaded the Plugins page says so, notes are edi
   await expect(lines(page)).toHaveText(["# Betajk"]);
   await expect(statusLine(page)).toHaveCount(0);
   await openAllNotes(page);
-  await noteCard(page, "Beta").focus();
+  await noteCard(page, "Betajk").focus();
   await page.keyboard.press("Control+o");
   await page.waitForTimeout(200);
   await expect(page).toHaveURL(/\/folder\/all$/);
