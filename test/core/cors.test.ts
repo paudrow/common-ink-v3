@@ -7,10 +7,14 @@ import { newMember } from "./members.ts";
 import { bytesOf, upload } from "./uploading.ts";
 
 /*
- * No route answers another site's page. The app's own pages call the Worker from its own origin, and
- * agents call /mcp from servers, which CORS doesn't govern. So no response, preflight or not, for any
- * route, says Access-Control-Allow-*: a browser then lets no other origin read an answer, and sends
- * no preflighted request (JSON, DELETE, PATCH, Authorization) on at all.
+ * No route answers another site's page, but those an OAuth client in a browser has to call. The app's
+ * own pages call the Worker from its own origin, and agents (and the servers of chat apps) call /mcp from
+ * servers, which CORS doesn't govern. So no response, preflight or not, for any other route says
+ * Access-Control-Allow-*: a browser then lets no other origin read an answer, and sends no preflighted
+ * request (JSON, DELETE, PATCH, Authorization) on at all.
+ *
+ * The exceptions, OPEN below, are the OAuth metadata and /oauth/{register,token,revoke}. They take no
+ * cookie and no credentials, and answer to whoever holds a code or a token, so any site may read them.
  */
 const ROUTES: [string, string][] = [
   ["a page", "/"],
@@ -29,9 +33,22 @@ const ROUTES: [string, string][] = [
   ["a plugin's draft's operations", "/api/workspaces/aaaaaaaaaaaa/plugins/bbbbbbbbbbbb/draft/ops"],
   ["a full-trust plugin's code", `/api/workspaces/aaaaaaaaaaaa/plugins/bbbbbbbbbbbb/trusted/${"0".repeat(64)}.js`],
   ["agents' MCP", "/mcp"],
+  ["where an app sends a member to authorize", "/oauth/authorize"],
+  ["an OAuth address that isn't one", "/oauth/nothing"],
+  ["a well-known address that isn't OAuth's", "/.well-known/security.txt"],
   ["an HTML embed's document", "/embed-frame"],
   ["an HTML embed's document under a token", "/embed-frame/g/tokentokentoken"],
   ["the retiring service worker", "/sw.js"],
+];
+
+/** The one set of addresses another site may read, and the methods each is asked with. */
+const OPEN: [string, string][] = [
+  ["the protected resource's metadata", "/.well-known/oauth-protected-resource"],
+  ["the protected resource's metadata for /mcp", "/.well-known/oauth-protected-resource/mcp"],
+  ["the authorization server's metadata", "/.well-known/oauth-authorization-server"],
+  ["registering", "/oauth/register"],
+  ["the token endpoint", "/oauth/token"],
+  ["revoking", "/oauth/revoke"],
 ];
 
 const EVIL = "https://evil.example";
@@ -55,6 +72,19 @@ async function probe(url: string, session: string, more: Partial<Env> = {}) {
 }
 
 describe("CORS on every route", () => {
+  it("lets any site read the OAuth addresses an app in a browser calls, and says nothing of credentials", async () => {
+    const ada = await newMember();
+    const session = `__Host-ink_session=${encodeURIComponent(await sign({ personId: ada.personId }, SECRET, 3600))}`;
+    for (const [route, path] of OPEN) {
+      const answers = await probe(`https://ink.test${path}`, session);
+      for (const method of ["GET", "POST", "OPTIONS"]) expect(answers[method]!.cors.sort(), `${route} ${method}`).toEqual(method === "OPTIONS" ? ["access-control-allow-headers", "access-control-allow-methods", "access-control-allow-origin", "access-control-max-age"] : ["access-control-allow-origin"]);
+      const res = await worker.fetch(new Request(`https://ink.test${path}`, { headers: { Origin: EVIL, Cookie: session } }) as never, { ...env, SESSION_SECRET: SECRET });
+      await res.arrayBuffer();
+      expect(res.headers.get("Access-Control-Allow-Origin"), route).toBe("*");
+      expect(res.headers.get("Access-Control-Allow-Credentials"), route).toBeNull();
+    }
+  });
+
   it("answers another site with no Access-Control-Allow-* header, signed in or not, preflight or not", async () => {
     const ada = await newMember();
     const session = `__Host-ink_session=${encodeURIComponent(await sign({ personId: ada.personId }, "test-secret", 3600))}`;

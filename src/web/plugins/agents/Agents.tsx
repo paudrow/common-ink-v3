@@ -350,9 +350,10 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
         <span className="agent-name">{agent.name}</span>
         {agent.readOnly && <span className="badge">read only</span>}
         {agent.folderIds && <span className="badge">limited to folders</span>}
+        {agent.app !== null && <span className="badge">OAuth</span>}
       </div>
       <p className="agent-meta">
-        <code>{agent.tokenPrefix}…</code> · reaches {reach(agent)} · connected {ago(agent.createdAt, now)} · {agent.lastUsedAt === null ? "never used" : `last used ${ago(agent.lastUsedAt, now)}`} · {ends(agent)}
+        {agent.app === null ? <code>{agent.tokenPrefix}…</code> : `connected by OAuth from ${agent.app}, a name the app gave itself and nobody checked`} · reaches {reach(agent)} · connected {ago(agent.createdAt, now)} · {agent.lastUsedAt === null ? "never used" : `last used ${ago(agent.lastUsedAt, now)}`} · {ends(agent)}
       </p>
       <div className="agent-actions">
         {wrote.has(agent.id) ? (
@@ -386,7 +387,7 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
         {connected(agent) &&
           (disconnecting === agent.id ? (
             <span className="confirm" role="group" aria-label={`Disconnect ${agent.name}`}>
-              <span>Its token stops working at once. Its changes stay in history.</span>
+              <span>{agent.app === null ? "Its token stops" : `${agent.app}'s tokens stop`} working at once. Its changes stay in history.</span>
               <button type="button" className="button small primary" autoFocus onClick={() => disconnect(agent)}>
                 Disconnect
               </button>
@@ -399,7 +400,7 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
               Disconnect
             </button>
           ))}
-        {connected(agent) && (
+        {connected(agent) && agent.app === null && (
           <button
             type="button"
             ref={settingUp === agent.id ? setUpAgain : undefined}

@@ -40,7 +40,7 @@ The PATCH takes the same four fields, each optional, and changes only the ones i
 
 ## MCP
 
-`POST /mcp` with `Authorization: Bearer cink_...` and `Content-Type: application/json`. Streamable HTTP, stateless: one JSON-RPC message (or a batch) per POST, answered as JSON. No server-sent events, no sessions. Without a valid token the answer is 401.
+`POST /mcp` with `Authorization: Bearer cink_...` and `Content-Type: application/json`. Streamable HTTP, stateless: one JSON-RPC message (or a batch) per POST, answered as JSON. No server-sent events, no sessions. Without a valid token the answer is 401, which says where to sign in by OAuth (see Connecting by OAuth).
 
 Tools: `list_workspaces`, `list_notes`, `read_note`, `note_syntax`, `create_note`, `write_note`, `edit_note`, `backlinks`, `rebuild_links`, `list_todos`, `todo_filters`, `set_todo`, `todo_history`, `daily_note`, `find_daily_note`, `rebuild_todos`, `move_note`, `note_history`, `search`, `list_tags`, for a note's state `archive_note`, `trash_note`, `restore_note`, `list_trash`, for the member's data sources `list_sources`, `list_events`, `update_event`, `create_event`, `list_contacts`, `refer_record`, `read_record`, `notes_about_record`, `read_person` for a person a mention names, for uploads `list_uploads`, `read_upload`, `place_upload`, `move_upload`, `archive_upload`, `trash_upload`, `restore_upload`, `list_trashed_uploads`, `start_upload`, `resume_upload`, `finish_upload`, `abort_upload`, `upload_file`, for folders `list_folders`, `find_folder`, `create_folder`, `rename_folder`, `move_folder`, `delete_folder`, and for history `history_summary`, `history`, `change_diff`, `note_blame`, `history_authors`, `history_diff`, `preview_reverts`, `revert_many`, `label_revision`, `revert_note`, `revert_changes`, `preview_revert`, `revert_author`, `undo`, `redo`, for the member's dashboard `list_pins`, `pin_note`, `last_visit`, `list_members` for who is in the workspace, and for its plugins `list_plugins`, `read_plugin`, `scaffold_plugin`, `validate_plugin`, `install_plugin`, `uninstall_plugin`, `permit_plugin`, `request_plugin_permission`, `list_drafts`, `read_draft`, `save_draft` and `discard_draft`.
 
@@ -87,6 +87,47 @@ A member's calendar and contacts are data sources (`docs/adr/0006-data-sources-a
 Most clients take a URL and a header:
 
     claude mcp add --transport http common-ink https://commonink.app/mcp --header "Authorization: Bearer $INK_TOKEN"
+
+## Connecting by OAuth
+
+A hosted chat app (claude.ai, ChatGPT) can't send a pasted token, so it connects by OAuth 2.1 instead. Common Ink is both the authorization server and the resource. The app needs only the address `https://commonink.app/mcp`: the rest it finds. The decisions are in `docs/adr/0012-oauth-connections-are-agents.md`.
+
+A connection by OAuth is an agent. Consent makes one with the limits the member picks, through the same checks as the Agents page, and everything in Rules holds for it. The Agents page lists it under the app's name, marked OAuth, and Disconnect ends every token it holds at once. It has no token to set up again.
+
+    GET  /.well-known/oauth-protected-resource       where /mcp says to sign in (RFC 9728), also at .../mcp
+    GET  /.well-known/oauth-authorization-server     the endpoints below (RFC 8414)
+    POST /oauth/register                             an app registers itself (RFC 7591)
+    GET  /oauth/authorize                            the member's browser, on to the consent page at /connect
+    POST /oauth/token                                a code or a refresh token for tokens
+    POST /oauth/revoke                               ends the connection (RFC 7009)
+
+The steps, as an app takes them:
+
+1. `POST /mcp` with no token answers 401 with `WWW-Authenticate: Bearer realm="Common Ink", resource_metadata="<origin>/.well-known/oauth-protected-resource"`. A token that was sent and is no good adds `error="invalid_token"`, which is how an app knows to refresh.
+2. The app registers: `{"client_name": "...", "redirect_uris": ["https://..."]}` answers 201 with a `client_id`. Every app is a public client with no secret (`token_endpoint_auth_method: "none"`), whatever it asks for. A redirect address is https, or http to `localhost`, `127.0.0.1` or `[::1]`, with no fragment.
+3. The app sends the member's browser to `/oauth/authorize` with `response_type=code`, its `client_id`, a registered `redirect_uri`, `state`, a PKCE `code_challenge` with `code_challenge_method=S256`, and optionally `resource=<origin>/mcp`. The member signs in if need be and lands on the consent page. It shows the app's name as the app gave it, the host they will be sent back to in punycode, and what to allow: which workspace, which folders, how long, and read only. An error in the request is said on a page and never sent to the app's address, since anyone can register one.
+4. Allow sends the browser to the app's address with `code`, `state` and `iss`. Don't allow sends it there with `error=access_denied`.
+5. The app trades the code within a minute at `/oauth/token` (`grant_type=authorization_code`, `code`, `client_id`, `redirect_uri`, `code_verifier`). The answer has an access token (`cink_at_...`) for an hour and a refresh token (`cink_rt_...`) for 30 days. Neither lasts past the agent's own expiry.
+6. The app calls `/mcp` with `Authorization: Bearer cink_at_...`, as with a pasted token.
+7. Before the hour is up it refreshes (`grant_type=refresh_token`, `refresh_token`, `client_id`). Each refresh token works once and is replaced.
+
+What ends a connection:
+
+- **Disconnecting it**, on the Agents page, by its member signing out everywhere, or by the app at `/oauth/revoke` with either token.
+- **A code presented twice.** The second try is refused, and what the first was given ends, since the code may have been stolen.
+- **A refresh token used again** more than 30 seconds after it was spent. Used again within 30 seconds it is only refused, as a retry after a lost answer.
+- **Holding nothing that works**: a code that lapsed untraded, or every token run out. A sweep disconnects it, so it stops counting toward the 20 agents.
+- **Connecting the same app again**, which replaces the earlier connection.
+
+Limits, since anyone can register an app and start a sign-in:
+
+- 20 registrations an hour from one address. An IPv6 address counts as its /48. Addresses are counted by a salted hash, logged nowhere.
+- 1,000 apps waiting for a grant in all. An app that never sends anyone to sign in is forgotten after an hour, and one that never gets a grant after a day. When 1,000 wait, a new app takes the place of the oldest that never sent anyone to sign in, and is refused only when every one has.
+- A sign-in is kept only for a member who is signed in. A browser that isn't is sent to sign in and back to the same `/oauth/authorize` address, and nothing is kept for it.
+- 2,000 sign-ins waiting in all, 20 for one app and 10 for one member. Each lapses after ten minutes.
+- Bodies past 16 KB are refused.
+
+The discovery documents and `/oauth/{register,token,revoke}` allow any origin, with no credentials. Nothing there reads a cookie. `/mcp`, `/oauth/authorize` and the consent API (`/api/oauth/{request,consent,deny}`) allow none.
 
 ## Uploads over HTTP
 

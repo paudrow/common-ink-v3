@@ -32,14 +32,17 @@ export async function sessionPersonId(req: Request, env: Env, url: URL): Promise
 
 const allowedEmails = (value: string | undefined) => new Set((value ?? "").split(/[\s,]+/).map((e) => e.trim().toLowerCase()).filter(Boolean));
 
-const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-function page(title: string, body: string, status: number): Response {
+export function page(title: string, body: string, status: number): Response {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} · Common Ink</title><link rel="icon" href="/favicon.svg">
 <style>:root{color-scheme:light dark;font-family:ui-sans-serif,system-ui,sans-serif}body{max-width:28rem;margin:20vh auto;padding:0 1.5rem;line-height:1.5}a{color:#5b5bd6}</style></head>
 <body><h1 style="font-size:1.25rem">${title}</h1>${body}</body></html>`;
   return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
+
+/** The longest address sign-in sends you back to: it rides in a cookie through Google and back. */
+export const MAX_NEXT = 1000;
 
 /** Only paths on this site, read the way a browser reads a Location, so sign-in can't send you elsewhere. */
 function safeNext(next: string | null): string {
@@ -48,7 +51,7 @@ function safeNext(next: string | null): string {
   try {
     const u = new URL(next, base);
     const path = `${u.pathname}${u.search}${u.hash}`;
-    return u.origin === base && !path.startsWith("//") && path.length <= 1000 ? path : "/";
+    return u.origin === base && !path.startsWith("//") && path.length <= MAX_NEXT ? path : "/";
   } catch {
     return "/";
   }

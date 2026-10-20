@@ -54,6 +54,9 @@ export const EMBED_FRAME: Policy = {
   "frame-ancestors": ["'self'"],
 };
 
+/** The one address under /oauth/ that is a page: it answers with a redirect, or says on a page what is wrong with the request. */
+const AUTHORIZE = "/oauth/authorize";
+
 /** JSON for the app and for agents: nothing in it is ever run or drawn. */
 export const DATA: Policy = { "default-src": ["'none'"], "frame-ancestors": ["'none'"] };
 
@@ -63,7 +66,7 @@ export const written = (policy: Policy) =>
     .join("; ");
 
 const policyFor = (path: string): Policy =>
-  path === "/mcp" || path.startsWith("/api/") ? DATA : path === EMBED_FRAME_PATH || path.startsWith(`${EMBED_FRAME_PATH}/`) ? EMBED_FRAME : PAGE;
+  path === "/mcp" || path.startsWith("/api/") || path.startsWith("/.well-known/") || (path.startsWith("/oauth/") && path !== AUTHORIZE) ? DATA : path === EMBED_FRAME_PATH || path.startsWith(`${EMBED_FRAME_PATH}/`) ? EMBED_FRAME : PAGE;
 
 /**
  * The page's policy at `url`: it may also frame the HTML embed's document, at its own address and under
@@ -88,5 +91,25 @@ export function secured(res: Response, url: URL, env: { DEV_SERVER?: string; EMB
   if (!out.headers.has("Content-Security-Policy")) out.headers.set("Content-Security-Policy", written(policy));
   out.headers.set("X-Content-Type-Options", "nosniff");
   if (!out.headers.has("Referrer-Policy")) out.headers.set("Referrer-Policy", kind === EMBED_FRAME ? "no-referrer" : "strict-origin-when-cross-origin");
+  return out;
+}
+
+/**
+ * Where another site may read the answer: only the addresses an OAuth client in a browser has to call,
+ * which take no cookie and answer with nothing of any person's. Everything else, /mcp and /api and /auth
+ * included, says nothing about other sites, so a browser lets none of them read it.
+ */
+const OPEN = /^\/(?:\.well-known\/oauth-[a-z-]+(?:\/mcp)?|oauth\/(?:register|token|revoke))$/;
+
+/** `res` with the headers that let any site read it, for the routes in `OPEN`. No credentials are allowed, so a request is made without the visitor's cookies. */
+export function crossOrigin(res: Response, req: Request, url: URL): Response {
+  if (!OPEN.test(url.pathname)) return res;
+  const out = new Response(res.body, res);
+  out.headers.set("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") {
+    out.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    out.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, MCP-Protocol-Version, Accept");
+    out.headers.set("Access-Control-Max-Age", "86400");
+  }
   return out;
 }

@@ -1730,6 +1730,8 @@ export interface Agent {
    * can reach. A folder deleted since is still listed, and stands for nothing.
    */
   folderIds: string[] | null;
+  /** The app it was connected from by OAuth, as that app names itself, which nobody has checked. Null for an agent connected on the Agents page. */
+  app: string | null;
 }
 
 export const MAX_AGENT_FOLDERS = 50;

@@ -5,6 +5,8 @@ import { standingIn, type Standing } from "./standing.ts";
 import { NO_SUCH_WORKSPACE, AgentEdit, ConnectOptions, MAX_AGENT_NAME, OpError, type Agent, type ExpiresIn } from "./protocol.ts";
 
 export const TOKEN_PREFIX = "cink_";
+/** What an OAuth access token starts with, after TOKEN_PREFIX's `cink_`. It is looked for in `oauth_tokens`, not in `agents`. */
+export const ACCESS_PREFIX = "cink_at_";
 export const MAX_ACTIVE_AGENTS = 20;
 const DAY = 86_400_000;
 /** How often an agent's "last used" time is rewritten, so a busy agent doesn't write on every call. */
@@ -21,7 +23,7 @@ export interface ConnectedAgent {
   folderIds: string[] | null;
 }
 
-const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
 /** A token is 256 random bits, so a plain SHA-256 is enough to keep it safe at rest: there is nothing to guess. */
 export async function hashToken(token: string): Promise<string> {
@@ -40,9 +42,10 @@ interface AgentRow {
   workspace_id: string | null;
   read_only: number;
   folder_ids: string | null;
+  app: string | null;
 }
 
-const COLUMNS = "id, name, token_prefix, created_at, expires_at, last_used_at, revoked_at, workspace_id, read_only, folder_ids";
+const COLUMNS = "id, name, token_prefix, created_at, expires_at, last_used_at, revoked_at, workspace_id, read_only, folder_ids, (SELECT name FROM oauth_clients WHERE id = agents.client_id) AS app";
 
 /** Only a null column is no limit. Anything kept there that isn't a list of ids is a limit to nothing. */
 function foldersOf(r: Pick<AgentRow, "folder_ids">): string[] | null {
@@ -66,14 +69,18 @@ const toAgent = (r: AgentRow): Agent => ({
   workspaceId: r.workspace_id,
   readOnly: r.read_only === 1,
   folderIds: foldersOf(r),
+  app: r.app,
 });
 
 /** A token that never expires has no end, so it is always before it. */
-const ACTIVE = "revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)";
+export const ACTIVE = "revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)";
 const endOf = (expiresIn: ExpiresIn, now: number) => (expiresIn === "never" ? null : now + expiresIn * DAY);
 
-async function roomForOneMore(db: D1Database, personId: string, now: number) {
-  const active = await db.prepare(`SELECT COUNT(*) AS n FROM agents WHERE person_id = ? AND ${ACTIVE}`).bind(personId, now).first<{ n: number }>();
+async function roomForOneMore(db: D1Database, personId: string, now: number, replacingClientId?: string) {
+  // Reconnecting an app replaces its agent, so that one does not count toward the cap.
+  const active = replacingClientId
+    ? await db.prepare(`SELECT COUNT(*) AS n FROM agents WHERE person_id = ? AND ${ACTIVE} AND (client_id IS NULL OR client_id <> ?)`).bind(personId, now, replacingClientId).first<{ n: number }>()
+    : await db.prepare(`SELECT COUNT(*) AS n FROM agents WHERE person_id = ? AND ${ACTIVE}`).bind(personId, now).first<{ n: number }>();
   if ((active?.n ?? 0) >= MAX_ACTIVE_AGENTS) throw new OpError("invalid", `You can have ${MAX_ACTIVE_AGENTS} agents connected; disconnect one first`);
 }
 
@@ -97,23 +104,39 @@ async function folderLimit(db: D1Database, personId: string, workspaceId: string
   return JSON.stringify(ids);
 }
 
-/** Connects an agent for `personId`. The returned token is the only time it can be seen. */
-export async function connectAgent(db: D1Database, personId: string, rawName: string, input: ConnectOptions = {}, now = Date.now()): Promise<{ agent: Agent; token: string }> {
+/** What an agent row is made with besides what its member asked for: the start of its token, the hash of it, and the app it was connected from. */
+export interface AgentToken {
+  tokenPrefix: string;
+  tokenHash: string;
+  clientId?: string;
+}
+
+/**
+ * Checks what a member asks of a new agent, as connecting one does, and gives the statement that
+ * makes it. Nothing is written until the statement is run. Consenting to an OAuth app makes its
+ * agent here too, so it can't be given more than the Agents page could give.
+ */
+export async function prepareAgent(db: D1Database, personId: string, rawName: string, input: ConnectOptions, how: AgentToken, now: number): Promise<{ id: string; insert: D1PreparedStatement }> {
   const parsed = ConnectOptions.safeParse(input);
   if (!parsed.success) throw new OpError("invalid", z.prettifyError(parsed.error));
   const options = parsed.data;
   const name = rawName.trim();
   if (!name || name.length > MAX_AGENT_NAME) throw new OpError("invalid", `Give the agent a name of 1 to ${MAX_AGENT_NAME} characters`);
-  await roomForOneMore(db, personId, now);
+  await roomForOneMore(db, personId, now, how.clientId);
   if (options.workspaceId) await ownWorkspace(db, personId, options.workspaceId);
   const folders = options.folderIds ? await folderLimit(db, personId, options.workspaceId, options.folderIds) : null;
-  const token = TOKEN_PREFIX + b64url(crypto.getRandomValues(new Uint8Array(32)));
   const id = newId();
-  const tokenPrefix = token.slice(0, TOKEN_PREFIX.length + 4);
-  await db
-    .prepare("INSERT INTO agents (id, person_id, name, token_prefix, token_hash, created_at, expires_at, workspace_id, read_only, folder_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, personId, name, tokenPrefix, await hashToken(token), now, endOf(options.expiresInDays, now), options.workspaceId ?? null, options.readOnly ? 1 : 0, folders)
-    .run();
+  const insert = db
+    .prepare("INSERT INTO agents (id, person_id, name, token_prefix, token_hash, created_at, expires_at, workspace_id, read_only, folder_ids, client_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(id, personId, name, how.tokenPrefix, how.tokenHash, now, endOf(options.expiresInDays, now), options.workspaceId ?? null, options.readOnly ? 1 : 0, folders, how.clientId ?? null);
+  return { id, insert };
+}
+
+/** Connects an agent for `personId`. The returned token is the only time it can be seen. */
+export async function connectAgent(db: D1Database, personId: string, rawName: string, input: ConnectOptions = {}, now = Date.now()): Promise<{ agent: Agent; token: string }> {
+  const token = TOKEN_PREFIX + b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const { id, insert } = await prepareAgent(db, personId, rawName, input, { tokenPrefix: token.slice(0, TOKEN_PREFIX.length + 4), tokenHash: await hashToken(token) }, now);
+  await insert.run();
   const row = await db.prepare(`SELECT ${COLUMNS} FROM agents WHERE id = ?`).bind(id).first<AgentRow>();
   return { agent: toAgent(row!), token };
 }
@@ -182,13 +205,34 @@ export async function agentById(db: D1Database, id: string, now = Date.now()): P
   return row ? connected(row) : null;
 }
 
-/** The agent a token belongs to, or null if it is unknown, malformed, expired, or disconnected. */
+/**
+ * The agent an OAuth access token belongs to. The token is good only while its agent is: the agent's
+ * own end and its disconnecting are read in the same query, so neither leaves a token working.
+ */
+async function agentOfAccessToken(db: D1Database, token: string, now: number): Promise<ActiveRow | null> {
+  return db
+    .prepare(
+      `SELECT a.id, a.person_id, a.name, a.last_used_at, a.workspace_id, a.read_only, a.folder_ids
+       FROM oauth_tokens t JOIN agents a ON a.id = t.agent_id
+       WHERE t.hash = ? AND t.kind = 'access' AND t.expires_at > ? AND a.revoked_at IS NULL AND (a.expires_at IS NULL OR a.expires_at > ?)`,
+    )
+    .bind(await hashToken(token), now, now)
+    .first<ActiveRow>();
+}
+
+/**
+ * The agent a token belongs to, or null if it is unknown, malformed, expired, or disconnected. The
+ * token is one the agent was connected with, or an OAuth access token: a refresh token or a code is
+ * neither. (An agent's token may start with `cink_at_` by chance, so it is looked for as one too.)
+ */
 export async function authenticateAgent(db: D1Database, token: string, now = Date.now()): Promise<ConnectedAgent | null> {
   if (!token.startsWith(TOKEN_PREFIX) || token.length > 200) return null;
-  const row = await db
-    .prepare(`SELECT id, person_id, name, last_used_at, workspace_id, read_only, folder_ids FROM agents WHERE token_hash = ? AND ${ACTIVE}`)
-    .bind(await hashToken(token), now)
-    .first<ActiveRow>();
+  const row =
+    (token.startsWith(ACCESS_PREFIX) ? await agentOfAccessToken(db, token, now) : null) ??
+    (await db
+      .prepare(`SELECT id, person_id, name, last_used_at, workspace_id, read_only, folder_ids FROM agents WHERE token_hash = ? AND ${ACTIVE}`)
+      .bind(await hashToken(token), now)
+      .first<ActiveRow>());
   if (!row) return null;
   if (row.last_used_at === null || now - row.last_used_at > LAST_USED_EVERY) {
     await db.prepare("UPDATE agents SET last_used_at = ? WHERE id = ?").bind(now, row.id).run();
