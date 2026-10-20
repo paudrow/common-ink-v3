@@ -53,7 +53,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "disconnect":
       return respond(clipper.disconnect());
     case "capture":
-      void open();
+      // The popup asks for a capture from inside itself. Opening one again opens a second, out of sight, whose wake resets this one's save.
       return respond(clipActive(message.mode === "selection" ? "selection" : "page", typeof message.tabId === "number" ? message.tabId : undefined));
     case "save":
       return respond(clipper.save());
