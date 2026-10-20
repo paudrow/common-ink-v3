@@ -23,7 +23,7 @@ test("the clipper's zip unzips to the extension Chrome loads, under the pinned i
   ]);
   execFileSync("unzip", ["-q", "clipper.zip", "-d", "out"], { cwd: dir });
   expect(readFileSync(path.join(dir, "out/manifest.json"), "utf8")).toBe(readFileSync("extension/manifest.json", "utf8"));
-  expect(unpackedExtensionId(path.join(dir, "out/manifest.json"))).toBe("nloccbnkboaohceggkmbmkppnjjkkdkh");
+  expect(unpackedExtensionId(path.join(dir, "out/manifest.json"))).toBe("fcppkekegajpfdoilfhhohoilkbleiih");
 });
 
 test("a zip keeps each file's bytes", () => {

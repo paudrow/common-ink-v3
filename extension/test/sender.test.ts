@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { answers } from "../src/sender.ts";
 
-const OWN = "nloccbnkboaohceggkmbmkppnjjkkdkh";
+const OWN = "fcppkekegajpfdoilfhhohoilkbleiih";
 const tab = { id: 7, index: 0, pinned: false, highlighted: false, windowId: 1, active: true, incognito: false, selected: true, discarded: false, autoDiscardable: true, groupId: -1, frozen: false } as chrome.tabs.Tab;
 
 test("only the clipper's own pages sign in, save or change the draft, and anyone may ask for a capture", () => {

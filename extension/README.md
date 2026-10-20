@@ -15,7 +15,7 @@ That writes an unpacked extension to `extension/dist`. `npm run build` and `npm 
 
 ## Download it from the dev server
 
-A dev server (`npm run dev`) offers the clipper it was started from: Settings, under Account, has Download next to the clipper. That zip is built from `extension/` when you click, so it is always this checkout's clipper, with the same ID as a local build. Unzip it, then load it as below. A deploy has no Download.
+A dev server (`npm run dev`) offers the clipper it was started from: Settings, under Account, has Download next to the clipper. That zip is built from `extension/` when you click, so it is always this checkout's clipper, with the same ID as a local build. Unzip it, then load it as below. A deploy has no Download. On a deploy, Get the Chrome Extension opens the Chrome Web Store page.
 
 ## Load a build without npm
 
@@ -48,8 +48,8 @@ A pasted token still works, under Paste a token. A read-only token can sign in, 
 
 Common Ink lets only the extension IDs in its `CLIPPER_EXTENSION_IDS` setting sign in, so another extension can't ask for a token. The sign-in page shows the ID it is for.
 
-The `key` in `manifest.json` fixes the ID of an unpacked build at `nloccbnkboaohceggkmbmkppnjjkkdkh`, wherever it is loaded from. `scripts/extension-id.ts` works the ID out from the key. The dev server and the tests allow that ID. A Preview or production allows the IDs its own setting names.
+The `key` in `manifest.json` is the Chrome Web Store item's public key. It fixes the ID of an unpacked build at `fcppkekegajpfdoilfhhohoilkbleiih`, the store item's ID, wherever it is loaded from. `scripts/extension-id.ts` works the ID out from the key. The dev server and the tests allow that ID. Production allows it in `CLIPPER_EXTENSION_IDS`, and a Preview copies that setting.
 
-The key is a public key. Anyone can copy it into an unpacked extension, so production should allow only the Chrome Web Store ID. Once the clipper is in the store, put the store's public key here as `key`, so a local build has the store's ID.
+The key is a public key. Anyone can copy it into an unpacked extension. That copy has the store item's ID only on a machine that loads it unpacked.
 
 Clip a page, edit the title, pick a folder, and save. The folder list is the folders you can edit, loaded again each time you open the clipper, and it opens on the folder you saved to last. Images are uploaded into that folder and embedded in the note. An image the extension cannot fetch is kept as a link, and the note is still created. So is an image on this computer or its network, and one behind a redirect: Chrome doesn't show an extension where a redirect points, so it is not followed. A public name that resolves to a private address is not caught, since an extension can't see what a name resolves to. A PDF or another document is uploaded and embedded on the note. A tweet keeps the post's text and its address, so the note can embed it. A YouTube page keeps the description and the watch address.

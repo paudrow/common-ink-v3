@@ -1,16 +1,15 @@
-/** The clipper's Chrome Web Store page, once it is listed there. Set it, and Get the Chrome Extension opens it everywhere. */
-export const CLIPPER_STORE_URL: string | null = null;
+/** The clipper's Chrome Web Store page. */
+export const CLIPPER_STORE_URL = "https://chromewebstore.google.com/detail/fcppkekegajpfdoilfhhohoilkbleiih";
 
 /**
- * Where Get the Chrome Extension takes the member: the store page once there is one, and until then, on
- * the dev server, this build of the clipper as a zip to load unpacked. Null where there is neither, as in
- * production now, and then the command isn't offered.
+ * Where Get the Chrome Extension takes the member. On the dev server, this build of the clipper as a zip
+ * to load unpacked. A built app opens the store page.
  */
-export const clipperTarget = (): { kind: "store" | "zip"; url: string } | null =>
-  CLIPPER_STORE_URL ? { kind: "store", url: CLIPPER_STORE_URL } : import.meta.env.DEV ? { kind: "zip", url: "/dev/clipper.zip" } : null;
+export const clipperTarget = (): { kind: "store" | "zip"; url: string } =>
+  import.meta.env.DEV ? { kind: "zip", url: "/dev/clipper.zip" } : { kind: "store", url: CLIPPER_STORE_URL };
 
 /** Opens the store page in a new tab, or downloads the zip. */
-export function getClipper(target: NonNullable<ReturnType<typeof clipperTarget>>): void {
+export function getClipper(target: ReturnType<typeof clipperTarget>): void {
   if (target.kind === "store") {
     window.open(target.url, "_blank", "noopener");
     return;

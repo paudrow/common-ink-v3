@@ -7,6 +7,8 @@ import { chromium, expect, test, type Download } from "@playwright/test";
 import { unpackedExtensionId } from "../../scripts/extension-id.ts";
 import { agentWith, signInAsNewPerson } from "./helpers.ts";
 
+const STORE = "https://chromewebstore.google.com/detail/fcppkekegajpfdoilfhhohoilkbleiih";
+
 // The dev server allows the unpacked clipper, whose id the key in extension/manifest.json fixes.
 const EXTENSION = unpackedExtensionId();
 const RETURN = `https://${EXTENSION}.chromiumapp.org/`;
@@ -73,17 +75,20 @@ test("the dev server offers the clipper as a zip to load unpacked, and a built a
   expect(await unzipped(await download)).toBe(EXTENSION);
 });
 
-test("Get the Chrome Extension in the command palette downloads the clipper on the dev server, and a built app with no store page doesn't offer it", async ({ page }) => {
+test("Get the Chrome Extension downloads the clipper on the dev server and opens the store from a built app", async ({ page }) => {
   await signInAsNewPerson(page, "Clip Getter");
   await expect(page.getByRole("button", { name: "New note" })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+Shift+P");
   const palette = page.getByRole("dialog", { name: "Commands" });
   await palette.getByRole("combobox").fill("Chrome Extension");
+  await expect(palette.getByRole("option").first()).toHaveText(/^Get the Chrome Extension/);
   if (process.env.BASE_URL) {
-    await expect(palette.getByRole("option", { name: /Get the Chrome Extension/ })).toHaveCount(0);
+    await page.context().route(`${STORE}*`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<title>store</title>" }));
+    const popup = page.waitForEvent("popup");
+    await page.keyboard.press("Enter");
+    await expect(await popup).toHaveURL(STORE);
     return;
   }
-  await expect(palette.getByRole("option").first()).toHaveText(/^Get the Chrome Extension/);
   const download = page.waitForEvent("download");
   await page.keyboard.press("Enter");
   expect(await unzipped(await download)).toBe(EXTENSION);
@@ -128,6 +133,7 @@ test("clips a page into a note", async ({ baseURL }) => {
   try {
     const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
     const extensionId = new URL(worker.url()).host;
+    expect(extensionId).toBe("fcppkekegajpfdoilfhhohoilkbleiih");
     expect(extensionId).toBe(EXTENSION);
     const app = await context.newPage();
     await app.goto(`${baseURL}/auth/dev?${new URLSearchParams({ email: `clipper-${crypto.randomUUID()}@example.com`, name: "Clip Tester" })}`);
