@@ -1,0 +1,798 @@
+/*
+ * The public site: the landing page, and prose pages such as the privacy policy. Headings are in the
+ * editor's font, and the hero is a note whose blame column says who wrote each run of lines. The
+ * colours of who wrote what are the app's own: you in grey, people in cool colours, agents in warm ones.
+ */
+
+@font-face {
+  font-family: "iA Writer Mono";
+  src: url("/fonts/ia-writer-mono/ia-writer-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "iA Writer Mono";
+  src: url("/fonts/ia-writer-mono/ia-writer-mono-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Source Serif 4";
+  src: url("/fonts/source-serif-4/source-serif-4-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Source Serif 4";
+  src: url("/fonts/source-serif-4/source-serif-4-latin-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Source Serif 4";
+  src: url("/fonts/source-serif-4/source-serif-4-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+  --paper: #fbfaf8;
+  --paper-raised: #ffffff;
+  --paper-sunk: #f4f2ee;
+  --ink: #1f1e1c;
+  --muted: #6f6b66;
+  --faint: #a8a39b;
+  --rule: #e7e4df;
+  --accent: #5b5bd6;
+  --accent-ink: #4545b8;
+  --on-accent: #ffffff;
+  --you: #8a857e;
+  --member: #3e8ee6;
+  --agent: #f76b15;
+  --agent-2: #d6409f;
+  --mono: "iA Writer Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --serif: "Source Serif 4", Georgia, serif;
+  --gutter: 9.5rem;
+  --gap: 2.25rem;
+  --measure: 40rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #171716;
+    --paper-raised: #22211f;
+    --paper-sunk: #1d1c1b;
+    --ink: #e8e6e3;
+    --muted: #9a958f;
+    --faint: #6b6762;
+    --rule: #2c2b29;
+    --accent: #8f8ff0;
+    --accent-ink: #a9a9ff;
+    --on-accent: #10101a;
+    --you: #9a958f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 1.125rem/1.65 var(--serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent-ink);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+code {
+  font: 0.86em var(--mono);
+  background: var(--paper-sunk);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+pre {
+  margin: 0;
+  overflow-x: auto;
+}
+
+pre code {
+  display: block;
+  background: none;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  left: 1rem;
+  top: 0.75rem;
+  z-index: 1;
+  background: var(--paper-raised);
+  padding: 0.5rem 0.75rem;
+}
+
+.site-head,
+main,
+.site-foot {
+  width: min(var(--gutter) + var(--gap) + var(--measure), 100% - 2rem);
+  margin-inline: auto;
+}
+
+/* The page */
+
+.site-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 0;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  color: var(--ink);
+  font: 700 1rem var(--mono);
+  text-decoration: none;
+}
+
+.drop {
+  width: 1.05rem;
+  height: 1.45rem;
+  color: var(--accent);
+}
+
+.head-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font: 0.9rem var(--mono);
+  color: var(--ink);
+}
+
+main {
+  padding-bottom: 4rem;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2rem, 5.2vw, 3.1rem);
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: 1.45rem;
+  line-height: 1.3;
+  margin: 0 0 1rem;
+}
+
+h3 {
+  font-size: 1.1rem;
+  margin: 2rem 0 0.5rem;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+/* The landing page: one column of text, with the blame column to its left. */
+
+.site-landing section {
+  display: grid;
+  grid-template-columns: var(--gutter) minmax(0, var(--measure));
+  column-gap: var(--gap);
+}
+
+.site-landing section > * {
+  grid-column: 2;
+}
+
+.site-landing section + section {
+  margin-top: 4rem;
+}
+
+.hero {
+  padding-top: clamp(1.5rem, 6vh, 4rem);
+}
+
+.hero .note {
+  grid-column: 1 / -1;
+}
+
+.run {
+  display: grid;
+  grid-template-columns: var(--gutter) minmax(0, var(--measure));
+  column-gap: var(--gap);
+  --tone: var(--you);
+}
+
+.run.agent {
+  --tone: var(--agent);
+}
+
+.run.member {
+  --tone: var(--member);
+}
+
+.who {
+  margin: 0;
+  padding: 0.35rem 0.85rem 0.35rem 0;
+  border-right: 3px solid var(--tone);
+  text-align: right;
+  font: 0.78rem/1.35 var(--mono);
+}
+
+.who-name {
+  display: block;
+  color: var(--ink);
+}
+
+.who-when {
+  display: block;
+  color: var(--muted);
+}
+
+.lines {
+  padding: 0.35rem 0 0.35rem;
+  min-width: 0;
+}
+
+.run + .run .lines {
+  padding-top: 1rem;
+}
+
+.run.agent .lines,
+.run.member .lines {
+  background: color-mix(in srgb, var(--tone) 7%, transparent);
+  margin-left: calc(var(--gap) * -1);
+  padding-left: var(--gap);
+  padding-right: 1rem;
+  padding-bottom: 1rem;
+}
+
+.lede {
+  font-size: 1.28rem;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--ink) 82%, var(--paper));
+  margin-top: 1.25rem;
+  max-width: 34em;
+}
+
+.todos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.todo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.45rem;
+  row-gap: 0.2rem;
+  padding: 0.1rem 0;
+}
+
+.box {
+  flex: none;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 1.5px solid var(--muted);
+  border-radius: 3px;
+  transform: translateY(0.12rem);
+}
+
+.done .box {
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5'/%3E%3C/svg%3E") center / 80% no-repeat;
+  border-color: var(--accent);
+}
+
+.done .todo-text {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.todo-text {
+  margin-right: 0.15rem;
+}
+
+.chip {
+  font: 0.72rem/1.5 var(--mono);
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+
+.ways-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  margin-top: 2.25rem;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 0 1.25rem;
+  border-radius: 8px;
+  background: var(--accent-ink);
+  color: var(--on-accent);
+  font: 700 0.92rem var(--mono);
+  text-decoration: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .button {
+    background: var(--accent);
+  }
+}
+
+.button:hover {
+  background: color-mix(in srgb, var(--accent-ink) 88%, var(--ink));
+}
+
+.quiet {
+  font: 0.92rem var(--mono);
+  color: var(--ink);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.fine {
+  margin-top: 1rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+/* The one moment of motion: the agent's lines arrive in the note, marked as new, then settle. */
+@media (prefers-reduced-motion: no-preference) {
+  .arrives .who {
+    animation: who-in 0.4s ease-out 0.5s both;
+  }
+
+  .arrives .lines {
+    animation: fresh 3.2s ease-out 0.5s both;
+  }
+
+  .arrives .lines > p,
+  .arrives .todo {
+    animation: line-in 0.35s ease-out both;
+    animation-delay: calc(0.7s + var(--line) * 0.32s);
+  }
+
+  .arrives .lines > p {
+    --line: 0;
+  }
+
+  .arrives .todo:nth-child(1) {
+    --line: 1;
+  }
+
+  .arrives .todo:nth-child(2) {
+    --line: 2;
+  }
+
+  .arrives .todo:nth-child(3) {
+    --line: 3;
+  }
+
+  @keyframes who-in {
+    from {
+      opacity: 0;
+      border-right-color: transparent;
+    }
+  }
+
+  @keyframes fresh {
+    from {
+      background: color-mix(in srgb, var(--tone) 22%, transparent);
+    }
+  }
+
+  @keyframes line-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.3rem);
+    }
+  }
+}
+
+.terminal {
+  background: #1f1e1c;
+  color: #e8e6e3;
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+  margin: 0.25rem 0 1.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .terminal {
+    background: var(--paper-raised);
+    box-shadow: inset 0 0 0 1px var(--rule);
+  }
+}
+
+.specimen {
+  margin: 0.25rem 0 1.25rem;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+}
+
+.specimen figcaption {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0.85rem 0 0.35rem;
+}
+
+.source pre code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.history-panel {
+  padding: 0;
+  font: 0.8rem/1.45 var(--mono);
+}
+
+.history-panel .tabs {
+  display: flex;
+  gap: 1.25rem;
+  margin: 0;
+  padding: 0.7rem 1.15rem 0;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+}
+
+.history-panel .tabs span {
+  padding-bottom: 0.55rem;
+}
+
+.history-panel .tabs .on {
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+
+.history-panel ol {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 0;
+}
+
+.history-panel li {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  padding: 0.5rem 1.15rem 0.5rem 1rem;
+  border-left: 3px solid var(--agent);
+}
+
+.history-panel li.other {
+  border-left-color: var(--agent-2);
+}
+
+.history-panel li + li {
+  border-top: 1px solid var(--rule);
+}
+
+.history-panel time {
+  color: var(--muted);
+}
+
+.history-panel .revert {
+  color: var(--accent-ink);
+}
+
+details {
+  border-top: 1px solid var(--rule);
+}
+
+details:last-of-type {
+  border-bottom: 1px solid var(--rule);
+}
+
+summary {
+  cursor: pointer;
+  padding: 0.85rem 0;
+  font-weight: 700;
+}
+
+details p {
+  color: color-mix(in srgb, var(--ink) 82%, var(--paper));
+}
+
+.end p {
+  color: var(--muted);
+}
+
+.end .ways-in {
+  margin-top: 0.5rem;
+}
+
+/* What else is in the notebook: a name and one line each, in two columns where there is room. */
+.features {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem 2rem;
+  margin: 0.5rem 0 0;
+}
+
+.features div {
+  border-top: 1px solid var(--rule);
+  padding-top: 0.6rem;
+}
+
+.features dt {
+  font: 700 0.92rem/1.4 var(--mono);
+}
+
+.features dd {
+  margin: 0.2rem 0 0;
+  color: color-mix(in srgb, var(--ink) 82%, var(--paper));
+}
+
+/* HTML in a note: the block as it is written beside what the note draws from it. */
+.html-demo {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+
+.html-demo pre {
+  padding: 1rem 1.15rem;
+  background: var(--paper-sunk);
+}
+
+.bars {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 1rem 1.15rem 0.85rem 0;
+}
+
+.bars p {
+  margin: 0 0 0.6rem;
+  font: 700 0.8rem var(--mono);
+}
+
+.bars ol {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+  height: 6.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--rule);
+}
+
+.bars li {
+  flex: 1;
+  height: var(--h);
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+}
+
+/* Prose pages: the same column, without the blame column's runs. */
+
+.prose {
+  max-width: var(--measure);
+  margin: clamp(1rem, 5vh, 3rem) 0 0 calc(var(--gutter) + var(--gap));
+}
+
+.prose h1 {
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  margin-bottom: 1.5rem;
+}
+
+.prose h2 {
+  margin-top: 2.75rem;
+  scroll-margin-top: 1rem;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.25rem;
+  margin: 0 0 1rem;
+}
+
+.prose li {
+  margin-bottom: 0.35rem;
+}
+
+.prose table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 1.25rem;
+  font-size: 0.95rem;
+}
+
+.prose th,
+.prose td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.45rem 0.75rem 0.45rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.prose th {
+  font: 700 0.82rem var(--mono);
+}
+
+.prose pre {
+  background: var(--paper-sunk);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin: 0 0 1.25rem;
+}
+
+.prose blockquote {
+  margin: 0 0 1.25rem;
+  padding-left: 1rem;
+  border-left: 3px solid var(--rule);
+  color: var(--muted);
+}
+
+.site-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.75rem;
+  padding: 1.75rem 0 2.5rem;
+  border-top: 1px solid var(--rule);
+  font: 0.82rem var(--mono);
+  color: var(--muted);
+}
+
+.site-foot nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+}
+
+.site-foot nav a {
+  color: var(--muted);
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.site-foot p {
+  margin: 0 0 0 auto;
+}
+
+/* A phone: the blame column folds into a line above each run. */
+@media (max-width: 760px) {
+  .features,
+  .html-demo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bars {
+    padding: 0 1.15rem 1rem;
+  }
+
+  body {
+    font-size: 1.0625rem;
+  }
+
+  .lede {
+    font-size: 1.15rem;
+  }
+
+  .site-landing section,
+  .run {
+    display: block;
+  }
+
+  .site-landing section + section {
+    margin-top: 3.5rem;
+  }
+
+  .run {
+    border-left: 3px solid var(--tone);
+    padding-left: 0.85rem;
+  }
+
+  .run + .run {
+    margin-top: 0.75rem;
+  }
+
+  .who {
+    border: 0;
+    padding: 0 0 0.25rem;
+    text-align: left;
+    display: flex;
+    gap: 0.6rem;
+  }
+
+  .who-name,
+  .who-when {
+    display: inline;
+  }
+
+  .run + .run .lines,
+  .lines {
+    padding-top: 0;
+  }
+
+  .run.agent .lines,
+  .run.member .lines {
+    margin-left: -0.85rem;
+    padding: 0.35rem 0.75rem 0.75rem 0.85rem;
+  }
+
+  .run.agent .who,
+  .run.member .who {
+    padding-top: 0.35rem;
+  }
+
+  .prose {
+    margin-left: 0;
+  }
+
+  .history-panel li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .history-panel li span:not(.revert) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .site-foot p {
+    margin-left: 0;
+    width: 100%;
+  }
+}

@@ -302,6 +302,17 @@ button.link:hover {
   width: 100%;
 }
 
+.sign-in-links {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  font-size: calc(0.85rem * var(--text-scale));
+}
+
+.sign-in-links a {
+  color: var(--muted);
+}
+
 .connect {
   max-width: 28rem;
   margin: 12vh auto 0;
