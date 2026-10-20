@@ -4,5 +4,5 @@
     "lib": ["es2024", "dom"],
     "types": ["node"]
   },
-  "include": ["scripts", "cli", "test/browser", "test/zones", "test/node", "test/site", "test/cli", "*.config.ts"]
+  "include": ["scripts", "cli", "test/browser", "test/zones", "test/node", "test/site", "test/cli", "test/store", "*.config.ts"]
 }

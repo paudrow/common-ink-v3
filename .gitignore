@@ -8,3 +8,4 @@ test-results/
 playwright-report/
 wrangler.preview.json
 blob-report/
+extension/store/*.zip
