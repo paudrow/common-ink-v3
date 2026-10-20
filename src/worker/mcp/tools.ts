@@ -5,6 +5,7 @@ import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
 import { CAPABILITY_NAMES } from "../../core/plugins.ts";
 import { EXPORT_PART_BYTES, EXPORT_PART_FILES, MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type ExportPlan, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
 import { EXPORT_INDEX, SHARED_WITH_ME } from "../../core/export.ts";
+import { noteLines } from "../../core/text.ts";
 import { writtenUpload } from "../../core/uploadRefs.ts";
 import { ASK_NOTE_SYNTAX, syntaxDescription, syntaxText as noteSyntaxText } from "../../core/noteSyntax.ts";
 import { MAX_SEARCH_LENGTH, SCOPES, queryLanguage, type Scope } from "../../core/query.ts";
@@ -46,8 +47,10 @@ interface Tool {
   example: Record<string, unknown>;
   /** Keys of this tool's answer that hold a time, besides those that do in every answer. */
   times?: string[];
-  /** What the agent is told of the operation's answer, when that is more than the answer: `origin` is the server's address. */
-  told?: (answer: never, origin: string) => unknown;
+  /** Arguments the operation doesn't take, which say how the agent is shown its answer. They go to told alone. */
+  own?: string[];
+  /** What the agent is told of the operation's answer, when that is more than the answer: `origin` is the server's address, and `own` the call's own arguments. */
+  told?: (answer: never, origin: string, own: Record<string, unknown>) => unknown;
 }
 
 /** Each argument's old name, taken for the name it has now: `workspace` for every tool, and the operation's own field for an argument renamed. */
@@ -217,6 +220,27 @@ const LIFE = "A note is live, archived or in Trash, which its state says. An arc
 const uploadId = { type: "string", description: "The upload's id, from list_uploads" };
 /** An upload, with the line a note shows it by. */
 const withLine = (upload: Upload) => ({ ...upload, line: writtenUpload(upload.kind, upload.id, upload.width && upload.height ? { width: upload.width, height: upload.height } : null) });
+/**
+ * A note as read_note shows it. With lines, only those lines, and where they are in the note: a
+ * range past the end stops at the end. With numbered, each line after its number, padded to the
+ * widest shown, and a tab. Lines are counted by noteLines, so read_note and edit_note count alike.
+ */
+function shownLines(note: { text: string }, _origin: string, { lines, numbered }: Record<string, unknown>) {
+  if (numbered !== undefined && typeof numbered !== "boolean") throw new OpError("invalid", "numbered is true or false");
+  if (lines === undefined && !numbered) return note;
+  const all = noteLines(note.text).lines;
+  let [from, to] = [0, all.length];
+  if (lines !== undefined) {
+    const { from: first, to: last } = (typeof lines === "object" && lines ? lines : {}) as { from?: number; to?: number };
+    if (!Number.isInteger(first) || !Number.isInteger(last) || first! < 0 || last! < first!)
+      throw new OpError("invalid", `lines is { from, to }: whole numbers counted from 0 as edit_note counts them, with to at least from and not included. ${JSON.stringify(lines)} isn't`);
+    [from, to] = [Math.min(first!, all.length), Math.min(last!, all.length)];
+  }
+  const shown = all.slice(from, to);
+  const width = String(from + shown.length - 1).length;
+  const text = (numbered ? shown.map((line, i) => `${String(from + i).padStart(width)}\t${line}`) : shown).join("\n");
+  return { ...note, text, ...(lines === undefined ? {} : { lines: { from, to, of: all.length } }) };
+}
 const UPLOADS =
   "A note shows an upload with an embed on a line of its own that starts with the upload's id: ::image{<id> WIDTHxHEIGHT} or ::video{<id> WIDTHxHEIGHT}, with the room to keep for it, ::audio{<id>}, or ::file{<id>} for anything else. The upload's name is never in the note. Its bytes are not in any tool's answer: GET /api/workspaces/<workspace>/uploads/<id> with the same bearer token answers with them, and POST /api/workspaces/<workspace>/uploads takes a new file. A token limited to folders reaches only the uploads in them, at those addresses too.";
 const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
@@ -280,9 +304,25 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are @[[id|Name]] or @[[Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. Uploads in the text are ::image{id ...}, ::video{id ...}, ::audio{id} or ::file{id}: uploads names each one's id with its name, type, kind and size, or a null upload for one that doesn't exist or that you can't see. A note in Trash is read as any other, and its state says trashed.",
-    inputSchema: object({ noteId, revision: { type: "integer", minimum: 0, description: "An earlier revision; default is the latest" } }, ["noteId"]),
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are @[[id|Name]] or @[[Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. Uploads in the text are ::image{id ...}, ::video{id ...}, ::audio{id} or ::file{id}: uploads names each one's id with its name, type, kind and size, or a null upload for one that doesn't exist or that you can't see. A note in Trash is read as any other, and its state says trashed. Pass lines to read only some lines, and numbered to see each line's number: the numbers are edit_note's, counted in the revision read. Leave them out of edit_note's text.",
+    inputSchema: object(
+      {
+        noteId,
+        revision: { type: "integer", minimum: 0, description: "An earlier revision; default is the latest" },
+        lines: {
+          type: "object",
+          properties: { from: { type: "integer", minimum: 0, description: "The first line, counted from 0" }, to: { type: "integer", minimum: 0, description: "The line to stop before" } },
+          required: ["from", "to"],
+          additionalProperties: false,
+          description: "Only these lines in text. The answer's lines is { from, to, of }: the range shown, stopped at the end, and how many lines the note has",
+        },
+        numbered: { type: "boolean", description: "Each line of text after its number, padded to one width, and a tab; default false" },
+      },
+      ["noteId"],
+    ),
     renames: { noteId: "id" },
+    own: ["lines", "numbered"],
+    told: shownLines,
     op: "note.read",
     example: { noteId: NOTE },
   },
@@ -334,7 +374,7 @@ export const TOOLS: Tool[] = [
   {
     name: "edit_note",
     description:
-      `Change lines of a note and leave the rest. Give the revision you read as baseRevision. Each edit replaces the lines from its from up to and not including its to, counted from 0 in the note at that revision: from equal to to inserts, and an empty text deletes. A newline after the note's last line is not a line of its own. Every range is counted in that revision, so one edit is not shifted by another, and two that overlap are refused. There may be 50 edits. Edits made since baseRevision are merged in, as write_note merges them, and a line you left out is left as it was. Send the same writeId again after a failed call and the edit is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `Change lines of a note and leave the rest. Give the revision you read as baseRevision. read_note with numbered shows each line's number. Each edit replaces the lines from its from up to and not including its to, counted from 0 in the note at that revision: from equal to to inserts, and an empty text deletes. A newline after the note's last line is not a line of its own. Every range is counted in that revision, so one edit is not shifted by another, and two that overlap are refused. There may be 50 edits. Edits made since baseRevision are merged in, as write_note merges them, and a line you left out is left as it was. Send the same writeId again after a failed call and the edit is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         noteId,
@@ -1150,7 +1190,7 @@ const loosely = (name: string) => name.toLowerCase().replace(/[_-]/g, "");
  * An argument the tool doesn't take is refused by name, since the core would leave it out and a
  * misspelt argument would turn into a different request.
  */
-export function opArguments(tool: Tool, args: Record<string, unknown>): { workspaceId: unknown; fields: Record<string, unknown> } {
+export function opArguments(tool: Tool, args: Record<string, unknown>): { workspaceId: unknown; fields: Record<string, unknown>; own: Record<string, unknown> } {
   const properties = (tool.inputSchema as { properties: Record<string, object> }).properties;
   const takes = Object.keys(properties);
   const old = oldNames(tool);
@@ -1166,7 +1206,12 @@ export function opArguments(tool: Tool, args: Record<string, unknown>): { worksp
   }
   const { workspaceId, ...rest } = { ...tool.defaults, ...named };
   const fields: Record<string, unknown> = {};
+  const own: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(rest)) {
+    if (tool.own?.includes(name)) {
+      own[name] = value;
+      continue;
+    }
     let taken = value;
     if (TIMES.has(properties[name]!) && typeof value === "string") {
       taken = Date.parse(value);
@@ -1174,7 +1219,7 @@ export function opArguments(tool: Tool, args: Record<string, unknown>): { worksp
     }
     fields[tool.renames?.[name] ?? name] = taken;
   }
-  return { workspaceId, fields };
+  return { workspaceId, fields, own };
 }
 
 /** The keys of an answer that hold a time, which the operations give in milliseconds. */
@@ -1213,7 +1258,7 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
   if (!tool) return null;
   if (!reaches(agent, name)) return text(`forbidden: The clipper can only list workspaces and folders and create notes. ${name} is for agents`, true);
   try {
-    const { workspaceId: workspace, fields } = opArguments(tool, args);
+    const { workspaceId: workspace, fields, own } = opArguments(tool, args);
     if (name === "note_syntax") return text(noteSyntaxText());
     if (name === "query_syntax") {
       if (!SCOPES.includes(fields.scope as Scope)) throw new OpError("invalid", `scope is ${SCOPES.join(", ")}`);
@@ -1250,7 +1295,7 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       if (prior) return text({ id: prior.id });
     }
     const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
-    return written(tool.told ? tool.told(answer as never, reached.origin) : answer);
+    return written(tool.told ? tool.told(answer as never, reached.origin, own) : answer);
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${namedAsTold(tool, err.message)}`, true);
     throw err;

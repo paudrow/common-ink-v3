@@ -38,7 +38,7 @@ const COMMANDS: Record<string, string[][]> = {
   trash_note: [["trash", ID]],
   restore_note: [["restore", ID]],
   list_trash: [["trashed", "--limit", "5", "--after", "WzEsImEiXQ"]],
-  read_note: [["read", ID, "--revision", "1"]],
+  read_note: [["read", ID, "--revision", "1", "--from", "1", "--to", "3", "--numbered", "true"]],
   note_syntax: [["note-syntax"]],
   create_note: [["create", "--text", "# Hi", "--folder", ID, "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep"]],
   write_note: [["write", ID, "--base", "1", "--text", "# Hi", "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--on", "2026-10-11"]],
@@ -244,8 +244,8 @@ describe("what an agent can do, against what the web app can", () => {
     expect([...OPS.values()].flat().filter((field) => /^(actor|personId|agentId|pluginId|workspaceId|role|scope)$/.test(field))).toEqual([]);
   });
 
-  it("gives each tool every field its operation takes, and no other", () => {
-    for (const tool of TOOLS.filter((t) => t.op)) expect(argumentsOf(tool).map((name) => tool.renames?.[name] ?? name).sort(), tool.name).toEqual([...OPS.get(tool.op!)!].sort());
+  it("gives each tool every field its operation takes, and no other but its own, which say how its answer is shown", () => {
+    for (const tool of TOOLS.filter((t) => t.op)) expect(argumentsOf(tool).filter((name) => !tool.own?.includes(name)).map((name) => tool.renames?.[name] ?? name).sort(), tool.name).toEqual([...OPS.get(tool.op!)!].sort());
   });
 
   it("has an ink command for every tool, with a flag for every argument", async () => {
@@ -366,7 +366,7 @@ describe("what each argument is called", () => {
     for (const tool of TOOLS.filter((t) => t.op)) {
       const { properties } = listed.find((t) => t.name === tool.name)!.inputSchema as { properties: Record<string, unknown> };
       expect(Object.keys(properties), tool.name).not.toContain("workspace");
-      expect(opArguments(tool, { workspace: "w" }), tool.name).toEqual({ workspaceId: "w", fields: { ...tool.defaults } });
+      expect(opArguments(tool, { workspace: "w" }), tool.name).toEqual({ workspaceId: "w", fields: { ...tool.defaults }, own: {} });
       for (const [name, field] of Object.entries(tool.renames ?? {})) {
         expect(Object.keys(properties), `${tool.name} ${field}`).not.toContain(field);
         expect(opArguments(tool, { [field]: ID }).fields, `${tool.name} ${field}`).toEqual({ ...tool.defaults, [field]: ID });
@@ -388,9 +388,9 @@ describe("what each argument is called", () => {
   it("refuses an argument it doesn't take by name, with the ones it does and a guess at the one meant", () => {
     const tool = TOOLS.find((t) => t.name === "list_folders")!;
     expect(() => opArguments(tool, { workspace_id: ID })).toThrow('list_folders takes no "workspace_id": did you mean "workspaceId"? It takes workspaceId.');
-    expect(() => opArguments(TOOLS.find((t) => t.name === "read_note")!, { noteId: ID, rev: 2 })).toThrow('read_note takes no "rev". It takes workspaceId, noteId, revision.');
+    expect(() => opArguments(TOOLS.find((t) => t.name === "read_note")!, { noteId: ID, rev: 2 })).toThrow('read_note takes no "rev". It takes workspaceId, noteId, revision, lines, numbered.');
     expect(() => opArguments(TOOLS.find((t) => t.name === "read_note")!, { noteId: ID, id: "bbbbbbbbbbbb" })).toThrow('Pass noteId once: "id" is its old name, and they differ');
-    expect(opArguments(TOOLS.find((t) => t.name === "read_note")!, { noteId: ID, id: ID, workspace: "w" })).toEqual({ workspaceId: "w", fields: { id: ID } });
+    expect(opArguments(TOOLS.find((t) => t.name === "read_note")!, { noteId: ID, id: ID, workspace: "w" })).toEqual({ workspaceId: "w", fields: { id: ID }, own: {} });
   });
 
   it("takes a time as ISO 8601 or as milliseconds, and gives create_folder's ifExists its default", () => {

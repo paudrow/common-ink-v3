@@ -61,7 +61,10 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   trash ID                            move a note to Trash, where it waits 30 days
   restore ID                          bring a note back from Trash, to the folder it was in
   trashed [--limit N] [--after NEXT]  the notes in Trash, and when each is removed for good
-  read ID [--revision N]              a note's markdown, and the titles of the notes it links to
+  read ID [--revision N] [--from N --to N] [--numbered true]
+                                      a note's markdown, and the titles of the notes it links to. --from and --to
+                                      read only those lines, and --numbered puts each line's number first, both
+                                      counted as edit counts them
   create [--text TEXT] [--folder ID] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep]
                                       a new note (text from stdin if --text is left out). The same --write-id again returns the first note
   write ID --base N [--text TEXT] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--on DAY]
@@ -656,8 +659,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
         args = given({ limit: ["limit", integer], after: ["after"] });
         break;
       case "read":
+        if (flags.has("from") !== flags.has("to")) throw new UsageError("read needs --from and --to together");
         tool = "read_note";
-        args = { noteId: needId(), ...(flags.has("revision") ? { revision: integer("--revision", flags.get("revision")!) } : {}) };
+        args = {
+          noteId: needId(),
+          ...given({ revision: ["revision", integer], numbered: ["numbered", truth] }),
+          ...(flags.has("from") ? { lines: { from: integer("--from", flags.get("from")!), to: integer("--to", flags.get("to")!) } } : {}),
+        };
         break;
       case "create":
         tool = "create_note";
