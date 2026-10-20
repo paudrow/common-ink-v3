@@ -66,7 +66,7 @@ export const written = (policy: Policy) =>
     .join("; ");
 
 const policyFor = (path: string): Policy =>
-  path === "/mcp" || path.startsWith("/api/") || path.startsWith("/.well-known/") || (path.startsWith("/oauth/") && path !== AUTHORIZE) ? DATA : path === EMBED_FRAME_PATH || path.startsWith(`${EMBED_FRAME_PATH}/`) ? EMBED_FRAME : PAGE;
+  path === "/mcp" || path === "/health" || path.startsWith("/api/") || path.startsWith("/.well-known/") || (path.startsWith("/oauth/") && path !== AUTHORIZE) ? DATA : path === EMBED_FRAME_PATH || path.startsWith(`${EMBED_FRAME_PATH}/`) ? EMBED_FRAME : PAGE;
 
 /**
  * The page's policy at `url`: it may also frame the HTML embed's document, at its own address and under

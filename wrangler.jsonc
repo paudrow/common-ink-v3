@@ -53,6 +53,9 @@
     { "name": "OPS_LIMIT", "namespace_id": "3004", "simple": { "limit": 300, "period": 60 } },
     { "name": "MCP_LIMIT", "namespace_id": "3005", "simple": { "limit": 300, "period": 60 } }
   ],
+  // Which version of the Worker is answering: /health says its id, and a fault sent to Sentry names it as the release,
+  // the same id `wrangler versions list` and `wrangler rollback` use (docs/runbooks/rollback.md).
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // The optional settings are typed in src/worker/env.d.ts.
   "secrets": { "required": ["SESSION_SECRET"] }
   // Previews run on their own Worker, common-ink-v3-previews. scripts/preview.ts writes their settings: their own D1

@@ -869,7 +869,7 @@ test("a tab on a page that is no longer there keeps its place in the tab row und
   await page.goto("/");
   await gone();
 
-  await tab(page, "History").getByRole("button", { name: "Close History" }).click();
+  await tab(page, "History").getByTitle("Close History", { exact: true }).click();
   await expect(tabs(page)).toHaveText(["Plugins"]);
   await expect(page).toHaveURL(/\/plugins$/);
 });

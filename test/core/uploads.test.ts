@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { env, createExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
@@ -260,7 +260,7 @@ describe("an upload's life", () => {
     const ada = await newMember();
     const { id } = await upload(ada, "due.png");
     await perform(env.DB, ada, { type: "upload.trash", id }, T0);
-    await worker.scheduled!({ scheduledTime: T0 + TRASH_MS, cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env);
+    await worker.scheduled!({ scheduledTime: T0 + TRASH_MS, cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env, createExecutionContext());
     expect([await rowsOf(id), await inBucket(id)]).toEqual([[], false]);
   });
 

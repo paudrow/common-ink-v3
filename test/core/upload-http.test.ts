@@ -356,7 +356,7 @@ describe("a PDF opened in a tab, from the site kept for files", () => {
     try {
       const answer = await at("https://ink.test/", {}, { FILE_ORIGIN: "http://files.ink-files.test" });
       expect(answer.status).toBe(500);
-      expect(logged.mock.calls.join("\n")).toContain("FILE_ORIGIN must be an https address");
+      expect(logged.mock.calls).toEqual([[{ fault: expect.objectContaining({ route: "/", status: 500, message: expect.stringContaining("FILE_ORIGIN must be an https address") }) }]]);
     } finally {
       logged.mockRestore();
     }

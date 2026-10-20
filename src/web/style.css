@@ -111,7 +111,7 @@
   --bg-side: #f4f2ee;
   --code-bg: rgb(31 30 28 / 0.035);
   --line-strong: #d9d4ca;
-  --faint: #a8a39b;
+  --faint: #716b62;
   --danger: #c2410c;
   --added: #15803d;
   --added-soft: rgb(21 128 61 / 0.12);
@@ -159,7 +159,7 @@
     --bg-side: #1d1c1b;
     --code-bg: rgb(232 230 227 / 0.026);
     --line-strong: #403e3b;
-    --faint: #6b6762;
+    --faint: #8c877f;
     --danger: #f08a5d;
     --added: #6dc98a;
     --added-soft: rgb(109 201 138 / 0.14);
@@ -189,7 +189,7 @@
   --bg-side: #1d1c1b;
   --code-bg: rgb(232 230 227 / 0.026);
   --line-strong: #403e3b;
-  --faint: #6b6762;
+  --faint: #8c877f;
   --danger: #f08a5d;
   --added: #6dc98a;
   --added-soft: rgb(109 201 138 / 0.14);
@@ -617,7 +617,7 @@ button.link:hover {
 
 .mode[aria-current="page"] {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .mode[aria-current="page"] svg {
@@ -659,7 +659,7 @@ button.link:hover {
 
 .folder-row[aria-selected="true"] {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 550;
 }
 
@@ -3920,7 +3920,7 @@ kbd {
 
 .settings-nav a[aria-current="page"] {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
@@ -5259,7 +5259,7 @@ kbd {
   height: 22px;
   border-radius: 50%;
   background: hsl(var(--hue) 75% 91%);
-  color: hsl(var(--hue) 50% 36%);
+  color: hsl(var(--hue) 50% 30%);
   font-size: calc(9px * var(--text-scale));
   font-weight: 700;
   line-height: 1;
@@ -8010,7 +8010,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .tag-row[aria-current="page"] {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 550;
 }
 

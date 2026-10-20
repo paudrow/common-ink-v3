@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { env, createExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { TRASH_MS } from "../../src/core/lifecycle.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
@@ -190,7 +190,7 @@ describe("removing notes from Trash", () => {
     await perform(env.DB, ada, { type: "note.trash", id: due.id }, T0);
     await perform(env.DB, ada, { type: "note.trash", id: waiting.id }, T0 + 5000);
 
-    await worker.scheduled!({ scheduledTime: T0 + TRASH_MS, cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env);
+    await worker.scheduled!({ scheduledTime: T0 + TRASH_MS, cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env, createExecutionContext());
 
     expect((await perform(env.DB, ada, { type: "trash.list" })).notes.map((n) => n.title)).toEqual(["Waiting"]);
     await expect(perform(env.DB, ada, { type: "note.read", id: due.id })).rejects.toMatchObject({ code: "not_found" });

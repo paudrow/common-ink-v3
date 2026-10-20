@@ -192,18 +192,18 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
                         </span>
                       )}
                       <span className="tab-title">{title}</span>
-                      <button
-                        type="button"
+                      {/* A control inside a tab is one a screen reader can't reach as its own, so the cross is for the mouse alone: the keyboard closes a tab from its menu or the Close tab command. */}
+                      <span
                         className="tab-close"
-                        tabIndex={-1}
-                        aria-label={`Close ${title}`}
+                        aria-hidden="true"
+                        title={`Close ${title}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           close();
                         }}
                       >
                         <Icon name="close" />
-                      </button>
+                      </span>
                     </div>
                   );
                 })}

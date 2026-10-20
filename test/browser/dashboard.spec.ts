@@ -462,7 +462,7 @@ test("the Dashboard is a plugin: turned off, its page, its link and the pin are 
   await page.getByRole("checkbox", { name: "Dashboard", exact: true }).setChecked(false);
   await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Dashboard" })).toHaveCount(0);
   // The Plugins page is a tab, which `/` would return to: with it closed nothing is open, and no Dashboard opens there.
-  await page.getByRole("button", { name: "Close Plugins" }).click();
+  await page.getByTitle("Close Plugins", { exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
   await expect(dashboard(page)).toHaveCount(0);

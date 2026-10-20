@@ -18,6 +18,8 @@ interface InkSettings {
   FILE_ORIGIN?: string;
   /** The Chrome extension ids the clipper may sign in from, separated by commas. Without one no clipper signs in. */
   CLIPPER_EXTENSION_IDS?: string;
+  /** A Sentry project's DSN. With it, every fault the Worker reports is also sent to Sentry; without it, faults go only to Workers Logs (src/worker/report.ts). */
+  SENTRY_DSN?: string;
 }
 
 interface Env extends InkSettings {}

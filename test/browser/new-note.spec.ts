@@ -129,7 +129,7 @@ test("a new note left with nothing in it is gone when its tab closes, not put in
     await expect(editor(page)).toBeFocused();
     return noteIdIn(page);
   };
-  const closeTab = () => page.getByRole("button", { name: "Close Untitled" }).click();
+  const closeTab = () => page.getByTitle("Close Untitled", { exact: true }).click();
 
   // Untouched.
   const untouched = await newNote();
@@ -190,7 +190,7 @@ test("an empty note open in another tab of the browser is not discarded when one
   await other.goto(`/note/${id}`);
   await expect(editor(other)).toBeVisible();
 
-  await page.getByRole("button", { name: "Close Untitled" }).click();
+  await page.getByTitle("Close Untitled", { exact: true }).click();
   await page.waitForTimeout(1500);
   expect((await read(page, id)).state).toBe("live");
   await editor(other).focus();

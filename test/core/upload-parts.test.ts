@@ -347,9 +347,8 @@ describe("a part that breaks the Worker", () => {
     try {
       const answer = await worker.fetch(new Request(sending.address.replace("{part}", "2"), { method: "PUT", body: "x" }) as never, { ...env, SESSION_SECRET: SECRET, DB: failing });
       expect(answer.status).toBe(500);
-      const lines = logged.mock.calls.join("\n");
-      expect(lines).toContain("/api/upload-parts/…/2 broke");
-      expect(lines).not.toContain(secret);
+      expect(logged.mock.calls).toEqual([[{ fault: expect.objectContaining({ route: "/api/upload-parts/*/2", message: "D1 broke at /api/upload-parts/…/2" }) }]]);
+      expect(JSON.stringify(logged.mock.calls)).not.toContain(secret);
     } finally {
       logged.mockRestore();
     }

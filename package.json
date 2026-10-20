@@ -11,7 +11,8 @@
     "typecheck": "wrangler types --check && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p extension/tsconfig.json",
     "types": "wrangler types",
     "test": "vitest run && vitest run -c vitest.extension.config.ts && node --test test/zones/recurrence-zones.test.ts test/node/zip.test.ts test/node/restore-drill.test.ts test/node/scripts-load.test.ts",
-    "test:browser": "playwright test",
+    "test:browser": "playwright test --project=chromium",
+    "test:browser:others": "npm run build && node scripts/smoke-browsers.ts",
     "check": "npm run typecheck && npm test && npm run build",
     "preview": "node scripts/preview.ts",
     "ink": "node scripts/ink.ts",
@@ -37,6 +38,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@cloudflare/vite-plugin": "^1.63.1",
     "@cloudflare/vitest-plugin": "^1.4.0",
     "@mozilla/readability": "^0.6.0",

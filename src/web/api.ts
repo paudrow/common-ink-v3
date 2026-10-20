@@ -1,4 +1,5 @@
 import { partSpan, partsLeft, planParts } from "../core/parts.ts";
+import { tellFault } from "./faults.ts";
 import { NO_SUCH_WORKSPACE, type Agent, type ClipperGrantView, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type SendingUpload, type Shared, type Upload } from "../core/protocol.ts";
 
 export class ApiError extends Error {
@@ -6,6 +7,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: OpErrorCode | "signed_out" | "unknown",
     message: string,
+    /** A fault answered by something other than the Worker, such as Cloudflare's page for a Worker it cut off. The Worker reports its own. */
+    readonly cutOff = false,
   ) {
     super(message);
   }
@@ -40,7 +43,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // A refusal is an answer to whoever is signed in, as much as a result is. A fault says nothing either way.
   if (res.status === 401) sessionIs(true);
   else if (res.status < 500) sessionIs(false);
-  if (!res.ok) throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? res.statusText);
+  if (!res.ok) throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? res.statusText, res.status >= 500 && typeof body.error !== "string");
   return body as T;
 }
 
@@ -80,17 +83,26 @@ export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<
   });
   answer.catch((err) => {
     if (err instanceof ApiError && (err.code === "forbidden" || err.message === NO_SUCH_WORKSPACE)) for (const listener of [...refused]) listener();
+    tellBroken(op.type, err);
   });
   return answer;
 }
+
+/** An operation answered with a fault the Worker didn't make is told of, as the page saw it: the Worker can't tell of one Cloudflare cut off. */
+const tellBroken = (op: string, err: unknown) => {
+  if (err instanceof ApiError && err.cutOff) tellFault({ name: "ApiError", message: err.message, op, status: err.status });
+};
 
 /**
  * Performs an operation as a plugin installed in the workspace, for the member. The server lets it do
  * only what the plugin is permitted and records the plugin as the author. A refusal here says nothing
  * of the member's own standing, so nobody listening for those is told.
  */
-export const performAsPlugin = <T extends OpInput>(workspaceId: string, pluginId: string, op: T, draft = false) =>
-  request<Results[T["type"]]>(`/api/workspaces/${workspaceId}/plugins/${pluginId}${draft ? "/draft" : ""}/ops`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(op) });
+export function performAsPlugin<T extends OpInput>(workspaceId: string, pluginId: string, op: T, draft = false): Promise<Results[T["type"]]> {
+  const answer = request<Results[T["type"]]>(`/api/workspaces/${workspaceId}/plugins/${pluginId}${draft ? "/draft" : ""}/ops`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(op) });
+  answer.catch((err) => tellBroken(op.type, err));
+  return answer;
+}
 
 /**
  * Loads a full-trust plugin's code as a module from the app's own address, which the page's policy
