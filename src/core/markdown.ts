@@ -1,32 +1,64 @@
 import { linesOutsideCode } from "./lines.ts";
+import { codeSpans } from "./spans.ts";
 import { parseTodo } from "./todos.ts";
 
-const HEADING = /^ {0,3}#[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+const HEADING = /^ {0,3}#[ \t]+(.*)$/;
+/** A heading's closing `#`s and the spaces around them, cut by hand: as one pattern they tried again from every space. */
+const unclosed = (words: string) => {
+  const trimmed = words.trimEnd();
+  const hashes = trimmed.replace(/#+$/, "");
+  return hashes !== trimmed && /[ \t]$/.test(hashes) ? hashes.trimEnd() : trimmed;
+};
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const SNIPPET_LENGTH = 160;
 
 const TITLE_LENGTH = 80;
 
-/** A line as it reads: without its marks, and without what is drawn in it and has no words of its own. */
+/** Inline code as its words, without the backticks around it. */
+const unquoted = (line: string) => {
+  let out = "";
+  let at = 0;
+  for (const [from, to] of codeSpans(line)) {
+    let ticks = 0;
+    while (line[from + ticks] === "`") ticks++;
+    out += line.slice(at, from) + line.slice(from + ticks, to - ticks);
+    at = to;
+  }
+  return out + line.slice(at);
+};
+
+/** A link's words in brackets, which may hold one pair of brackets, and its address in parentheses, which may hold one pair: `[a [b]](https://w.org/Foo_(bar))`. No middle runs past an opening it can't hold. */
+const TEXT = String.raw`\[((?:[^[\]]|\[[^[\]]*\])*)\]`;
+const ADDRESS_IN = String.raw`\((?:[^()]|\([^()]*\))*\)`;
+
+/**
+ * A line as it reads: without its marks, and without what is drawn in it and has no words of its own.
+ * No bracket's middle runs past another opening bracket, so each pattern stops at the next one it meets
+ * and a line of thousands of `[` costs no more than a line of words.
+ */
 const plainText = (line: string) =>
-  line
-    .replace(/^\s*(?:>\s*)*/, "")
-    .replace(/^#{1,6}(?:\s+|$)/, "")
-    .replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\](?:\s+|$))?/, "")
-    // An embed and an image are drawn, and a block of math's fence is no words.
-    .replace(/:{2,3}[a-z][a-z0-9-]*\{[^{}]*\}/g, "")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/^(?::::|\$\$)\s*$/, "")
-    // A mention reads as the name it was written with.
-    .replace(/@\[\[(?:[^\]|]*\|)?([^\]|]+)\]\]/g, "@$1")
-    .replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1")
-    // A link with no words of its own shows its note's title, which isn't this note's to keep.
-    .replace(/\s*\[\[[a-z0-9]{12}\]\]/g, "")
-    .replace(/\[\[([^\]]*)\]\]/g, "$1")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/<(https?:\/\/[^>\s]+)>/g, "$1")
-    // Marks around words, and not a lone `*` or backtick that is one of the words: `2 * 3`.
-    .replace(/(`+)([^`]+)\1/g, "$2")
+  unmarked(
+    line
+      .replace(/^\s*(?:>\s*)*/, "")
+      .replace(/^#{1,6}(?:\s+|$)/, "")
+      .replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\](?:\s+|$))?/, "")
+      // An embed and an image are drawn, and a block of math's fence is no words.
+      .replace(/:{2,3}[a-z][a-z0-9-]*\{[^{}]*\}/g, "")
+      .replace(new RegExp(`!${TEXT}${ADDRESS_IN}`, "g"), "")
+      .replace(/^(?::::|\$\$)\s*$/, "")
+      // A mention reads as the name it was written with.
+      .replace(/@\[\[(?:[^[\]|]*\|)?([^[\]|]+)\]\]/g, "@$1")
+      .replace(/\[\[[^[\]|]*\|([^[\]]*)\]\]/g, "$1")
+      // A link with no words of its own shows its note's title, which isn't this note's to keep.
+      .replace(/(?<!\s)\s*\[\[[a-z0-9]{12}\]\]/g, "")
+      .replace(/\[\[([^[\]]*)\]\]/g, "$1")
+      .replace(new RegExp(`${TEXT}${ADDRESS_IN}`, "g"), "$1")
+      .replace(/<(https?:\/\/[^<>\s]+)>/g, "$1"),
+  );
+
+/** Marks around words, and not a lone `*` that is one of the words: `2 * 3`. */
+const unmarked = (line: string) =>
+  unquoted(line)
     .replace(/(\*\*|~~|__)(?=\S)([^*~_]+)(?<=\S)\1/g, "$2")
     .replace(/(?<![\w*])([*_])(?=\S)([^*_]+)(?<=\S)\1(?![\w*])/g, "$2")
     .replace(/\s+/g, " ")
@@ -55,7 +87,8 @@ export function summarize(text: string): { title: string; snippet: string; openT
     const todo = parseTodo(line);
     if (todo?.done === false) openTodos++;
     if (RULE.test(line)) continue;
-    const titling = heading < 0 ? HEADING.exec(line)?.[1] : undefined;
+    const head = heading < 0 ? HEADING.exec(line)?.[1] : undefined;
+    const titling = head === undefined ? undefined : unclosed(head);
     // A todo reads as its words: its importance and due date are options, not prose.
     const words = plainText(titling ?? (todo ? todo.words : line));
     if (!words) continue;

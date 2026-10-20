@@ -1,4 +1,5 @@
 import { linesOutsideCode } from "./lines.ts";
+import { blanked, codeSpans } from "./spans.ts";
 
 /**
  * A note refers to an upload by an embed whose config starts with the upload's id: `::image{id 640x480}`,
@@ -17,7 +18,6 @@ export const SIZE_WORDS = ["small", "medium", "large", "full"] as const;
 export type SizeWord = (typeof SIZE_WORDS)[number];
 
 const REF = new RegExp(`(?<!:)::(${UPLOAD_EMBEDS.join("|")})\\{([a-z0-9]{12})(?:[ \\t][^{}\\n]*)?\\}`, "g");
-const INLINE_CODE = /(`+)(?!`)[^]*?(?<!`)\1(?!`)/g;
 
 /** The upload an embed's config names, or null when it names none. */
 export const uploadIn = (config: string): string | null => /^([a-z0-9]{12})(?:[ \t]|$)/.exec(config)?.[1] ?? null;
@@ -56,7 +56,7 @@ export function uploadIds(text: string): string[] {
   const ids = new Set<string>();
   for (const { line } of linesOutsideCode(text)) {
     if (!line.includes("::")) continue;
-    for (const match of line.replace(INLINE_CODE, (code) => " ".repeat(code.length)).matchAll(REF)) ids.add(match[2]!);
+    for (const match of blanked(line, codeSpans(line), " ").matchAll(REF)) ids.add(match[2]!);
   }
   return [...ids];
 }

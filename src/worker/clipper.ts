@@ -1,6 +1,7 @@
 import { whoAmI } from "../core/accounts.ts";
 import { CLIPPER_DAYS, authenticateClipper, clipperExtensionIds, clipperRedirect, connectClipper, listClipperGrants, revokeClipperGrant } from "../core/clipper.ts";
 import { sessionOf, sessionPersonId } from "./auth.ts";
+import { MAX_FORM_BYTES, cappedBody } from "./body.ts";
 import { PAGE, written } from "./headers.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 
@@ -75,8 +76,10 @@ export async function handleClipperApi(req: Request, env: Env, url: URL): Promis
 async function postedRedirect(req: Request): Promise<string | null> {
   const type = req.headers.get("Content-Type") ?? "";
   if (!type.includes("application/x-www-form-urlencoded") && !type.includes("multipart/form-data")) return null;
+  const body = await cappedBody(req, MAX_FORM_BYTES);
+  if (!body) return null;
   try {
-    return (await req.clone().formData()).get("redirect")?.toString() ?? null;
+    return (await new Response(body, { headers: { "Content-Type": type } }).formData()).get("redirect")?.toString() ?? null;
   } catch {
     return null;
   }

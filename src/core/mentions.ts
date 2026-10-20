@@ -1,4 +1,5 @@
 import { linesOutsideCode } from "./lines.ts";
+import { addressSpans, blanked, codeSpans } from "./spans.ts";
 
 /**
  * A mention as a note writes it: `@[[target]]` or `@[[target|name]]`.
@@ -21,9 +22,7 @@ export interface WrittenMention {
 }
 
 const MENTION = /(?<![\p{L}\p{N}_@])@\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/gu;
-const INLINE_CODE = /(`+)(?!`)[^]*?(?<!`)\1(?!`)/g;
 const ID = /^[a-z0-9]{12}$/;
-const ADDRESS = /\]\([^)\n]*\)/g;
 const UNWRITABLE = /[[\]|\s]+/g;
 /** Characters that don't show and can change how what follows is laid out: zero-width ones, and the ones that turn text right to left. */
 const UNSEEN = /\p{Cf}+/gu;
@@ -47,8 +46,8 @@ export function writtenMention(person: { id?: string | null; name: string }): st
 /** The mentions on one line of a note, which starts at `offset`. Those inside inline code and in a link's address are left out. */
 export function mentionsOn(line: string, offset = 0): WrittenMention[] {
   if (!line.includes("@[[")) return [];
-  const out = (text: string) => " ".repeat(text.length);
-  const read = line.replace(INLINE_CODE, out).replace(ADDRESS, out);
+  const code = blanked(line, codeSpans(line), " ");
+  const read = blanked(code, addressSpans(code), " ");
   return [...read.matchAll(MENTION)].flatMap((match) => {
     const target = readableName(match[1]!);
     const from = offset + match.index;

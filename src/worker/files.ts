@@ -4,14 +4,12 @@
 //
 // The bytes are whatever somebody uploaded, served from the app's own host, so every answer is made
 // unable to act as a page of the app: see `SEALED`.
-import { authenticateAgent } from "../core/agents.ts";
-import { authenticateClipper } from "../core/clipper.ts";
 import { disposition, fileClass } from "../core/filetypes.ts";
 import { agentActor, perform, type Actor, type Visitor } from "../core/operations.ts";
 import { OpError, PART_BYTES, type OpErrorCode, type OpenedUpload } from "../core/protocol.ts";
 import { passHolder } from "../core/uploads.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
-import { sessionPersonId } from "./auth.ts";
+import { listed, sessionPersonId, tokenHolder } from "./auth.ts";
 import { sign, verify } from "./session.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 
@@ -63,10 +61,9 @@ function served(req: Request, { upload, body, etag, range }: OpenedUpload, more:
 async function asker(req: Request, env: Env, url: URL, workspaceId: string): Promise<{ actor: Actor; byToken: boolean; clipper?: true } | Response> {
   const token = bearerToken(req);
   if (token) {
-    const agent = await authenticateAgent(env.DB, token);
-    if (agent) return { byToken: true, actor: agentActor(agent, workspaceId) };
-    const clipper = await authenticateClipper(env.DB, token);
-    if (clipper) return { byToken: true, clipper: true, actor: { kind: "member", personId: clipper.personId, workspaceId } satisfies Actor };
+    const holder = await tokenHolder(env, url, token);
+    if (holder && "agent" in holder) return { byToken: true, actor: agentActor(holder.agent, workspaceId) };
+    if (holder) return { byToken: true, clipper: true, actor: { kind: "member", personId: holder.clipper.personId, workspaceId } satisfies Actor };
     return json({ error: "unauthorized", message: "Send a Common Ink agent token or an OAuth access token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
   }
   const personId = await sessionPersonId(req, env, url);
@@ -114,7 +111,7 @@ const PART = /^\/api\/upload-parts\/([A-Za-z0-9_-]{43})\/(\d{1,5})$/;
 async function part(req: Request, env: Env, secret: string, number: number): Promise<Response> {
   if (req.method !== "PUT") return json({ error: "method_not_allowed" }, 405, { Allow: "PUT" });
   const holder = await passHolder(env.DB, secret, Date.now());
-  if (!holder) return json({ error: "gone", message: "This address has lapsed or was never one. Ask for a fresh one with upload.resume (resume_upload)" }, 410);
+  if (!holder || !(await listed(env, new URL(req.url), holder.actor.personId))) return json({ error: "gone", message: "This address has lapsed or was never one. Ask for a fresh one with upload.resume (resume_upload)" }, 410);
   const length = req.headers.get("Content-Length");
   try {
     return json(

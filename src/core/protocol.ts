@@ -16,8 +16,14 @@ export const MAX_SETTINGS_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
 const Revision = z.number().int().min(0);
-/** Line endings as a note keeps them and no half of a character pair: what the database and a recorded change would each make of them differs, and the text stored must be the text its changes replay to. */
-const normalized = (text: string) => text.replace(/\r\n?/g, "\n").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+/**
+ * Line endings as a note keeps them and no half of a character pair: what the database and a recorded change would each make of them differs, and the text stored must be the text its changes replay to.
+ * No control character but tab and newline either: each is six characters once a change is written as JSON, so a note of them would make a change past what D1 keeps in one value.
+ */
+const normalized = (text: string) =>
+  text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\u0000-\u0008\u000B-\u001F]/g, "\uFFFD");
 const NoteText = z.string().max(MAX_NOTE_LENGTH).transform(normalized);
 const LabelName = z
   .string()
@@ -37,6 +43,8 @@ const Choice = z.union([z.literal("keep"), z.literal("back"), z.object({ text: N
  */
 const Resolve = z.object({ at: Revision, choices: z.union([z.literal("keep"), z.literal("back"), z.array(Choice).max(1000)]) }).strict();
 export type Resolve = z.output<typeof Resolve>;
+/** Chosen by the writer; an operation sent again with the same id takes effect once. */
+const WriteId = z.string().min(1).max(64).optional();
 const AuthorRef = z.object({ kind: z.enum(["member", "agent", "plugin"]), id: Id });
 export type AuthorRef = z.output<typeof AuthorRef>;
 /** Whose changes: people's, or agents'. */
@@ -626,15 +634,17 @@ export const Op = z.discriminatedUnion("type", [
    * describes. `size` is how many bytes are coming, at most PART_BYTES, which is as much as one
    * request carries, and a body of any other length is refused. A larger file is sent in parts:
    * `upload.start`. What the file is served as is decided from its name's ending and its first bytes.
-   * `private` makes it private to the member who uploads it, as a private note is.
+   * `private` makes it private to the member who uploads it, as a private note is. Sent again with the
+   * same `writeId`, it answers the upload the first made and stores nothing more.
    */
-  z.object({ type: z.literal("upload.create"), name: FileName, size: z.number().int().min(1), folderId: Id.optional(), private: z.boolean().default(false) }),
+  z.object({ type: z.literal("upload.create"), name: FileName, size: z.number().int().min(1), folderId: Id.optional(), private: z.boolean().default(false), writeId: WriteId }),
   /**
    * Begins a file of `size` bytes, at most MAX_UPLOAD_BYTES, sent in parts of PART_BYTES. The upload
    * is pending, and no one sees it, until `upload.finish`. The answer says how the file is cut and
    * gives an address each part is sent to, once, over HTTP (`upload.part`), which lapses in an hour.
+   * Sent again with the same `writeId` while the upload is being sent, it answers as `upload.resume` does.
    */
-  z.object({ type: z.literal("upload.start"), name: FileName, size: z.number().int().min(1), folderId: Id.optional(), private: z.boolean().default(false) }),
+  z.object({ type: z.literal("upload.start"), name: FileName, size: z.number().int().min(1), folderId: Id.optional(), private: z.boolean().default(false), writeId: WriteId }),
   /** Which parts of an upload being sent are stored, and a fresh address for the rest. Only whoever started it can ask. */
   z.object({ type: z.literal("upload.resume"), id: Id }),
   /**

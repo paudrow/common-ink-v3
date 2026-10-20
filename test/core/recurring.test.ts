@@ -771,8 +771,8 @@ describe("taking a completion back", () => {
 
     const reverted = await perform(env.DB, eve, { type: "note.revertChanges", id: note.id, revisions: [2] });
     expect(await text()).toBe(`# ${SUNDAY}\n\n`);
-    // The daily note is Ada's and private: Eve's change took the line off it, and she is told of no note she can't see.
-    expect(reverted.unfiled).toEqual({ removed: 1, left: 0, dailyNoteIds: [] });
+    // The daily note is Ada's and private: Eve's change took the line off it, and she is told nothing of a note she can't see, not even in the counts.
+    expect(reverted.unfiled).toEqual({ removed: 0, left: 0, dailyNoteIds: [] });
   });
 
   it("leaves a daily note outside a folder-limited agent's folders as it is", async () => {
@@ -787,7 +787,8 @@ describe("taking a completion back", () => {
 
     const reverted = await perform(env.DB, claude, { type: "note.revert", id: note.id, revision: 1 });
 
-    expect(reverted.unfiled).toEqual({ removed: 0, left: 1, dailyNoteIds: [] });
+    // The line left on the daily note isn't counted, so nothing is said of it: the agent can't see that note.
+    expect(reverted.unfiled).toBeUndefined();
     expect((await read(ada, daily)).text).toBe(before);
     expect((await read(ada, note.id)).text).toBe(`# Chores\n\n${WATER}`);
     expect(await codeOf(read(claude, daily))).toBe("not_found");

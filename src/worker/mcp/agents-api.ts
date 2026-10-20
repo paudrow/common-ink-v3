@@ -3,6 +3,7 @@
 import { connectAgent, disconnectAgent, editAgent, listAgents } from "../../core/agents.ts";
 import { ConnectOptions, OpError, type OpErrorCode } from "../../core/protocol.ts";
 import { sessionPersonId } from "../auth.ts";
+import { MAX_FORM_BYTES, TooLarge, cappedJson } from "../body.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -31,8 +32,9 @@ export async function handleAgentsApi(req: Request, env: Env, url: URL): Promise
       if (!req.headers.get("Content-Type")?.startsWith("application/json")) return json({ error: "invalid", message: "Send JSON" }, 400);
       let body: { name?: unknown; expiresInDays?: unknown; workspaceId?: unknown; readOnly?: unknown; folderIds?: unknown };
       try {
-        body = (await req.json()) as typeof body;
-      } catch {
+        body = (await cappedJson(req, MAX_FORM_BYTES)) as typeof body;
+      } catch (err) {
+        if (err instanceof TooLarge) return json({ error: "invalid", message: err.message }, 413);
         return json({ error: "invalid", message: "The body isn't JSON" }, 400);
       }
       // An edit keeps its nulls: a null workspace there means every workspace, and null folders all notes.

@@ -100,12 +100,12 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       put a file of up to 25 GB in a folder, or in Unsorted, and say how a
                                       note shows it. It goes in parts, several at once, and a part that
                                       fails is sent again; stopped, upload-resume ID says what is left
-  upload-start NAME --size N [--folder ID] [--private true]
+  upload-start NAME --size N [--folder ID] [--private true] [--write-id ANY]
                                       begin a file sent in parts: the address each part is PUT to
   upload-resume ID                    the parts of a file being sent that are stored, and a fresh address
   upload-finish ID                    put a file's parts together once all are sent, and make it an upload
   upload-abort ID                     stop sending a file, and throw away its parts
-  upload-inline NAME --base64 DATA [--folder ID]
+  upload-inline NAME --base64 DATA [--folder ID] [--write-id ANY]
                                       put a small file (4 MB at most), given as base64, in a folder
   download ID [--out PATH] [--force true]
                                       save an upload's bytes under its name here, or at PATH
@@ -728,7 +728,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "upload-start":
         tool = "start_upload";
-        args = { name: need("the file's name"), size: integer("--size", needFlag("size")), ...given({ folderId: ["folder"], private: ["private", truth] }) };
+        args = { name: need("the file's name"), size: integer("--size", needFlag("size")), ...given({ folderId: ["folder"], private: ["private", truth], writeId: ["write-id"] }) };
         break;
       case "upload-resume":
       case "upload-finish":
@@ -738,7 +738,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "upload-inline":
         tool = "upload_file";
-        args = { name: need("the file's name"), base64: needFlag("base64"), ...given({ folderId: ["folder"] }) };
+        args = { name: need("the file's name"), base64: needFlag("base64"), ...given({ folderId: ["folder"], writeId: ["write-id"] }) };
         break;
       case "upload-move":
         tool = "move_upload";

@@ -4,6 +4,7 @@ import { linesOutsideCode } from "./lines.ts";
 import { mentionKey, mentionsOn, personKey, writtenMention, type WrittenMention } from "./mentions.ts";
 import { RULE_PATTERN, counted, nextDue, parseRule, skippedTo, writeRule, type Rule } from "./recurrence.ts";
 import { applyChanges } from "./text.ts";
+import { addressSpans, blanked, codeSpans } from "./spans.ts";
 
 /**
  * A todo as a note writes it: a list item with a checkbox, and its options as tokens on the same line.
@@ -58,9 +59,7 @@ export interface LastDone {
 export type Importance = 0 | 1 | 2 | 3;
 
 const BOX = /^(\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\](?=\s|$)/;
-const INLINE_CODE = /(`+)(?!`)[^]*?(?<!`)\1(?!`)/g;
 const NOTE_LINK = /\[\[[^[\]\n]*\]\]/g;
-const ADDRESS = /\]\([^)\n]*\)/g;
 const AFTER = "(?=$|[\\s.,;:!?)])";
 const IMPORTANCE = /^\s+(!{1,3})(?=\s|$)/;
 const DUE = new RegExp(`(?<=\\s)due:(\\d{4}-\\d{2}-\\d{2})${AFTER}`, "g");
@@ -71,7 +70,8 @@ const TAG = new RegExp(`(?<=^|\\s)#([\\p{L}\\p{N}_][\\p{L}\\p{N}_/-]*)${AFTER}`,
 /** The line with what is never a token put out of the way, each character still where it was. */
 const readable = (line: string) => {
   const out = (text: string) => "\0".repeat(text.length);
-  return line.replace(INLINE_CODE, out).replace(NOTE_LINK, out).replace(ADDRESS, out);
+  const read = blanked(line, codeSpans(line), "\0").replace(NOTE_LINK, out);
+  return blanked(read, addressSpans(read), "\0");
 };
 
 /** Whether `day` is a real calendar date written YYYY-MM-DD. */

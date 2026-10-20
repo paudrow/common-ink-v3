@@ -177,6 +177,19 @@ describe("a file sent in parts", () => {
     expect(await tool(token, "start_upload", { name: "huge.mov", size: 25 * 1024 ** 3 + 1 })).toEqual({ isError: true, text: expect.stringContaining("at most 25 GB") });
   });
 
+  it("answers a start sent again with the same writeId as resume_upload does, and refuses it once that upload is finished", async () => {
+    const { ada } = await agentOf();
+    const files = { bucket: env.FILES };
+    const start = () => perform(env.DB, ada, { type: "upload.start", name: "a.bin", size: 4, writeId: "w1" }, Date.now(), undefined, files);
+    const first = await start();
+    await perform(env.DB, ada, { type: "upload.part", id: first.id, number: 1 }, Date.now(), undefined, { bucket: env.FILES, pass: first.address.split("/")[3]!, body: new Response(bytesOf("abcd")).body });
+    const again = await start();
+    expect([again.id, again.stored, again.address === first.address]).toEqual([first.id, [1], false]);
+    await perform(env.DB, ada, { type: "upload.finish", id: first.id }, Date.now(), undefined, files);
+    await expect(start()).rejects.toMatchObject({ code: "conflict", message: `This writeId made upload ${first.id} already` });
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM uploads WHERE workspace_id = ?").bind(ada.workspaceId).first<{ n: number }>())!.n).toBe(1);
+  });
+
   it("is checked against the size it was said to be when the parts are put together, and thrown away when it isn't", async () => {
     const { ada } = await agentOf();
     const files = { bucket: env.FILES };

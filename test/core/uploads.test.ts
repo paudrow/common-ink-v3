@@ -92,6 +92,25 @@ describe("uploading a file", () => {
     expect([await env.DB.prepare("SELECT COUNT(*) AS n FROM uploads WHERE workspace_id = ?").bind(ada.workspaceId).first(), await inBucket(left[0]!.id), await inBucket(left[1]!.id)]).toEqual([{ n: 0 }, false, false]);
   });
 
+  it("stores a file sent again with the same writeId once, and answers the first upload", async () => {
+    const ada = await newMember();
+    const ed = await addMember(ada, "editor", "Ed");
+    const sent = (actor: Actor, writeId: string, bytes: Uint8Array = PNG) => perform(env.DB, actor, { type: "upload.create", name: "a.png", size: PNG.byteLength, writeId }, T0, undefined, carrying(bytes));
+    const first = await sent(ada, "w1");
+    expect(await sent(ada, "w1")).toEqual(first);
+    // Another writer's id is their own, and a failed try lets its id go, to be sent again.
+    expect((await sent(ed, "w1")).id).not.toBe(first.id);
+    await expect(sent(ada, "w2", bytesOf("short"))).rejects.toMatchObject({ code: "invalid" });
+    const again = await sent(ada, "w2");
+    expect((await perform(env.DB, ada, { type: "upload.list" })).map((u) => u.id).sort()).toEqual([first.id, again.id, (await sent(ed, "w1")).id].sort());
+    // A try cut off mid-file leaves its row pending: a retry is told to wait while it may still be arriving, and takes its place after.
+    await env.DB.prepare("INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, created_at, created_by, uploaded_by, uploaded_by_kind, state, touched_at, write_id) SELECT 'cutoffupload', workspace_id, folder_id, 'a.png', '', 4, ?, ?, ?, 'member', 'pending', ?, 'w3' FROM uploads WHERE id = ?").bind(T0, ada.personId, ada.personId, T0, first.id).run();
+    const later = (minutes: number) => perform(env.DB, ada, { type: "upload.create", name: "a.png", size: PNG.byteLength, writeId: "w3" }, T0 + minutes * 60_000, undefined, carrying(PNG));
+    await expect(later(1)).rejects.toMatchObject({ code: "conflict" });
+    expect((await later(16)).id).not.toBe("cutoffupload");
+    expect(await clearUploads(env.DB, env.FILES, T0)).toMatchObject({ removed: 2, failed: [] });
+  });
+
   it("is for someone who can change the folder: not a viewer, not a read-only token, and an agent makes nothing private", async () => {
     const ada = await newMember();
     const vera = await addMember(ada, "viewer");

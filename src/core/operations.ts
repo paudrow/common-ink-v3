@@ -131,6 +131,8 @@ export interface Context {
   author: Author;
   /** True for a plugin that runs shut off from the app, which is told only what its permissions name: nothing of uploads or of who a mention means. One running with full trust is told what its member is. */
   shutOff: boolean;
+  /** False for a plugin that runs shut off and wasn't given members.read: it is told no member's name or id, even as who last wrote a note. */
+  namesMembers: boolean;
   workspaceId: string;
   /** The person acting, or the person an agent acts for. Null for whoever opened a link. */
   personId: string | null;
@@ -211,7 +213,8 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   }
   if (actor.kind === "plugin") author = { kind: "plugin", pluginId: actor.pluginId, name: (plugin as { name: string }).name, onBehalfOf: actor.personId };
   const shutOff = plugin !== null && "allowed" in plugin && plugin.allowed !== "all";
-  const ctx: Context = { db, actor, author, shutOff, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
+  const namesMembers = !shutOff || (plugin as { allowed: ReadonlySet<string> }).allowed.has("member.list");
+  const ctx: Context = { db, actor, author, shutOff, namesMembers, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
   return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
 }
 
@@ -300,6 +303,13 @@ export const authorOf = (kind: string, id: string, name: string | null, owner: s
       ? { kind: "plugin", pluginId: id, name: name ?? "A plugin", onBehalfOf: owner ?? "" }
       : { kind: "member", personId: id, name: name ?? "Someone" };
 
+/** `author` as the one asking may be told of them: to a plugin that may not read members' names, another member is "A member", and an agent or a plugin acts for nobody named. The member it runs for is told as they are. */
+function unnamed(ctx: Context, author: Author): Author {
+  if (ctx.namesMembers) return author;
+  if (author.kind === "member") return author.personId === ctx.personId ? author : { kind: "member", personId: "", name: "A member" };
+  return author.onBehalfOf === ctx.personId ? author : { ...author, onBehalfOf: "" };
+}
+
 /** A note as the one asking is told of it. Only a row they can see is ever handed here. */
 export const toSummary = (ctx: Context, stored: SummaryRow): NoteSummary => summaryOf(ctx, typeof stored.unmade === "string" ? { ...stored, ...made(stored.unmade) } : stored);
 
@@ -322,7 +332,7 @@ const summaryOf = (ctx: Context, row: SummaryRow): NoteSummary => ({
   revision: row.revision,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
-  updatedBy: authorOf(row.updated_by_kind, row.updated_by, row.updated_by_name, row.updated_by_owner),
+  updatedBy: unnamed(ctx, authorOf(row.updated_by_kind, row.updated_by, row.updated_by_name, row.updated_by_owner)),
   snippet: row.snippet,
   openTodos: row.open_todos,
   access: itemLevel(ctx.sight, row) === "edit" ? "edit" : "view",
@@ -1149,8 +1159,10 @@ async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[]
   for (const [dailyId, completions] of Map.groupBy(moved, (c) => c.daily_note_id)) {
     const daily = await ctx.db.prepare(NOTE_BY_ID).bind(dailyId).first<NoteRow>();
     if (!daily) continue;
+    // A daily note the asker can't see is refiled all the same, but not counted, so the answer doesn't tell them it is there.
+    const seen = itemLevel(ctx.sight, daily) !== "none";
     if (daily.state === "trashed" || !mayRefile(ctx, daily)) {
-      refiled.unfiled!.left += completions.filter((c) => after.has(c.revision)).length;
+      if (seen) refiled.unfiled!.left += completions.filter((c) => after.has(c.revision)).length;
       continue;
     }
     const removals: { from: number; to: number }[] = [];
@@ -1165,11 +1177,11 @@ async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[]
         if (stands) removals.push({ from: now, to: Math.min(daily.text.length, now + line.length + 1) });
         // Reverting an author takes the daily note's change that filed the line back out too, before this or after: either way the line is off.
         const off = stands || (await takenBack(ctx, daily.id, completion.daily_revision));
-        refiled.unfiled![off ? "removed" : "left"]++;
+        if (seen) refiled.unfiled![off ? "removed" : "left"]++;
         if (off && !stands) touched = true;
       } else if (!stands) additions.push({ completion, line });
     }
-    if (touched && itemLevel(ctx.sight, daily) !== "none") refiled.unfiled!.dailyNoteIds.push(daily.id);
+    if (touched && seen) refiled.unfiled!.dailyNoteIds.push(daily.id);
     if (!removals.length && !additions.length) continue;
     const end = daily.text.length;
     const filedAgain = additions.length ? `${end === 0 || daily.text.endsWith("\n") || removals.some((r) => r.to === end) ? "" : "\n"}${additions.map((a) => `${a.line}\n`).join("")}` : "";

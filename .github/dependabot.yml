@@ -1,0 +1,19 @@
+# Weekly update PRs, one per ecosystem: every npm update in one PR and every Action in another, so a
+# week's upgrades are reviewed and tested together. Security updates come on their own, as soon as they
+# are known, once Dependabot security updates are on in the repository's settings.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

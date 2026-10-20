@@ -95,17 +95,35 @@ export async function loadUpload(ctx: Context, id: string, need: GrantLevel, tra
 
 const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 
-/** Makes the row of an upload whose bytes are on their way: pending, so no one is told of it. */
-const pend = (ctx: Context, row: UploadRow, multipartId: string | null) =>
-  intoFolder(
-    ctx.db
-      .prepare(
-        `INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, created_at, created_by, uploaded_by, uploaded_by_kind, private_owner, state, multipart_id, touched_at)
-         VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11, ?6)`,
-      )
-      .bind(row.id, ctx.workspaceId, row.folder_id, row.name, row.size, row.created_at, row.created_by, row.uploaded_by, row.uploaded_by_kind, row.private_owner, multipartId)
-      .run(),
-  );
+/** Makes the row of an upload whose bytes are on their way: pending, so no one is told of it. A second with the same `writeId` is refused, as one sent at the same moment. */
+async function pend(ctx: Context, row: UploadRow, multipartId: string | null, writeId: string | undefined): Promise<void> {
+  try {
+    await intoFolder(
+      ctx.db
+        .prepare(
+          `INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, created_at, created_by, uploaded_by, uploaded_by_kind, private_owner, state, multipart_id, touched_at, write_id)
+           VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11, ?6, ?12)`,
+        )
+        .bind(row.id, ctx.workspaceId, row.folder_id, row.name, row.size, row.created_at, row.created_by, row.uploaded_by, row.uploaded_by_kind, row.private_owner, multipartId, writeId ?? null)
+        .run(),
+    );
+  } catch (err) {
+    if (writeId && /UNIQUE/i.test(String(err))) throw new OpError("conflict", STILL_ARRIVING);
+    throw err;
+  }
+}
+
+const STILL_ARRIVING = "An upload with this writeId is still arriving. Ask again in a moment, with the same writeId";
+
+/** The upload this writer already made with `writeId`, unless it is being removed. */
+const madeBefore = (ctx: Context, writeId: string) =>
+  ctx.db
+    .prepare("SELECT id, state, multipart_id, created_at FROM uploads WHERE workspace_id = ? AND uploaded_by_kind = ? AND uploaded_by = ? AND write_id = ? AND state <> 'removing'")
+    .bind(ctx.workspaceId, ctx.author.kind, authorId(ctx), writeId)
+    .first<{ id: string; state: string; multipart_id: string | null; created_at: number }>();
+
+/** How long a file sent in one request may take to arrive, 80 MB on a slow connection. A try still pending after that was cut off without a word, and a retry takes its place. */
+const ONE_REQUEST_MS = 15 * 60_000;
 
 /** An upload as it is when its bytes start on their way. */
 function begun(ctx: Context, op: { name: string; size: number; private: boolean }, folderId: string): UploadRow {
@@ -148,10 +166,20 @@ export async function createUpload(ctx: Context, op: Extract<Op, { type: "upload
   const { bucket, body } = ctx.files;
   if (!bucket) throw new OpError("unavailable", NO_BUCKET);
   if (!body) throw new OpError("invalid", "A file's bytes come as the body of the request");
+  let before = op.writeId ? await madeBefore(ctx, op.writeId) : null;
+  if (before?.state === "pending" && before.multipart_id === null && ctx.now - before.created_at > ONE_REQUEST_MS) {
+    await ctx.db.prepare("UPDATE uploads SET state = 'removing' WHERE id = ? AND state = 'pending'").bind(before.id).run();
+    before = null;
+  }
+  if (before) {
+    await body.cancel();
+    if (before.state === "pending" || before.multipart_id !== null) throw new OpError("conflict", before.multipart_id ? "This writeId began an upload in parts. Finish it with upload.finish" : STILL_ARRIVING);
+    return toUpload(ctx, await loadUpload(ctx, before.id, "view", "opens"));
+  }
 
   const row = begun(ctx, op, folder.id);
   const { id } = row;
-  await pend(ctx, row, null);
+  await pend(ctx, row, null, op.writeId);
 
   const head = new Uint8Array(Math.min(HEAD_BYTES, op.size));
   let headed = 0;
@@ -252,9 +280,19 @@ export async function startUpload(ctx: Context, op: Extract<Op, { type: "upload.
   if (op.size > MAX_UPLOAD_BYTES) throw new OpError("invalid", `A file can be at most ${MAX_UPLOAD_BYTES / GB} GB`);
   const { bucket } = ctx.files;
   if (!bucket) throw new OpError("unavailable", NO_BUCKET);
+  const before = op.writeId ? await madeBefore(ctx, op.writeId) : null;
+  if (before) {
+    if (before.state !== "pending" || before.multipart_id === null) throw new OpError("conflict", `This writeId made upload ${before.id} already`);
+    return resumeUpload(ctx, before.id);
+  }
   const row = begun(ctx, op, folder.id);
   const multipart = await bucket.createMultipartUpload(row.id);
-  await pend(ctx, row, multipart.uploadId);
+  try {
+    await pend(ctx, row, multipart.uploadId, op.writeId);
+  } catch (err) {
+    await multipart.abort().catch(() => {});
+    throw err;
+  }
   return sendingOf(ctx, { ...row, multipart_id: multipart.uploadId }, []);
 }
 

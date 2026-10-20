@@ -538,6 +538,22 @@ describe("a plugin acting for a member", () => {
     expect(await perform(env.DB, ada, { type: "grant.list" })).toMatchObject({ grants: [] });
   });
 
+  it("is told who last wrote a note only with members.read: without it, another member is \"A member\", and the member it runs for is as they are", async () => {
+    const { ada, grace, id } = await permitted([READ]);
+    const plan = await perform(env.DB, ada, { type: "note.create", text: "# Plan" });
+    const own = await perform(env.DB, grace, { type: "note.create", text: "# Own" });
+    const seen = async () => {
+      const notes = await perform(env.DB, pluginOf(grace, id), { type: "note.list" });
+      return [plan.id, own.id].map((noteId) => notes.find((n) => n.id === noteId)!.updatedBy);
+    };
+    expect(await seen()).toEqual([
+      { kind: "member", personId: "", name: "A member" },
+      { kind: "member", personId: grace.personId, name: "Grace Hopper" },
+    ]);
+    await permit(ada, id, "members.read");
+    expect((await seen())[0]).toEqual({ kind: "member", personId: ada.personId, name: "Ada Lovelace" });
+  });
+
   it("writes as itself: its changes are the plugin's in History, with the member it acted for", async () => {
     const { ada, grace, id } = await permitted([READ, WRITE]);
     const acting = pluginOf(grace, id);
@@ -768,7 +784,7 @@ describe("a plugin's operations over HTTP", () => {
       return ((await res.json()) as { dev?: boolean }).dev;
     };
     expect(await me("localhost", { DEV_SIGN_IN: "1" })).toBe(true);
-    expect(await me("pr-16-common-ink-v3.draftox.workers.dev", { DEV_SIGN_IN: "1" })).toBe(true);
+    expect(await me("pr-16-common-ink-v3-previews.draftox.workers.dev", { DEV_SIGN_IN: "1" })).toBe(true);
     expect(await me("commonink.app", { DEV_SIGN_IN: "1" })).toBe(false);
     expect(await me("localhost", {})).toBe(false);
     expect(await me("commonink.app", {})).toBe(false);

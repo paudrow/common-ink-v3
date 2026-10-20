@@ -57,6 +57,12 @@ describe("what the Worker tells a browser about each response", () => {
       "  X-Content-Type-Options: nosniff",
       "  Referrer-Policy: strict-origin-when-cross-origin",
       `  Content-Security-Policy: ${written(DATA_POLICY)}`,
+      "  Cache-Control: public, max-age=31536000, immutable",
     ]);
+  });
+
+  it("puts a page in a browsing context group of its own, and leaves JSON and the embed's document out of it", async () => {
+    const opener = async (path: string) => (await SELF.fetch(`https://commonink.app${path}`, { redirect: "manual" })).headers.get("Cross-Origin-Opener-Policy");
+    expect([await opener("/"), await opener("/auth/google"), await opener("/oauth/authorize"), await opener("/api/me"), await opener("/embed-frame")]).toEqual(["same-origin", "same-origin", "same-origin", null, null]);
   });
 });

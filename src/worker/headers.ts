@@ -1,6 +1,6 @@
 // What a browser may do with each response the Worker answers: the Content-Security-Policy for its
 // kind of route, and nosniff and a referrer rule for all. Sent by the Worker, so a Preview runs under
-// the same policy as the app. Files under /assets/ are served without the Worker: public/_headers
+// the same policy as the app, and a page is in a browsing context group of its own (COOP). Files under /assets/ are served without the Worker: public/_headers
 // gives them nosniff, the referrer rule and DATA, and test/core/headers.test.ts holds the two in step.
 // HSTS is the zone's, not the Worker's.
 
@@ -90,6 +90,8 @@ export function secured(res: Response, url: URL, env: { DEV_SERVER?: string; EMB
   if (kind === PAGE && env.DEV_SERVER === "1") policy = { ...policy, "script-src": [...policy["script-src"]!, "'unsafe-inline'"] };
   if (!out.headers.has("Content-Security-Policy")) out.headers.set("Content-Security-Policy", written(policy));
   out.headers.set("X-Content-Type-Options", "nosniff");
+  // A page opened from the app, or that opens it, gets no handle on its window. Every link and window.open the app makes is noopener already.
+  if (kind === PAGE) out.headers.set("Cross-Origin-Opener-Policy", "same-origin");
   if (!out.headers.has("Referrer-Policy")) out.headers.set("Referrer-Policy", kind === EMBED_FRAME ? "no-referrer" : "strict-origin-when-cross-origin");
   return out;
 }

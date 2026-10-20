@@ -85,7 +85,7 @@ describe("a social post's address", () => {
   });
 
   it("is nothing for anything else", () => {
-    for (const written of ["", "post address", "http://x.com/jack/status/20", "https://x.com/jack", "https://x.com/jack/status/20/photo/1", "https://x.com/jack/status/20 height=300", "https://x.com/jack/status/abc", "https://x.com.evil.example/jack/status/20", "https://bsky.app/profile/a/b/post/3l6oveex3ii2l", "https://bsky.app/profile/bsky.app/post/3l6oveex3ii2l", "https://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/..%2F..", "https://mastodon.social/@Gargron/1"]) {
+    for (const written of ["", "post address", "http://x.com/jack/status/20", "https://x.com/jack", "https://x.com/jack/status/20/photo/1", "https://x.com/jack/status/20 height=300", "https://x.com/jack/status/abc", "https://x.com.evil.example/jack/status/20", "https://bsky.app/profile/a/b/post/3l6oveex3ii2l", "https://bsky.app/profile/bsky.app/post/3l6oveex3ii2l", "https://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/..%2F..", "https://bsky.app/profile/did:web:x%2F..%2Fapi/post/3l6oveex3ii2l", "https://mastodon.social/@Gargron/1"]) {
       expect(postIn(written), written).toBeNull();
     }
   });

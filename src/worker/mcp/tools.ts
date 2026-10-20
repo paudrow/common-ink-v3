@@ -109,7 +109,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
  * `ink download` use them.
  */
 export const OVER_HTTP: Partial<Record<OpType, string>> = {
-  "upload.create": `A file's bytes are not text, and a tool call carries only text. POST /api/workspaces/<workspace>/uploads with the token as Authorization: Bearer, the bytes as the body, Content-Type: application/octet-stream, Content-Length, and X-Ink-Upload: encodeURIComponent of the JSON { name, folderId? }. The answer is 201 with the upload. One request carries at most ${PART_BYTES / 1024 / 1024} MB. upload_file does the same with base64 for a small file, and start_upload sends any file in parts.`,
+  "upload.create": `A file's bytes are not text, and a tool call carries only text. POST /api/workspaces/<workspace>/uploads with the token as Authorization: Bearer, the bytes as the body, Content-Type: application/octet-stream, Content-Length, and X-Ink-Upload: encodeURIComponent of the JSON { name, folderId?, writeId? }, where the same writeId sent again answers the first upload. The answer is 201 with the upload. One request carries at most ${PART_BYTES / 1024 / 1024} MB. upload_file does the same with base64 for a small file, and start_upload sends any file in parts.`,
   "upload.part": "A part's bytes are not text, and go from the agent's own shell, never through the model. PUT them to the address start_upload or resume_upload answered, with {part} the part's number: no token goes with it, since the address is the permission, and each address takes each part once.",
   "upload.open": "A file's bytes are not text, and a tool answer carries only text. GET /api/workspaces/<workspace>/uploads/<id> with the token as Authorization: Bearer answers with the bytes. Range and If-None-Match are honoured.",
 };
@@ -619,6 +619,7 @@ export const TOOLS: Tool[] = [
         size: { type: "integer", minimum: 1, maximum: MAX_UPLOAD_BYTES, description: "How many bytes the file is, exactly: wc -c < FILE. A part of any other length is refused" },
         folderId: folderId("The folder to put it in, from list_folders. Left out, Unsorted"),
         private: { type: "boolean", description: "Leave it out: only a member makes an upload private, in the app, and an agent asking is refused" },
+        writeId: { type: "string", maxLength: 64, description: "Any unique string. Sent again after a failed call, it answers the upload the first began, as resume_upload does" },
       },
       ["name", "size"],
     ),
@@ -662,6 +663,7 @@ export const TOOLS: Tool[] = [
         name: { type: "string", maxLength: 1000, description: "The file's name, with its ending" },
         base64: { type: "string", maxLength: Math.ceil(MAX_INLINE_UPLOAD_BYTES / 3) * 4, description: "The file's bytes, in base64" },
         folderId: folderId("The folder to put it in, from list_folders. Left out, Unsorted"),
+        writeId: { type: "string", maxLength: 64, description: "Any unique string. Sent again after a failed call, the file is uploaded once and the first upload is answered" },
       },
       ["name", "base64"],
     ),
@@ -1209,11 +1211,11 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
     const actor: Actor = agent.clipper ? { kind: "member", personId: agent.personId, workspaceId } : agentActor(agent, workspaceId);
     const written = async (answer: unknown) => text(withTimes(answer, timeIn((await timeZoneOf(db, workspaceId, agent.personId)) ?? "UTC"), tool.times ? new Set([...TIME_KEYS, ...tool.times]) : TIME_KEYS));
     if (name === "upload_file") {
-      const { name: fileName, base64, folderId } = fields;
+      const { name: fileName, base64, folderId, writeId } = fields;
       const bytes = fromBase64(base64);
       if (!bytes?.byteLength) throw new OpError("invalid", "base64 isn't a file's bytes in base64");
       if (bytes.byteLength > MAX_INLINE_UPLOAD_BYTES) throw new OpError("invalid", `upload_file takes at most ${MAX_INLINE_UPLOAD_BYTES / 1024 / 1024} MB. Send a larger file with start_upload`);
-      const upload = await perform(db, actor, { type: "upload.create", name: fileName as string, size: bytes.byteLength, ...(folderId === undefined ? {} : { folderId: folderId as string }) }, Date.now(), sources, { bucket: reached.bucket, body: new Response(bytes).body });
+      const upload = await perform(db, actor, { type: "upload.create", name: fileName as string, size: bytes.byteLength, ...(folderId === undefined ? {} : { folderId: folderId as string }), ...(writeId === undefined ? {} : { writeId: writeId as string }) }, Date.now(), sources, { bucket: reached.bucket, body: new Response(bytes).body });
       return written(withLine(upload));
     }
     if (agent.clipper && name === "create_note" && typeof fields.writeId === "string") {

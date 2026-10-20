@@ -14,9 +14,8 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+# Secrets are given only to the steps that use them, never to a job's `npm ci`, whose packages' install
+# scripts would otherwise see them: each of those steps names them in its own `env`.
 
 jobs:
   check:
@@ -38,8 +37,9 @@ jobs:
           path: extension/dist
           if-no-files-found: error
 
-  # Every PR gets a Preview at https://pr-<number>-common-ink-v3.draftox.workers.dev with its own D1
-  # database, open without a login, linked from one comment that each push updates.
+  # Every PR gets a Preview at https://pr-<number>-common-ink-v3-previews.draftox.workers.dev with its own D1
+  # database, open without a login, linked from one comment that each push updates. Previews run on their own
+  # Worker, common-ink-v3-previews, which the first Preview creates; production has no workers.dev address.
   # Uploads go to the bucket Previews share, common-ink-v3-uploads-preview, so the token needs Workers R2 Storage: Edit.
   preview:
     needs: check
@@ -52,8 +52,11 @@ jobs:
       deployment_url: ${{ steps.deploy.outputs.deployment_url }}
     steps:
       - name: Check Cloudflare credentials
-        if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          [ "$HAS_TOKEN" = true ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && exit 0
           echo "::error::Add the CLOUDFLARE_API_TOKEN secret and CLOUDFLARE_ACCOUNT_ID variable to this repository to enable Previews."
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,6 +66,9 @@ jobs:
           cache: npm
       - run: npm ci
       - id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run preview -- --name "pr-${{ github.event.pull_request.number }}" --message "${{ github.event.pull_request.head.sha }}"
       - name: Wait for it to answer
         run: |
@@ -184,7 +190,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run preview -- --name "pr-${{ github.event.pull_request.number }}" --delete
+      - env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run preview -- --name "pr-${{ github.event.pull_request.number }}" --delete
 
   # Main goes live at PRODUCTION_DOMAIN and www.PRODUCTION_DOMAIN (the Worker 301s www to the apex, see
   # src/worker/hosts.ts; a deploy that leaves www out detaches it). Until that variable is set, nothing deploys, so merging can't
@@ -198,12 +207,6 @@ jobs:
       cancel-in-progress: false
     env:
       PRODUCTION_DOMAIN: ${{ vars.PRODUCTION_DOMAIN }}
-      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-      ALLOWED_EMAILS: ${{ vars.ALLOWED_EMAILS }}
-      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-      # Seals each person's Google tokens. Without it none is kept, and Calendar and Contacts aren't offered.
-      TOKEN_KEY: ${{ secrets.TOKEN_KEY }}
     steps:
       - name: Skip without a production domain
         if: env.PRODUCTION_DOMAIN == ''
@@ -219,7 +222,18 @@ jobs:
         run: npm ci
       - name: Deploy
         if: env.PRODUCTION_DOMAIN != ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          ALLOWED_EMAILS: ${{ vars.ALLOWED_EMAILS }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          # Seals each person's Google tokens. Without it none is kept, and Calendar and Contacts aren't offered.
+          TOKEN_KEY: ${{ secrets.TOKEN_KEY }}
         run: |
+          # The list is who may use Common Ink at all, and an empty one would let nobody in, sessions and agents included.
+          [ -n "$ALLOWED_EMAILS" ] || { echo "::error::Set the ALLOWED_EMAILS variable before deploying."; exit 1; }
           jq -n --arg g "$GOOGLE_CLIENT_SECRET" --arg s "$SESSION_SECRET" --arg t "$TOKEN_KEY" '{GOOGLE_CLIENT_SECRET: $g, SESSION_SECRET: $s, TOKEN_KEY: $t} | with_entries(select(.value != ""))' > "$RUNNER_TEMP/secrets.json"
           npm run deploy -- --domain "$PRODUCTION_DOMAIN" --domain "www.$PRODUCTION_DOMAIN" --secrets-file "$RUNNER_TEMP/secrets.json" \
             --var "GOOGLE_CLIENT_ID:$GOOGLE_CLIENT_ID" --var "ALLOWED_EMAILS:$ALLOWED_EMAILS"

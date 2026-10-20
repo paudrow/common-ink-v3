@@ -1,5 +1,9 @@
 // A Preview with its own D1 database, for a pull request or a branch. CI runs it on every push to a PR.
 //
+// Previews belong to a Worker of their own, `<production name>-previews`, so production can keep its
+// workers.dev addresses off. The first Preview creates that Worker: `wrangler preview` makes a Worker it
+// can't find, with no script, no secrets and no production bindings, then adds the Preview to it.
+//
 //   npm run preview -- --name pr-12 [--message <sha>]   create or update it, and print its URL
 //   npm run preview -- --name pr-12 --delete            delete the Preview and its database
 //
@@ -27,6 +31,7 @@ if (!name || !/^[a-z0-9-]{1,40}$/.test(name)) throw new Error("--name takes lowe
 const GENERATED = "wrangler.preview.json";
 const config = parse(readFileSync("wrangler.jsonc", "utf8"));
 const database = `${config.name}-${name}`;
+const worker = `${config.name}-previews`;
 
 const wrangler = (args: string[], options: { quiet?: boolean } = {}) =>
   execFileSync("npx", ["wrangler", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", options.quiet ? "pipe" : "inherit"], env: { ...process.env, CI: "1" } });
@@ -60,7 +65,7 @@ function deleteObjects() {
 const findDatabase = () => (JSON.parse(wrangler(["d1", "list", "--json"], { quiet: true })) as { name: string; uuid: string }[]).find((d) => d.name === database);
 
 if (values.delete) {
-  wrangler(["preview", "delete", "--name", name, "--skip-confirmation"]);
+  wrangler(["preview", "delete", "--worker-name", worker, "--name", name, "--skip-confirmation"]);
   if (findDatabase()) {
     deleteObjects();
     wrangler(["d1", "delete", database, "--skip-confirmation"]);
@@ -87,7 +92,8 @@ const { triggers: _, ...untimed } = config;
 const writeConfig = (uuid: string) => {
   const binding = { ...config.d1_databases[0], database_name: database, database_id: uuid };
   const previews = { d1_databases: [binding], r2_buckets: files, ratelimits: config.ratelimits, vars: { DEV_SIGN_IN: "1" } };
-  writeFileSync(GENERATED, JSON.stringify({ ...untimed, d1_databases: [binding], r2_buckets: files, previews }, null, 2));
+  const previewConfig = { ...untimed, name: worker, workers_dev: false, preview_urls: true, d1_databases: [binding], r2_buckets: files, previews };
+  writeFileSync(GENERATED, JSON.stringify(previewConfig, null, 2));
 };
 writeConfig(db.uuid);
 

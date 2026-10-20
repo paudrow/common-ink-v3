@@ -1,4 +1,5 @@
 import { linesOutsideCode } from "./lines.ts";
+import { blanked, codeSpans } from "./spans.ts";
 
 /**
  * A link as a note writes it: `[[target]]` or `[[target|display text]]`. A note stores the target
@@ -15,7 +16,6 @@ export interface WrittenLink {
 
 // `@[[` is a mention of a person, which mentions.ts reads, where the `@` starts one: after anything but a letter, a digit, `_` or `@`.
 const LINK = /(?<!(?<![\p{L}\p{N}_@])@)\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/gu;
-const INLINE_CODE = /(`+)(?!`)[^]*?(?<!`)\1(?!`)/g;
 const ID = /^[a-z0-9]{12}$/;
 
 export const isNoteId = (target: string) => ID.test(target);
@@ -26,7 +26,7 @@ export const writtenLink = (target: string, display?: string | null) => (display
 /** The links on one line of a note, which starts at `offset`. Those inside inline code are left out. */
 export function linksOn(line: string, offset = 0): WrittenLink[] {
   if (!line.includes("[[")) return [];
-  const read = line.replace(INLINE_CODE, (code) => " ".repeat(code.length));
+  const read = blanked(line, codeSpans(line), " ");
   return [...read.matchAll(LINK)].flatMap((match) => {
     const target = match[1]!.trim();
     const from = offset + match.index;

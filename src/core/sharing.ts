@@ -40,7 +40,7 @@ const mayShare = (ctx: Context, item: Item) => canShare(item.facts ? itemAsked(c
  */
 function narrowing(ctx: Context, item: Item): void {
   const ownPrivate = item.facts !== undefined && item.facts.private_owner !== null;
-  if (ctx.role !== "admin" && !ownPrivate) throw new OpError("forbidden", "They are a member here, and only an admin can narrow what a member's role allows, or stop narrowing it");
+  if (ctx.role !== "admin" && !ownPrivate) throw new OpError("forbidden", "Only an admin can change what this person can see here");
 }
 
 function sharing(ctx: Context, item: Item): void {
@@ -94,7 +94,14 @@ const toGrant = (ctx: Context, r: GrantRow): Grant => ({
   access: r.access,
   to:
     r.kind === "person"
-      ? { kind: "person", email: r.person_id === null || ctx.role === "admin" || (r.granted_by === ctx.personId && !r.named) ? r.email : null, personId: r.person_id, name: r.person_name, role: r.person_role }
+      ? {
+          kind: "person",
+          email: r.person_id === null || ctx.role === "admin" || (r.granted_by === ctx.personId && !r.named) ? r.email : null,
+          personId: r.person_id,
+          // The name someone signed in with is the workspace's to know once they are a member. Of anyone else, only an admin is told it, so sharing by email doesn't say what an address's owner is called.
+          name: r.person_role !== null || ctx.role === "admin" ? r.person_name : null,
+          role: r.person_role,
+        }
       : { kind: "link", link: r.kind, token: r.token! },
   grantedBy: { personId: r.granted_by, name: r.granted_by_name },
   createdAt: r.created_at,
