@@ -2,37 +2,40 @@ import { TRASH_MS } from "./lifecycle.ts";
 import { logLine } from "./logs.ts";
 
 /**
- * Removing a note from Trash is the one place the record of a note is deleted: the note, its
- * changes, and everything else kept by its id. Each table that holds something by a note's id is
- * named here, and test/core/purge.test.ts fails when a table that isn't still holds something of a
- * removed note.
+ * Removing a note is the one place the record of a note is deleted: the note, its changes, and
+ * everything else kept by its id. Each table that holds something by a note's id is named here, and
+ * test/core/purge.test.ts fails when a table that isn't still holds something of a removed note.
  *
- * In every statement ?1 is the note and ?2 the latest time it may have been trashed at, or null for
- * any. Each does nothing unless the note is in Trash at that moment, so a note restored a moment
- * before is left whole, and one already removed is removed again as nothing.
+ * `notes` is a query for the ids of the notes to remove, which each statement asks again, so every
+ * statement removes what is kept of the same notes, and the last removes the notes themselves.
  */
-const DUE = "EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND state = 'trashed' AND (?2 IS NULL OR state_at <= ?2))";
-
-export const REMOVALS = [
-  `DELETE FROM note_search WHERE rowid = (SELECT id FROM note_search_rows WHERE note_id = ?1) AND ${DUE}`,
-  `DELETE FROM note_search_rows WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM todos WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM note_tags WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM mentions WHERE note_id = ?1 AND ${DUE}`,
+export const removalsOf = (notes: string): string[] => [
+  `DELETE FROM note_search WHERE rowid IN (SELECT id FROM note_search_rows WHERE note_id IN ${notes})`,
+  `DELETE FROM note_search_rows WHERE note_id IN ${notes}`,
+  `DELETE FROM todos WHERE note_id IN ${notes}`,
+  `DELETE FROM note_tags WHERE note_id IN ${notes}`,
+  `DELETE FROM mentions WHERE note_id IN ${notes}`,
   // What the note links to. What links to it stays: that is what another note's text says.
-  `DELETE FROM links WHERE source_id = ?1 AND ${DUE}`,
+  `DELETE FROM links WHERE source_id IN ${notes}`,
   // Which uploads the note refers to. The uploads stay: each is a thing of its own, which other notes may refer to.
-  `DELETE FROM upload_refs WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM labels WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM completions WHERE note_id = ?1 AND ${DUE}`,
+  `DELETE FROM upload_refs WHERE note_id IN ${notes}`,
+  `DELETE FROM labels WHERE note_id IN ${notes}`,
+  `DELETE FROM completions WHERE note_id IN ${notes}`,
   // A todo completed elsewhere and filed on this note stays completed, filed nowhere.
-  `UPDATE completions SET daily_note_id = NULL, daily_revision = NULL, daily_at = NULL WHERE daily_note_id = ?1 AND ${DUE}`,
-  `DELETE FROM daily_notes WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM pins WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM grants WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM changes WHERE note_id = ?1 AND ${DUE}`,
-  "DELETE FROM notes WHERE id = ?1 AND state = 'trashed' AND (?2 IS NULL OR state_at <= ?2)",
-] as const;
+  `UPDATE completions SET daily_note_id = NULL, daily_revision = NULL, daily_at = NULL WHERE daily_note_id IN ${notes}`,
+  `DELETE FROM daily_notes WHERE note_id IN ${notes}`,
+  `DELETE FROM pins WHERE note_id IN ${notes}`,
+  `DELETE FROM grants WHERE note_id IN ${notes}`,
+  `DELETE FROM changes WHERE note_id IN ${notes}`,
+  `DELETE FROM notes WHERE id IN ${notes}`,
+];
+
+/**
+ * Removing a note from Trash. ?1 is the note and ?2 the latest time it may have been trashed at, or
+ * null for any. Each statement does nothing unless the note is in Trash at that moment, so a note
+ * restored a moment before is left whole, and one already removed is removed again as nothing.
+ */
+export const REMOVALS = removalsOf("(SELECT id FROM notes WHERE id = ?1 AND state = 'trashed' AND (?2 IS NULL OR state_at <= ?2))");
 
 /** The statements that remove one note in Trash and all that is kept of it, to run as one batch. The last one removes the note itself. */
 export const removing = (db: D1Database, noteId: string, trashedBy: number | null = null): D1PreparedStatement[] => REMOVALS.map((sql) => db.prepare(sql).bind(noteId, trashedBy));

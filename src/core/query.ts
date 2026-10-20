@@ -1,5 +1,6 @@
 import { FILE_CLASSES, KNOWN_TYPES, TEXT_ENDINGS, typesOf, type FileClass } from "./filetypes.ts";
 import { RULE_GRAMMAR } from "./recurrence.ts";
+import { asc, desc, type Order } from "./order.ts";
 import { isDay, nameKey } from "./todos.ts";
 
 /**
@@ -44,7 +45,7 @@ export interface Word {
   /** The condition, for a filter. */
   sql?: (c: Compiling, given: Given) => string;
   /** The order, for `sort:`. */
-  order?: string;
+  order?: Order;
   /** The field it is offered under where it is not its filter's own, as Shared and Private are under Visibility and not State. */
   field?: "visibility";
 }
@@ -91,6 +92,8 @@ const NOTES = ["notes"] as const;
 const TODOS = ["todos"] as const;
 const UPLOADS = ["uploads"] as const;
 const ALL = SCOPES;
+/** A note's title as the app shows it, so one with none is ordered as "Untitled". */
+const SHOWN_TITLE = "CASE WHEN n.title = '' THEN 'Untitled' ELSE n.title END COLLATE NOCASE";
 const KEPT = ["notes", "uploads"] as const;
 
 /** A todo's priorities, from the lowest, as a query writes them. */
@@ -381,20 +384,20 @@ export const FILTERS = {
     value: {
       type: "words",
       words: [
-        { word: "updated-desc", scopes: BOTH, means: "Latest changed first", order: "n.updated_at DESC" },
-        { word: "updated-asc", scopes: BOTH, means: "Longest unchanged first", order: "n.updated_at" },
-        { word: "created-desc", scopes: BOTH, means: "Newest first", order: "n.created_at DESC" },
-        { word: "created-asc", scopes: BOTH, means: "Oldest first", order: "n.created_at" },
-        { word: "title-asc", scopes: BOTH, means: "By the note's title, A to Z", order: "CASE WHEN n.title = '' THEN 'Untitled' ELSE n.title END COLLATE NOCASE" },
-        { word: "title-desc", scopes: BOTH, means: "By the note's title, Z to A", order: "CASE WHEN n.title = '' THEN 'Untitled' ELSE n.title END COLLATE NOCASE DESC" },
-        { word: "due-asc", scopes: TODOS, means: "Soonest due first, and those with no due date last", order: "t.due IS NULL, t.due" },
-        { word: "due-desc", scopes: TODOS, means: "Latest due first, and those with no due date last", order: "t.due IS NULL, t.due DESC" },
-        { word: "priority-desc", aliases: ["importance-desc"], scopes: TODOS, means: "Highest priority first", order: "t.importance DESC" },
-        { word: "text-asc", scopes: TODOS, means: "By the todo's words, A to Z", order: "t.words COLLATE NOCASE" },
-        { word: "uploaded-desc", scopes: UPLOADS, means: "Latest uploaded first", order: "u.created_at DESC" },
-        { word: "uploaded-asc", scopes: UPLOADS, means: "Earliest uploaded first", order: "u.created_at" },
-        { word: "name-asc", scopes: UPLOADS, means: "By the file's name, A to Z", order: "u.name COLLATE NOCASE" },
-        { word: "size-desc", scopes: UPLOADS, means: "Largest first", order: "u.size DESC" },
+        { word: "updated-desc", scopes: BOTH, means: "Latest changed first", order: [desc("n.updated_at")] },
+        { word: "updated-asc", scopes: BOTH, means: "Longest unchanged first", order: [asc("n.updated_at")] },
+        { word: "created-desc", scopes: BOTH, means: "Newest first", order: [desc("n.created_at")] },
+        { word: "created-asc", scopes: BOTH, means: "Oldest first", order: [asc("n.created_at")] },
+        { word: "title-asc", scopes: BOTH, means: "By the note's title, A to Z", order: [asc(SHOWN_TITLE)] },
+        { word: "title-desc", scopes: BOTH, means: "By the note's title, Z to A", order: [desc(SHOWN_TITLE)] },
+        { word: "due-asc", scopes: TODOS, means: "Soonest due first, and those with no due date last", order: [asc("t.due IS NULL"), asc("t.due")] },
+        { word: "due-desc", scopes: TODOS, means: "Latest due first, and those with no due date last", order: [asc("t.due IS NULL"), desc("t.due")] },
+        { word: "priority-desc", aliases: ["importance-desc"], scopes: TODOS, means: "Highest priority first", order: [desc("t.importance")] },
+        { word: "text-asc", scopes: TODOS, means: "By the todo's words, A to Z", order: [asc("t.words COLLATE NOCASE")] },
+        { word: "uploaded-desc", scopes: UPLOADS, means: "Latest uploaded first", order: [desc("u.created_at")] },
+        { word: "uploaded-asc", scopes: UPLOADS, means: "Earliest uploaded first", order: [asc("u.created_at")] },
+        { word: "name-asc", scopes: UPLOADS, means: "By the file's name, A to Z", order: [asc("u.name COLLATE NOCASE")] },
+        { word: "size-desc", scopes: UPLOADS, means: "Largest first", order: [desc("u.size")] },
       ],
     },
     compares: false,
@@ -931,7 +934,7 @@ export function topTerms(where: Node | null): Text[] {
 }
 
 /** The order a `sort:` asks for. */
-export const orderOf = (sort: SortKey): string => FILTERS.sort.value.words.find((w) => w.word === sort)!.order;
+export const orderOf = (sort: SortKey): Order => FILTERS.sort.value.words.find((w) => w.word === sort)!.order;
 
 export interface SyntaxRow {
   form: string;

@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, a plugin's frame and turning full trust on are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts and test/core/third-party.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts and test/core/upload-parts.test.ts check, and a workspace's storage is for its members. */
-type ToolOp = Exclude<OpType, "note.purge" | "note.discard" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "plugin.frame" | "plugin.trust" | "plugin.decide">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, a plugin's frame, turning full trust on and deleting an account or a workspace are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts, test/core/third-party.test.ts and test/core/erase.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts and test/core/upload-parts.test.ts check, as an export's do, which test/core/export.test.ts checks, and a workspace's storage is for its members. */
+type ToolOp = Exclude<OpType, "note.purge" | "note.discard" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "export.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "plugin.frame" | "plugin.trust" | "plugin.decide" | `account.${string}` | "workspace.delete">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -109,6 +109,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "upload.resume": { id: "aaaaaaaaaaaa" },
   "upload.finish": { id: "aaaaaaaaaaaa" },
   "upload.abort": { id: "aaaaaaaaaaaa" },
+  "export.plan": {},
   "record.notes": { sourceId: "google-calendar", id: "none" },
   "plugin.list": {},
   // Each is asked of a plugin that isn't there, or of a manifest that is no plugin's, so what refuses it is the role and nothing else.

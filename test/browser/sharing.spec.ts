@@ -69,7 +69,7 @@ test("a guest given one note to view sees that note and nothing else, and can't 
   await expect(grace.getByText(NOTHING)).toBeVisible();
   await expect(grace.getByText("Not for Grace.")).toHaveCount(0);
   await expect(perform(grace, { type: "note.read", id: secret.id }, workspaceId)).rejects.toThrow();
-  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title)).toEqual(["Shared plan"]);
+  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).notes.map((n) => n.title)).toEqual(["Shared plan"]);
 });
 
 test("a guest given a folder to edit sees what is in it, edits a note, sees its history, and makes a note there, and a note shared to view inside it stays read-only", async ({ page }) => {
@@ -106,13 +106,13 @@ test("a guest given a folder to edit sees what is in it, edits a note, sees its 
   await expect(grace.getByRole("tab", { name: "Untitled" })).toHaveAttribute("aria-selected", "true");
   await expect(editor(grace)).toBeFocused();
   await grace.keyboard.type("# From Grace");
-  await expect.poll(async () => (await perform(page, { type: "note.list", folderId: projects.id })).map((n) => n.title).sort()).toEqual(["From Grace", "Kickoff"]);
+  await expect.poll(async () => (await perform(page, { type: "note.list", folderId: projects.id })).notes.map((n) => n.title).sort()).toEqual(["From Grace", "Kickoff"]);
 
   await grace.goto(`/note/${q3.id}`);
   await expect(editor(grace)).toContainText("Fixed by Ada.");
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
   await expect(perform(grace, { type: "note.write", id: q3.id, baseRevision: 1, text: "# Q3\n\nGrace's." }, workspaceId)).rejects.toThrow();
-  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title).sort()).toEqual(["From Grace", "Kickoff", "Q3"]);
+  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).notes.map((n) => n.title).sort()).toEqual(["From Grace", "Kickoff", "Q3"]);
 });
 
 test("a note its maker makes private is hidden from an admin everywhere, and sharing it with one member lets that member in", async ({ page }) => {

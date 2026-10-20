@@ -325,7 +325,7 @@ test("a guest who can't add notes where they are is shown New note with the reas
   await newInSidebar(grace).click({ force: true });
   await grace.waitForTimeout(500);
   await expect(listedNotes(grace)).toHaveText(["Leave policy"]);
-  await expect.poll(() => perform(grace, { type: "note.list" }, workspaceId)).toHaveLength(1);
+  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).notes).toHaveLength(1);
 
   await folderRow(grace, "Drafts").click();
   await expect(newInSidebar(grace)).toHaveAttribute("aria-disabled", "false");

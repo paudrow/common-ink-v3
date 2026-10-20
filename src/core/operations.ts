@@ -14,6 +14,7 @@ import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
 import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, mentionsOn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
+import { accountDeletion, deleteAccount, deleteWorkspace } from "./erase.ts";
 import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, signOut, type Asking } from "./membership.ts";
 import {
   NO_SUCH_WORKSPACE,
@@ -61,10 +62,13 @@ import { ownSandboxed } from "./ownPlugins.ts";
 import { codeHash, scaffold, validate } from "./plugins.ts";
 import { decideProposal, listProposals, propose, PROPOSED } from "./pluginProposals.ts";
 import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, listPlugins, permitPlugin, readDraft, readPlugin, requestPlugin, saveDraft, trustPlugin, uninstallPlugin } from "./pluginRecord.ts";
+import { openExport, planExport } from "./export.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
 import { NO_FILES, abortUpload, archiveUpload, createUpload, finishUpload, listUploads, moveUpload, openUpload, placeUpload, purgeUpload, putPart, readUpload, referred, restoreUpload, resumeUpload, startUpload, trashUpload, trashedUploads, uploadStorage, type Files } from "./uploads.ts";
 import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
+import { asc, desc, type Order } from "./order.ts";
+import { paging } from "./paging.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
@@ -667,12 +671,12 @@ function inParts(rows: readonly unknown[]): string[] {
 }
 
 /** Each order of todo.list, before its ties by note and line. */
-const TODO_ORDER: Record<TodoSort, string> = {
-  due: "t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE",
-  priority: "t.importance DESC, t.due IS NULL, t.due, n.title COLLATE NOCASE",
-  changed: "n.updated_at DESC",
-  note: "n.title COLLATE NOCASE",
-  text: "t.words COLLATE NOCASE",
+const TODO_ORDER: Record<TodoSort, Order> = {
+  due: [asc("t.due IS NULL"), asc("t.due"), desc("t.importance"), asc("n.title COLLATE NOCASE")],
+  priority: [desc("t.importance"), asc("t.due IS NULL"), asc("t.due"), asc("n.title COLLATE NOCASE")],
+  changed: [desc("n.updated_at")],
+  note: [asc("n.title COLLATE NOCASE")],
+  text: [asc("t.words COLLATE NOCASE")],
 };
 
 const INDEXED = {
@@ -1539,7 +1543,7 @@ export interface Finding {
  * when it was bound before, so a statement holds each of its values once. D1 takes a hundred, and
  * one more is refused here, in words, where the database would refuse the whole statement.
  */
-export function binder(values: (string | number)[]): (value: string | number) => string {
+export function binder(values: (string | number | null)[]): (value: string | number) => string {
   return (value) => {
     const had = values.indexOf(value);
     if (had >= 0) return `?${had + 1}`;
@@ -1786,15 +1790,15 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       // A list is where titles are read, so it is where the ones made by an older rule are made again.
       await mend(ctx);
       // A folder the asker can't see lists nothing. The note stays in the unfiltered list, with no folder, as note.read says.
-      const { results } = await ctx.db
-        .prepare(
-          `SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR (n.folder_id = ?2 AND EXISTS (SELECT 1 FROM folders f WHERE f.workspace_id = ?1 AND f.id = ?2 AND ${SEEN_FOLDER("f", "?4")}))) AND (?3 IS NULL OR n.updated_at >= ?3 OR n.state_at >= ?3) AND ${SEEN("n", "?4", listing(op.includeArchived))}
-             AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = ?5))
-           ORDER BY n.updated_at DESC, n.id LIMIT ?6 OFFSET ?7`,
-        )
-        .bind(ctx.workspaceId, op.folderId ?? null, op.updatedSince ?? null, ctx.sight.bind, op.tag === undefined ? null : nameKey(op.tag), op.limit ?? -1, op.offset)
-        .all<SummaryRow>();
-      return results.map((row) => toSummary(ctx, row));
+      const binds = [ctx.workspaceId, op.folderId ?? null, op.updatedSince ?? null, ctx.sight.bind, op.tag === undefined ? null : nameKey(op.tag)];
+      const bind = binder(binds);
+      const pages = paging([desc("n.updated_at"), asc("n.id")], op.after, bind);
+      const sql = `SELECT ${pages.keys}, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR (n.folder_id = ?2 AND EXISTS (SELECT 1 FROM folders f WHERE f.workspace_id = ?1 AND f.id = ?2 AND ${SEEN_FOLDER("f", "?4")}))) AND (?3 IS NULL OR n.updated_at >= ?3 OR n.state_at >= ?3) AND ${SEEN("n", "?4", listing(op.includeArchived))}
+             AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = ?5)) AND ${pages.where}
+           ORDER BY ${pages.orderBy} LIMIT ${bind(op.limit + 1)}`;
+      const { results } = await ctx.db.prepare(sql).bind(...binds).all<SummaryRow>();
+      const { page, next } = pages.page(results, op.limit);
+      return { notes: page.map((row) => toSummary(ctx, row)), next };
     },
   },
 
@@ -1869,16 +1873,17 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       // The query's sort: says the order where it has one, and `sort` where it hasn't. The done ones are last either way, and a
       // word the Todos page's Sort menu offers breaks its ties as the menu's order does.
       const sort = query.sort ? TODO_SORTS.find((s) => TODO_SORT_WORDS[s] === query.sort) : op.sort;
-      const order = `t.done, ${sort ? TODO_ORDER[sort] : orderOf(query.sort!)}`;
+      const pages = paging([asc("t.done"), ...(sort ? TODO_ORDER[sort] : orderOf(query.sort!)), asc("t.note_id"), asc("t.line")], op.after, bind);
       const { results } = await prepare(
-        `SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
+        `SELECT ${pages.keys}, t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
            (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
          FROM todos t JOIN notes n ON n.id = t.note_id
-         WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition}
-         ORDER BY ${order}, t.note_id, t.line
-         LIMIT ${bind(op.limit + 1)} OFFSET ${bind(op.offset)}`,
+         WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition} AND ${pages.where}
+         ORDER BY ${pages.orderBy}
+         LIMIT ${bind(op.limit + 1)}`,
       ).all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
-      const page = results.slice(0, op.limit).map((r) => ({ r, todo: parseTodo(r.text) }));
+      const listed = pages.page(results, op.limit);
+      const page = listed.page.map((r) => ({ r, todo: parseTodo(r.text) }));
       const members = (await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []))).byId;
       const tagged = page.filter(({ r }) => r.tags !== "[]").map(({ r }) => r.note_id);
       const texts = new Map(
@@ -1905,7 +1910,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             access: itemLevel(ctx.sight, { id: r.note_id, folder_id: r.folder_id, private_owner: r.private_owner }) === "edit" ? "edit" : "view",
           };
         }),
-        next: results.length > op.limit ? op.offset + op.limit : null,
+        next: listed.next,
       };
     },
   },
@@ -2607,18 +2612,21 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
 
   "trash.list": {
     needs: "view",
-    async run(ctx) {
-      const { results } = await ctx.db
-        .prepare(
-          `SELECT n.state_by, n.state_by_kind, COALESCE(tp.name, ta.name, json_extract(tpi.manifest, '$.name')) AS state_by_name, ta.person_id AS state_by_owner, ${SUMMARY_COLUMNS}
+    async run(ctx, op) {
+      const binds = [ctx.workspaceId, ctx.sight.bind];
+      const bind = binder(binds);
+      const pages = paging([desc("n.state_at"), asc("n.id")], op.after, bind);
+      const sql = `SELECT ${pages.keys}, n.state_by, n.state_by_kind, COALESCE(tp.name, ta.name, json_extract(tpi.manifest, '$.name')) AS state_by_name, ta.person_id AS state_by_owner, ${SUMMARY_COLUMNS}
            LEFT JOIN people tp ON n.state_by_kind = 'member' AND tp.id = n.state_by
            LEFT JOIN agents ta ON n.state_by_kind = 'agent' AND ta.id = n.state_by
            LEFT JOIN plugin_installs tpi ON n.state_by_kind = 'plugin' AND tpi.id = n.state_by
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "trashed")} ORDER BY n.state_at DESC, n.id`,
-        )
-        .bind(ctx.workspaceId, ctx.sight.bind)
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "trashed")} AND ${pages.where} ORDER BY ${pages.orderBy} LIMIT ${bind(op.limit + 1)}`;
+      const { results } = await ctx.db
+        .prepare(sql)
+        .bind(...binds)
         .all<SummaryRow & { state_by: string; state_by_kind: AuthorRef["kind"]; state_by_name: string | null; state_by_owner: string | null }>();
-      return results.map((row): TrashedNote => ({ ...toSummary(ctx, row), trashedAt: row.state_at!, trashedBy: unnamed(ctx, authorOf(row.state_by_kind, row.state_by, row.state_by_name, row.state_by_owner)) }));
+      const { page, next } = pages.page(results, op.limit);
+      return { notes: page.map((row): TrashedNote => ({ ...toSummary(ctx, row), trashedAt: row.state_at!, trashedBy: unnamed(ctx, authorOf(row.state_by_kind, row.state_by, row.state_by_name, row.state_by_owner)) })), next };
     },
   },
 
@@ -2626,14 +2634,14 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       const indexing = !(await mend(ctx));
-      const { results } = await ctx.db
-        .prepare(
-          `SELECT MIN(g.name) AS name, COUNT(*) AS notes FROM note_tags g JOIN notes n ON n.id = g.note_id
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))} GROUP BY g.tag ORDER BY g.tag`,
-        )
-        .bind(ctx.workspaceId, ctx.sight.bind)
-        .all<{ name: string; notes: number }>();
-      return { tags: results, indexing };
+      const binds = [ctx.workspaceId, ctx.sight.bind];
+      const bind = binder(binds);
+      const pages = paging([asc("g.tag")], op.after, bind);
+      const sql = `SELECT ${pages.keys}, MIN(g.name) AS name, COUNT(*) AS notes FROM note_tags g JOIN notes n ON n.id = g.note_id
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))} AND ${pages.where} GROUP BY g.tag ORDER BY ${pages.orderBy} LIMIT ${bind(op.limit + 1)}`;
+      const { results } = await ctx.db.prepare(sql).bind(...binds).all<{ name: string; notes: number }>();
+      const { page, next } = pages.page(results, op.limit);
+      return { tags: page.map(({ name, notes }) => ({ name, notes })), next, indexing };
     },
   },
 
@@ -2650,19 +2658,21 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       if (!query.where) return { results: [], next: null, indexing: false };
       const indexing = !(await mend(ctx));
       const inTitle = !query.sort && op.sort === "match" ? topTerms(query.where) : [];
-      const order = query.sort ? orderOf(query.sort) : orderOf(({ match: "updated-desc", recent: "updated-desc", created: "created-desc", title: "title-asc" } as const)[op.sort]);
+      const order = orderOf(query.sort ?? ({ match: "updated-desc", recent: "updated-desc", created: "created-desc", title: "title-asc" } as const)[op.sort]);
       // What a note the asker isn't shown matches is left out before anything is counted, ordered or read. The
       // order asked for is of the note itself, as the title's match and then the time of the last change are: a rank worked
       // out across every note would move with the notes that are hidden. Each match names the workspace, so the
       // index is walked for this workspace's notes and no other's.
-      const titleFirst = inTitle.length ? `n.id IN (SELECT r.note_id FROM note_search s JOIN note_search_rows r ON r.id = s.rowid WHERE s.note_search MATCH ${bind(matchOf(ctx.workspaceId, inTitle, ["title"]))}) DESC,` : "";
+      const titleFirst = inTitle.length ? [desc(`n.id IN (SELECT r.note_id FROM note_search s JOIN note_search_rows r ON r.id = s.rowid WHERE s.note_search MATCH ${bind(matchOf(ctx.workspaceId, inTitle, ["title"]))})`)] : [];
+      const pages = paging([...titleFirst, ...order, asc("n.id")], op.after, bind);
       const { results: found } = await prepare(
-        `SELECT n.id FROM notes n
-         WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition}
-         ORDER BY ${titleFirst} ${order}, n.id
-         LIMIT ${bind(op.limit + 1)} OFFSET ${bind(op.offset)}`,
+        `SELECT ${pages.keys}, n.id FROM notes n
+         WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition} AND ${pages.where}
+         ORDER BY ${pages.orderBy}
+         LIMIT ${bind(op.limit + 1)}`,
       ).all<{ id: string }>();
-      const page = found.slice(0, op.limit).map((r) => r.id);
+      const listed = pages.page(found, op.limit);
+      const page = listed.page.map((r) => r.id);
       const { results: rows } = await ctx.db
         .prepare(`SELECT n.text, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?3)) AND ${SEEN("n", "?2", covering)}`)
         .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(page))
@@ -2674,7 +2684,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           const row = byId.get(id);
           return row ? [{ note: toSummary(ctx, row), matches: matchesIn(row.text, sought) }] : [];
         }),
-        next: found.length > op.limit ? op.offset + op.limit : null,
+        next: listed.next,
         indexing,
       };
     },
@@ -2871,6 +2881,15 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "invite.list": { needs: "manage", by: "member", run: (ctx) => listInvites(ctx.db, ctx.workspaceId) },
   "invite.revoke": { needs: "manage", by: "member", run: (ctx, op) => revokeInvite(asking(ctx), op.id) },
 
+  // Deleting an account or a workspace can't be undone, so only the person does it, signed in: see NOT_FOR_AGENTS.
+  "account.read": { needs: "view", by: "member", run: (ctx) => accountDeletion(ctx.db, ctx.personId!) },
+  "account.delete": {
+    needs: "view",
+    by: "member",
+    run: (ctx, op) => deleteAccount({ db: ctx.db, personId: ctx.personId!, now: ctx.now, sources: ctx.sources, bucket: ctx.files.bucket }, op.confirm),
+  },
+  "workspace.delete": { needs: "manage", by: "member", run: (ctx, op) => deleteWorkspace({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now, bucket: ctx.files.bucket }, op.confirm) },
+
   // Who a note is shared with is not in history either, and a link can put a note before the whole internet. Only the member decides it: see NOT_FOR_AGENTS.
   "grant.list": { needs: "view", by: "member", run: (ctx, op) => listGrants(ctx, op) },
   // What each needs of its item is `canShare`'s to say: a viewer who owns a private note shares it, and can change nothing else.
@@ -2927,6 +2946,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "upload.list": { needs: "view", run: (ctx, op) => listUploads(ctx, op) },
   "upload.read": { needs: "view", run: (ctx, op) => readUpload(ctx, op.id) },
   "upload.open": { needs: "view", run: (ctx, op) => openUpload(ctx, op.id, "opens") },
+  // An export holds what the asker could read one note and one upload at a time, and nothing more, so whoever reads may export: a guest, a viewer, an agent within its folders.
+  "export.plan": { needs: "view", run: (ctx, op) => planExport(ctx, { bytes: op.partBytes, files: op.partFiles }) },
+  "export.open": { needs: "view", run: (ctx, op) => openExport(ctx, op) },
   "upload.move": { needs: "edit", run: (ctx, op) => moveUpload(ctx, op.id, op.folderId) },
   "upload.place": { needs: "edit", run: (ctx, op) => placeUpload(ctx, op.id, op.noteId) },
   "upload.archive": { needs: "edit", run: (ctx, op) => archiveUpload(ctx, op.id, op.archived) },

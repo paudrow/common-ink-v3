@@ -72,7 +72,7 @@ test("a recording over 8 MB dropped in a note goes in parts: its line is written
   await expect(below(page, "audio").getByRole("progressbar", { name: "episode-12.wav uploaded" })).toBeVisible();
   // The line is in the note while the file is still on its way, and the file is in no list yet.
   await expect.poll(() => noteText(page, note.id)).toMatch(/^# Episode 12\n\nThe recording:\n::audio\{[a-z0-9]{12}\}\n$/);
-  expect(await perform(page, { type: "upload.list" })).toEqual([]);
+  expect((await perform(page, { type: "upload.list" })).uploads).toEqual([]);
   const id = /::audio\{([a-z0-9]{12})\}/.exec(await noteText(page, note.id))![1]!;
   await expect(page.getByRole("status", { name: "Uploading" })).toContainText("Uploading episode-12.wav");
 
@@ -80,7 +80,7 @@ test("a recording over 8 MB dropped in a note goes in parts: its line is written
   const player = below(page, "audio").locator("audio");
   await expect(player).toBeVisible();
   await expect(below(page, "audio")).not.toContainText("Uploading");
-  expect((await perform(page, { type: "upload.list" })).map((u) => [u.id, u.name, u.type, u.size])).toEqual([[id, "episode-12.wav", "audio/wav", 12 * MIB]]);
+  expect((await perform(page, { type: "upload.list" })).uploads.map((u) => [u.id, u.name, u.type, u.size])).toEqual([[id, "episode-12.wav", "audio/wav", 12 * MIB]]);
 
   // A player asks for the part it is at, and gets just that part.
   const ranged = page.waitForResponse((res) => res.url().includes(`/uploads/${id}`) && res.status() === 206);
@@ -119,7 +119,7 @@ test("a part whose connection drops is sent again to a fresh address, and the fi
   expect(tried).toHaveLength(2);
   expect(tried[0]).not.toBe(tried[1]);
   expect(tried.every((path) => path.endsWith("/1"))).toBe(true);
-  const [upload] = await perform(page, { type: "upload.list" });
+  const [upload] = (await perform(page, { type: "upload.list" })).uploads;
   expect(upload).toMatchObject({ name: "interview.wav", size: 9 * MIB, kind: "audio" });
   await expect(toast(page)).toHaveCount(0);
 });

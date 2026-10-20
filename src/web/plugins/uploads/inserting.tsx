@@ -10,7 +10,7 @@ import { writtenNow } from "./sending.ts";
 import { onItsOwnLine } from "./pasting.ts";
 import { Thumb } from "./Thumb.tsx";
 
-type Listed = Results["upload.list"][number];
+type Listed = Results["upload.list"]["uploads"][number];
 
 /** As many as the popover lists: the latest, which is what a member looking for one mostly wants. More are found by typing. */
 const SHOWN = 30;
@@ -114,8 +114,8 @@ function Picker({ host, onPick, onClose }: { host: PluginHost; onPick: (upload: 
     let live = true;
     const timer = setTimeout(
       () =>
-        void host.perform({ type: "upload.list", query: text.trim() }).then(
-          (uploads) => live && (setFound({ uploads: uploads.slice(0, SHOWN) }), setActive(0)),
+        void host.perform({ type: "upload.list", query: text.trim(), limit: SHOWN }).then(
+          ({ uploads }) => live && (setFound({ uploads }), setActive(0)),
           (err: unknown) => live && setFound({ problem: reasonOf(err) }),
         ),
       text ? PAUSE_MS : 0,

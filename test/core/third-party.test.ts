@@ -80,7 +80,7 @@ describe("the record of a workspace's plugins", () => {
       await expect(perform(env.DB, pluginOf(ada, id), op)).rejects.toMatchObject({ code: "forbidden", message: `Word Tally isn't permitted to ${op.type}` });
     }
     await permit(ada, id, "notes.read");
-    expect((await perform(env.DB, pluginOf(ada, id), { type: "note.list" })).map((n) => n.title)).toEqual(["Plan"]);
+    expect((await perform(env.DB, pluginOf(ada, id), { type: "note.list" })).notes.map((n) => n.title)).toEqual(["Plan"]);
     // And only what that permission names.
     await expect(perform(env.DB, pluginOf(ada, id), { type: "note.create", text: "# Made" })).rejects.toMatchObject({ code: "forbidden", message: "Word Tally isn't permitted to note.create" });
   });
@@ -544,7 +544,7 @@ describe("a plugin acting for a member", () => {
     const plan = await perform(env.DB, ada, { type: "note.create", text: "# Plan" });
     const own = await perform(env.DB, grace, { type: "note.create", text: "# Own" });
     const seen = async () => {
-      const notes = await perform(env.DB, pluginOf(grace, id), { type: "note.list" });
+      const notes = (await perform(env.DB, pluginOf(grace, id), { type: "note.list" })).notes;
       return [plan.id, own.id].map((noteId) => notes.find((n) => n.id === noteId)!.updatedBy);
     };
     expect(await seen()).toEqual([
@@ -576,7 +576,7 @@ describe("a plugin acting for a member", () => {
     );
 
     // Every listing that names an author names the plugin, for the note never written too.
-    const listed = await perform(env.DB, ada, { type: "note.list" });
+    const listed = (await perform(env.DB, ada, { type: "note.list" })).notes;
     expect(Object.fromEntries(listed.map((n) => [n.id, n.updatedBy]))).toEqual({ [mine.id]: plugin, [made.id]: plugin, [empty.id]: plugin });
     expect((await perform(env.DB, ada, { type: "note.history", id: mine.id })).map((c) => c.author)).toEqual([{ kind: "member", personId: ada.personId, name: "Ada Lovelace" }, plugin]);
 
@@ -598,7 +598,7 @@ describe("a plugin acting for a member", () => {
     expect(reverted.reverted.map((r) => [r.note.id, r.revisions]).sort()).toEqual([[made.id, [1]], [mine.id, [2, 3]]].sort());
     expect(reverted.emptied).toEqual([{ noteId: made.id, title: "Counted", trashed: true }]);
     expect((await perform(env.DB, ada, { type: "note.read", id: mine.id })).text).toBe("# Plan\n\nStep");
-    expect((await perform(env.DB, ada, { type: "note.list" })).map((n) => n.id).sort()).toEqual([mine.id, empty.id].sort());
+    expect((await perform(env.DB, ada, { type: "note.list" })).notes.map((n) => n.id).sort()).toEqual([mine.id, empty.id].sort());
     // An agent of a member's is not the plugin, though both act for a member.
     expect((await perform(env.DB, ada, { type: "history.revertAuthor", author: { kind: "plugin", id } })).reverted).toEqual([]);
     // The notes History lists name it among who changed each, and so does a revert that a change of its stands in the way of.
@@ -649,8 +649,8 @@ describe("a plugin acting for a member", () => {
     const secret = await perform(env.DB, ada, { type: "note.create", text: "# Secret\n\nwords" });
     await perform(env.DB, ada, { type: "note.setPrivate", id: secret.id, private: true });
 
-    expect((await perform(env.DB, pluginOf(ada, id), { type: "note.list" })).map((n) => n.title).sort()).toEqual(["Open", "Secret"]);
-    expect((await perform(env.DB, pluginOf(grace, id), { type: "note.list" })).map((n) => n.title)).toEqual(["Open"]);
+    expect((await perform(env.DB, pluginOf(ada, id), { type: "note.list" })).notes.map((n) => n.title).sort()).toEqual(["Open", "Secret"]);
+    expect((await perform(env.DB, pluginOf(grace, id), { type: "note.list" })).notes.map((n) => n.title)).toEqual(["Open"]);
     expect((await perform(env.DB, pluginOf(grace, id), { type: "search", query: "words" })).results.map((r) => r.note.title)).toEqual(["Open"]);
     expect(await outcome(pluginOf(grace, id), { type: "note.read", id: secret.id })).toBe("not_found: No such note");
     expect(await outcome(pluginOf(grace, id), { type: "note.write", id: secret.id, baseRevision: 1, text: "# Mine" })).toBe("not_found: No such note");
@@ -770,7 +770,7 @@ describe("a plugin's operations over HTTP", () => {
     expect(await post({ type: "note.list" }, { Origin: "https://evil.example.com" })).toEqual({ status: 403, body: { error: "forbidden", message: "Operations come as JSON from Common Ink itself" } });
     expect(await post({ type: "note.list" }, { "Content-Type": "text/plain" })).toMatchObject({ status: 403 });
     expect(await post("{", {})).toEqual({ status: 400, body: { error: "invalid", message: "The body isn't JSON" } });
-    for (const type of ["upload.create", "upload.open", "shared.upload"]) expect((await post({ type, id, name: "x.png", size: 1 })).body.message, type).toBe("A file's bytes come and go at /api/workspaces/<id>/uploads, and a part of one at the address upload.start gives");
+    for (const type of ["upload.create", "upload.open", "shared.upload", "export.open"]) expect((await post({ type, id, name: "x.png", size: 1 })).body.message, type).toBe("A file's bytes come and go at /api/workspaces/<id>/uploads, a part of one at the address upload.start gives, and an export's at the addresses export.plan gives");
     expect((await send(route, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://ink.test" }, body: '{"type":"note.list"}' })).status).toBe(401);
     expect((await send(route, { headers: { Cookie: await cookieOf(grace) } })).status).toBe(404);
     // An agent's token is no session here either.

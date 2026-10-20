@@ -5,7 +5,7 @@ import { noteIdFromPath, notePath } from "../../src/core/slug.ts";
 import { newMember } from "./members.ts";
 
 const create = (actor: Actor, text: string) => perform(env.DB, actor, { type: "note.create", text });
-const titles = async (actor: Actor) => (await perform(env.DB, actor, { type: "note.list" })).map((n) => n.title).sort();
+const titles = async (actor: Actor) => (await perform(env.DB, actor, { type: "note.list" })).notes.map((n) => n.title).sort();
 
 /** Puts the notes back as an older build left them: the title that build stored, and not yet made by today's rule. */
 const asStoredBefore = (id: string, title: string) => env.DB.prepare("UPDATE notes SET title = ?, snippet = 'old snippet', indexed = 5 WHERE id = ?").bind(title, id).run();
@@ -72,7 +72,7 @@ describe("a title stored by an older rule", () => {
     for (let i = 0; i < 320; i++) notes.push(await create(ada, `Plain note ${String(i).padStart(3, "0")}\n\nbody`));
     await env.DB.prepare("UPDATE notes SET title = '', snippet = 'old snippet', indexed = 5 WHERE workspace_id = ?").bind(ada.workspaceId).run();
 
-    const listed = await perform(env.DB, ada, { type: "note.list" });
+    const listed = (await perform(env.DB, ada, { type: "note.list", limit: 1000 })).notes;
     expect(listed.map((n) => n.title).sort()).toEqual(notes.map((n) => n.title).sort());
     expect(listed.every((n) => n.snippet === "body")).toBe(true);
     // Not all of them are stored yet: the rest were read from their text.

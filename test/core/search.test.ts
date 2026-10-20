@@ -6,6 +6,7 @@ import { matchOf, parse, soughtIn } from "../../src/core/query.ts";
 import { matchesIn } from "../../src/core/search.ts";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { addMember, newMember } from "./members.ts";
+import { walk } from "./walking.ts";
 
 const create = (by: Actor, text: string, now?: number) => perform(env.DB, by, { type: "note.create", text }, now);
 const found = async (by: Actor, query: string, more: Omit<Partial<Extract<OpInput, { type: "search" }>>, "type" | "query"> = {}) => (await perform(env.DB, by, { type: "search", query, ...more })).results.map((r) => r.note.title);
@@ -135,11 +136,33 @@ describe("search", () => {
     // Pages follow the order asked for.
     const first = await perform(env.DB, ada, { type: "search", query: "finch", sort: "title", limit: 2 });
     expect(first.results.map((r) => r.note.title)).toEqual(["alpha", "Beta"]);
-    expect((await perform(env.DB, ada, { type: "search", query: "finch", sort: "title", limit: 2, offset: first.next! })).results.map((r) => r.note.title)).toEqual(["Finch"]);
+    expect((await perform(env.DB, ada, { type: "search", query: "finch", sort: "title", limit: 2, after: first.next! })).results.map((r) => r.note.title)).toEqual(["Finch"]);
 
-    expect((await perform(env.DB, ada, { type: "note.list", includeArchived: "only" })).map((n) => n.title)).toEqual(["Old"]);
-    expect((await perform(env.DB, ada, { type: "note.list", includeArchived: true })).map((n) => n.title)).toEqual(["alpha", "Old", "Finch", "Beta"]);
-    expect((await perform(env.DB, ada, { type: "note.list" })).map((n) => n.title)).toEqual(["alpha", "Finch", "Beta"]);
+    expect((await perform(env.DB, ada, { type: "note.list", includeArchived: "only" })).notes.map((n) => n.title)).toEqual(["Old"]);
+    expect((await perform(env.DB, ada, { type: "note.list", includeArchived: true })).notes.map((n) => n.title)).toEqual(["alpha", "Old", "Finch", "Beta"]);
+    expect((await perform(env.DB, ada, { type: "note.list" })).notes.map((n) => n.title)).toEqual(["alpha", "Finch", "Beta"]);
+  });
+
+  it("pages across the notes whose title matches and those after them, each once, and lists a note renamed past the page where it is now", async () => {
+    const ada = await newMember();
+    await create(ada, "# Heron A\n\nbird", 1000);
+    await create(ada, "# Plain\n\nheron", 2000);
+    const b = await create(ada, "# Heron B\n\nbird", 3000);
+    await create(ada, "# Other\n\nheron here", 4000);
+    await create(ada, "# Last\n\nheron", 4000);
+    const titles = async (limit: number, more: Omit<Partial<Extract<OpInput, { type: "search" }>>, "type" | "query"> = {}) =>
+      (await walk((after) => perform(env.DB, ada, { type: "search", query: "heron", limit, after, ...more }))).flatMap((page) => page.results.map((r) => r.note.title));
+
+    const [tieFirst, tieSecond] = (await perform(env.DB, ada, { type: "search", query: "heron", sort: "recent", limit: 2 })).results.map((r) => r.note.title);
+    expect([tieFirst, tieSecond].sort()).toEqual(["Last", "Other"]);
+    for (const limit of [1, 2, 4]) expect(await titles(limit), `${limit} a page`).toEqual(["Heron B", "Heron A", tieFirst, tieSecond, "Plain"]);
+    for (const limit of [1, 3]) expect(await titles(limit, { sort: "title" }), `by title, ${limit} a page`).toEqual(["Heron A", "Heron B", "Last", "Other", "Plain"]);
+
+    const first = await perform(env.DB, ada, { type: "search", query: "heron", sort: "title", limit: 2 });
+    await perform(env.DB, ada, { type: "note.write", id: b.id, baseRevision: 1, text: "# Zz heron\n\nbird" }, 5000);
+    const rest = await walk((after) => perform(env.DB, ada, { type: "search", query: "heron", sort: "title", limit: 2, after: after ?? first.next! }));
+    expect(first.results.map((r) => r.note.title)).toEqual(["Heron A", "Heron B"]);
+    expect(rest.flatMap((page) => page.results.map((r) => r.note.title)), "renamed to after the page, it is listed again").toEqual(["Last", "Other", "Plain", "Zz heron"]);
   });
 
   it("is never thrown by what is typed: it answers, or says where the query can't be read", async () => {
@@ -174,8 +197,7 @@ describe("search", () => {
 
     expect(await perform(env.DB, ada, { type: "search", query: "quarterly report", limit: 2 })).toEqual(before);
     expect(before.results.map((r) => r.note.title)).toEqual(["Quarterly 02", "Quarterly 01"]);
-    expect(before.next).toBe(2);
-    expect((await perform(env.DB, ada, { type: "search", query: "quarterly report", limit: 2, offset: 2 })).results.map((r) => r.note.title)).toEqual(["Quarterly 00"]);
+    expect((await perform(env.DB, ada, { type: "search", query: "quarterly report", limit: 2, after: before.next! })).results.map((r) => r.note.title)).toEqual(["Quarterly 00"]);
     expect(await found(ada, "#hidden")).toEqual([]);
     expect((await perform(env.DB, ada, { type: "tag.list" })).tags).toEqual([]);
     expect((await perform(env.DB, eve, { type: "search", query: "#hidden", limit: 50 })).results).toHaveLength(30);
@@ -218,8 +240,8 @@ describe("search", () => {
     const search = () => perform(env.DB, ada, { type: "search", query: "herons", limit: 1 });
 
     expect(await search()).toMatchObject({ indexing: true });
-    expect(await perform(env.DB, ada, { type: "tag.list" })).toEqual({ tags: [{ name: "bird", notes: 310 }], indexing: false });
-    expect(await search()).toMatchObject({ indexing: false, next: 1 });
+    expect(await perform(env.DB, ada, { type: "tag.list" })).toEqual({ tags: [{ name: "bird", notes: 310 }], next: null, indexing: false });
+    expect(await search()).toMatchObject({ indexing: false, next: expect.any(String) });
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM note_search").first()).toEqual({ n: 310 });
   });
 
@@ -229,9 +251,9 @@ describe("search", () => {
     await create(ada, "# Two\n\n#money");
 
     expect((await perform(env.DB, ada, { type: "tag.list" })).tags).toEqual([{ name: "bills", notes: 1 }, { name: "Money", notes: 2 }]);
-    expect((await perform(env.DB, ada, { type: "note.list", tag: "MONEY" })).map((n) => n.title).sort()).toEqual(["One", "Two"]);
-    expect((await perform(env.DB, ada, { type: "note.list", tag: "bills" })).map((n) => n.title)).toEqual(["One"]);
-    expect(await perform(env.DB, ada, { type: "note.list", tag: "none" })).toEqual([]);
+    expect((await perform(env.DB, ada, { type: "note.list", tag: "MONEY" })).notes.map((n) => n.title).sort()).toEqual(["One", "Two"]);
+    expect((await perform(env.DB, ada, { type: "note.list", tag: "bills" })).notes.map((n) => n.title)).toEqual(["One"]);
+    expect((await perform(env.DB, ada, { type: "note.list", tag: "none" })).notes).toEqual([]);
   });
 });
 
@@ -277,7 +299,7 @@ describe("search, tags and Trash, asked by someone who sees part of the workspac
     for (const mark of w.marks) expect(told.filter((text) => text.includes(mark)), mark).toEqual([]);
     expect((await perform(env.DB, vera, { type: "search", query: "commonword", includeArchived: true, limit: 50 })).results.map((r) => r.note.title).sort()).toEqual(["Open archived", "Open live"]);
     expect((await perform(env.DB, vera, { type: "tag.list", includeArchived: true })).tags).toEqual([{ name: "sharedtag", notes: 2 }]);
-    expect((await perform(env.DB, vera, { type: "trash.list" })).map((n) => n.title)).toEqual(["Open trashed"]);
+    expect((await perform(env.DB, vera, { type: "trash.list" })).notes.map((n) => n.title)).toEqual(["Open trashed"]);
     for (const query of ["hidden-words", "Hidden-live", "#hiddentag"]) expect(await said(vera, { type: "search", query, includeArchived: true })).toBe(await said(vera, { type: "search", query: "nosuchwordanywhere", includeArchived: true }));
 
     const before = await w.states();
@@ -320,7 +342,7 @@ describe("search, tags and Trash, asked by someone who sees part of the workspac
       expect((await perform(env.DB, guest, { type: "search", query: "commonword", includeArchived: true, limit: 50 })).results.map((r) => r.note.title).sort()).toEqual(["Open archived", "Open live"]);
       expect((await perform(env.DB, guest, { type: "search", query: "commonword", limit: 1 })).next).toBeNull();
       expect((await perform(env.DB, guest, { type: "tag.list", includeArchived: true })).tags).toEqual([{ name: "sharedtag", notes: 2 }]);
-      expect((await perform(env.DB, guest, { type: "trash.list" })).map((n) => n.title)).toEqual(["Open trashed"]);
+      expect((await perform(env.DB, guest, { type: "trash.list" })).notes.map((n) => n.title)).toEqual(["Open trashed"]);
       // A note they weren't given is answered as one that was never there. One who may only read is told a guest can't, whatever the note.
       for (const id of [extra.id, w.hidden.trashed.id, w.hidden.live.id]) {
         for (const op of [{ type: "note.archive", id, archived: true }, { type: "note.trash", id }, { type: "note.restore", id }, { type: "note.read", id }] as OpInput[]) {
@@ -345,7 +367,7 @@ describe("search, tags and Trash, asked by someone who sees part of the workspac
     const ed = await addMember(w.ada, "editor", "Ed Editor");
     const mine = await create(w.eve, "# Soon-hidden\n\ncommonword soon-hidden-words #sharedtag #soontag");
     await perform(env.DB, w.eve, { type: "note.trash", id: mine.id });
-    expect((await perform(env.DB, ed, { type: "trash.list" })).map((n) => n.title).sort()).toEqual(["Open trashed", "Soon-hidden"]);
+    expect((await perform(env.DB, ed, { type: "trash.list" })).notes.map((n) => n.title).sort()).toEqual(["Open trashed", "Soon-hidden"]);
     await perform(env.DB, w.eve, { type: "note.restore", id: mine.id });
     expect(await found(ed, "soon-hidden-words")).toEqual(["Soon-hidden"]);
 
@@ -369,7 +391,7 @@ describe("search, tags and Trash, asked by someone who sees part of the workspac
     const { signIn } = await import("../../src/core/accounts.ts");
     const gus: Actor = { kind: "member", personId: (await signIn(env.DB, { email, name: "Gus Guest" })).personId, workspaceId: w.ada.workspaceId };
     const grant = await perform(env.DB, w.ada, { type: "grant.set", noteId: w.open.trashed.id, email, access: "edit" });
-    expect((await perform(env.DB, gus, { type: "trash.list" })).map((n) => n.title)).toEqual(["Open trashed"]);
+    expect((await perform(env.DB, gus, { type: "trash.list" })).notes.map((n) => n.title)).toEqual(["Open trashed"]);
     await perform(env.DB, w.ada, { type: "grant.revoke", id: grant.id });
     await perform(env.DB, w.ada, { type: "member.remove", memberId: ed.personId });
     for (const lost of [gus, ed]) {

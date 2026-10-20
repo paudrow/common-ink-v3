@@ -266,7 +266,7 @@ test("editing an agent changes what its token may do, with no new agent and no n
   await expect(row).toContainText(`${token.slice(0, 9)}…`);
   await expect(page.getByRole("region", { name: "New token" })).toHaveCount(0);
   await expect(claude.tool("create_note", { text: "# No" })).rejects.toThrow("forbidden: A read-only token can't note.create");
-  expect((await claude.tool<{ notes: Note[] }>("list_notes", {})).notes).toHaveLength(1);
+  expect((await claude.tool<{ notes: unknown[] }>("list_notes", {})).notes).toHaveLength(1);
 
   await row.getByRole("button", { name: "Edit" }).click();
   await expect(edit.getByRole("checkbox", { name: /^Read only/ })).toBeChecked();
@@ -497,7 +497,7 @@ test("reverting an agent takes back out the notes it made, which are left empty"
   await expect(toast(page)).toContainText("Reverted 4 changes in 3 notes");
   await expect.poll(() => text(page, draft.id)).toBe("");
   await expect.poll(() => text(page, trip)).toBe("# Trip");
-  expect((await perform(page, { type: "note.list" })).map((n) => n.title).sort()).toEqual(["", "Plan", "Trip"]);
+  expect((await perform(page, { type: "note.list" })).notes.map((n) => n.title).sort()).toEqual(["", "Plan", "Trip"]);
 });
 
 test("reverting an agent that reaches every workspace says the member's other workspaces aren't covered", async ({ page }) => {

@@ -195,8 +195,8 @@ describe("search, by each filter", () => {
 
     // A page at a time, in the order asked for.
     const first = await perform(env.DB, ada, { type: "search", query: "is:open sort:title-asc", limit: 3 });
-    expect([first.results.map((r) => r.note.title), first.next]).toEqual([["Budget", "Diary", "Recipes"], 3]);
-    const second = await perform(env.DB, ada, { type: "search", query: "is:open sort:title-asc", limit: 3, offset: 3 });
+    expect(first.results.map((r) => r.note.title)).toEqual(["Budget", "Diary", "Recipes"]);
+    const second = await perform(env.DB, ada, { type: "search", query: "is:open sort:title-asc", limit: 3, after: first.next! });
     expect([second.results.map((r) => r.note.title), second.next]).toEqual([["Roadmap"], null]);
     // Nothing asked finds nothing, as it always has: a list of every note is note.list's.
     expect(await titles(ada, "sort:title-asc")).toEqual([]);
@@ -339,7 +339,8 @@ describe("todo.list, by each filter", () => {
     expect(await todos(ada, "sort:priority-desc")).toEqual(["Ship the plan", "Call the bank #urgent", "Tidy the roadmap"]);
     expect(await todos(ada, "sort:title-desc")).toEqual(["Ship the plan", "Tidy the roadmap", "Call the bank #urgent"]);
     const first = await perform(env.DB, ada, { type: "todo.list", query: "sort:due-asc", limit: 2 });
-    expect([first.todos.map((t) => t.words), first.next]).toEqual([["Call the bank #urgent", "Ship the plan"], 2]);
+    expect(first.todos.map((t) => t.words)).toEqual(["Call the bank #urgent", "Ship the plan"]);
+    expect((await perform(env.DB, ada, { type: "todo.list", query: "sort:due-asc", limit: 2, after: first.next! })).todos.map((t) => t.words)).toEqual(["Tidy the roadmap"]);
 
     // A todo's words are found as a note's are: by their starts, whatever their case or accents.
     await perform(env.DB, ada, { type: "note.create", text: "# Shopping\n\n- [ ] Buy Éclair and café\n- [ ] Replant\n- [ ] Plant B" });

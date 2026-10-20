@@ -1192,7 +1192,7 @@ test("the sidebar's Today and the command both open today's daily note, headed b
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`${daily.note.id}$`));
   await expect(editor(page)).toContainText(today);
-  await expect.poll(async () => (await perform(page, { type: "note.list" })).filter((n) => n.title === today)).toHaveLength(1);
+  await expect.poll(async () => (await perform(page, { type: "note.list" })).notes.filter((n) => n.title === today)).toHaveLength(1);
   await page.goBack();
   await expect(page).toHaveURL(/\/todos$/);
 });

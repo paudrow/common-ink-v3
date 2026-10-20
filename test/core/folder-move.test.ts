@@ -161,7 +161,7 @@ describe("moving a folder", () => {
     const email = `${crypto.randomUUID()}@example.com`;
     const gus: Actor = { kind: "member", personId: (await signIn(env.DB, { email, name: "Gus Guest" })).personId, workspaceId: ada.workspaceId };
     await perform(env.DB, ada, { type: "grant.set", folderId: shared, email, access: "view" });
-    const titles = async () => (await perform(env.DB, gus, { type: "note.list" })).map((n) => n.title);
+    const titles = async () => (await perform(env.DB, gus, { type: "note.list" })).notes.map((n) => n.title);
 
     expect([await paths(gus), await titles()]).toEqual([["Shared"], []]);
     await move(ada, plans, shared);

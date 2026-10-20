@@ -114,7 +114,7 @@ describe("Common Ink's own plugins that run shut off", () => {
     for (const other of [ada, vera, gus]) {
       const told = await perform(env.DB, pluginOf(other, "backlinks"), { type: "note.backlinks", id: shared });
       expect(told).toEqual([]);
-      expect(JSON.stringify(await perform(env.DB, pluginOf(other, "word-count"), { type: "note.list" }))).not.toContain("only-eve-knows");
+      expect(JSON.stringify((await perform(env.DB, pluginOf(other, "word-count"), { type: "note.list" })).notes)).not.toContain("only-eve-knows");
       expect(await outcome(pluginOf(other, "backlinks"), { type: "note.backlinks", id: secret })).toBe("not_found: No such note");
     }
     // A person and a workspace sent along in the operation are not the ones it is performed for.
@@ -125,7 +125,7 @@ describe("Common Ink's own plugins that run shut off", () => {
     const { gus, secret, shared } = await team();
     expect((await perform(env.DB, pluginOf(gus, "word-count"), { type: "note.read", id: shared })).text).toContain("for everyone");
     expect(await outcome(pluginOf(gus, "word-count"), { type: "note.read", id: secret })).toBe("not_found: No such note");
-    expect((await perform(env.DB, pluginOf(gus, "word-count"), { type: "note.list" })).map((n) => n.id)).toEqual([shared]);
+    expect((await perform(env.DB, pluginOf(gus, "word-count"), { type: "note.list" })).notes.map((n) => n.id)).toEqual([shared]);
     expect(await outcome(pluginOf(gus, "quick-timer"), { type: "note.read", id: shared })).toBe("forbidden: Quick timer isn't permitted to note.read");
     expect(await outcome(pluginOf(gus, "word-count", true), { type: "note.read", id: shared })).toMatch(/^forbidden: A guest runs no plugins/);
     expect(await outcome(gus, { type: "draft.save", id: "word-count", manifest: JSON.stringify(OWN_SANDBOXED["word-count"]), code: "", running: true })).toBe("forbidden: A guest can't draft.save");

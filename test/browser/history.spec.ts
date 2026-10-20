@@ -799,13 +799,13 @@ test("a selection of more notes than one request takes is read, previewed and re
 
   await expect(toast(page)).toContainText("Reverted 104 changes in 104 notes", { timeout: 30_000 });
   await expect(dialog).toHaveCount(0);
-  await expect.poll(async () => (await perform(page, { type: "note.list" })).filter((n) => n.revision === 2).length, { timeout: 20_000 }).toBe(104);
+  await expect.poll(async () => (await perform(page, { type: "note.list" })).notes.filter((n) => n.revision === 2).length, { timeout: 20_000 }).toBe(104);
   expect(await text(page, made[57]!.id)).toBe("");
 
   await toast(page).getByRole("button", { name: "Undo" }).click();
   await expect(toast(page)).toContainText("Undone: 104 notes are as they were before the revert.", { timeout: 30_000 });
   expect(await text(page, made[57]!.id)).toBe("# Note 057");
-  await expect.poll(async () => (await perform(page, { type: "note.list" })).filter((n) => n.revision === 3).length).toBe(104);
+  await expect.poll(async () => (await perform(page, { type: "note.list" })).notes.filter((n) => n.revision === 3).length).toBe(104);
 });
 
 test("History's panes are side by side with room, one over the other in a narrower pane, and one at a time in a narrow one", async ({ page }) => {

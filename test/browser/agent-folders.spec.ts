@@ -144,7 +144,7 @@ test("an agent whose folder is deleted reaches nothing, never everything, and it
   const claude = await connectLimited(page, "Claude", (form) => pick(form, "Projects / Plans").check());
   await expect.poll(titles(claude)).toEqual(["Q3 plan"]);
 
-  const [q3] = await perform(page, { type: "note.list", folderId: plans.id });
+  const [q3] = (await perform(page, { type: "note.list", folderId: plans.id })).notes;
   await perform(page, { type: "note.move", id: q3!.id, folderId: (await perform(page, { type: "folder.list" })).unsortedId! });
   await perform(page, { type: "folder.delete", id: plans.id });
   await expect.poll(titles(claude)).toEqual([]);

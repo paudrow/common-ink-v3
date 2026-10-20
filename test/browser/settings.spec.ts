@@ -703,7 +703,7 @@ test("Enter and Space given to commands leave buttons, links and checkboxes thei
   await page.goto("/plugins");
   const app = page.locator(".app");
   const modes = page.getByRole("navigation", { name: "Modes" });
-  const notes = async () => (await perform(page, { type: "note.list" })).length;
+  const notes = async () => (await perform(page, { type: "note.list" })).notes.length;
   await expect(modes.getByRole("button", { name: "Less" })).toBeVisible();
 
   await modes.getByRole("button", { name: "Less" }).focus();

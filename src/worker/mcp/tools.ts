@@ -3,7 +3,8 @@ import { timeIn } from "../../core/history.ts";
 import { PRIOR_WRITE, agentActor, isReadOnlyOp, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
 import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
 import { CAPABILITY_NAMES } from "../../core/plugins.ts";
-import { MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
+import { EXPORT_PART_BYTES, EXPORT_PART_FILES, MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type ExportPlan, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
+import { EXPORT_INDEX, SHARED_WITH_ME } from "../../core/export.ts";
 import { writtenUpload } from "../../core/uploadRefs.ts";
 import { ASK_NOTE_SYNTAX, syntaxDescription, syntaxText as noteSyntaxText } from "../../core/noteSyntax.ts";
 import { MAX_SEARCH_LENGTH, SCOPES, queryLanguage, type Scope } from "../../core/query.ts";
@@ -47,8 +48,6 @@ interface Tool {
   times?: string[];
   /** What the agent is told of the operation's answer, when that is more than the answer: `origin` is the server's address. */
   told?: (answer: never, origin: string) => unknown;
-  /** The key a page of the operation's list is told under, with next. The operation is asked for one more than limit, to know whether there are more. */
-  pages?: string;
 }
 
 /** Each argument's old name, taken for the name it has now: `workspace` for every tool, and the operation's own field for an argument renamed. */
@@ -83,6 +82,9 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "member.signOut": "Signing someone out of every browser locks them out until they sign in again with Google, which an agent can't do for them. An agent that was talked into it could keep its own member, or as an admin's agent anyone in the workspace, signed out. Only the member, signed in, does it.",
   "invite.list": "Invites name people who are not in the workspace yet, by email, and are only of use for managing them, which an agent can't do.",
   "invite.revoke": MEMBERS,
+  "account.read": "It is what deleting the member's own account would take with it, asked by the app before the member confirms. An agent deletes no account.",
+  "account.delete": "Deleting an account erases everything that was the member's alone, their private notes and files among them, and nothing brings it back. Only the member does it, signed in, after typing their email: an agent that was talked into it would destroy its own member.",
+  "workspace.delete": "Deleting a workspace erases every note, file and change in it for every member, and nothing brings it back. Only an admin does it, signed in, after typing its name: an agent that was talked into it would destroy everyone's work there.",
   "grant.list": "How a note, a folder or an upload is shared names people outside the workspace by email, and is only of use for sharing it, which an agent can't do. What the agent itself may do with a note or an upload is in every listing of it, as access.",
   "grant.set": SHARING,
   "grant.link": SHARING,
@@ -116,6 +118,7 @@ export const OVER_HTTP: Partial<Record<OpType, string>> = {
   "upload.create": `A file's bytes are not text, and a tool call carries only text. POST /api/workspaces/<workspace>/uploads with the token as Authorization: Bearer, the bytes as the body, Content-Type: application/octet-stream, Content-Length, and X-Ink-Upload: encodeURIComponent of the JSON { name, folderId?, writeId? }, where the same writeId sent again answers the first upload. The answer is 201 with the upload. One request carries at most ${PART_BYTES / 1024 / 1024} MB. upload_file does the same with base64 for a small file, and start_upload sends any file in parts.`,
   "upload.part": "A part's bytes are not text, and go from the agent's own shell, never through the model. PUT them to the address start_upload or resume_upload answered, with {part} the part's number: no token goes with it, since the address is the permission, and each address takes each part once.",
   "upload.open": "A file's bytes are not text, and a tool answer carries only text. GET /api/workspaces/<workspace>/uploads/<id> with the token as Authorization: Bearer answers with the bytes. Range and If-None-Match are honoured.",
+  "export.open": "An export is a zip, which is not text. GET each address plan_export answers, with the token as Authorization: Bearer: each is one part, a zip of its own. ink export saves every part.",
 };
 
 /** Made-up ids for the examples. */
@@ -156,11 +159,6 @@ const linkTitles = {
 };
 const mentionNames = { type: "string", enum: ["resolve", "keep"], description: 'What to do with mentions you add, @[[Name]] or @[[id]]. "resolve", the default, stores a mention of the one member with that name by their id, as @[[id|Name]], and refuses the write when several members have the name. A name no member has stays a name. "keep" leaves every mention as you wrote it.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
-const MAX_PAGE = 200;
-const page = (what: string) => ({
-  limit: { type: "integer", minimum: 1, maximum: MAX_PAGE, description: `How many ${what}; default 50` },
-  offset: { type: "integer", minimum: 0, description: "Where the page starts: next, from the page before" },
-});
 const queryDays = {
   today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
   zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is the zone your member's settings name, or UTC" },
@@ -208,6 +206,13 @@ const author = {
 const noteIds = (description: string) => ({ type: "array", items: { type: "string" }, minItems: 1, description });
 const includeArchived = { type: "boolean", description: "True to cover archived notes too, which are left out otherwise" };
 const archivedToo = { enum: [true, false, "only"], description: 'True to cover archived notes too, which are left out otherwise, or "only" for the archived notes alone' };
+/** A list that pages: how many to a page, and where the page starts. */
+const paging = (what: string, byDefault: number, most: number) => ({
+  limit: { type: "integer", minimum: 1, maximum: most, description: `How many ${what}; default ${byDefault}` },
+  after: { type: "string", description: "The next of the page before" },
+});
+/** What a list that pages says of its next page. */
+const PAGES = "While next isn't null, pass it as after for more.";
 const LIFE = "A note is live, archived or in Trash, which its state says. An archived note is left out of listings unless includeArchived is true, and is read and changed as any other. A note in Trash is listed only by list_trash, can be read, and can't be changed until restore_note brings it back.";
 const uploadId = { type: "string", description: "The upload's id, from list_uploads" };
 /** An upload, with the line a note shows it by. */
@@ -261,17 +266,16 @@ export const TOOLS: Tool[] = [
   {
     name: "list_notes",
     description:
-      `The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, to notes with a tag, or to notes whose text changed since a time. The answer is notes, 50 at a time; pass next as offset for more, until it is null. ${LIFE}`,
+      `The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, to notes with a tag, or to notes whose text changed since a time. The answer is notes, 50 at a time. ${PAGES} ${LIFE}`,
     inputSchema: object({
       folderId: folderId("Only notes in this folder, from list_folders"),
       updatedSince: time("Only notes whose text or state changed at or after this time. A note trashed since is in list_trash"),
       tag: { type: "string", description: "Only notes with this tag, without the #, ignoring case" },
       includeArchived: archivedToo,
-      ...page("notes"),
+      ...paging("notes", 50, 1000),
     }),
     op: "note.list",
     defaults: { limit: 50 },
-    pages: "notes",
     example: { workspaceId: WORKSPACE, folderId: FOLDER, updatedSince: "2026-10-01T00:00:00Z" },
   },
   {
@@ -379,7 +383,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see that query finds: with no query, every open one. Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more. A query is filters and words, such as: due:<today priority:>=medium -tag:someday, assignee:@me, is:done, or: call folder:"Common Ink". query_syntax {"scope":"todos"} lists every form, and every token a todo's line can hold. The arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The todos in the notes you can see that query finds: with no query, every open one. Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. Due days are calendar dates. ${PAGES} A query is filters and words, such as: due:<today priority:>=medium -tag:someday, assignee:@me, is:done, or: call folder:"Common Ink". query_syntax {"scope":"todos"} lists every form, and every token a todo's line can hold. The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
       query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
       ...queryDays,
@@ -395,8 +399,7 @@ export const TOOLS: Tool[] = [
       includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
       sort: { type: "string", enum: [...TODO_SORTS], description: "The order, when the query has no sort:, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
-      limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
-      offset: { type: "integer", minimum: 0, description: "Where the page starts: next, from the page before" },
+      ...paging("todos", 100, 200),
     }),
     op: "todo.list",
     example: { dueTo: "2026-10-14", sort: "priority" },
@@ -496,7 +499,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "search",
-    description: `Find the notes you can see with a query: words, each matching the start of a word in the note, ignoring case and accents, and filters. Todos and tags are text like any other, so their words are found too. A query with no word and no filter finds nothing: list_notes lists. Notes whose title matches come first, then the latest changed, unless the query's sort: or else sort asks for another order. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless the query says is:archived, and notes in Trash unless it says is:trashed. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again. A query is words and filters, such as: budget "second quarter" #money -is:archived, folder:"Common Ink" editor:@me updated:>=7d, or: has:open-todo OR has:backlink. query_syntax {"scope":"notes"} lists every form. The arguments beside query are from before it could say them, and narrow it further.`,
+    description: `Find the notes you can see with a query: words, each matching the start of a word in the note, ignoring case and accents, and filters. Todos and tags are text like any other, so their words are found too. A query with no word and no filter finds nothing: list_notes lists. Notes whose title matches come first, then the latest changed, unless the query's sort: or else sort asks for another order. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless the query says is:archived, and notes in Trash unless it says is:trashed. ${PAGES} While indexing is true, some notes are still being read into the index and may be missing: ask again. A query is words and filters, such as: budget "second quarter" #money -is:archived, folder:"Common Ink" editor:@me updated:>=7d, or: has:open-todo OR has:backlink. query_syntax {"scope":"notes"} lists every form. The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object(
       {
         query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'What to find, such as: budget "second quarter" #money -is:archived, or: editor:@me updated:>=7d (has:open-todo OR has:backlink)' },
@@ -505,8 +508,7 @@ export const TOOLS: Tool[] = [
         includeArchived: archivedToo,
         hasTodos: { type: "boolean", description: "True for only the notes with an open todo. In the query: has:open-todo" },
         sort: { enum: ["match", "recent", "created", "title"], description: "match, the default: title matches first, then the latest changed. recent: the latest changed. created: the latest made. title: by title. The query's sort: wins over it" },
-        limit: { type: "integer", minimum: 1, maximum: 50, description: "How many notes; default 20" },
-        offset: { type: "integer", minimum: 0, description: "Where the page starts: next, from the page before" },
+        ...paging("notes", 20, 50),
       },
       ["query"],
     ),
@@ -515,8 +517,8 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_tags",
-    description: "The tags of the notes you can see, each with how many of those notes have it. A #tag anywhere in a note tags the note. list_notes with tag lists the notes under one. While indexing is true, some notes are still being read in: ask again.",
-    inputSchema: object({ includeArchived }),
+    description: `The tags of the notes you can see, by name, each with how many of those notes have it. A #tag anywhere in a note tags the note. list_notes with tag lists the notes under one. ${PAGES} While indexing is true, some notes are still being read in: ask again.`,
+    inputSchema: object({ includeArchived, ...paging("tags", 200, 1000) }),
     op: "tag.list",
     example: {},
   },
@@ -546,24 +548,23 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_trash",
-    description: "The notes in Trash that you can see, latest trashed first: each as list_notes gives it, with who trashed it and when, and purgesAt, the time it is removed for good. An agent can't remove one sooner; a member does that in the app.",
-    inputSchema: object({}),
+    description: `The notes in Trash that you can see, latest trashed first: each as list_notes gives it, with who trashed it and when, and purgesAt, the time it is removed for good. An agent can't remove one sooner; a member does that in the app. ${PAGES}`,
+    inputSchema: object(paging("notes", 100, 500)),
     op: "trash.list",
     example: {},
   },
   {
     name: "list_uploads",
-    description: `The uploads you can see that query finds, latest uploaded first unless its sort: says otherwise: with no query, every live one. Each has its id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, private, state, access, which is edit or view, and uses: how many notes you can see show it. An upload you can't see is never listed or counted, and reads as no such upload everywhere. Archived uploads are left out unless the query says is:archived, and those in Trash unless it says is:trashed. The answer is uploads, 50 at a time; pass next as offset for more, until it is null. ${UPLOADS} A query is filters and words, such as: type:image uploader:@me, size:>1mb used:no -type:video, or: name:report uploaded:>=7d. query_syntax {"scope":"uploads"} lists every form. The arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The uploads you can see that query finds, latest uploaded first unless its sort: says otherwise: with no query, every live one. Each has its id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, private, state, access, which is edit or view, and uses: how many notes you can see show it. An upload you can't see is never listed or counted, and reads as no such upload everywhere. Archived uploads are left out unless the query says is:archived, and those in Trash unless it says is:trashed. The answer is uploads, 50 at a time. ${PAGES} ${UPLOADS} A query is filters and words, such as: type:image uploader:@me, size:>1mb used:no -type:video, or: name:report uploaded:>=7d. query_syntax {"scope":"uploads"} lists every form. The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
       query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: "Which uploads, such as: type:image uploader:@me, or: size:>1mb used:no -type:video" },
       ...queryDays,
       folderId: folderId("Only uploads in this folder, not those of the folders inside it, from list_folders. In the query, folder: takes the folders inside too"),
       includeArchived: { type: "boolean", description: "True to cover archived uploads too, which are left out otherwise. In the query: is:archived" },
-      ...page("uploads"),
+      ...paging("uploads", 50, 500),
     }),
     op: "upload.list",
     defaults: { limit: 50 },
-    pages: "uploads",
     example: { query: 'type:image uploader:@me' },
   },
   {
@@ -679,6 +680,17 @@ export const TOOLS: Tool[] = [
     inputSchema: object({}),
     op: "upload.trashed",
     example: {},
+  },
+  {
+    name: "plan_export",
+    description: `A copy of the workspace to keep: every live and archived note and upload you can see, and nothing else, as Markdown files and the files themselves in directories named for their folders. A note is <title>.md, its text as stored, so links stay [[id]] and embeds ::image{id}; ${EXPORT_INDEX} in the first part says which id is at which path, with each title, state and time. What you can see in a folder you can't is under ${SHARED_WITH_ME}/. It comes in parts, each a zip of its own, at most partBytes of uploads (${EXPORT_PART_BYTES / 2 ** 30} GiB unless smaller is asked) and partFiles uploads (${EXPORT_PART_FILES}); a larger file is a part alone. The answer is notes, uploads, and parts: each with number, notes and uploads it holds, bytes before the zip's own, and address. GET an address with the token as Authorization: Bearer for its zip; asked again, a part holds the same uploads. Most workspaces are one part. ink export saves them all.`,
+    inputSchema: object({
+      partBytes: { type: "integer", minimum: 1, maximum: EXPORT_PART_BYTES, description: "The most bytes of uploads in one part. Left out, 1 GiB" },
+      partFiles: { type: "integer", minimum: 1, maximum: EXPORT_PART_FILES, description: `The most uploads in one part. Left out, ${EXPORT_PART_FILES}` },
+    }),
+    op: "export.plan",
+    example: {},
+    told: (plan: ExportPlan, origin: string) => ({ ...plan, parts: plan.parts.map((part) => ({ ...part, address: `${origin}${part.address}` })) }),
   },
   {
     name: "list_folders",
@@ -1236,12 +1248,6 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       fields.writeId = CLIPPER_WRITE + fields.writeId;
       const prior = await db.prepare(PRIOR_WRITE).bind(fields.writeId, workspaceId, "member", agent.personId).first<{ id: string }>();
       if (prior) return text({ id: prior.id });
-    }
-    if (tool.pages) {
-      const { limit, offset = 0 } = fields as { limit: unknown; offset?: number };
-      if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE) throw new OpError("invalid", `limit is a whole number from 1 to ${MAX_PAGE}`);
-      const listed = (await perform(db, actor, { ...fields, limit: limit + 1, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket })) as unknown[];
-      return written({ [tool.pages]: listed.slice(0, limit), next: listed.length > limit ? offset + limit : null });
     }
     const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
     return written(tool.told ? tool.told(answer as never, reached.origin) : answer);

@@ -83,6 +83,12 @@ const LinkKind = z.enum(["public", "signed_in"]);
 const On = { noteId: Id.optional(), folderId: Id.optional(), uploadId: Id.optional() };
 
 export { MAX_UPLOAD_BYTES, PART_BYTES } from "./parts.ts";
+
+/** The most bytes of uploads in one part of an export, and the most uploads: what one request reads well inside a Worker's time and its calls to the bucket. A larger upload is a part alone. */
+export const EXPORT_PART_BYTES = 2 ** 30;
+export const EXPORT_PART_FILES = 300;
+/** Where an upload is in the order an export's parts take them: when it was made, then its id. */
+const ExportPlace = z.string().regex(/^\d{1,16}\.[a-z0-9]{12}$/, "not a place in an export");
 /** The most bytes `upload_file` takes from an agent as base64 in one tool call. A larger file goes in parts. */
 export const MAX_INLINE_UPLOAD_BYTES = 4 * 1024 * 1024;
 /** A file's name as it was given. What is kept of it is its last part, cleaned: see `cleanName`. */
@@ -166,10 +172,18 @@ const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.lit
  * trash.list covers a note in Trash.
  */
 const IncludeArchived = z.boolean().default(false);
-/** A page of a listing that is all of it when no `limit` is asked. */
-const Page = { limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).default(0) };
 /** For a listing of notes that can also be asked for the archived ones alone, with `"only"`. */
 const Archived = z.union([z.boolean(), z.literal("only")]).default(false);
+/**
+ * Where a page of a list starts: the `next` the page before gave, made from that page's last row.
+ * The rows after it are the ones that come after that row in the list's order now, so a row that
+ * moves in the order between pages, as a note changed meanwhile does, may be listed twice or not at
+ * all, and one added where the pages have already been is not listed. Every other row is listed once.
+ * It holds the values the list is ordered by, which can be a long heading.
+ */
+const After = z.string().min(1).max(20_000).optional();
+/** How many rows a page holds: `most` keeps one answer small enough to send and read. */
+const Limit = (byDefault: number, most: number) => z.number().int().min(1).max(most).default(byDefault);
 /** The orders a search answers in. `match` is notes whose title matches first, then the latest changed. */
 export const SEARCH_SORTS = ["match", "recent", "created", "title"] as const;
 export type SearchSort = (typeof SEARCH_SORTS)[number];
@@ -226,10 +240,10 @@ export const Op = z.discriminatedUnion("type", [
    * archived or trashed, is not in it to be told of: ask with `includeArchived`, and trash.list.
    * `folderId` lists the notes in that folder. A folder the asker can't see lists nothing, and the
    * note is still in the list with no folder. `tag` lists only the notes with that tag, ignoring case.
-   * `includeArchived: "only"` lists the archived notes and no live one. `limit` and `offset` take a
-   * page of the list; without `limit` it is all of it.
+   * `includeArchived: "only"` lists the archived notes and no live one. The latest changed come first. Pass the answer's
+   * `next` as `after` for the page after.
    */
-  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived, ...Page }),
+  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived, limit: Limit(200, 1000), after: After }),
   z.object({
     type: z.literal("note.create"),
     text: NoteText.default(""),
@@ -305,10 +319,10 @@ export const Op = z.discriminatedUnion("type", [
   /** Removes a note in Trash now, with its history, instead of after its 30 days. Nothing brings it back. */
   z.object({ type: z.literal("note.purge"), id: Id }),
   z.object({ type: z.literal("note.discard"), id: Id }),
-  /** The notes in Trash that the asker can see, latest trashed first. */
-  z.object({ type: z.literal("trash.list") }),
-  /** The tags of the notes the asker can see, each with how many of those notes have it. */
-  z.object({ type: z.literal("tag.list"), includeArchived: IncludeArchived }),
+  /** The notes in Trash that the asker can see, latest trashed first. Pass the answer's `next` as `after` for the page after. */
+  z.object({ type: z.literal("trash.list"), limit: Limit(100, 500), after: After }),
+  /** The tags of the notes the asker can see, by name, each with how many of those notes have it. Pass the answer's `next` as `after` for the page after. */
+  z.object({ type: z.literal("tag.list"), includeArchived: IncludeArchived, limit: Limit(200, 1000), after: After }),
   /**
    * The notes the asker can see that `query` finds, written in the query language of docs/search.md:
    * words, each matching the start of a word in the note, ignoring case and accents; "a phrase"; filters
@@ -322,7 +336,7 @@ export const Op = z.discriminatedUnion("type", [
    * The fields beside `query` are from before it could say them, and narrow it further: `folderId` to
    * the notes in one folder, not those of the folders inside it, where a folder the asker can't see is
    * no such folder; `hasTodos` to notes with an open todo; `includeArchived` to cover archived notes
-   * too, or with `"only"` them alone. Pass the answer's `next` as `offset` for more.
+   * too, or with `"only"` them alone. Pass the answer's `next` as `after` for more.
    */
   z.object({
     type: z.literal("search"),
@@ -332,8 +346,8 @@ export const Op = z.discriminatedUnion("type", [
     hasTodos: z.boolean().default(false),
     sort: z.enum(SEARCH_SORTS).default("match"),
     ...Days,
-    limit: z.number().int().min(1).max(50).default(20),
-    offset: z.number().int().min(0).default(0),
+    limit: Limit(20, 50),
+    after: After,
   }),
   /** Names a revision, or takes its name away when `name` is null. */
   z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
@@ -416,7 +430,7 @@ export const Op = z.discriminatedUnion("type", [
    * is `assignee:` of the query: a member's id, or anyone else's name, ignoring case. `assignedToMe`
    * is `assignee:@me`: the asker, or the member an agent acts for. `folderId`
    * lists the todos of the notes in that folder and in every folder under it; one the asker can't see
-   * is no folder. Pass the answer's `next` as `offset` for the page after. A field it doesn't know is
+   * is no folder. Pass the answer's `next` as `after` for the page after. A field it doesn't know is
    * refused, so a filter it no longer has, such as a project, is never read as no filter.
    * `sort` orders the open ones, and the done ones after them, another way: `priority` the highest
    * first, then by due date; `changed` those whose note changed last first; `note` by their note's
@@ -439,8 +453,8 @@ export const Op = z.discriminatedUnion("type", [
     includeArchived: IncludeArchived,
     noteId: Id.optional(),
     sort: z.enum(TODO_SORTS).default("due"),
-    limit: z.number().int().min(1).max(200).default(100),
-    offset: z.number().int().min(0).default(0),
+    limit: Limit(100, 200),
+    after: After,
   }).strict(),
   /** What todo.list can be narrowed by, besides the folders of folder.list: the tags of the notes that have todos, and who todos are assigned to, in notes the asker can see. */
   z.object({ type: z.literal("todo.filters"), includeArchived: IncludeArchived }),
@@ -593,6 +607,15 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("invite.list") }),
   /** Takes back an invite nobody has taken up. */
   z.object({ type: z.literal("invite.revoke"), id: Id }),
+  /** What deleting the asker's own account would do: the workspaces they are alone in, deleted with it, and those it waits on, where they are the only admin and others are members. */
+  z.object({ type: z.literal("account.read") }),
+  /**
+   * Deletes the asker's own account, once `confirm` is their email. What they wrote in workspaces
+   * they share stays, under "A former member", and everything else of theirs goes.
+   */
+  z.object({ type: z.literal("account.delete"), confirm: z.string().max(400) }),
+  /** Deletes the workspace and everything in it, for an admin, once `confirm` is its name. */
+  z.object({ type: z.literal("workspace.delete"), confirm: z.string().max(400) }),
   /**
    * How a note or a folder is shared: the grants on it, the grants on the folders above that cover
    * it, its link, and for a note whether it is private. Anyone who can see the item may ask, and is
@@ -661,10 +684,10 @@ export const Op = z.discriminatedUnion("type", [
   /**
    * The uploads the asker can see that `query` finds, in the query language (docs/search.md), latest
    * first: with no query, every live one. `folderId` narrows to one folder's own uploads and
-   * `includeArchived` covers archived ones too, as `is:archived` does. `limit` and `offset` take a page
-   * of the list; without `limit` it is all of it.
+   * `includeArchived` covers archived ones too, as `is:archived` does. Pass the answer's `next` as
+   * `after` for the page after.
    */
-  z.object({ type: z.literal("upload.list"), query: z.string().max(MAX_SEARCH_LENGTH).default(""), ...Days, folderId: Id.optional(), includeArchived: IncludeArchived, ...Page }),
+  z.object({ type: z.literal("upload.list"), query: z.string().max(MAX_SEARCH_LENGTH).default(""), ...Days, folderId: Id.optional(), includeArchived: IncludeArchived, limit: Limit(100, 500), after: After }),
   /** One upload, and the notes the asker can see that refer to it. */
   z.object({ type: z.literal("upload.read"), id: Id }),
   /** The bytes of one upload. Over HTTP it is `GET /api/workspaces/<id>/uploads/<upload id>`. */
@@ -691,6 +714,17 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("upload.trashed") }),
   /** Makes an upload private to the member who uploaded it, or stops it being so, as note.setPrivate does a note. */
   z.object({ type: z.literal("upload.setPrivate"), id: Id, private: z.boolean() }),
+  /**
+   * The parts of an export of the workspace: the live and archived notes and uploads the asker can
+   * see, as Markdown and files in their folders, in zips of at most `partBytes` of uploads and
+   * `partFiles` uploads each. Each part has the address of its bytes.
+   */
+  z.object({ type: z.literal("export.plan"), partBytes: z.number().int().min(1).max(EXPORT_PART_BYTES).optional(), partFiles: z.number().int().min(1).max(EXPORT_PART_FILES).optional() }),
+  /**
+   * The bytes of one part of an export, a zip: with `notes`, the folders, the notes and the index of
+   * every id; and the uploads after `after` up to `through`. Over HTTP it is the address export.plan gives.
+   */
+  z.object({ type: z.literal("export.open"), notes: z.boolean().default(false), after: ExportPlace.optional(), through: ExportPlace.optional() }),
   /**
    * The data sources of whoever asks, each with whether it is connected and whether it takes changes.
    * A data source is a person's own. Every operation on one answers for the person asking and nobody
@@ -1113,6 +1147,29 @@ export interface OpenedUpload {
   range?: { offset: number; length: number };
 }
 
+/** One part of an export: how many notes and uploads it holds, their bytes before the zip's own, and the address of its bytes. */
+export interface ExportPart {
+  number: number;
+  notes: number;
+  uploads: number;
+  bytes: number;
+  address: string;
+}
+
+/** An export of what the asker can see, in parts. Most are one. */
+export interface ExportPlan {
+  notes: number;
+  uploads: number;
+  parts: ExportPart[];
+}
+
+/** A part of an export as it is sent: a zip written while it is read. */
+export interface OpenedExport {
+  /** The workspace's name, which the file is saved under. */
+  workspace: string;
+  body: ReadableStream<Uint8Array>;
+}
+
 /** A grant as someone who may share its item is told of it. */
 export interface Grant {
   id: string;
@@ -1444,15 +1501,15 @@ export interface Rebuilt {
 }
 
 export interface Results {
-  "note.list": NoteSummary[];
+  /** `next` is the `after` of the page after, or null on the last, here and in each list that pages. */
+  "note.list": { notes: NoteSummary[]; next: string | null };
   "note.create": Linked<Note>;
   "note.read": ReadNote;
   "note.write": Linked<Written>;
   "note.edit": Linked<Written>;
   "note.backlinks": NoteSummary[];
   "links.rebuild": Rebuilt;
-  /** `next` is the `offset` of the page after, or null on the last. */
-  "todo.list": { todos: ListedTodo[]; next: number | null };
+  "todo.list": { todos: ListedTodo[]; next: string | null };
   /** Each name once, ignoring case, as a note writes it. */
   "todo.filters": { tags: string[]; assignees: Mentioned[] };
   "todo.set": Written;
@@ -1472,11 +1529,11 @@ export interface Results {
   "note.restore": Note & { folderGone: boolean };
   "note.purge": { id: string };
   "note.discard": { id: string };
-  "trash.list": TrashedNote[];
+  "trash.list": { notes: TrashedNote[]; next: string | null };
   /** `indexing` is true while some notes are still to be read into the index, as after a deploy: the answer may lack them, and asking again reads more. */
-  "tag.list": { tags: ListedTag[]; indexing: boolean };
-  /** `next` is the `offset` of the page after, or null on the last. `indexing` is as for tag.list. */
-  search: { results: SearchResult[]; next: number | null; indexing: boolean };
+  "tag.list": { tags: ListedTag[]; next: string | null; indexing: boolean };
+  /** `indexing` is as for tag.list. */
+  search: { results: SearchResult[]; next: string | null; indexing: boolean };
   "note.label": { id: string; revision: number; label: string | null };
   "note.revert": Written;
   "note.revertChanges": Written;
@@ -1511,6 +1568,11 @@ export interface Results {
   "member.signOut": { memberId: string };
   "invite.list": Invite[];
   "invite.revoke": { id: string };
+  "account.read": AccountDeletion;
+  /** The workspaces deleted with the account. */
+  "account.delete": { deleted: WorkspaceRef[] };
+  /** False while some of what it held is still being erased, which carries on without anyone. */
+  "workspace.delete": { erased: boolean };
   "grant.list": Sharing;
   "grant.set": Grant;
   "grant.link": Grant | null;
@@ -1527,7 +1589,7 @@ export interface Results {
   "upload.finish": Upload;
   "upload.abort": { id: string };
   "upload.storage": UploadStorage;
-  "upload.list": ListedUpload[];
+  "upload.list": { uploads: ListedUpload[]; next: string | null };
   "upload.read": Upload & { usedIn: NoteSummary[] };
   "upload.open": OpenedUpload;
   "upload.move": Upload;
@@ -1539,6 +1601,8 @@ export interface Results {
   "upload.purge": { id: string };
   "upload.trashed": TrashedUpload[];
   "upload.setPrivate": { id: string; private: boolean; removed: number };
+  "export.plan": ExportPlan;
+  "export.open": OpenedExport;
   "source.list": { sources: Source[] };
   /** `redirect` is where the member's browser goes to agree, or null when the data source is connected already. */
   "source.connect": { sources: Source[]; redirect: string | null };
@@ -1845,6 +1909,20 @@ export interface Me {
   workspaces: WorkspaceSummary[];
   /** True on this machine and in Previews, and never in production: there a test may put plugins on the page itself. */
   dev: boolean;
+}
+
+export interface WorkspaceRef {
+  id: string;
+  name: string;
+}
+
+/** What deleting someone's account would do. */
+export interface AccountDeletion {
+  email: string;
+  /** The workspaces they are the only member of, which go with the account. */
+  deletes: WorkspaceRef[];
+  /** The workspaces where they are the only admin and others are members. The account can't be deleted until each has another admin or is deleted. */
+  blocking: WorkspaceRef[];
 }
 
 /** What an operation answers anyone who isn't in the workspace, whether or not there is one. */

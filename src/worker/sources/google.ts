@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { shiftDay } from "../../core/events.ts";
+import { logLine } from "../../core/logs.ts";
 import { CONTACT_LABELS, labelType, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactLine, type EventWhen, type LabelledField } from "../../core/protocol.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type DataSource, type Described, type EventChange } from "../../core/sources.ts";
 import { covers, isGoogleSource, refresh, revoke, writes as agreedToWrite, type GoogleConfig, type GoogleSourceId } from "../google.ts";
@@ -617,6 +618,15 @@ function stateOf(connection: Connection | null, id: GoogleSourceId, now: number)
 
 /** Google's data sources, where this Common Ink has a Google client and a key to seal tokens with. */
 export function google(deps: Deps): Provider {
+  const ending = async (personId: string) => {
+    const connection = await connectionOf(deps.db, personId, PROVIDER);
+    const token = connection && ((await openToken(deps.vault, connection, "refresh")) ?? (await openToken(deps.vault, connection, "access")));
+    if (!token) return null;
+    return async () => {
+      // Logged without the token or whose it was. The connection is ended here all the same.
+      if (!(await revoke(token, deps.outbound))) logLine("Google didn't say it ended a connection that was disconnected here");
+    };
+  };
   return {
     owns: isGoogleSource,
     async of(personId) {
@@ -636,11 +646,10 @@ export function google(deps: Deps): Provider {
      * are deleted whether or not it answers, so nothing here can use them again.
      */
     async disconnect(personId) {
-      const connection = await connectionOf(deps.db, personId, PROVIDER);
-      if (!connection) return;
-      const token = (await openToken(deps.vault, connection, "refresh")) ?? (await openToken(deps.vault, connection, "access"));
+      const end = await ending(personId);
       await forget(deps.db, personId, PROVIDER);
-      if (token) await revoke(token, deps.outbound);
+      await end?.();
     },
+    ending,
   };
 }

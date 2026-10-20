@@ -43,8 +43,8 @@ describe("a matched line cut into pieces", () => {
 
 describe("the search request", () => {
   it("lists what the server answered for the search that is asked", () => {
-    const state = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a"), result("b")], next: 20, indexing: false });
-    expect(state).toMatchObject({ status: "listed", ask: PLAN, next: 20, more: "ready" });
+    const state = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, after: null, results: [result("a"), result("b")], next: "p20", indexing: false });
+    expect(state).toMatchObject({ status: "listed", ask: PLAN, next: "p20", more: "ready" });
     expect(ids(state)).toEqual(["a", "b"]);
   });
 
@@ -52,20 +52,20 @@ describe("the search request", () => {
     const late = after(
       { type: "asked", ask: PLAN },
       { type: "asked", ask: PLANS },
-      { type: "answered", ask: PLANS, offset: 0, results: [result("new")], next: null, indexing: false },
-      { type: "answered", ask: PLAN, offset: 0, results: [result("old")], next: null, indexing: false },
+      { type: "answered", ask: PLANS, after: null, results: [result("new")], next: null, indexing: false },
+      { type: "answered", ask: PLAN, after: null, results: [result("old")], next: null, indexing: false },
     );
     expect(late).toMatchObject({ status: "listed", ask: PLANS });
     expect(ids(late)).toEqual(["new"]);
 
-    const early = after({ type: "asked", ask: PLAN }, { type: "asked", ask: PLANS }, { type: "answered", ask: PLAN, offset: 0, results: [result("old")], next: null, indexing: false });
+    const early = after({ type: "asked", ask: PLAN }, { type: "asked", ask: PLANS }, { type: "answered", ask: PLAN, after: null, results: [result("old")], next: null, indexing: false });
     expect(early).toEqual({ status: "searching", ask: PLANS, before: null });
   });
 
   it("tells apart searches that differ in the folder, the states covered, the order, or whether only notes with todos are wanted", () => {
     const others: Ask[] = [{ ...PLAN, includeArchived: true }, { ...PLAN, includeArchived: "only" }, { ...PLAN, folderId: "f" }, { ...PLAN, sort: "title" }, { ...PLAN, hasTodos: true }];
     for (const other of others) {
-      const state = after({ type: "asked", ask: PLAN }, { type: "asked", ask: other }, { type: "answered", ask: PLAN, offset: 0, results: [result("live")], next: null, indexing: false });
+      const state = after({ type: "asked", ask: PLAN }, { type: "asked", ask: other }, { type: "answered", ask: PLAN, after: null, results: [result("live")], next: null, indexing: false });
       expect(state).toEqual({ status: "searching", ask: other, before: null });
     }
     const again = after({ type: "asked", ask: { ...PLAN, folderId: "f" } }, { type: "asked", ask: { ...PLAN, folderId: "f" } });
@@ -73,25 +73,25 @@ describe("the search request", () => {
   });
 
   it("keeps what was listed on show while the next search is on its way", () => {
-    const state = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: null, indexing: false }, { type: "asked", ask: PLANS });
+    const state = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, after: null, results: [result("a")], next: null, indexing: false }, { type: "asked", ask: PLANS });
     expect(state.status).toBe("searching");
     expect(state.status === "searching" && state.before?.map((r) => r.note.id)).toEqual(["a"]);
   });
 
   it("is idle with nothing typed, and an answer on its way then changes nothing", () => {
-    const state = after({ type: "asked", ask: PLAN }, { type: "asked", ask: { ...PLAN, query: "", includeArchived: true } }, { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: null, indexing: false });
+    const state = after({ type: "asked", ask: PLAN }, { type: "asked", ask: { ...PLAN, query: "", includeArchived: true } }, { type: "answered", ask: PLAN, after: null, results: [result("a")], next: null, indexing: false });
     expect(state).toEqual({ status: "idle" });
   });
 
   it("fails with the reason, and asks again when the same search is asked after that", () => {
-    const failed = after({ type: "asked", ask: PLAN }, { type: "refused", ask: PLAN, offset: 0, message: "Common Ink can't be reached." });
+    const failed = after({ type: "asked", ask: PLAN }, { type: "refused", ask: PLAN, after: null, message: "Common Ink can't be reached." });
     expect(failed).toEqual({ status: "failed", ask: PLAN, message: "Common Ink can't be reached." });
     expect(reduce(failed, { type: "asked", ask: PLAN })).toEqual({ status: "searching", ask: PLAN, before: null });
   });
 
   it("appends the next page once, and only to the search it was asked for", () => {
-    const listed = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a"), result("b")], next: 2, indexing: false });
-    const page: Event = { type: "answered", ask: PLAN, offset: 2, results: [result("b"), result("c")], next: null, indexing: false };
+    const listed = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, after: null, results: [result("a"), result("b")], next: "p2", indexing: false });
+    const page: Event = { type: "answered", ask: PLAN, after: "p2", results: [result("b"), result("c")], next: null, indexing: false };
     expect(reduce(listed, page)).toBe(listed);
 
     const asking = reduce(listed, { type: "moreAsked" });
@@ -109,17 +109,17 @@ describe("the search request", () => {
   it("keeps the results when the next page can't be read, and can ask for it again", () => {
     const refused = after(
       { type: "asked", ask: PLAN },
-      { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: 1, indexing: false },
+      { type: "answered", ask: PLAN, after: null, results: [result("a")], next: "p1", indexing: false },
       { type: "moreAsked" },
-      { type: "refused", ask: PLAN, offset: 1, message: "Try again." },
+      { type: "refused", ask: PLAN, after: "p1", message: "Try again." },
     );
-    expect(refused).toMatchObject({ status: "listed", more: { refused: "Try again." }, next: 1 });
+    expect(refused).toMatchObject({ status: "listed", more: { refused: "Try again." }, next: "p1" });
     expect(ids(refused)).toEqual(["a"]);
     expect(reduce(refused, { type: "moreAsked" })).toMatchObject({ more: "asking" });
   });
 
   it("says the results may lack notes while the server is still indexing, and no longer once an answer says it is done", () => {
-    const partial = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: null, indexing: true });
+    const partial = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, after: null, results: [result("a")], next: null, indexing: true });
     expect(partial).toMatchObject({ status: "listed", indexing: true });
 
     const whole = reduce(partial, { type: "reanswered", ask: PLAN, results: [result("b"), result("a")], next: null, indexing: false });
@@ -128,12 +128,12 @@ describe("the search request", () => {
   });
 
   it("never lets a search answered again replace a newer search, or come between a next page and its answer", () => {
-    const partial = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: 1, indexing: true });
+    const partial = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, after: null, results: [result("a")], next: "p1", indexing: true });
     const again: Event = { type: "reanswered", ask: PLAN, results: [result("old")], next: null, indexing: false };
 
     const searching = reduce(partial, { type: "asked", ask: PLANS });
     expect(reduce(searching, again)).toBe(searching);
-    const newer = reduce(searching, { type: "answered", ask: PLANS, offset: 0, results: [result("new")], next: null, indexing: true });
+    const newer = reduce(searching, { type: "answered", ask: PLANS, after: null, results: [result("new")], next: null, indexing: true });
     expect(reduce(newer, again)).toBe(newer);
     const asking = reduce(partial, { type: "moreAsked" });
     expect(reduce(asking, again)).toBe(asking);
@@ -143,17 +143,17 @@ describe("the search request", () => {
   it("keeps the pages read past what was asked again, and takes the next page's word on whether the server is done", () => {
     const pages = after(
       { type: "asked", ask: PLAN },
-      { type: "answered", ask: PLAN, offset: 0, results: [result("a"), result("b")], next: 2, indexing: true },
+      { type: "answered", ask: PLAN, after: null, results: [result("a"), result("b")], next: "p2", indexing: true },
       { type: "moreAsked" },
-      { type: "answered", ask: PLAN, offset: 2, results: [result("c"), result("d")], next: 4, indexing: true },
+      { type: "answered", ask: PLAN, after: "p2", results: [result("c"), result("d")], next: "p4", indexing: true },
     );
     expect(pages).toMatchObject({ indexing: true });
 
-    const again = reduce(pages, { type: "reanswered", ask: PLAN, results: [result("n"), result("a"), result("b")], next: 3, indexing: true });
+    const again = reduce(pages, { type: "reanswered", ask: PLAN, results: [result("n"), result("a"), result("b")], next: "p3", indexing: true });
     expect(ids(again)).toEqual(["n", "a", "b", "c", "d"]);
-    expect(again).toMatchObject({ next: 4, more: "ready" });
+    expect(again).toMatchObject({ next: "p4", more: "ready" });
 
-    const done = reduce(reduce(again, { type: "moreAsked" }), { type: "answered", ask: PLAN, offset: 4, results: [result("d"), result("e")], next: null, indexing: false });
+    const done = reduce(reduce(again, { type: "moreAsked" }), { type: "answered", ask: PLAN, after: "p4", results: [result("d"), result("e")], next: null, indexing: false });
     expect(ids(done)).toEqual(["n", "a", "b", "c", "d", "e"]);
     expect(done).toMatchObject({ next: null, indexing: false });
   });

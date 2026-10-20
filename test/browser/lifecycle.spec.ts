@@ -509,7 +509,7 @@ test("an editor who didn't make a note is told plainly that they can't delete it
   await page.getByRole("group", { name: "Delete Hers forever" }).getByRole("button", { name: "Delete forever" }).click();
 
   await expect(banner(page).getByRole("alert")).toHaveText("Only an admin or the member who made a note can delete it for good");
-  await expect.poll(async () => (await perform(admin, { type: "trash.list" })).map((n) => n.id)).toEqual([note.id]);
+  await expect.poll(async () => (await perform(admin, { type: "trash.list" })).notes.map((n) => n.id)).toEqual([note.id]);
 });
 
 test("quick open leaves out archived and trashed notes, and finds archived ones when they are included", async ({ page }) => {

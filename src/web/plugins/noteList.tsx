@@ -290,12 +290,12 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     () => ({ query: ready ? asked : "", ...(scoped && { folderId }), includeArchived: includeArchivedOf(view.show), hasTodos: view.hasTodos, sort: view.sort ?? "match" }),
     [ready, asked, scoped, folderId, view.show, view.hasTodos, view.sort],
   );
-  const find = (asked: Ask, offset = 0) => {
-    dispatch(offset ? { type: "moreAsked" } : { type: "asked", ask: asked });
+  const find = (asked: Ask, after: string | null = null) => {
+    dispatch(after ? { type: "moreAsked" } : { type: "asked", ask: asked });
     if (!asked.query) return;
-    host.perform({ type: "search", ...asked, ...days, offset }).then(
-      ({ results, next, indexing }) => dispatch({ type: "answered", ask: asked, offset, results, next, indexing }),
-      (err: unknown) => dispatch({ type: "refused", ask: asked, offset, message: reasonOf(err) }),
+    host.perform({ type: "search", ...asked, ...days, ...(after && { after }) }).then(
+      ({ results, next, indexing }) => dispatch({ type: "answered", ask: asked, after, results, next, indexing }),
+      (err: unknown) => dispatch({ type: "refused", ask: asked, after, message: reasonOf(err) }),
     );
   };
   useEffect(() => find(ask), [host, ask]);
@@ -310,7 +310,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     let timer: ReturnType<typeof setTimeout>;
     const again = () => {
       timer = setTimeout(() => {
-        host.perform({ type: "search", ...partialAsk, ...days, offset: 0, limit: againLimit(partialResults.length) }).then(
+        host.perform({ type: "search", ...partialAsk, ...days, limit: againLimit(partialResults.length) }).then(
           ({ results, next, indexing }) => !left && dispatch({ type: "reanswered", ask: partialAsk, results, next, indexing }),
           // The results on show stay, and the server is asked once more after the same pause.
           () => !left && again(),
@@ -829,7 +829,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
         </nav>
         {found && found.next !== null && (
           <div className="search-more">
-            <button type="button" className="found-more" disabled={found.more === "asking"} onClick={() => find(found.ask, found.next!)}>
+            <button type="button" className="found-more" disabled={found.more === "asking"} onClick={() => find(found.ask, found.next)}>
               {found.more === "asking" ? "Reading more…" : "More results"}
             </button>
             {typeof found.more === "object" && <span role="alert">{found.more.refused}</span>}

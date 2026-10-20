@@ -31,13 +31,13 @@ const COMMANDS: Record<string, string[][]> = {
   read_draft: [["draft", ID]],
   save_draft: [["draft-save", ID, "--manifest", '{"name":"Greeter"}', "--code", "ink.notify(1)", "--running", "true", "--base-hash", "none"]],
   discard_draft: [["draft-discard", ID]],
-  list_notes: [["notes", "--folder", ID, "--since", "2026-10-01", "--tag", "money", "--archived", "true"]],
-  search: [["search", "budget #money", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--archived", "only", "--has-todos", "true", "--sort", "title", "--limit", "5", "--offset", "5"]],
-  list_tags: [["tags", "--archived", "true"]],
+  list_notes: [["notes", "--folder", ID, "--since", "2026-10-01", "--tag", "money", "--archived", "true", "--limit", "5", "--after", "WzEsImEiXQ"]],
+  search: [["search", "budget #money", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--archived", "only", "--has-todos", "true", "--sort", "title", "--limit", "5", "--after", "WzEsImEiXQ"]],
+  list_tags: [["tags", "--archived", "true", "--limit", "5", "--after", "WyJhIl0"]],
   archive_note: [["archive", ID], ["unarchive", ID]],
   trash_note: [["trash", ID]],
   restore_note: [["restore", ID]],
-  list_trash: [["trashed"]],
+  list_trash: [["trashed", "--limit", "5", "--after", "WzEsImEiXQ"]],
   read_note: [["read", ID, "--revision", "1"]],
   note_syntax: [["note-syntax"]],
   create_note: [["create", "--text", "# Hi", "--folder", ID, "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep"]],
@@ -45,7 +45,7 @@ const COMMANDS: Record<string, string[][]> = {
   edit_note: [["edit", ID, "--base", "1", "--edits", '[{"from":1,"to":2,"text":"Hi"}]', "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--on", "2026-10-11"]],
   backlinks: [["backlinks", ID]],
   rebuild_links: [["links-rebuild"]],
-  list_todos: [["todos", "due:<today -tag:someday", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--assignee", "Sam Okafor", "--assigned-to-me", "true", "--completed", "true", "--archived", "true", "--note", ID, "--sort", "priority", "--limit", "5", "--offset", "5"]],
+  list_todos: [["todos", "due:<today -tag:someday", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--assignee", "Sam Okafor", "--assigned-to-me", "true", "--completed", "true", "--archived", "true", "--note", ID, "--sort", "priority", "--limit", "5", "--after", "WzEsImEiXQ"]],
   todo_filters: [["todo-filters", "--archived", "true"]],
   set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--every", "2w", "--assign", "Sam Okafor", "--unassign", ID, "--on", "2026-10-11", "--words", "Call the bank #money"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w", "--skip", "true"]],
   todo_history: [["todo-history", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w"]],
@@ -56,7 +56,7 @@ const COMMANDS: Record<string, string[][]> = {
   last_visit: [["visit"]],
   rebuild_todos: [["todos-rebuild"]],
   move_note: [["move", ID, "--folder", ID]],
-  list_uploads: [["uploads", "type:image uploader:@me", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--archived", "true"]],
+  list_uploads: [["uploads", "type:image uploader:@me", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--archived", "true", "--limit", "5", "--after", "WzEsImEiXQ"]],
   place_upload: [["upload-place", ID, "--note", ID]],
   read_upload: [["upload-info", ID]],
   move_upload: [["upload-move", ID, "--folder", ID]],
@@ -69,6 +69,7 @@ const COMMANDS: Record<string, string[][]> = {
   finish_upload: [["upload-finish", ID]],
   abort_upload: [["upload-abort", ID]],
   upload_file: [["upload-inline", "dot.png", "--base64", "iVBORw0K", "--folder", ID, "--write-id", "w1"]],
+  plan_export: [["export-plan", "--part-bytes", "1000", "--part-files", "10"]],
   list_folders: [["folders"]],
   find_folder: [["folder-find", "Projects/Skills"]],
   create_folder: [["folder-create", "Plans", "--parent", ID, "--if-exists", "error"]],
@@ -127,8 +128,8 @@ describe("what an agent can do, against what the web app can", () => {
     expect(Object.keys(OVER_HTTP).filter((type) => type in NOT_FOR_AGENTS), "an operation is kept from agents or done over HTTP, not both").toEqual([]);
   });
 
-  it("has an ink command for every operation done over HTTP: upload sends a file's parts to their address from disk, and download sends the token to the bytes' address", async () => {
-    expect(Object.keys(OVER_HTTP).sort()).toEqual(["upload.create", "upload.open", "upload.part"]);
+  it("has an ink command for every operation done over HTTP: upload sends a file's parts to their address from disk, and download and export send the token to the bytes' address", async () => {
+    expect(Object.keys(OVER_HTTP).sort()).toEqual(["export.open", "upload.create", "upload.open", "upload.part"]);
     const WS = "wwwwwwwwwwww";
     const PNG_BYTES = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d);
     const requests: { method: string; url: string; headers: Record<string, string>; body: unknown }[] = [];
@@ -210,6 +211,29 @@ describe("what an agent can do, against what the web app can", () => {
     expect(out.at(-1)).toBe("ink: taken.png is already there. Pass --force true to replace it, or --out for another place");
     expect(await run(["download", ID, "--out", "taken.png", "--force", "true"], io)).toBe(0);
     expect(written.at(-1)).toEqual({ path: "taken.png", bytes: [...PNG_BYTES], replace: true });
+
+    // An export's parts are saved as they come, each to a file of its own, with the token sent only to the server's own addresses.
+    const saved: { path: string; bytes: number[]; replace: boolean }[] = [];
+    io.saveStream = async (path, body, replace) => {
+      if (path === "backups/common-ink-wwwwwwwwwwww.zip" && !replace) return false;
+      saved.push({ path, bytes: [...new Uint8Array(await new Response(body).arrayBuffer())], replace });
+      return true;
+    };
+    const part = (number: number) => ({ number, notes: number === 1 ? 2 : 0, uploads: 1, bytes: 5, address: `https://ink.test/api/workspaces/${WS}/export?part=${number}&of=2${number === 1 ? "&notes=1" : ""}` });
+    tools.plan_export = { notes: 2, uploads: 2, parts: [part(1), part(2)] };
+    requests.length = calls.length = 0;
+    expect(await run(["export", "--out", "backups", "--part-files", "1"], io)).toBe(0);
+    expect(calls.map((c) => [c.name, c.args])).toEqual([["list_workspaces", {}], ["plan_export", { partFiles: 1, workspaceId: WS }]]);
+    expect(requests).toEqual([1, 2].map((n) => ({ method: "GET", url: part(n).address, headers: { Authorization: "Bearer cink_x" }, body: undefined })));
+    expect(saved).toEqual([1, 2].map((n) => ({ path: `backups/common-ink-${WS}-part-${n}-of-2.zip`, bytes: [...PNG_BYTES], replace: false })));
+    expect(out.at(-1)).toBe(`Saved part 2 of 2: backups/common-ink-${WS}-part-2-of-2.zip`);
+    tools.plan_export = { notes: 2, uploads: 0, parts: [part(1)] };
+    expect(await run(["export", "--out", "backups"], io)).toBe(2);
+    expect(out.at(-1)).toBe(`ink: backups/common-ink-${WS}.zip is already there. Pass --force true to replace it, or --out for another place`);
+    tools.plan_export = { notes: 2, uploads: 0, parts: [{ ...part(1), address: "https://evil.example/steal" }] };
+    requests.length = 0;
+    expect(await run(["export"], io)).toBe(1);
+    expect(requests).toEqual([]);
 
     tools.list_workspaces = { workspaces: [{ id: WS }, { id: "vvvvvvvvvvvv" }] };
     expect(await run(["download", ID], io)).toBe(2);

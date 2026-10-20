@@ -140,9 +140,9 @@ describe("folders", () => {
     await perform(env.DB, ada, { type: "note.create", text: "# Loose" }, 2000);
     const { unsortedId } = await perform(env.DB, ada, { type: "folder.list" });
 
-    const inWork = await perform(env.DB, ada, { type: "note.list", folderId: work.id });
-    const inUnsorted = await perform(env.DB, ada, { type: "note.list", folderId: unsortedId! });
-    const everywhere = await perform(env.DB, ada, { type: "note.list" });
+    const inWork = (await perform(env.DB, ada, { type: "note.list", folderId: work.id })).notes;
+    const inUnsorted = (await perform(env.DB, ada, { type: "note.list", folderId: unsortedId! })).notes;
+    const everywhere = (await perform(env.DB, ada, { type: "note.list" })).notes;
 
     expect(inWork.map((n) => n.title)).toEqual(["Plan"]);
     expect(inUnsorted.map((n) => n.title)).toEqual(["Loose"]);
@@ -160,8 +160,8 @@ describe("folders", () => {
     const moved = await perform(env.DB, ada, { type: "note.move", id: note.id, folderId: work.id }, 5000);
 
     expect(moved).toEqual({ ...note, folderId: work.id });
-    expect((await perform(env.DB, ada, { type: "note.list", folderId: work.id })).map((n) => [n.id, n.updatedAt])).toEqual([[note.id, 1000]]);
-    expect(await perform(env.DB, ada, { type: "note.list", folderId: note.folderId! })).toEqual([]);
+    expect((await perform(env.DB, ada, { type: "note.list", folderId: work.id })).notes.map((n) => [n.id, n.updatedAt])).toEqual([[note.id, 1000]]);
+    expect((await perform(env.DB, ada, { type: "note.list", folderId: note.folderId! })).notes).toEqual([]);
     expect((await perform(env.DB, ada, { type: "note.history", id: note.id })).map((c) => c.revision)).toEqual([1]);
   });
 
@@ -181,7 +181,7 @@ describe("folders", () => {
     const theirs = await perform(env.DB, grace, { type: "folder.create", name: "Theirs" });
 
     await expect(perform(env.DB, ada, { type: "note.create", text: "# Sneaky", folderId: theirs.id })).rejects.toMatchObject({ code: "not_found", message: "No such folder" });
-    expect(await perform(env.DB, grace, { type: "note.list", folderId: theirs.id })).toEqual([]);
+    expect((await perform(env.DB, grace, { type: "note.list", folderId: theirs.id })).notes).toEqual([]);
   });
 
   it("deleted while a note is being created in them either keep the note or refuse it as missing", async () => {

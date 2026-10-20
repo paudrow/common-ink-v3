@@ -68,9 +68,15 @@ export interface Sources {
   /** Connects one, or says where the person's browser goes to agree to it. `back` is where they return to. `edit` asks to change it too. */
   connect(personId: string, sourceId: string, back: string, edit?: boolean): Promise<{ redirect: string | null }>;
   disconnect(personId: string, sourceId: string): Promise<void>;
+  /**
+   * For deleting an account, which deletes its connections with everything else: reads, while they
+   * are still here, what telling each provider to end them takes, and answers what tells them. That
+   * is called only once the deletion went through, so an account that stays keeps its own.
+   */
+  ending(personId: string): Promise<() => Promise<void>>;
 }
 
-export const NO_SOURCES: Sources = { of: async () => [], connect: async () => ({ redirect: null }), disconnect: async () => {} };
+export const NO_SOURCES: Sources = { of: async () => [], connect: async () => ({ redirect: null }), disconnect: async () => {}, ending: async () => async () => {} };
 
 /**
  * Why a data source didn't do what it was asked. `needs_reconnect`: it no longer answers for the

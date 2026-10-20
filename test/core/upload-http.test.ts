@@ -58,7 +58,7 @@ const sent = async (workspace: string, token: string, name: string, bytes: Uint8
 /** The workspace a person got when they first signed in, which is not the one they were invited to. */
 const ownWorkspace = async (member: Actor) => (await whoAmI(env.DB, member.personId)).workspaces.find((w) => w.id !== member.workspaceId)!.id;
 
-const listed = (actor: Actor) => perform(env.DB, actor, { type: "upload.list" });
+const listed = async (actor: Actor) => (await perform(env.DB, actor, { type: "upload.list" })).uploads;
 
 describe("an upload's bytes over HTTP, with an agent's token", () => {
   it("come back as they went in: a picture is answered as a picture, shown in place", async () => {
@@ -260,7 +260,7 @@ describe("an upload's bytes over HTTP, with an agent's token", () => {
     const op = (body: unknown) => send(`/api/workspaces/${workspace}/ops`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://ink.test", Cookie: cookie }, body: JSON.stringify(body) });
 
     const listing = await op({ type: "upload.list" });
-    expect([listing.status, ((await listing.json()) as Upload[]).map((u) => u.name)]).toEqual([200, ["dot.png"]]);
+    expect([listing.status, ((await listing.json()) as { uploads: Upload[] }).uploads.map((u) => u.name)]).toEqual([200, ["dot.png"]]);
     for (const body of [{ type: "upload.create", name: "more.png", size: 70 }, { type: "upload.open", id: upload.id }]) {
       const res = await op(body);
       expect([res.status, await errorIn(res)], body.type).toEqual([400, "invalid"]);

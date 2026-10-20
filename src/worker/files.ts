@@ -1,4 +1,4 @@
-// Where an upload's bytes come in and go out. Nothing else serves them: there is no address for a
+// Where an upload's bytes come in and go out, and an export's go out. Nothing else serves them: there is no address for a
 // file in the bucket, and none that is good for longer than the one request it answers. Each request
 // is decided by the core as a read of a note is, so access that was taken away stops the next one.
 //
@@ -96,6 +96,31 @@ async function upload(req: Request, env: Env, url: URL, workspaceId: string): Pr
   if (typeof named !== "object" || named === null) return json({ error: "invalid", message: `${UPLOAD_HEADER} isn't an object` }, 400);
   try {
     return json(await perform(env.DB, who.actor, { ...named, type: "upload.create", size: Number(length) } as never, Date.now(), undefined, { bucket: env.FILES, body: req.body }), 201);
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+const EXPORT = /^\/api\/workspaces\/([a-z0-9]{12})\/export$/;
+
+/**
+ * A part of an export, at the address export.plan gave: a zip written as it is sent. It is the
+ * asker's own copy of what they can see, decided as each read is, so it is sealed as an upload's
+ * bytes are, always a download, and kept by no cache.
+ */
+async function exported(req: Request, env: Env, url: URL, workspaceId: string): Promise<Response> {
+  if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405, { Allow: "GET" });
+  const who = await asker(req, env, url, workspaceId);
+  if (who instanceof Response) return who;
+  if (who.clipper) return json({ error: "forbidden", message: "The clipper can only upload files" }, 403);
+  const asked = url.searchParams;
+  const op = { type: "export.open", notes: asked.get("notes") === "1", ...(asked.has("after") ? { after: asked.get("after") } : {}), ...(asked.has("through") ? { through: asked.get("through") } : {}) };
+  try {
+    const { workspace, body } = await perform(env.DB, who.actor, op as never, Date.now(), undefined, { bucket: env.FILES });
+    const [part, of] = [asked.get("part"), asked.get("of")].map((n) => (n && /^\d{1,5}$/.test(n) ? Number(n) : 1)) as [number, number];
+    const name = of > 1 ? `${workspace} export, part ${part} of ${of}.zip` : `${workspace} export.zip`;
+    const { "Accept-Ranges": _, ...sealed } = SEALED;
+    return new Response(body, { headers: { ...sealed, "Cache-Control": "no-store", "Content-Type": "application/zip", "Content-Disposition": disposition("application/zip", name, false) } });
   } catch (err) {
     return refused(err);
   }
@@ -210,6 +235,8 @@ export async function handleFiles(req: Request, env: Env, url: URL): Promise<Res
   if (sent) return part(req, env, sent[1]!, Number(sent[2]));
   const shared = SHARED_UPLOAD.exec(url.pathname);
   if (shared) return reads(req) ? sharedUpload(req, env, url, shared[1]!, shared[2]!) : json({ error: "method_not_allowed" }, 405, UNLISTED);
+  const exporting = EXPORT.exec(url.pathname);
+  if (exporting) return exported(req, env, url, exporting[1]!);
   const route = UPLOADS.exec(url.pathname);
   if (!route) return null;
   const [, workspaceId, id] = route;

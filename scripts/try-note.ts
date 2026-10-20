@@ -23,6 +23,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { isNoteId, linksIn, retargeted } from "../src/core/links.ts";
+import { allPages } from "../src/core/allPages.ts";
 import type { CalendarEvent, Contact, Reference, Source, Upload } from "../src/core/protocol.ts";
 import { namedReferences } from "../src/core/references.ts";
 import { writtenUpload } from "../src/core/uploadRefs.ts";
@@ -56,7 +57,7 @@ async function op<T>(body: object): Promise<T> {
 }
 
 type Summary = { id: string; title: string; slug: string; revision: number };
-const notes = await op<Summary[]>({ type: "note.list" });
+const notes = await allPages((after) => op<{ notes: Summary[]; next: string | null }>({ type: "note.list", limit: 1000, after }), (page) => page.notes);
 
 const idOf = new Map<string, string>();
 for (const title of new Set(linksIn(text).map((link) => link.target).filter((target) => !isNoteId(target)))) {
@@ -98,7 +99,7 @@ async function showing(written: string): Promise<string> {
     if (bytes) samples.set(name, bytes);
   }
   if (!samples.size) return written;
-  const there = await op<Upload[]>({ type: "upload.list", includeArchived: true });
+  const there = await allPages((after) => op<{ uploads: Upload[]; next: string | null }>({ type: "upload.list", includeArchived: true, limit: 500, after }), (page) => page.uploads);
   const sent = new Map<string, Upload>();
   for (const [name, bytes] of samples) {
     const send = async () => {

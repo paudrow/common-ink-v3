@@ -153,7 +153,7 @@ describe("removing notes from Trash", () => {
 
     const removed = (at: string) => {
       const [table, column] = at.split(".") as [string, string];
-      return REMOVALS.some((sql) => new RegExp(`^(DELETE FROM|UPDATE) ${table} .*\\b${column} = (\\?1|NULL)`).test(sql));
+      return REMOVALS.some((sql) => new RegExp(`^(DELETE FROM|UPDATE) ${table} .*\\b${column} IN \\(`).test(sql));
     };
     expect(holds.filter((at) => !removed(at) && !(at in KEPT))).toEqual([]);
     expect(Object.keys(KEPT).filter((at) => !holds.includes(at) || removed(at))).toEqual([]);
@@ -176,7 +176,7 @@ describe("removing notes from Trash", () => {
       expect(said).toEqual([expect.stringContaining(`Couldn't remove note ${stuck} from Trash`)]);
       expect(await perform(env.DB, ada, { type: "note.read", id: stuck })).toMatchObject({ title: "Note 0", state: "trashed", revision: 1 });
       expect((await perform(env.DB, ada, { type: "note.history", id: stuck })).length).toBe(1);
-      expect((await perform(env.DB, ada, { type: "trash.list" })).map((n) => n.id)).toEqual([stuck]);
+      expect((await perform(env.DB, ada, { type: "trash.list" })).notes.map((n) => n.id)).toEqual([stuck]);
     } finally {
       await env.DB.prepare("DROP TABLE unknown_to_purge").run();
     }
@@ -192,7 +192,7 @@ describe("removing notes from Trash", () => {
 
     await worker.scheduled!({ scheduledTime: T0 + TRASH_MS, cron: "17 * * * *", noRetry() {} } as ScheduledController, env as unknown as Env);
 
-    expect((await perform(env.DB, ada, { type: "trash.list" })).map((n) => n.title)).toEqual(["Waiting"]);
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes.map((n) => n.title)).toEqual(["Waiting"]);
     await expect(perform(env.DB, ada, { type: "note.read", id: due.id })).rejects.toMatchObject({ code: "not_found" });
   });
 

@@ -127,7 +127,7 @@ test("a file uploaded on the Uploads page is listed with its picture, and its de
 
   await expect(rows(page)).toHaveText([/^harbour\.pngImage.*You, just now.*Only you/]);
   await expect.poll(() => rows(page).locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(320);
-  const [upload] = await perform(page, { type: "upload.list", includeArchived: false });
+  const [upload] = (await perform(page, { type: "upload.list", includeArchived: false })).uploads;
   await expect(page).toHaveURL(new RegExp(`/uploads/${upload!.id}$`));
   const detail = page.getByRole("complementary", { name: "harbour.png" });
   await expect(detail).toContainText("320 × 200");
@@ -204,11 +204,11 @@ test("a picture pasted into a note is sent to the note's folder and written with
 
   await give(page, "paste", [], { "text/plain": " Plain words." });
   await expect(editor(page)).toContainText("The harbour at dusk. Plain words.");
-  await expect.poll(() => perform(page, { type: "upload.list", includeArchived: true })).toEqual([]);
+  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: true })).uploads).toEqual([]);
 
   await give(page, "paste", [{ name: "dusk.png", type: "image/png", bytes: png(320, 200) }]);
-  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).map((u) => [u.name, u.folderId, u.private])).toEqual([["dusk.png", folder.id, false]]);
-  const [upload] = await perform(page, { type: "upload.list", includeArchived: false });
+  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.map((u) => [u.name, u.folderId, u.private])).toEqual([["dusk.png", folder.id, false]]);
+  const [upload] = (await perform(page, { type: "upload.list", includeArchived: false })).uploads;
   await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe harbour at dusk. Plain words.\n::image{${upload!.id} 320x200}\n`);
   await expect.poll(() => drawnWidth(page)).toBe(320);
   const box = await below(page, "image").boundingBox();
@@ -235,8 +235,8 @@ test("a file dropped on a private note is uploaded private, a file that is no pi
   expect(sent).toEqual([]);
 
   await give(page, "drop", [{ name: "minutes.bin", type: "application/octet-stream", bytes: Buffer.from("What was said.") }]);
-  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).map((u) => [u.name, u.private, u.kind])).toEqual([["minutes.bin", true, "file"]]);
-  const [upload] = await perform(page, { type: "upload.list", includeArchived: false });
+  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.map((u) => [u.name, u.private, u.kind])).toEqual([["minutes.bin", true, "file"]]);
+  const [upload] = (await perform(page, { type: "upload.list", includeArchived: false })).uploads;
   await expect.poll(() => noteText(page, note.id)).toBe(`# Diary\n\nWords.\n::file{${upload!.id}}\n`);
   const card = below(page, "file");
   await expect(card.locator(".upload-card-head")).toContainText("14 bytes");
@@ -259,8 +259,8 @@ test("Upload a file in the / menu asks for a file and writes it where the menu w
   const chooser = page.waitForEvent("filechooser");
   await page.keyboard.press("Enter");
   await (await chooser).setFiles({ name: "map.png", mimeType: "image/png", buffer: png(200, 100) });
-  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).length).toBe(1);
-  const [upload] = await perform(page, { type: "upload.list", includeArchived: false });
+  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.length).toBe(1);
+  const [upload] = (await perform(page, { type: "upload.list", includeArchived: false })).uploads;
   await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\n::image{${upload!.id} 200x100}\n`);
   await expect.poll(() => drawnWidth(page)).toBe(200);
 });

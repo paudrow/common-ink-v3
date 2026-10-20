@@ -859,7 +859,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
 
   const more = () => {
     if (page?.next == null) return;
-    void host.perform({ type: "todo.list", ...ask, offset: page.next }).then(
+    void host.perform({ type: "todo.list", ...ask, after: page.next }).then(
       (next) => {
         take({ type: "more", rows: next.todos });
         setPage({ next: next.next });

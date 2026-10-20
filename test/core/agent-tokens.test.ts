@@ -213,7 +213,7 @@ describe("a token pinned to one workspace", () => {
     const { ada, team, mine } = await twoWorkspaces();
     const agent = { kind: "agent", agentId: "aaaaaaaaaaaa", personId: ada.personId, scope: { pinnedWorkspaceId: team.workspaceId } } as const;
     await expect(perform(env.DB, { ...agent, workspaceId: ada.workspaceId }, { type: "note.read", id: mine.id })).rejects.toMatchObject({ code: "not_found" });
-    await expect(perform(env.DB, { ...agent, workspaceId: team.workspaceId }, { type: "note.list" })).resolves.toEqual([expect.anything()]);
+    await expect(perform(env.DB, { ...agent, workspaceId: team.workspaceId }, { type: "note.list" })).resolves.toEqual({ notes: [expect.anything()], next: null });
   });
 
   it("can only be pinned to a workspace its member belongs to", async () => {
@@ -247,14 +247,14 @@ describe("a read-only token", () => {
     expect(await tool(token, "write_note", { id: note.id, baseRevision: 1, text: "# Changed" })).toMatchObject({ isError: true, text: "forbidden: A read-only token can't note.write" });
     expect(await tool(token, "create_note", { text: "# New" })).toMatchObject({ isError: true, text: "forbidden: A read-only token can't note.create" });
     expect((await perform(env.DB, { kind: "member", ...ada }, { type: "note.read", id: note.id })).text).toBe("# Mine");
-    expect(await perform(env.DB, { kind: "member", ...ada }, { type: "note.list" })).toHaveLength(1);
+    expect((await perform(env.DB, { kind: "member", ...ada }, { type: "note.list" })).notes).toHaveLength(1);
   });
 
   it("is enforced by the core operations too", async () => {
     const ada = await newPerson();
     const actor = { kind: "agent", agentId: "aaaaaaaaaaaa", ...ada, scope: { readOnly: true } } as const;
     await expect(perform(env.DB, actor, { type: "note.create", text: "# x" })).rejects.toMatchObject({ code: "forbidden" });
-    await expect(perform(env.DB, actor, { type: "note.list" })).resolves.toEqual([]);
+    await expect(perform(env.DB, actor, { type: "note.list" })).resolves.toEqual({ notes: [], next: null });
     const empty = await perform(env.DB, { kind: "member", ...ada }, { type: "folder.create", name: "Empty" });
     await expect(perform(env.DB, actor, { type: "folder.delete", id: empty.id })).rejects.toMatchObject({ code: "forbidden", message: "A read-only token can't folder.delete" });
   });

@@ -6,9 +6,10 @@ import { IN_TRASH, TRASH_MS } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
 import type { OpInput } from "../../src/core/protocol.ts";
 import { addMember, newMember } from "./members.ts";
+import { walk } from "./walking.ts";
 
 const create = (by: Actor, text: string, folderId?: string, now?: number) => perform(env.DB, by, { type: "note.create", text, folderId }, now);
-const titles = async (by: Actor, op: OpInput) => ((await perform(env.DB, by, op)) as { title: string }[]).map((n) => n.title).sort();
+const titles = async (by: Actor, op: OpInput) => ((await perform(env.DB, by, op)) as { notes: { title: string }[] }).notes.map((n) => n.title).sort();
 const agentOf = async (member: Actor, name = "Claude"): Promise<Actor> => ({ kind: "agent", agentId: (await connectAgent(env.DB, member.personId, name)).agent.id, personId: member.personId, workspaceId: member.workspaceId });
 const guest = async (ada: Actor, noteId: string, access: "view" | "edit"): Promise<Actor> => {
   const email = `${crypto.randomUUID()}@example.com`;
@@ -83,7 +84,7 @@ describe("archive", () => {
   it("is told to a listing of what changed since a time when its state changed, though its text didn't", async () => {
     const ada = await newMember();
     const note = await create(ada, "# Plan", undefined, 1000);
-    const changed = async (includeArchived = false) => (await perform(env.DB, ada, { type: "note.list", updatedSince: 2000, includeArchived })).map((n) => [n.title, n.state, n.stateAt]);
+    const changed = async (includeArchived = false) => (await perform(env.DB, ada, { type: "note.list", updatedSince: 2000, includeArchived })).notes.map((n) => [n.title, n.state, n.stateAt]);
 
     expect(await changed(true)).toEqual([]);
     await perform(env.DB, ada, { type: "note.archive", id: note.id, archived: true }, 3000);
@@ -132,9 +133,53 @@ describe("Trash", () => {
     expect((await perform(env.DB, ada, { type: "history.list" })).changes.map((c) => c.noteTitle)).toEqual(["Kept"]);
     expect((await perform(env.DB, ada, { type: "history.list", noteIds: [note.id] })).changes.map((c) => c.noteTitle)).toEqual(["Mistake"]);
 
-    expect(await perform(env.DB, ada, { type: "trash.list" })).toMatchObject([
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes).toMatchObject([
       { id: note.id, title: "Mistake", folderId: folder.id, state: "trashed", trashedAt: 5000, purgesAt: 5000 + TRASH_MS, trashedBy: { kind: "agent", name: "Zed" } },
     ]);
+  });
+
+  it("lists Trash a page at a time, latest trashed first and a tie by id, each once; one trashed meanwhile is on the first page asked again", async () => {
+    const ada = await newMember();
+    const eve = await addMember(ada, "editor", "Eve");
+    const id: Record<string, string> = {};
+    for (const [title, at] of [["T1", 1000], ["T2", 2000], ["Tie", 2000], ["T3", 3000], ["T4", 4000]] as const) {
+      id[title] = (await create(ada, `# ${title}`)).id;
+      await perform(env.DB, ada, { type: "note.trash", id: id[title]! }, at);
+    }
+    const [tieFirst, tieSecond] = id.T2! < id.Tie! ? ["T2", "Tie"] : ["Tie", "T2"];
+    const pages = () => walk((after) => perform(env.DB, ada, { type: "trash.list", limit: 2, after }));
+    const before = await pages();
+
+    expect(before.map((page) => page.notes.map((n) => n.title))).toEqual([["T4", "T3"], [tieFirst, tieSecond], ["T1"]]);
+    for (const at of [1500, 2500, 3500]) {
+      const hidden = await create(eve, "# Eve's own");
+      await perform(env.DB, eve, { type: "note.setPrivate", id: hidden.id, private: true });
+      await perform(env.DB, eve, { type: "note.trash", id: hidden.id }, at);
+    }
+    expect(await pages(), "the same pages, and the same cursors, with Eve's private notes in Trash among them").toEqual(before);
+
+    const first = await perform(env.DB, ada, { type: "trash.list", limit: 2 });
+    await perform(env.DB, ada, { type: "note.restore", id: id.T1! });
+    const late = await create(ada, "# Late");
+    await perform(env.DB, ada, { type: "note.trash", id: late.id }, 9000);
+    const rest = await walk((after) => perform(env.DB, ada, { type: "trash.list", limit: 2, after: after ?? first.next! }));
+    expect(rest.flatMap((page) => page.notes.map((n) => n.title)), "one restored is gone, and one trashed since is before the page").toEqual([tieFirst, tieSecond]);
+    expect((await perform(env.DB, ada, { type: "trash.list", limit: 2 })).notes.map((n) => n.title)).toEqual(["Late", "T4"]);
+  });
+
+  it("lists tags a page at a time by name, each once, and says nothing of a tag only notes the asker can't see have", async () => {
+    const ada = await newMember();
+    const eve = await addMember(ada, "editor", "Eve");
+    await create(ada, "# One\n\n#delta #Alpha");
+    await create(ada, "# Two\n\n#charlie #bravo #alpha");
+    await create(ada, "# Three\n\n#echo");
+    const pages = () => walk((after) => perform(env.DB, ada, { type: "tag.list", limit: 2, after }));
+    const before = await pages();
+
+    expect(before.map((page) => page.tags)).toEqual([[{ name: "Alpha", notes: 2 }, { name: "bravo", notes: 1 }], [{ name: "charlie", notes: 1 }, { name: "delta", notes: 1 }], [{ name: "echo", notes: 1 }]]);
+    const hidden = await create(eve, "# Eve's\n\n#charlie-secret #aardvark #zulu #delta");
+    await perform(env.DB, eve, { type: "note.setPrivate", id: hidden.id, private: true });
+    expect(await pages(), "the same pages, and the same cursors, with Eve's private tags among them").toEqual(before);
   });
 
   it("opens a trashed note to be read, says so on a link to it, and refuses every change to it", async () => {
@@ -187,7 +232,7 @@ describe("Trash", () => {
     expect(await perform(env.DB, ada, { type: "note.restore", id: live.id })).toMatchObject({ folderId: folder.id, state: "live", folderGone: false });
     expect(await perform(env.DB, ada, { type: "note.restore", id: archived.id })).toMatchObject({ folderId: folder.id, state: "archived", folderGone: false });
     expect(await titles(ada, { type: "note.list", folderId: folder.id })).toEqual(["Live"]);
-    expect(await perform(env.DB, ada, { type: "trash.list" })).toEqual([]);
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes).toEqual([]);
     expect((await perform(env.DB, ada, { type: "note.write", id: live.id, baseRevision: 1, text: "# Live again" })).title).toBe("Live again");
   });
 
@@ -235,12 +280,12 @@ describe("Trash", () => {
     await perform(env.DB, eve, { type: "note.setPrivate", id: note.id, private: true });
     await perform(env.DB, eve, { type: "note.trash", id: note.id });
 
-    expect((await perform(env.DB, eve, { type: "trash.list" })).map((n) => n.title)).toEqual(["Diary"]);
-    expect(await perform(env.DB, ada, { type: "trash.list" })).toEqual([]);
+    expect((await perform(env.DB, eve, { type: "trash.list" })).notes.map((n) => n.title)).toEqual(["Diary"]);
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes).toEqual([]);
     await expect(perform(env.DB, ada, { type: "note.restore", id: note.id })).rejects.toMatchObject({ code: "not_found", message: "No such note" });
     await expect(perform(env.DB, eve, { type: "member.leave" })).rejects.toMatchObject({ code: "invalid", message: "You have a private note here besides your daily notes, which nobody else can reach. Stop it being private first, so it isn't left with nobody. Look in Trash too." });
     expect(await perform(env.DB, eve, { type: "note.setPrivate", id: note.id, private: false })).toMatchObject({ private: false });
-    expect((await perform(env.DB, ada, { type: "trash.list" })).map((n) => n.title)).toEqual(["Diary"]);
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes.map((n) => n.title)).toEqual(["Diary"]);
   });
 
   it("stops a link on a trashed note opening anything, until the note is restored", async () => {
@@ -334,7 +379,7 @@ describe("Trash", () => {
     expect(second.reverted.map((r) => r.note.id).sort()).toEqual([mine.id, theirs.id].sort());
 
     expect(await titles(ada, { type: "note.list" })).toEqual(["", "Mine"]);
-    expect(await perform(env.DB, ada, { type: "trash.list" })).toMatchObject([{ id: theirs.id, trashedBy: { kind: "agent", name: "Zed" } }]);
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes).toMatchObject([{ id: theirs.id, trashedBy: { kind: "agent", name: "Zed" } }]);
     // Notes in Trash are left as they are: a second revert finds nothing of the author's to take out of them.
     expect((await perform(env.DB, ada, { type: "history.revertAuthor", author, trashEmptied: true })).reverted).toEqual([]);
   });
@@ -363,6 +408,6 @@ describe("Trash", () => {
       await expect(perform(env.DB, ada, { type: "note.purge", id })).rejects.toMatchObject(never);
     }
     expect((await perform(env.DB, ada, { type: "note.read", id: linker.id })).links.map(({ title, state }) => ({ title, state }))).toEqual(Array(3).fill({ title: null, state: null }));
-    expect(await perform(env.DB, ada, { type: "trash.list" })).toEqual([]);
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes).toEqual([]);
   });
 });

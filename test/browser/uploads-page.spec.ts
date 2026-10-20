@@ -87,7 +87,7 @@ test("the page has one Upload files and no folder to upload to, and a file sent 
   await expect(toast(page)).toContainText("Uploaded harbour.png. Only you can see it until you put it in a note.");
   await expect(rows(page)).toHaveCount(1);
   await expect(row(page, "harbour.png").locator(".upload-meta")).toHaveText(/^Image.*You, just now.*Only you$/);
-  const [upload] = await perform(page, { type: "upload.list" });
+  const [upload] = (await perform(page, { type: "upload.list" })).uploads;
   expect(upload!.private).toBe(true);
   expect(upload!.uses).toBe(0);
 });

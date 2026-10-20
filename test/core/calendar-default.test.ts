@@ -66,6 +66,7 @@ function world(calendars: Calendar[] = [SHARED, HOLIDAYS, WORK, PERSONAL]) {
     of: async () => [source("ro", false), source("cal", true)],
     connect: async () => ({ redirect: null }),
     disconnect: async () => {},
+    ending: async () => async () => {},
   };
   const ask = <T extends OpInput>(actor: Actor, op: T) => perform(env.DB, actor, op, T0, sources);
   return { creates, ask, lapsed };

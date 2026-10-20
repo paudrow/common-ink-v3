@@ -1,37 +1,31 @@
 import { useEffect, useState } from "react";
 import { ago, useNow, type PluginHost, type TrashedNote, type TrashedUpload, type ViewProps } from "../../plugin-api.ts";
 import { lifecycle, mayPurge, restoredMessage } from "../lib/lifecycle.ts";
+import { ShowMore, usePaged } from "../lib/paged.tsx";
 import { daysLeft, leftLabel } from "./days.ts";
 import { Purge } from "./Purge.tsx";
 
 const titleOf = (note: { title: string }) => note.title || "Untitled";
 
+/** How many notes in Trash a read lists, and the most it lists read again after Show more. They are trash.list's own. */
+const PAGE = 100;
+const MOST = 500;
+
 /** Trash: every note waiting there that the member can see, with the way back and the way out. */
 export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   const now = useNow();
-  const [listed, setListed] = useState<TrashedNote[] | null>(null);
-  /** Why Trash couldn't be read, until it is. */
-  const [unread, setUnread] = useState<string | null>(null);
   const [asked, setAsked] = useState(0);
   const [files, setFiles] = useState<TrashedUpload[]>([]);
   const { restoring, purge } = lifecycle(host);
   // Read again whenever the app learns that Trash changed, here or anywhere else.
   const known = app.trashed.map((n) => n.id).sort().join(",");
 
-  useEffect(() => {
-    let live = true;
-    host.perform({ type: "trash.list" }).then(
-      (notes) => {
-        if (!live) return;
-        setListed(notes);
-        setUnread(null);
-      },
-      (err: Error) => live && setUnread(err.message),
-    );
-    return () => {
-      live = false;
-    };
-  }, [host, known, asked]);
+  const paged = usePaged<TrashedNote>(
+    (page) => host.perform({ type: "trash.list", ...page }).then(({ notes, next }) => ({ rows: notes, next })),
+    (note) => note.id,
+    { of: "trash", again: `${known}/${asked}`, page: PAGE, most: MOST },
+  );
+  const { rows: listed, problem: unread } = paged;
 
   useEffect(() => {
     let live = true;
@@ -119,6 +113,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
           })}
         </ul>
       )}
+      <ShowMore paged={paged} />
       {files.length > 0 && (
         <>
           <h2 className="trash-part">Files</h2>

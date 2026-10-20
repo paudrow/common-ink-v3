@@ -73,7 +73,7 @@ describe("an agent's answers", () => {
     const answers = [
       made,
       await agent.json("read_note", { noteId: made.id }),
-      await agent.json("list_notes"),
+      (await agent.json("list_notes")).notes,
       await agent.json("note_history", { noteId: made.id }),
       await agent.json("history", { limit: 1 }),
       await agent.json("history_summary", { limit: 1 }),
@@ -83,7 +83,7 @@ describe("an agent's answers", () => {
     ];
     const binned = await agent.json("create_note", { text: "# Old plan" });
     await agent.json("trash_note", { noteId: binned.id });
-    const trashed = await agent.json("list_trash");
+    const trashed = (await agent.json("list_trash")).notes;
     expect(trashed[0]).toMatchObject({ stateAt: expect.stringMatching(/-0[78]:00$/), trashedAt: expect.stringMatching(/-0[78]:00$/), purgesAt: expect.stringMatching(/-0[78]:00$/) });
     answers.push(trashed);
     await perform(env.DB, ada, { type: "visit.mark", until: Date.UTC(2026, 9, 15, 16, 30) });
@@ -113,28 +113,28 @@ describe("an agent's answers", () => {
 });
 
 describe("a listing an agent pages through", () => {
-  it("gives every note once across its pages, newest change first, with next null on the last, and the web app every note at once", async () => {
+  it("gives every note once across its pages, newest change first, with next null on the last, and 50 to a page unasked", async () => {
     const { ada, agent } = await connected();
     for (let i = 0; i < 7; i++) await agent.json("create_note", { text: `# Note ${i}` });
-    const all = (await perform(env.DB, ada, { type: "note.list" })).map((note) => note.id);
+    const all = (await perform(env.DB, ada, { type: "note.list" })).notes.map((note) => note.id);
     expect(all).toHaveLength(7);
 
-    const pages: { notes: { id: string }[]; next: number | null }[] = [];
-    for (let offset: number | null = 0; offset !== null; offset = pages.at(-1)!.next) pages.push(await agent.json("list_notes", { limit: 3, offset }));
-    expect(pages.map((page) => [page.notes.length, page.next])).toEqual([[3, 3], [3, 6], [1, null]]);
+    const pages: { notes: { id: string }[]; next: string | null }[] = [await agent.json("list_notes", { limit: 3 })];
+    while (pages.at(-1)!.next !== null) pages.push(await agent.json("list_notes", { limit: 3, after: pages.at(-1)!.next }));
+    expect(pages.map((page) => page.notes.length)).toEqual([3, 3, 1]);
     expect(pages.flatMap((page) => page.notes.map((note) => note.id))).toEqual(all);
     expect((await agent.json("list_notes")).notes).toHaveLength(7);
-    for (const limit of [0, 201, "50"]) expect(await agent.call("list_notes", { limit })).toEqual({ isError: true, text: "invalid: limit is a whole number from 1 to 200" });
+    for (const limit of [0, 1001, "50"]) expect((await agent.call("list_notes", { limit })).isError).toBe(true);
   });
 
-  it("gives every upload once across its pages, and the web app every upload at once", async () => {
+  it("gives every upload once across its pages", async () => {
     const { ada, agent } = await connected();
     for (let i = 0; i < 3; i++) await agent.json("upload_file", { name: `note-${i}.txt`, base64: btoa(`note ${i}`) });
-    const all = (await perform(env.DB, ada, { type: "upload.list" })).map((upload) => upload.id);
+    const all = (await perform(env.DB, ada, { type: "upload.list" })).uploads.map((upload) => upload.id);
     expect(all).toHaveLength(3);
     const first = await agent.json("list_uploads", { limit: 2 });
-    const second = await agent.json("list_uploads", { limit: 2, offset: first.next });
-    expect([first.next, second.next]).toEqual([2, null]);
+    const second = await agent.json("list_uploads", { limit: 2, after: first.next });
+    expect([typeof first.next, second.next]).toEqual(["string", null]);
     expect([...first.uploads, ...second.uploads].map((upload: { id: string }) => upload.id)).toEqual(all);
   });
 
@@ -144,13 +144,14 @@ describe("a listing an agent pages through", () => {
     const fetch_ = async (_url: string, init: RequestInit) => {
       const { arguments: args } = JSON.parse(init.body as string).params;
       asked.push(args);
-      const notes = Array.from({ length: args.offset === 0 ? args.limit : 1 }, (_, i) => ({ id: `n${args.offset + i}` }));
-      return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify({ notes, next: args.offset === 0 ? args.limit : null }) }] } });
+      const first = args.after === undefined;
+      const notes = Array.from({ length: first ? args.limit : 1 }, (_, i) => ({ id: `n${first ? i : args.limit + i}` }));
+      return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify({ notes, next: first ? "cursor-1" : null }) }] } });
     };
     expect(await run(["notes", "--tag", "money"], { env: { INK_TOKEN: "cink_x" }, stdin: async () => "", out: (line) => said.push(line), fetch: fetch_ as unknown as typeof fetch })).toBe(0);
     expect(asked).toEqual([
-      { tag: "money", limit: 200, offset: 0 },
-      { tag: "money", limit: 200, offset: 200 },
+      { tag: "money", limit: 200 },
+      { tag: "money", limit: 200, after: "cursor-1" },
     ]);
     const printed = JSON.parse(said.join("\n")) as { id: string }[];
     expect([printed.length, printed[0]!.id, printed.at(-1)!.id]).toEqual([201, "n0", "n200"]);

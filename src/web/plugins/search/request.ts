@@ -23,27 +23,27 @@ export type More = "ready" | "asking" | { refused: string };
 export type Search =
   | { status: "idle" }
   | { status: "searching"; ask: Ask; before: readonly SearchResult[] | null }
-  | { status: "listed"; ask: Ask; results: readonly SearchResult[]; next: number | null; more: More; indexing: boolean }
+  | { status: "listed"; ask: Ask; results: readonly SearchResult[]; next: string | null; more: More; indexing: boolean }
   | { status: "failed"; ask: Ask; message: string };
 
 export type Event =
   /** The member's search is now this one. */
   | { type: "asked"; ask: Ask }
   | { type: "moreAsked" }
-  /** The server answered `ask` from `offset` on. */
-  | { type: "answered"; ask: Ask; offset: number; results: readonly SearchResult[]; next: number | null; indexing: boolean }
+  /** The server answered `ask` from `after` on, the `next` of the page before, or from the start when it is null. */
+  | { type: "answered"; ask: Ask; after: string | null; results: readonly SearchResult[]; next: string | null; indexing: boolean }
   /** The server answered `ask` from the start again, asked because its last answer may have lacked notes. */
-  | { type: "reanswered"; ask: Ask; results: readonly SearchResult[]; next: number | null; indexing: boolean }
-  | { type: "refused"; ask: Ask; offset: number; message: string };
+  | { type: "reanswered"; ask: Ask; results: readonly SearchResult[]; next: string | null; indexing: boolean }
+  | { type: "refused"; ask: Ask; after: string | null; message: string };
 
 export const IDLE: Search = { status: "idle" };
 
 export const same = (a: Ask, b: Ask) => a.query === b.query && a.folderId === b.folderId && a.includeArchived === b.includeArchived && a.hasTodos === b.hasTodos && a.sort === b.sort;
 
-/** Whether an answer for `ask` from `offset` is the one the list is waiting for. Any other is for a search the member has left, and changes nothing. */
-function awaited(state: Search, ask: Ask, offset: number): boolean {
-  if (state.status === "searching") return offset === 0 && same(state.ask, ask);
-  return state.status === "listed" && state.more === "asking" && state.next === offset && same(state.ask, ask);
+/** Whether an answer for `ask` from `after` is the one the list is waiting for. Any other is for a search the member has left, and changes nothing. */
+function awaited(state: Search, ask: Ask, after: string | null): boolean {
+  if (state.status === "searching") return after === null && same(state.ask, ask);
+  return state.status === "listed" && state.more === "asking" && after !== null && state.next === after && same(state.ask, ask);
 }
 
 export function reduce(state: Search, event: Event): Search {
@@ -57,7 +57,7 @@ export function reduce(state: Search, event: Event): Search {
     case "moreAsked":
       return state.status === "listed" && state.next !== null && state.more !== "asking" ? { ...state, more: "asking" } : state;
     case "answered": {
-      if (!awaited(state, event.ask, event.offset)) return state;
+      if (!awaited(state, event.ask, event.after)) return state;
       if (state.status !== "listed") return { status: "listed", ask: event.ask, results: event.results, next: event.next, more: "ready", indexing: event.indexing };
       // A note that changed between the two pages can be on both.
       const had = new Set(state.results.map((r) => r.note.id));
@@ -72,7 +72,7 @@ export function reduce(state: Search, event: Event): Search {
       return { ...state, results, next: past ? state.next : event.next, indexing: event.indexing };
     }
     case "refused":
-      if (!awaited(state, event.ask, event.offset)) return state;
+      if (!awaited(state, event.ask, event.after)) return state;
       return state.status === "listed" ? { ...state, more: { refused: event.message } } : { status: "failed", ask: event.ask, message: event.message };
   }
 }

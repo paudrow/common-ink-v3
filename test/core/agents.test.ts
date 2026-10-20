@@ -163,6 +163,7 @@ describe("MCP protocol", () => {
       "abort_upload",
       "upload_file",
       "list_trashed_uploads",
+      "plan_export",
       "list_folders",
       "find_folder",
       "create_folder",
@@ -232,7 +233,7 @@ describe("MCP protocol", () => {
     const answered = await post([rpc("initialize", { protocolVersion: "2025-06-18" }, 1), rpc("tools/list", {}, 2), rpc("ping", {}, 3), rpc("tools/call", { name: "list_folders", arguments: {} }, 4)]);
     expect(answered.status).toBe(200);
     const [init, list, ping, called] = (await answered.json()) as any[];
-    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 85, {}]);
+    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 86, {}]);
     expect(called).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: "rate_limited: Too many calls. An agent makes at most 300 a minute. Wait a minute, then call again." }], isError: true } });
     expect(keys).toEqual([agent.id]);
   });
@@ -282,7 +283,7 @@ describe("MCP 2026-07-28", () => {
   it("lists its tools for this token with how long the list keeps", async () => {
     const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
     const { status, body } = await post(token, rpc("tools/list", { _meta: META }), { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list" });
-    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 85]);
+    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 86]);
   });
 
   it("calls a tool whose name the Mcp-Name header mirrors, plain or as base64, and refuses one that differs or a missing version header", async () => {
@@ -410,7 +411,7 @@ describe("MCP tools", () => {
     await perform(env.DB, claude, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\nby Claude" }, 2000);
     await perform(env.DB, claude, { type: "note.create", text: "# Claude's" }, 3000);
 
-    const listed = await perform(env.DB, { kind: "member", ...ada }, { type: "note.list" });
+    const listed = (await perform(env.DB, { kind: "member", ...ada }, { type: "note.list" })).notes;
 
     const byClaude = { kind: "agent", agentId: agent.id, name: "Claude", onBehalfOf: ada.personId };
     expect(listed.map((n) => [n.title, n.updatedBy])).toEqual([

@@ -5,6 +5,9 @@
   "compatibility_date": "2026-10-01",
   "workers_dev": false,
   "preview_urls": false,
+  // CPU time one request may spend: an export part holding one multi-GB upload computes CRC-32 over every
+  // byte, which can pass the 30 s default (src/core/zip.ts). Wall time waiting on R2 and D1 isn't counted.
+  "limits": { "cpu_ms": 300000 },
   // The web app, built by Vite into dist. Pages are the single-page app. Every address except the built
   // files under /assets reaches the Worker first: it redirects www.commonink.app to commonink.app (assets
   // can't be matched by host, so it must see every path) and answers /sw.js, which the single-page

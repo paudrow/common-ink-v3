@@ -209,6 +209,7 @@ function keptFromPerform(type: string): string | null {
   if (["upload.create", "upload.open", "upload.start", "upload.resume", "upload.part", "upload.finish", "upload.abort"].includes(type)) return "an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it";
   if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
   if (/^plugin\.(install|uninstall|permit|request|read)$/.test(type)) return "which plugins a workspace has, and what they are permitted, is decided on the Plugins page";
+  if (type.startsWith("account.") || type === "workspace.delete") return "only the person deletes an account or a workspace, in Settings";
   return null;
 }
 
