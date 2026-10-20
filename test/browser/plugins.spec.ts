@@ -684,3 +684,28 @@ test("an inspector view a plugin adds is an icon in the bar whatever is in front
   await run(page, "Toggle Count panel");
   await expect(inspector).toHaveCount(0);
 });
+
+test("what an admin's agent asks to do to the plugins waits on the Plugins page, where the admin reads the code and approves or declines it", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const agent = await connectAgent(page, "Claude");
+  const manifest = (name: string) => JSON.stringify({ name, capabilities: [{ name: "notes.read", reason: "Counts words." }] });
+  const asked = await agent.tool<{ proposed: { message: string } }>("install_plugin", { manifest: manifest("Word Tally"), code: "tally()" });
+  expect(asked.proposed.message).toContain("Waiting for an admin to approve it");
+  await agent.tool("install_plugin", { manifest: manifest("Spammy"), code: "spam()" });
+
+  await page.goto("/plugins");
+  const waiting = page.getByRole("region", { name: "Waiting for your approval" });
+  const tally = waiting.getByRole("listitem", { name: "Claude asks to install Word Tally" });
+  await tally.getByText("Manifest and code").click();
+  await expect(tally.getByText("tally()")).toBeVisible();
+  await expect(pluginRow(page, "Word Tally")).toHaveCount(0);
+
+  await tally.getByRole("button", { name: "Approve" }).click();
+  await expect(pluginRow(page, "Word Tally")).toBeVisible();
+  await waiting.getByRole("listitem", { name: "Claude asks to install Spammy" }).getByRole("button", { name: "Decline" }).click();
+  await expect(waiting).toHaveCount(0);
+  await expect(pluginRow(page, "Spammy")).toHaveCount(0);
+
+  const told = await agent.tool<{ proposals: { name: string; state: string }[] }>("list_plugin_proposals", {});
+  expect(told.proposals.map((p) => `${p.name}: ${p.state}`).sort()).toEqual(["Spammy: declined", "Word Tally: approved"]);
+});

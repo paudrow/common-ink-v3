@@ -161,6 +161,8 @@ test("clips a page into a note", async ({ baseURL }) => {
     await expect(save).toBeEnabled();
     await save.click();
     await expect(popup.getByText("Saved.")).toBeVisible();
+    // Clipping from the popup opens no second popup, whose wake would clear what this one shows.
+    expect(context.pages().filter((p) => p.url().endsWith("/popup.html"))).toHaveLength(1);
     const href = await popup.locator("a").getAttribute("href");
     const noteId = href?.match(/([a-z0-9]{12})$/)?.[1];
     expect(noteId).toBeTruthy();

@@ -70,6 +70,9 @@ const CONTACTS =
   "A contact is how the member reaches someone: the address their mail goes to, the number their phone calls, in every app that reads their Google contacts. A change to one is not a change in history, so it can't be reverted the way an agent's edits can, and nothing in Common Ink shows it was made. An agent reads notes other people wrote, so one that was talked into it could quietly send the member's mail or calls for a colleague to a stranger. An agent reads the member's contacts, and only the member, signed in, changes or adds one.";
 
 
+/** What an admin's agent is told of each plugin change it asks for: see PROPOSED in src/core/pluginProposals.ts. */
+const APPROVAL = " Your request waits for an admin to approve it in the app: the answer's proposed says so, and list_plugin_proposals says when it is answered. Nothing changes until then.";
+
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
   "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
@@ -98,6 +101,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "upload.setPrivate": "A private upload is hidden from every other member, admins too, and that is not a change in history. The member who uploaded it decides it, in the app.",
   "visit.mark": "How far a member has read the changes in a workspace moves only when the member has seen them and says so, in the app. An agent that marked them read would hide from the member what they haven't looked at. An agent reads how far that is with last_visit.",
   "upload.storage": "How much a workspace's uploads take counts every member's files, private ones and those in folders a token may be kept from, so it says something of what an agent can't see. It is for the members, in Settings.",
+  "plugin.decide": "An agent's request to install, update, permit or uninstall a plugin is answered by an admin, in the app. A plugin runs in every member's app, so what it is and what it may do is a person's call: an agent that answered requests could approve its own.",
   "plugin.frame": "A frame's token opens, once, the frame the app runs a plugin or an HTML embed in, in the member's own browser. An agent runs neither.",
   "plugin.trust": "Turning a full-trust plugin on runs its code inside the member's own session, with everything the member can see and do. Each member decides that for themself, in the app, after reading what it means. An agent that was talked into it would hand its member's session to whoever wrote the plugin.",
   "upload.purge": "Removing an upload from Trash for good removes its bytes, and nothing brings them back: not Trash, and no note that showed it. An agent reads notes other people wrote, so one that was talked into it could destroy files past recovery. An agent moves an upload to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
@@ -1006,7 +1010,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "install_plugin",
-    description: `Installs a plugin for the whole workspace from its manifest and code, or with pluginId puts them in an installed plugin's place (an update, which voids what it was permitted until it is permitted again). Only an admin's agent may. Nothing is permitted by installing, and the plugin's page says it was installed by you for your member. ${ROLE} ${PLUGIN_DOCS}`,
+    description: `Installs a plugin for the whole workspace from its manifest and code, or with pluginId puts them in an installed plugin's place (an update, which voids what it was permitted until it is permitted again). Only an admin's agent may. Nothing is permitted by installing, and the plugin's page says it was installed by you for your member.${APPROVAL} ${ROLE} ${PLUGIN_DOCS}`,
     inputSchema: object({ manifest, code, pluginId: { ...pluginId, description: "The installed plugin this takes the place of, from list_plugins; left out, this is a new plugin" } }, ["manifest", "code"]),
     renames: { pluginId: "replaces" },
     op: "plugin.install",
@@ -1015,7 +1019,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "uninstall_plugin",
-    description: `Takes a plugin out of the workspace, and with it everything it was permitted, every request for it and every member's draft of it. What it wrote stays in history. Only an admin's agent may. ${ROLE}`,
+    description: `Takes a plugin out of the workspace, and with it everything it was permitted, every request for it and every member's draft of it. What it wrote stays in history. Only an admin's agent may.${APPROVAL} ${ROLE}`,
     inputSchema: object({ pluginId }, ["pluginId"]),
     renames: { pluginId: "id" },
     op: "plugin.uninstall",
@@ -1024,7 +1028,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "permit_plugin",
-    description: `An admin's decision on one capability a plugin asks for: allowed or not, and locked or not (a locked one takes no requests). Allowing names the code you read, codeHash from list_plugins or read_plugin, and is refused when the plugin changed since. For HTML embeds (pluginId html, capability network) origins lists the sites they may reach. Granting full-trust is allowed to an admin's agent like any other decision, but it runs nobody's code: each member turns it on for themself in the app, and no agent can. Only an admin's agent may. ${ROLE}`,
+    description: `An admin's decision on one capability a plugin asks for: allowed or not, and locked or not (a locked one takes no requests). Allowing names the code you read, codeHash from list_plugins or read_plugin, and is refused when the plugin changed since. For HTML embeds (pluginId html, capability network) origins lists the sites they may reach. Granting full-trust is allowed to an admin's agent like any other decision, but it runs nobody's code: each member turns it on for themself in the app, and no agent can. Only an admin's agent may.${APPROVAL} ${ROLE}`,
     inputSchema: object(
       {
         pluginId: { type: "string", description: "The plugin's id, or html for HTML embeds" },
@@ -1040,6 +1044,14 @@ export const TOOLS: Tool[] = [
     op: "plugin.permit",
     times: ["installedAt"],
     example: { pluginId: PLUGIN, capability: "notes.read", allowed: true, codeHash: CODE_HASH },
+  },
+  {
+    name: "list_plugin_proposals",
+    description: "Your requests of the last 30 days to install, update, permit or uninstall a plugin, newest first, each with its state: pending until an admin answers in the app, then approved (done) or declined (nothing changed), or expired after 7 days unanswered. message says it in words you can pass on.",
+    inputSchema: object({}),
+    op: "plugin.proposals",
+    times: ["createdAt", "expiresAt", "decidedAt"],
+    example: {},
   },
   {
     name: "request_plugin_permission",

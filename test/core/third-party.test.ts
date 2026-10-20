@@ -348,21 +348,22 @@ describe("the record of a workspace's plugins", () => {
     const agent: Actor = { kind: "agent", agentId: (await connectAgent(env.DB, ada.personId, "Claude")).agent.id, personId: ada.personId, workspaceId: ada.workspaceId };
     const got: Record<string, string> = {};
     for (const op of pluginOps(id)) got[`${op.type}${"replaces" in op ? " replaces" : ""}`] = await outcome(agent, op);
-    // In order: the plugin is uninstalled before it is permitted, and an admin decides rather than asks.
+    // In order. Installing, updating, uninstalling and permitting each wait for an admin to approve them, so the plugin is still there to permit; an admin decides rather than asks.
     expect(got).toEqual({
       "plugin.list": "done",
       "plugin.read": "done",
       "plugin.install": "done",
       "plugin.install replaces": "done",
       "plugin.uninstall": "done",
-      "plugin.permit": "not_found: No such plugin",
+      "plugin.permit": "invalid: Say which code you are allowing: codeHash, as plugin.list answers it for the plugin",
       "plugin.request": "invalid: An admin decides it: plugin.permit",
       "plugin.frame": "forbidden: An agent can't plugin.frame",
     });
     const record = await perform(env.DB, agent, { type: "plugin.list" });
     expect(record.canManage).toBe(true);
+    // What it asked is waiting: the one plugin is still Ada's own, and the agent's install is not there yet.
     expect(record.plugins.map((p) => [p.manifest.name, p.installedBy, p.installedVia])).toEqual([
-      ["Word Tally", "Ada Lovelace", "Claude"],
+      ["Word Tally", "Ada Lovelace", null],
       ["HTML embeds", null, null],
     ]);
   });

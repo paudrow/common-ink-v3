@@ -1,5 +1,6 @@
 import { sightOf, type GrantLevel, type Reaching, type Sight } from "./access.ts";
 import { OpError, type Role, type Standing as StandingName } from "./protocol.ts";
+import { linkHash } from "./linkSeal.ts";
 
 /** Where someone stands in a workspace for one operation: who they are there, and what they can see. */
 export interface Standing {
@@ -67,11 +68,14 @@ export const SIGN_IN_FIRST = "Sign in to open this link";
  * Where whoever holds a link stands: they can read what the link is on, and nothing else, whoever
  * they are. A signed-in link opens only for a person, and which person makes no difference.
  */
+/** The link whose token is ?2 and whose hash is ?1: found by its hash, or by its token while it is one kept from before links were sealed. */
+export const BY_TOKEN = (g: string) => `(${g}.token_hash = ?1 OR (${g}.token_hash IS NULL AND ${g}.token = ?2))`;
+
 export async function standingByLink(db: D1Database, token: string, personId: string | null): Promise<Standing> {
   const link = await db
     // A link on a note in Trash opens nothing until the note is restored.
-    .prepare("SELECT workspace_id, note_id, folder_id, upload_id, access, kind FROM grants WHERE token = ? AND kind IN ('public', 'signed_in') AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.state = 'trashed')")
-    .bind(token)
+    .prepare(`SELECT workspace_id, note_id, folder_id, upload_id, access, kind FROM grants WHERE ${BY_TOKEN("grants")} AND kind IN ('public', 'signed_in') AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.state = 'trashed')`)
+    .bind(await linkHash(token), token)
     .first<GrantRow & { workspace_id: string; kind: "public" | "signed_in" }>();
   if (!link) throw new OpError("not_found", NO_SUCH_LINK);
   if (link.kind === "signed_in" && !personId) throw new OpError("forbidden", SIGN_IN_FIRST);

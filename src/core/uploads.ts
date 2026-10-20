@@ -3,7 +3,7 @@ import { agentById, hashToken } from "./agents.ts";
 import { HEAD_BYTES, cleanName, imageSize, kindByName, kindOf, typeOf } from "./filetypes.ts";
 import { newId } from "./ids.ts";
 import { purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
-import { OLD, agentActor, archiving, authorId, authorOf, finding, intoFolder, loadFolder, loadNote, mend, restoring, seenAmong, toSummary, trashing, type Actor, type Context } from "./operations.ts";
+import { OLD, agentActor, archiving, authorId, authorOf, finding, intoFolder, loadFolder, loadNote, mend, restoring, seenAmong, toSummary, trashing, unnamed, type Actor, type Context } from "./operations.ts";
 import { MAX_UPLOAD_BYTES, OpError, PART_BYTES, type AuthorRef, type ListedUpload, type Op, type OpenedUpload, type ReferredUpload, type Results, type SendingUpload, type TrashedUpload, type Upload, type UploadStorage } from "./protocol.ts";
 import { orderOf } from "./query.ts";
 import { partSpan, partsLeft, planParts } from "./parts.ts";
@@ -72,7 +72,7 @@ const toUpload = (ctx: Context, row: UploadRow): Upload => ({
   height: row.height,
   folderId: allows(folderLevel(ctx.sight, row.folder_id), "view") ? row.folder_id : null,
   createdAt: row.created_at,
-  uploadedBy: authorOf(row.uploaded_by_kind, row.uploaded_by, row.uploaded_by_name, row.uploaded_by_owner),
+  uploadedBy: unnamed(ctx, authorOf(row.uploaded_by_kind, row.uploaded_by, row.uploaded_by_name, row.uploaded_by_owner)),
   access: itemLevel(ctx.sight, row) === "edit" ? "edit" : "view",
   private: row.private_owner !== null,
   state: row.state,
@@ -604,5 +604,5 @@ export async function trashedUploads(ctx: Context): Promise<TrashedUpload[]> {
     )
     .bind(ctx.workspaceId, ctx.sight.bind)
     .all<UploadRow & { state_by: string; state_by_kind: AuthorRef["kind"]; state_by_name: string | null; state_by_owner: string | null }>();
-  return results.map((row) => ({ ...toUpload(ctx, row), trashedAt: row.state_at!, trashedBy: authorOf(row.state_by_kind, row.state_by, row.state_by_name, row.state_by_owner) }));
+  return results.map((row) => ({ ...toUpload(ctx, row), trashedAt: row.state_at!, trashedBy: unnamed(ctx, authorOf(row.state_by_kind, row.state_by, row.state_by_name, row.state_by_owner)) }));
 }

@@ -3,6 +3,7 @@ import { perform, trustedCode, type Actor, type Visitor } from "../core/operatio
 import { redeemFrame } from "../core/pluginRecord.ts";
 import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../core/protocol.ts";
 import { logFault } from "../core/logs.ts";
+import { sealLinksWith, sealOldLinks } from "../core/linkSeal.ts";
 import { sweep } from "../core/oauth.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
@@ -17,8 +18,11 @@ import { fileOrigin, fileSiteResponse, handleFiles } from "./files.ts";
 import { embedOrigin, embedResponse } from "./frames.ts";
 import { crossOrigin, secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
+import { addressOf, limitByAddress, overLimit, tokenKey } from "./limits.ts";
+import { bearerToken } from "./mcp/mcp.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
+import { vault } from "./vault.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
 
@@ -99,6 +103,8 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if (req.headers.get("Origin") !== url.origin || !req.headers.get("Content-Type")?.startsWith("application/json")) {
       return json({ error: "forbidden", message: "Operations come as JSON from Common Ink itself" }, 403);
     }
+    const busy = await overLimit(env, url, "OPS_LIMIT", personId);
+    if (busy) return busy;
     let op: unknown;
     try {
       op = await cappedJson(req, MAX_OP_BYTES);
@@ -131,6 +137,9 @@ async function answered(what: string, answer: () => Promise<Response>, broke: ()
 async function route(req: Request, env: Env, url: URL): Promise<Response> {
   const moved = redirectFor(url);
   if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
+  const byAddress = limitByAddress(url.pathname);
+  const limited = byAddress && (await overLimit(env, url, byAddress, addressOf(req)));
+  if (limited) return limited;
   const embed = await embedResponse(url, env, (token) => redeemFrame(env.DB, token, Date.now()));
   if (embed) return embed;
   const fileSite = fileSiteResponse(req, env, url);
@@ -138,7 +147,10 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
   if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
   if (url.pathname === "/clipper/connect" || url.pathname === "/clipper/revoke") return handleClipper(req, env, url);
-  if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
+  if (url.pathname === "/mcp") {
+    const busy = await overLimit(env, url, "MCP_LIMIT", await tokenKey(bearerToken(req)));
+    return busy ?? answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
+  }
   if (url.pathname.startsWith("/oauth/") || url.pathname.startsWith("/.well-known/oauth-")) {
     return answered(url.pathname, () => handleOAuth(req, env, url), () => json({ error: "server_error", error_description: BROKE }, 500));
   }
@@ -156,8 +168,15 @@ const unlistedPage = (page: Response) => {
   return unlisted;
 };
 
+/** Hands the core the key share links are sealed under. A SESSION_SECRET too short for one leaves links unmade, and never kept in the clear. */
+function keyLinks(env: Env): void {
+  const sealer = vault(env.SESSION_SECRET);
+  if (sealer) sealLinksWith(sealer);
+}
+
 export default {
   async fetch(req, env) {
+    keyLinks(env);
     const url = new URL(req.url);
     // Whatever breaks is logged redacted here, and not by the runtime as it was thrown.
     const answer = await answered(url.pathname, async () => route(req, env, url), () => new Response("Common Ink broke. Try again in a moment.", { status: 500 }));
@@ -165,6 +184,7 @@ export default {
   },
   // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, and uploads that never finished. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env) {
+    keyLinks(env);
     let purged;
     try {
       purged = await purgeTrash(env.DB, controller.scheduledTime);
@@ -175,6 +195,12 @@ export default {
     if (removed || failed.length) console.log(`Removed ${removed} notes from Trash${failed.length ? `, and couldn't remove ${failed.length}` : ""}${more ? ", with more waiting" : ""}`);
     const uploads = await clearUploads(env.DB, env.FILES, controller.scheduledTime);
     if (uploads.removed || uploads.failed.length) console.log(`Removed ${uploads.removed} uploads${uploads.failed.length ? `, and couldn't remove ${uploads.failed.length}` : ""}${uploads.more ? ", with more waiting" : ""}`);
+    try {
+      const sealed = await sealOldLinks(env.DB);
+      if (sealed) console.log(`Sealed ${sealed} links kept from before links were sealed`);
+    } catch (err) {
+      logFault("Sealing old links", err);
+    }
     // What OAuth sign-ins left behind that nobody came back to. Also done when someone starts one, so this is for a quiet day.
     try {
       await sweep(env.DB, controller.scheduledTime, true);

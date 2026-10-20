@@ -1,4 +1,4 @@
-import { sessionHolds, signIn, whoAmI } from "../core/accounts.ts";
+import { NotThatPerson, sessionHolds, signIn, whoAmI } from "../core/accounts.ts";
 import { authenticateAgent, type ConnectedAgent } from "../core/agents.ts";
 import { authenticateClipper, type ClipperGrant } from "../core/clipper.ts";
 import { authorizeUrl, covers, exchange, isGoogleSource, REACHING_SCOPES, revoke, SOURCE_SCOPES, type Asking, type GoogleConfig, type GoogleSourceId, type GoogleTokens } from "./google.ts";
@@ -233,7 +233,18 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
       await discard(granted.tokens);
       return page("Not on the list", `<p>${escape(granted.email)} can't use this Common Ink yet. <a href="/auth/google">Use another account</a>.</p>`, 403);
     }
-    const { personId } = await signIn(env.DB, granted);
+    let personId: string;
+    try {
+      ({ personId } = await signIn(env.DB, granted));
+    } catch (err) {
+      if (!(err instanceof NotThatPerson)) throw err;
+      await discard(granted.tokens);
+      return page(
+        "That's not the account this email signs in with",
+        `<p>${escape(granted.email)} signs in to Common Ink with another Google account than this one. An email that passed to someone else doesn't take over the person who had it. <a href="/auth/google">Use another account</a>, or ask an admin.</p>`,
+        403,
+      );
+    }
     const lasting = await keepGrant(env, personId, granted.email, granted.tokens);
     // Google hands a refresh token to an account only the first time it agrees. One that agreed before
     // this Common Ink kept tokens is asked once more, so its data sources don't stop working within the hour.

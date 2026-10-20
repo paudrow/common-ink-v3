@@ -12119,3 +12119,30 @@ button.crumb[aria-expanded="true"] {
 .embed-frame-block {
   max-width: 100%;
 }
+
+/* What admins' agents asked to do to the plugins, above the list, each answered with Decline or Approve. */
+.plugin-proposals {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.plugin-proposals h2 {
+  margin: 0;
+  font-size: calc(15px * var(--text-scale));
+}
+
+.plugin-asked {
+  font-weight: 650;
+}
+
+.plugin-code {
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+  white-space: pre-wrap;
+}

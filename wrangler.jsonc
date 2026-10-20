@@ -32,14 +32,24 @@
   // incomplete multipart uploads after 3 days" is the backstop for parts no row names (docs/adr/0013-big-files-go-in-parts-to-single-use-addresses.md).
   // A Preview has no timer, so nothing is removed from one's Trash on its own.
   "triggers": { "crons": ["17 * * * *"] },
-  // Tool calls an agent may make on /mcp: 300 a minute for each agent, counted where the call lands (src/worker/mcp/mcp.ts).
-  "ratelimits": [{ "name": "MCP_CALLS", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } }],
   // Workers Logs keeps what the Worker writes (already redacted by src/core/logs.ts) but no invocation
   // logs: each of those records the request's full address, and an address can carry a share link's
   // token (/s/<token>, /api/shared/<token>) or Google's sign-in code (/auth/*?code=). Wrangler has no
   // setting that drops only the path, and `redact_query_string` alone would leave the share tokens.
   // https://developers.cloudflare.com/workers/observability/logs/workers-logs/#invocation-logs
   "observability": { "enabled": true, "redact_query_string": true, "logs": { "invocation_logs": false } },
+  // How often one caller may ask, each a minute: src/worker/limits.ts says what each counts and by what.
+  // MCP_CALLS counts an agent's tool calls where each lands (src/worker/mcp/mcp.ts); MCP_LIMIT counts one
+  // token's requests to /mcp, before the token is checked.
+  // A namespace id is any number unique in the Cloudflare account; Cloudflare makes it on deploy.
+  "ratelimits": [
+    { "name": "MCP_CALLS", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } },
+    { "name": "SIGN_IN_LIMIT", "namespace_id": "3001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "LINK_LIMIT", "namespace_id": "3002", "simple": { "limit": 60, "period": 60 } },
+    { "name": "OAUTH_LIMIT", "namespace_id": "3003", "simple": { "limit": 30, "period": 60 } },
+    { "name": "OPS_LIMIT", "namespace_id": "3004", "simple": { "limit": 300, "period": 60 } },
+    { "name": "MCP_LIMIT", "namespace_id": "3005", "simple": { "limit": 300, "period": 60 } }
+  ],
   // The optional settings are typed in src/worker/env.d.ts.
   "secrets": { "required": ["SESSION_SECRET"] }
   // Previews run on their own Worker, common-ink-v3-previews. scripts/preview.ts writes their settings: their own D1

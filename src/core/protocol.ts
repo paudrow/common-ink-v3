@@ -813,6 +813,13 @@ export const Op = z.discriminatedUnion("type", [
   }),
   /** A member who isn't an admin saying yes: it allows nothing, and waits for an admin. `origins` as for plugin.permit. */
   z.object({ type: z.literal("plugin.request"), id: PluginSubject, capability: CapabilityName, origins: Origins.optional() }),
+  /**
+   * What admins' agents have asked to do to the workspace's plugins. An admin is told every request
+   * still waiting; an agent is told its own, waiting or answered; anyone else is told none.
+   */
+  z.object({ type: z.literal("plugin.proposals") }),
+  /** An admin answering an agent's request: approving does what it asked, as the admin, and declining does nothing. */
+  z.object({ type: z.literal("plugin.decide"), id: Id, approve: z.boolean() }),
   /** A new plugin's two files to start from: a manifest named `name`, and code that runs shut off and does one small thing. Nothing is kept. */
   z.object({ type: z.literal("plugin.scaffold"), name: z.string().min(1).max(60) }),
   /** What installing a manifest and code would make of them, without installing or keeping anything: the manifest as it would be kept and what it asks for, or why it would be refused. */
@@ -1554,9 +1561,11 @@ export interface Results {
   "record.notes": { notes: NoteAbout[] };
   "plugin.list": PluginRecord;
   "plugin.read": { id: string; code: string; codeHash: string };
-  "plugin.install": PluginRecord & { id: string };
-  "plugin.uninstall": PluginRecord;
-  "plugin.permit": PluginRecord;
+  "plugin.install": PluginRecord & { id: string; proposed?: PluginProposal };
+  "plugin.uninstall": PluginRecord & { proposed?: PluginProposal };
+  "plugin.permit": PluginRecord & { proposed?: PluginProposal };
+  "plugin.proposals": { proposals: PluginProposal[] };
+  "plugin.decide": PluginRecord;
   "plugin.request": PluginRecord;
   "plugin.scaffold": { manifest: string; code: string };
   "plugin.validate": Validated;
@@ -1566,6 +1575,29 @@ export interface Results {
   "draft.read": Draft;
   "draft.save": DraftSummary;
   "draft.discard": { drafts: DraftSummary[] };
+}
+
+/**
+ * An admin's agent asking to install, update, permit or uninstall a plugin, which waits for an admin.
+ * `request` is the operation it sent. An answer to an agent's plugin.install, plugin.permit or
+ * plugin.uninstall carries it as `proposed`, and nothing else has changed.
+ */
+export interface PluginProposal {
+  id: string;
+  kind: "install" | "update" | "permit" | "uninstall";
+  /** The plugin it is about: the id a new one will take, or `html` for HTML embeds. */
+  pluginId: string;
+  name: string;
+  request: Extract<Op, { type: "plugin.install" | "plugin.permit" | "plugin.uninstall" }>;
+  agent: { id: string; name: string };
+  /** The admin the agent asked for. */
+  for: { id: string; name: string };
+  createdAt: number;
+  expiresAt: number;
+  state: "pending" | "approved" | "declined" | "expired";
+  decidedBy: { id: string; name: string } | null;
+  decidedAt: number | null;
+  message: string;
 }
 
 export type SourceKind = "calendar" | "contacts";

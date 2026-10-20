@@ -626,7 +626,7 @@ describe("signing in and connecting with Google", () => {
   const revoked: string[] = [];
 
   /** Google's token endpoint, answering the code from its redirect. */
-  function tokenEndpoint(answer: { email: string; scope: string; refresh_token?: string }): URLSearchParams[] {
+  function tokenEndpoint(answer: { email: string; scope: string; refresh_token?: string; sub?: string }): URLSearchParams[] {
     const sent: URLSearchParams[] = [];
     revoked.length = 0;
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
@@ -636,7 +636,7 @@ describe("signing in and connecting with Google", () => {
       }
       if (url !== "https://oauth2.googleapis.com/token") throw new Error(`A request left for ${url}`);
       sent.push(init.body as URLSearchParams);
-      return Response.json({ access_token: "at-new", expires_in: 3599, token_type: "Bearer", scope: `openid ${answer.scope}`, ...(answer.refresh_token ? { refresh_token: answer.refresh_token } : {}), id_token: idToken({ aud: "client-id", iss: "https://accounts.google.com", email: answer.email, email_verified: true, name: "Ada" }) });
+      return Response.json({ access_token: "at-new", expires_in: 3599, token_type: "Bearer", scope: `openid ${answer.scope}`, ...(answer.refresh_token ? { refresh_token: answer.refresh_token } : {}), id_token: idToken({ aud: "client-id", iss: "https://accounts.google.com", email: answer.email, email_verified: true, name: "Ada", ...(answer.sub && { sub: answer.sub }) }) });
     });
     return sent;
   }
@@ -789,6 +789,24 @@ describe("signing in and connecting with Google", () => {
     expect((await visit("/auth/google/connect", await sessionOf(ada.personId))).status).toBe(404);
     const signedOut = await visit("/auth/google/connect?source=google-calendar");
     expect([signedOut.status, signedOut.headers.get("Location")]).toEqual([302, "/auth/google"]);
+  });
+
+  it("knows a person by the Google account they first signed in with, and refuses that email from another account, or that account under another email", async () => {
+    const id = crypto.randomUUID();
+    const [ada, sam] = [`ada-${id}@example.com`, `sam-${id}@example.com`];
+    listed.add(ada).add(sam);
+    tokenEndpoint({ email: ada, scope: "email", sub: `sub-ada-${id}` });
+    expect((await roundTrip("/auth/google", {})).home.status).toBe(302);
+    expect((await roundTrip("/auth/google", {})).home.status).toBe(302);
+    // The address passed to someone else's Google account: they don't become Ada here.
+    tokenEndpoint({ email: ada, scope: "email", sub: `sub-other-${id}` });
+    const taken = (await roundTrip("/auth/google", {})).home;
+    expect([taken.status, await taken.text()]).toEqual([403, expect.stringContaining("signs in to Common Ink with another Google account")]);
+    // Ada's Google account now says another address, which is someone else here already.
+    tokenEndpoint({ email: sam, scope: "email", sub: `sub-sam-${id}` });
+    expect((await roundTrip("/auth/google", {})).home.status).toBe(302);
+    tokenEndpoint({ email: sam, scope: "email", sub: `sub-ada-${id}` });
+    expect((await roundTrip("/auth/google", {})).home.status).toBe(403);
   });
 
   it("holds sign-in to the list of allowed emails, except where dev sign-in already lets anyone be anyone", async () => {

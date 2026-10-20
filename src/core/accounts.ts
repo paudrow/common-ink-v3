@@ -7,7 +7,12 @@ import { standingIn } from "./standing.ts";
 export interface SignInIdentity {
   email: string;
   name: string;
+  /** Who Google says they are. Kept the first time it is given; an email that comes back with another is someone else. */
+  sub?: string | null;
 }
+
+/** Why a sign-in was refused: the email belongs to a person Google knows as someone else, or this Google account is another person's here. */
+export class NotThatPerson extends Error {}
 
 /** The person with this email, created with a workspace of their own the first time they sign in. */
 export async function signIn(db: D1Database, identity: SignInIdentity, now = Date.now()): Promise<{ personId: string; sessionsEnded: number }> {
@@ -17,8 +22,17 @@ export async function signIn(db: D1Database, identity: SignInIdentity, now = Dat
     .prepare("INSERT INTO people (id, email, name, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (email) DO NOTHING")
     .bind(newId(), email, name, now)
     .run();
-  const person = await db.prepare("SELECT id, sessions_ended FROM people WHERE email = ?").bind(email).first<{ id: string; sessions_ended: number }>();
+  if (identity.sub) {
+    try {
+      await db.prepare("UPDATE people SET google_sub = ?2 WHERE email = ?1 AND google_sub IS NULL").bind(email, identity.sub).run();
+    } catch (err) {
+      if (/UNIQUE/i.test(String(err))) throw new NotThatPerson("This Google account signs in here under another email");
+      throw err;
+    }
+  }
+  const person = await db.prepare("SELECT id, sessions_ended, google_sub FROM people WHERE email = ?").bind(email).first<{ id: string; sessions_ended: number; google_sub: string | null }>();
   if (!person) throw new Error("no person for that email after sign-in");
+  if (identity.sub && person.google_sub !== identity.sub) throw new NotThatPerson("This email belongs to another Google account here");
   await arrive(db, person.id, now);
   return { personId: person.id, sessionsEnded: person.sessions_ended };
 }

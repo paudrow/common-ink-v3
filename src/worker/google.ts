@@ -88,6 +88,8 @@ const tokensOf = (answer: TokenAnswer, now: number): GoogleTokens | null =>
 export interface Granted {
   email: string;
   name: string;
+  /** Who Google says this is, which no other account is ever given. Google always sends it; null only where a stand-in left it out. */
+  sub: string | null;
   tokens: GoogleTokens | null;
 }
 
@@ -111,10 +113,11 @@ export async function exchange(config: GoogleConfig, code: string, redirectUri: 
     email?: string;
     email_verified?: boolean;
     name?: string;
+    sub?: string;
   };
   if (claims.aud !== config.clientId || !["accounts.google.com", "https://accounts.google.com"].includes(claims.iss ?? "")) throw new Error("Google's answer wasn't for this app");
   if (!claims.email || claims.email_verified !== true) throw new Error("Google didn't confirm an email address");
-  return { email: claims.email.toLowerCase(), name: claims.name ?? claims.email, tokens: tokensOf(token, now) };
+  return { email: claims.email.toLowerCase(), name: claims.name ?? claims.email, sub: typeof claims.sub === "string" && claims.sub ? claims.sub : null, tokens: tokensOf(token, now) };
 }
 
 /**
