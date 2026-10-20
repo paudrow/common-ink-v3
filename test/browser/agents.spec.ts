@@ -211,7 +211,7 @@ test("a token can be limited to reading, and the agent is refused a write", asyn
   await expect(connected(page)).toContainText("reaches only ");
   await expect(connected(page)).toContainText("expires in 30 days");
   const reader = agentWith(page, token);
-  expect(await reader.tool("list_notes", {})).toEqual([]);
+  expect((await reader.tool<{ notes: Note[] }>("list_notes", {})).notes).toEqual([]);
   await expect(reader.tool("create_note", { text: "# No" })).rejects.toThrow("forbidden: A read-only token can't note.create");
 });
 
@@ -266,7 +266,7 @@ test("editing an agent changes what its token may do, with no new agent and no n
   await expect(row).toContainText(`${token.slice(0, 9)}…`);
   await expect(page.getByRole("region", { name: "New token" })).toHaveCount(0);
   await expect(claude.tool("create_note", { text: "# No" })).rejects.toThrow("forbidden: A read-only token can't note.create");
-  expect(await claude.tool("list_notes", {})).toHaveLength(1);
+  expect((await claude.tool<{ notes: Note[] }>("list_notes", {})).notes).toHaveLength(1);
 
   await row.getByRole("button", { name: "Edit" }).click();
   await expect(edit.getByRole("checkbox", { name: /^Read only/ })).toBeChecked();

@@ -227,7 +227,7 @@ describe("moving a folder", () => {
       return { isError: !!result.isError, text: result.content[0]!.text };
     };
 
-    expect(await call({ id: plans, parentId: journal })).toMatchObject({ isError: false, text: expect.stringContaining(`"parentId": "${journal}"`) });
+    expect(await call({ id: plans, parentId: journal })).toMatchObject({ isError: false, text: expect.stringContaining(`"parentId":"${journal}"`) });
     expect(await call({ id: plans, parentId: reference })).toEqual({ isError: true, text: "not_found: No such folder" });
     expect(await call({ id: plans, parentId: "zzzzzzzzzzzz" })).toEqual({ isError: true, text: "not_found: No such folder" });
     expect(await call({ id: reference, parentId: journal })).toEqual({ isError: true, text: "not_found: No such folder" });

@@ -419,7 +419,7 @@ export async function uploadStorage(ctx: Context): Promise<UploadStorage> {
 export async function listUploads(ctx: Context, op: Extract<Op, { type: "upload.list" }>): Promise<ListedUpload[]> {
   // The folder narrows inside what the asker sees and never widens it: one they can't see is no folder.
   if (op.folderId !== undefined) await loadFolder(ctx, op.folderId, "view");
-  const { query, covering, condition, prepare } = await finding(ctx, "uploads", op, [
+  const { query, covering, condition, prepare, bind } = await finding(ctx, "uploads", op, [
     // The folder's own uploads, not those of the folders inside it, which `folder:` in the query covers.
     ...(op.folderId === undefined ? [] : [{ kind: "filter", key: "folder", cmp: "=", value: op.folderId, ids: [op.folderId] } as const]),
     ...OLD.archived(op.includeArchived),
@@ -429,7 +429,8 @@ export async function listUploads(ctx: Context, op: Extract<Op, { type: "upload.
   const { results } = await prepare(
     `SELECT (SELECT COUNT(*) FROM upload_refs r CROSS JOIN notes rn ON rn.id = r.note_id WHERE r.upload_id = u.id AND rn.workspace_id = ?1 AND ${SEEN("rn", "?2", "kept")}) AS uses, ${UPLOAD_COLUMNS}
      WHERE u.workspace_id = ?1 AND ${SEEN("u", "?2", covering)} AND ${condition}
-     ORDER BY ${orderOf(query.sort ?? "uploaded-desc")}, u.id`,
+     ORDER BY ${orderOf(query.sort ?? "uploaded-desc")}, u.id
+     LIMIT ${bind(op.limit ?? -1)} OFFSET ${bind(op.offset)}`,
   ).all<UploadRow & { uses: number }>();
   return results.map((row) => ({ ...toUpload(ctx, row), uses: row.uses }));
 }

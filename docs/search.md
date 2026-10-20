@@ -51,7 +51,7 @@ An upload's words are looked for in its file's name, anywhere in it, ignoring ca
 
 ## Every form
 
-The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a filter is said: `node scripts/query-docs.ts` writes them, and `test/core/query.test.ts` fails when they differ. The help behind **?** in the app, the tools' descriptions and `ink syntax` are the same rows.
+The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a filter is said: `node scripts/query-docs.ts` writes them, and `test/core/query.test.ts` fails when they differ. The help behind **?** in the app, the `query_syntax` tool and `ink syntax` are the same rows.
 
 <!-- syntax -->
 ### Notes

@@ -1,4 +1,4 @@
-import { syntaxText } from "../src/core/query.ts";
+import { queryLanguage } from "../src/core/query.ts";
 
 // The `ink` command's logic, for an agent working from a shell. It is a thin client of the /mcp endpoint,
 // so it does what the MCP tools do and nothing more. scripts/ink.ts runs it on this machine.
@@ -223,6 +223,9 @@ const SWITCHES = new Set(["--preview"]);
 /** How many notes one preview_reverts call takes, and how many history_summary lists a page. */
 const PREVIEWED_A_CALL = 40;
 const SUMMARIZED_A_CALL = 100;
+/** The tools that answer a page at a time, each with the key its page is under. The command asks for every page and prints them as one list. */
+const PAGED: Record<string, string> = { list_notes: "notes", list_uploads: "uploads" };
+const LISTED_A_CALL = 200;
 
 /** The flags given. A command reads the ones it takes, and `unread` is the rest: flags it would otherwise drop without a word. */
 class Flags {
@@ -309,6 +312,15 @@ function json(name: string, value: string): unknown {
   }
 }
 
+/** A tool's answer as a person reads it: JSON indented, and anything else as it came. */
+const pretty = (answer: string) => {
+  try {
+    return JSON.stringify(JSON.parse(answer), null, 2);
+  } catch {
+    return answer;
+  }
+};
+
 const read = (answer: string): { next?: string | null; done?: boolean } => {
   try {
     return JSON.parse(answer) as { next?: string | null; done?: boolean };
@@ -371,7 +383,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     // What a query can say is the same for everyone, so it is said with no token.
     if (command === "syntax") {
       if (id !== undefined && id !== "todos" && id !== "uploads") throw new UsageError("syntax takes nothing, todos or uploads");
-      io.out(syntaxText(id ?? "notes"));
+      io.out(queryLanguage(id ?? "notes"));
       return 0;
     }
     if (!token) throw new UsageError("Set INK_TOKEN to an agent token from Common Ink");
@@ -938,9 +950,23 @@ export async function run(argv: string[], io: Io): Promise<number> {
       return 0;
     }
 
+    const paged = PAGED[tool];
+    if (paged) {
+      const all: unknown[] = [];
+      for (let offset: number | null = 0; offset !== null; ) {
+        const { answer, failed } = await call(tool, { ...args, limit: LISTED_A_CALL, offset });
+        if (failed) return (io.out(answer), 1);
+        const page = json(`${tool}'s answer`, answer) as Record<string, unknown>;
+        all.push(...((page[paged] as unknown[] | undefined) ?? []));
+        offset = (page.next as number | null | undefined) ?? null;
+      }
+      io.out(JSON.stringify(all, null, 2));
+      return 0;
+    }
+
     for (;;) {
       const { answer, failed } = await call(tool, args);
-      io.out(answer);
+      io.out(pretty(answer));
       if (failed) return 1;
       // These cover a few notes a call, so the command carries on until every note is covered.
       if (tool === "rebuild_links" || tool === "rebuild_todos") {
