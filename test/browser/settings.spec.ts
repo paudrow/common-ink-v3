@@ -112,7 +112,7 @@ test("editing the JSON changes the options and the app, and editing the options 
 
 test("a plugin's options are listed under it with their schema and apply without a reload, and its switch is on the Plugins page and not among them", async ({ page }) => {
   await openSettings(page);
-  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Account", "Note list", "Dashboard", "HTML embeds", "Calendar", "Todos", "Daily notes", "Mentions", "Vim mode", "Night shift"]);
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Account", "Note list", "Dashboard", "HTML embeds", "Calendar", "Todos", "Daily notes", "Mentions", "Vim mode", "Night shift", "Typewriter mode"]);
   const noteList = await category(page, "Note list");
 
   await expect(noteList.getByRole("checkbox")).toHaveCount(1);
@@ -401,8 +401,8 @@ test("one search finds settings in every category and keyboard shortcuts, a cate
   await expect(group(page, "Keyboard shortcuts").getByRole("rowheader")).toHaveText([/daily\.today/, /daily\.yesterday/, /daily\.tomorrow/, /daily\.previous/, /daily\.next/, /Disable plugin: Daily notes/]);
   await expect(categories.first()).toHaveAttribute("aria-current", "page");
   await search.fill("note");
-  // Appearance's Text size says what it does to a note's text, and Mentions has a setting about a private note.
-  await expect.poll(names).toEqual(["Editor", "Appearance", "Note list", "Daily notes", "Mentions", "Keyboard shortcuts"]);
+  // Appearance's Text size says what it does to a note's text, Mentions has a setting about a private note, and Typewriter mode's height is a share of the note's.
+  await expect.poll(names).toEqual(["Editor", "Appearance", "Note list", "Daily notes", "Mentions", "Typewriter mode", "Keyboard shortcuts"]);
   await expect(group(page, "Daily notes").getByRole("textbox", { name: "Daily notes folder" })).toHaveValue("Journal");
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /New note/ })).toBeVisible();
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /Undo/ })).toHaveCount(0);
@@ -411,7 +411,7 @@ test("one search finds settings in every category and keyboard shortcuts, a cate
   await expect.poll(names).toEqual(["Daily notes"]);
   await expect(page).toHaveURL(/\/settings\/plugins\/daily$/);
   await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: /^All results/ }).click();
-  await expect(shown).toHaveCount(6);
+  await expect(shown).toHaveCount(7);
 
   await search.fill("zzzz");
   await expect(page.locator(".settings-pane")).toHaveText("No setting or keyboard shortcut matches.");

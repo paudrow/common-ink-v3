@@ -1,6 +1,6 @@
 import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { EditorView, RectangleMarker, ViewPlugin, drawSelection, layer } from "@codemirror/view";
-import { Vim, getCM, vim } from "@replit/codemirror-vim";
+import { Vim, getCM, vim, type MotionFn } from "@replit/codemirror-vim";
 import { dismissing, noteJump } from "../../plugin-api.ts";
 
 let run: (commandId: string) => boolean = () => false;
@@ -59,8 +59,10 @@ Vim.defineAction("scrollCursorTo", (cm, given) => {
     const { line } = cm.getCursor();
     cm.setCursor(line, /^\s*/.exec(cm.getLine(line))![0].length);
   }
-  // After vim has put its cursor where it goes, which would otherwise take the place of this scroll with its own.
-  setTimeout(() => view.dom.isConnected && view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: args.position ?? "center", yMargin: 0 }) }));
+  // After vim has put its cursor where it goes, which would otherwise take the place of this scroll with its own. The user event
+  // marks a scroll the member asked for, and the place they asked for the line at, for whatever else keeps the line somewhere.
+  const y = args.position ?? "center";
+  setTimeout(() => view.dom.isConnected && view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y, yMargin: 0 }), userEvent: `scroll.cursor.${y}` }));
 });
 for (const [keys, position, firstLetter] of [
   ["zz", "center", false],
@@ -98,6 +100,19 @@ const startTyping = ViewPlugin.define((view) => {
 let byRows = false;
 
 /**
+ * j and k by rows in visual mode, but by lines in visual line mode: its selection is whole lines with the cursor drawn at the last
+ * one's end, so a move between the rows of a wrapped line would change nothing on screen. Vim calls a motion on its table of
+ * motions, which is how this reaches its own two.
+ */
+const rowsOrLines: MotionFn = function (this: Record<string, MotionFn>, cm, head, args, state, input) {
+  const by = state.visualLine ? this.moveByLines! : this.moveByDisplayLines!;
+  // Each keeps the column of the last vertical move only after one of the two.
+  if (state.lastMotion === rowsOrLines) state.lastMotion = by;
+  return by.call(this, cm, head, args, state, input);
+};
+Vim.defineMotion("rowsOrLines", rowsOrLines);
+
+/**
  * In visual line mode every line selected is painted from its left edge to its right, a code block's across the whole block.
  * The editor's own painting runs the first line from where its text starts and the last to where its text ends, which in a
  * code block is short of the block's edges on both sides.
@@ -133,15 +148,15 @@ const wholeLines = layer({
 export function vimEditing(runCommand: (commandId: string) => boolean): { extension: Extension; jumpsFrom: (focused: HTMLElement) => boolean; toNormal: (focused: HTMLElement) => void; moveByRows: (on: boolean) => void } {
   run = runCommand;
   return {
-    /** Whether j and k, and the arrows, move by the rows on screen, as gj and gk do, in normal and visual mode. After an operator they are whole lines still: dj takes two lines. */
+    /** Whether j and k, and the arrows, move by the rows on screen, as gj and gk do, in normal and visual mode. After an operator and in visual line mode they are whole lines still: dj takes two lines, and so does Vj. */
     moveByRows(on) {
       if (on === byRows) return;
       byRows = on;
-      for (const [key, rows] of [["j", "gj"], ["k", "gk"], ["<Down>", "gj"], ["<Up>", "gk"]] as const) {
-        for (const context of ["normal", "visual"] as const) {
-          if (on) Vim.noremap(key, rows, context);
-          else Vim.unmap(key, context);
-        }
+      for (const [key, rows, forward] of [["j", "gj", true], ["k", "gk", false], ["<Down>", "gj", true], ["<Up>", "gk", false]] as const) {
+        if (on) {
+          Vim.noremap(key, rows, "normal");
+          Vim.mapCommand(key, "motion", "rowsOrLines", { forward }, { context: "visual" });
+        } else for (const context of ["normal", "visual"]) Vim.unmap(key, context);
       }
     },
     extension: [

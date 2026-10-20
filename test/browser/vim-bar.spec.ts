@@ -230,6 +230,30 @@ test("with the setting on, j and k move by the rows on screen and dj still takes
   await expect.poll(async () => (await cursorTop()) - top, "j passes every row of the wrapped line").toBeGreaterThan((await placeOf(page, "A long line")).height - 5);
 });
 
+test("with the setting on, j and k in visual line mode take one whole line each, a wrapped one too, and v still moves by rows", async ({ page }) => {
+  const text = `# Rows\n\n${LONG}\n\nafter\nlast`;
+  const note = await withVim(page, text, { "vim.screenLines": true });
+  const read = async () => (await perform(page, { type: "note.read", id: note.id })).text;
+  const undone = async () => {
+    await page.keyboard.press("u");
+    await expect.poll(read).toBe(text);
+  };
+
+  await keys(page, "g", "g", "j", "j", "V", "j", "d");
+  await expect.poll(read, "V and one j on the wrapped line take it and the blank line under it").toBe("# Rows\n\nafter\nlast");
+  await undone();
+  await keys(page, "g", "g", "j", "j", "V", "2", "j", "d");
+  await expect.poll(read, "a count of lines").toBe("# Rows\n\nlast");
+  await undone();
+  await keys(page, "G", "k", "V", "k", "k", "k", "d");
+  await expect.poll(read, "up from under it, one k passes the whole wrapped line").toBe("# Rows\nlast");
+  await undone();
+
+  await keys(page, "g", "g", "j", "j", "v", "j", "d");
+  await expect.poll(read, "v and j take a row of the wrapped line and leave the rest").toMatch(/^# Rows\n\n.{20,}\n\nafter\nlast$/);
+  expect((await read()).length, "only part of the wrapped line went").toBeGreaterThan(text.length - LONG.length + 20);
+});
+
 test("line numbers are shown by a setting, beside the text and off the text's own column: the text moves by the numbers' width, once, and by nothing else", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: `# Numbered\n\n${LONG}\n\n${Array.from({ length: 8 }, (_, n) => `row ${n}`).join("\n")}` });
