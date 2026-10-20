@@ -1,7 +1,8 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { arrive, signIn, whoAmI, workspaceOfNote } from "../../src/core/accounts.ts";
-import { connectAgent } from "../../src/core/agents.ts";
+import { connectAgent, hashToken } from "../../src/core/agents.ts";
+import { sealOldLinks } from "../../src/core/linkSeal.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
 import type { Grant, OpInput } from "../../src/core/protocol.ts";
 import worker from "../../src/worker/index.ts";
@@ -61,9 +62,10 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     const vic = await newPerson(ada, "Vic Viewer");
     await share(ada, { noteId: plan.id }, vic.email, "view");
 
+    // A guest is told no member's name or id: who wrote it is "A member".
     expect((await perform(env.DB, vic.actor, { type: "note.history", id: plan.id })).map((c) => [c.revision, c.author.name])).toEqual([
-      [1, "Ada Lovelace"],
-      [2, "Ada Lovelace"],
+      [1, "A member"],
+      [2, "A member"],
     ]);
     expect((await perform(env.DB, vic.actor, { type: "note.read", id: plan.id, revision: 1 })).text).toBe("# Plan");
     expect((await perform(env.DB, vic.actor, { type: "history.list" })).changes.map((c) => c.noteTitle)).toEqual(["Plan", "Plan"]);
@@ -91,7 +93,10 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     });
     const written = await write(gus.actor, plan.id, 1, "# Plan\n\nfrom Gus");
     expect(written).toMatchObject({ revision: 2, access: "edit", folderId: inside.id, updatedBy: { kind: "member", personId: gus.personId, name: "Gus Guest" } });
-    expect((await perform(env.DB, gus.actor, { type: "note.history", id: plan.id })).map((c) => c.author.name)).toEqual(["Ada Lovelace", "Gus Guest"]);
+    expect((await perform(env.DB, gus.actor, { type: "note.history", id: plan.id })).map((c) => c.author)).toEqual([
+      { kind: "member", personId: "", name: "A member" },
+      { kind: "member", personId: gus.personId, name: "Gus Guest" },
+    ]);
     const made = await note(gus.actor, "# From Gus", shared.id);
     const nested = await folder(gus.actor, "Gus's", inside.id);
     expect(await titles(gus.actor)).toEqual(["From Gus", "Plan"]);
@@ -422,6 +427,21 @@ describe("a private note", () => {
     expect(tokenOf(again)).not.toBe(tokenOf(link));
   });
 
+  it("ends an admin's own narrowing of a member as the admin makes the note private, so the member doesn't keep reading it", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve Editor");
+    const plan = await note(ada, "# Plan");
+    const guest = await newPerson(ada, "Gus Guest");
+    await perform(env.DB, ada, { type: "grant.set", noteId: plan.id, memberId: eve.personId, access: "view" });
+    await share(ada, { noteId: plan.id }, guest.email, "view");
+    expect(await titles(eve)).toEqual(["Plan"]);
+
+    expect(await perform(env.DB, ada, { type: "note.setPrivate", id: plan.id, private: true })).toEqual({ id: plan.id, private: true, removed: 1 });
+    await expect(read(eve, plan.id)).rejects.toMatchObject(NO_NOTE);
+    // What Ada shared with someone outside the workspace is hers to keep.
+    expect((await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).grants.map((g) => g.to.kind === "person" && g.to.email)).toEqual([guest.email]);
+  });
+
   it("is its owner's to share even when they are a viewer, who can share nothing else", async () => {
     const ada = await newMember("Ada Lovelace");
     const vera = await addMember(ada, "editor", "Vera Viewer");
@@ -536,6 +556,39 @@ describe("a private note", () => {
 });
 
 describe("a link", () => {
+  it("is kept sealed and found by its hash, so the database holds no address that opens anything, and the dialog still shows it", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const plan = await note(ada, "# Plan");
+    const token = tokenOf(await perform(env.DB, ada, { type: "grant.link", noteId: plan.id, link: "public" }));
+    const kept = (await env.DB.prepare("SELECT id, token, token_hash FROM grants WHERE note_id = ? AND kind = 'public'").bind(plan.id).first<{ id: string; token: string; token_hash: string }>())!;
+    expect([kept.token.startsWith("v1."), kept.token.includes(token), kept.token_hash]).toEqual([true, false, await hashToken(token)]);
+    expect(tokenOf((await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).grants[0]!)).toBe(token);
+    expect((await perform(env.DB, { kind: "visitor", token, personId: null }, { type: "shared.open" })).on).toEqual({ kind: "note", id: plan.id });
+    // A sealed token copied onto another grant opens as nothing there.
+    const other = await note(ada, "# Other");
+    await perform(env.DB, ada, { type: "grant.link", noteId: other.id, link: "public" });
+    await env.DB.batch([env.DB.prepare("DELETE FROM grants WHERE id = ?").bind(kept.id), env.DB.prepare("UPDATE grants SET token = ? WHERE note_id = ? AND kind = 'public'").bind(kept.token, other.id)]);
+    expect(tokenOf((await perform(env.DB, ada, { type: "grant.list", noteId: other.id })).grants[0]!)).toBe("");
+  });
+
+  it("made before links were sealed opens by its token, and keeps its address once the hourly job seals it", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const plan = await note(ada, "# Plan");
+    await perform(env.DB, ada, { type: "grant.link", noteId: plan.id, link: "public" });
+    const old = "o".repeat(43);
+    await env.DB.prepare("UPDATE grants SET token = ?, token_hash = NULL WHERE note_id = ? AND kind = 'public'").bind(old, plan.id).run();
+    const visitor: Visitor = { kind: "visitor", token: old, personId: null };
+    expect((await perform(env.DB, visitor, { type: "shared.read", id: plan.id })).title).toBe("Plan");
+    expect(tokenOf((await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).grants[0]!)).toBe(old);
+
+    expect(await sealOldLinks(env.DB, 10_000)).toBeGreaterThanOrEqual(1);
+    const kept = (await env.DB.prepare("SELECT token, token_hash FROM grants WHERE note_id = ? AND kind = 'public'").bind(plan.id).first<{ token: string; token_hash: string }>())!;
+    expect([kept.token.startsWith("v1."), kept.token_hash]).toEqual([true, await hashToken(old)]);
+    expect((await perform(env.DB, visitor, { type: "shared.read", id: plan.id })).title).toBe("Plan");
+    expect(tokenOf((await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).grants[0]!)).toBe(old);
+    expect(await sealOldLinks(env.DB, 10_000)).toBe(0);
+  });
+
   const SECRET = "test-secret";
   const fetchAs = async (path: string, personId?: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);

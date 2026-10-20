@@ -3,6 +3,7 @@ import { newId } from "./ids.ts";
 import { loadFolder, loadNote, type Context, type NoteRow } from "./operations.ts";
 import { loadUpload } from "./uploads.ts";
 import { OpError, type Grant, type GrantAccess, type LinkKind, type Results, type Role, type Sharing } from "./protocol.ts";
+import { linkHash, openedLink, sealedLink } from "./linkSeal.ts";
 
 /** What a grant is on, as an operation names it. */
 interface On {
@@ -102,15 +103,18 @@ const toGrant = (ctx: Context, r: GrantRow): Grant => ({
           name: r.person_role !== null || ctx.role === "admin" ? r.person_name : null,
           role: r.person_role,
         }
-      : { kind: "link", link: r.kind, token: r.token! },
+      : { kind: "link", link: r.kind, token: r.token },
   grantedBy: { personId: r.granted_by, name: r.granted_by_name },
   createdAt: r.created_at,
 });
 
+/** The rows with each link's token opened, as the sharing dialog shows it. */
+const opened = (rows: GrantRow[]): Promise<GrantRow[]> => Promise.all(rows.map(async (r) => (r.token === null ? r : { ...r, token: await openedLink(r.id, r.token) })));
+
 async function grantById(ctx: Context, id: string): Promise<Grant> {
   const row = await ctx.db.prepare(`SELECT ${GRANT_COLUMNS} WHERE g.id = ?`).bind(id).first<GrantRow>();
   if (!row) throw new OpError("not_found", "No such grant");
-  return toGrant(ctx, row);
+  return toGrant(ctx, (await opened([row]))[0]!);
 }
 
 /** The folders above `folderId` and itself, nearest first. */
@@ -131,7 +135,7 @@ export async function listGrants(ctx: Context, on: On): Promise<Sharing> {
       )
       .bind(ctx.workspaceId, ctx.sight.bind)
       .all<GrantRow>();
-    return { canShare: true, grants: results.map((r) => toGrant(ctx, r)), inherited: [], note: null };
+    return { canShare: true, grants: (await opened(results)).map((r) => toGrant(ctx, r)), inherited: [], note: null };
   }
   const item = await itemOf(ctx, on);
   const may = mayShare(ctx, item);
@@ -144,9 +148,9 @@ export async function listGrants(ctx: Context, on: On): Promise<Sharing> {
         .prepare(`${ABOVE} SELECT ${GRANT_COLUMNS} JOIN above ON above.id = g.folder_id WHERE above.depth >= ?2 AND ${SEEN_FOLDER("f", "?3")} ORDER BY above.depth, ${GRANT_ORDER}`)
         .bind(item.folderId, item.kind === "folder" ? 1 : 0, ctx.sight.bind),
     ]);
-    grants = own!.results.map((r) => toGrant(ctx, r));
+    grants = (await opened(own!.results)).map((r) => toGrant(ctx, r));
     // A private note or upload takes nothing from the folders above it.
-    inherited = item.facts && item.facts.private_owner !== null ? [] : above!.results.map((r) => told(ctx, toGrant(ctx, r)));
+    inherited = item.facts && item.facts.private_owner !== null ? [] : (await opened(above!.results)).map((r) => told(ctx, toGrant(ctx, r)));
   }
   return { canShare: may, grants, inherited, note: item.kind === "note" ? await noteSharing(ctx, item.note) : null };
 }
@@ -206,7 +210,7 @@ export async function setGrant(ctx: Context, on: On, to: { email?: string; membe
 
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-/** A link's token is 256 random bits, so there is no finding one by trying. Changing who it opens for keeps it, so the address already sent still works. */
+/** A link's token is 256 random bits, so there is no finding one by trying, and it is kept sealed and found by its hash. Changing who it opens for keeps it, so the address already sent still works. */
 export async function linkTo(ctx: Context, on: On, link: LinkKind | null): Promise<Grant | null> {
   const item = await itemOf(ctx, on);
   // A link opens a page to read. A file is reached by a link only through the folder it is in.
@@ -217,13 +221,15 @@ export async function linkTo(ctx: Context, on: On, link: LinkKind | null): Promi
     await ctx.db.prepare(`DELETE FROM grants WHERE workspace_id = ? AND ${column} = ? AND kind <> 'person'`).bind(ctx.workspaceId, item.id).run();
     return null;
   }
+  const id = newId();
+  const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const row = await ctx.db
     .prepare(
-      `INSERT INTO grants (id, workspace_id, ${column}, kind, token, access, granted_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 'view', ?6, ?7)
+      `INSERT INTO grants (id, workspace_id, ${column}, kind, token, token_hash, access, granted_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'view', ?7, ?8)
        ON CONFLICT (${column}) WHERE kind <> 'person' AND ${column} IS NOT NULL DO UPDATE SET kind = excluded.kind
        RETURNING id`,
     )
-    .bind(newId(), ctx.workspaceId, item.id, link, b64url(crypto.getRandomValues(new Uint8Array(32))), ctx.personId, ctx.now)
+    .bind(id, ctx.workspaceId, item.id, link, await sealedLink(id, token), await linkHash(token), ctx.personId, ctx.now)
     .first<{ id: string }>();
   return grantById(ctx, row!.id);
 }
@@ -265,8 +271,14 @@ async function makePrivate(ctx: Context, table: "notes" | "uploads", item: { id:
       .bind(id, ctx.workspaceId, makePrivate ? ctx.personId : null, ctx.personId),
     // A private note is open only to whoever its owner lets in. What anyone else put on it, a grant or a link, would stay
     // live where its maker could no longer see or take it back, so it goes as the note becomes private. Refusing instead
-    // would leave the owner waiting on grants only an admin can take away.
-    ctx.db.prepare(`DELETE FROM grants WHERE ${COLUMN[word]} = ?1 AND granted_by <> ?2 AND EXISTS (SELECT 1 FROM ${table} n WHERE n.id = ?1 AND n.private_owner = ?2)`).bind(id, ctx.personId),
+    // would leave the owner waiting on grants only an admin can take away. An admin's own grant to a member narrowed what
+    // their role allowed; on a private note it would let them in instead, which nobody chose, so it goes too.
+    ctx.db
+      .prepare(
+        `DELETE FROM grants WHERE ${COLUMN[word]} = ?1 AND (granted_by <> ?2 OR (kind = 'person' AND person_id IN (SELECT m.person_id FROM members m WHERE m.workspace_id = ?3)))
+         AND EXISTS (SELECT 1 FROM ${table} n WHERE n.id = ?1 AND n.private_owner = ?2)`,
+      )
+      .bind(id, ctx.personId, ctx.workspaceId),
   ]);
   if (!updated!.meta.changes) throw new OpError("not_found", `No such ${word}`);
   return { id, private: makePrivate, removed: removed!.meta.changes };

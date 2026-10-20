@@ -32,12 +32,13 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       what installing them would make of them, or why it would be refused
   plugin ID                           an installed plugin's code and its codeHash
   plugin-install --manifest TEXT --code TEXT [--replaces ID]
-                                      install a plugin, or update one (an admin's agent only)
-  plugin-uninstall ID                 take a plugin out of the workspace (an admin's agent only)
+                                      install a plugin, or update one (an admin's agent only, once an admin approves)
+  plugin-uninstall ID                 take a plugin out of the workspace (an admin's agent only, once an admin approves)
   plugin-permit ID --capability NAME --allowed true|false [--locked true|false] [--origins SITE,SITE]
-        [--code-hash HASH]            decide one capability (an admin's agent only); allowing names the code
+        [--code-hash HASH]            decide one capability (an admin's agent only, once an admin approves); allowing names the code
   plugin-request ID --capability NAME [--origins SITE,SITE]
                                       ask an admin to allow a plugin one capability
+  plugin-proposals                    your requests to change plugins, and whether an admin answered them
   drafts                              your member's own drafts of plugins
   draft ID                            one of them, with its code
   draft-save ID --manifest TEXT --code TEXT --running true|false [--base-hash HASH|none]
@@ -568,6 +569,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "plugin-permit":
         tool = "permit_plugin";
         args = { pluginId: need("a plugin id, or html"), capability: needFlag("capability"), allowed: truth("--allowed", needFlag("allowed")), ...given({ locked: ["locked", truth], origins: ["origins", ids], codeHash: ["code-hash"] }) };
+        break;
+      case "plugin-proposals":
+        tool = "list_plugin_proposals";
         break;
       case "plugin-request":
         tool = "request_plugin_permission";

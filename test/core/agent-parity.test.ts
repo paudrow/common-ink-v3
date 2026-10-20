@@ -26,6 +26,7 @@ const COMMANDS: Record<string, string[][]> = {
   uninstall_plugin: [["plugin-uninstall", ID]],
   permit_plugin: [["plugin-permit", ID, "--capability", "notes.read", "--allowed", "true", "--locked", "false", "--origins", "https://a.example", "--code-hash", "a".repeat(64)]],
   request_plugin_permission: [["plugin-request", "html", "--capability", "network", "--origins", "https://a.example"]],
+  list_plugin_proposals: [["plugin-proposals"]],
   list_drafts: [["drafts"]],
   read_draft: [["draft", ID]],
   save_draft: [["draft-save", ID, "--manifest", '{"name":"Greeter"}', "--code", "ink.notify(1)", "--running", "true", "--base-hash", "none"]],

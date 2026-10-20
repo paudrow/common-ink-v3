@@ -36,7 +36,7 @@ export const MAX_PLUGINS = 50;
 /** How long a frame's token is good for. */
 export const FRAME_SECONDS = 60;
 
-const NO_SUCH_PLUGIN = "No such plugin";
+export const NO_SUCH_PLUGIN = "No such plugin";
 
 interface InstallRow {
   id: string;
@@ -202,7 +202,7 @@ interface Installed {
   codeHash: string;
 }
 
-async function installed(db: D1Database, workspaceId: string, id: string): Promise<Installed | null> {
+export async function installed(db: D1Database, workspaceId: string, id: string): Promise<Installed | null> {
   const row = await db.prepare(`SELECT manifest, code_hash FROM plugin_installs WHERE id = ? AND ${INSTALLED}`).bind(id, workspaceId).first<{ manifest: string; code_hash: string }>();
   return row && { manifest: JSON.parse(row.manifest) as Manifest, codeHash: row.code_hash };
 }
@@ -262,12 +262,13 @@ export async function readPlugin(ctx: Context, id: string): Promise<Results["plu
   return { id, code: row.code, codeHash: row.code_hash };
 }
 
-export async function installPlugin(ctx: Context, op: Extract<Op, { type: "plugin.install" }>): Promise<Results["plugin.install"]> {
+/** `newPluginId` is the id a new plugin takes: an approved request of an agent's names the one it was told. */
+export async function installPlugin(ctx: Context, op: Extract<Op, { type: "plugin.install" }>, newPluginId = newId()): Promise<Results["plugin.install"]> {
   const read = readManifest(op.manifest);
   if ("reason" in read) throw new OpError("invalid", read.reason);
   const manifest = JSON.stringify(read.manifest);
   const hash = await codeHash(op.code);
-  const id = op.replaces ?? newId();
+  const id = op.replaces ?? newPluginId;
   if (op.replaces) {
     const declared = read.manifest.capabilities.find((c) => c.name === FULL_TRUST);
     const approval = declared ? approvalOf(declared, hash) : null;

@@ -3,6 +3,7 @@ import { Icon } from "./icons.tsx";
 import { PluginDetails, type PluginsProps } from "./PluginDetails.tsx";
 import { lackingSaid } from "./device.ts";
 import { InstallForm } from "./PluginInstall.tsx";
+import { PluginProposals } from "./PluginProposals.tsx";
 import { whyNotTrusted } from "./pluginRun.ts";
 import { PLUGINS_PATH, asksTrust, kindLabel, listPlugins, matchesPlugin, waitingOn, within } from "./pluginList.ts";
 
@@ -48,6 +49,7 @@ export function Plugins(props: PluginsProps) {
       <p className="soon">
         Most of Common Ink is plugins. Turn one off and what it adds goes away until you turn it back on. One an admin installed is off for you until you turn it on. The choice is yours alone, and is kept in your settings.
       </p>
+      {admin && <PluginProposals workspaceId={props.workspaceId} onRecord={props.onRecord} />}
       <input type="search" className="filter" aria-label="Search plugins" placeholder={`Search ${plugins.length} plugins`} value={typed} onChange={(e) => setTyped(e.target.value)} />
       {found.length === 0 && <p className="soon">No plugin matches.</p>}
       <ul className="plugin-list" aria-label="Plugins">

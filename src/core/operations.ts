@@ -59,6 +59,7 @@ import {
 } from "./protocol.ts";
 import { ownSandboxed } from "./ownPlugins.ts";
 import { codeHash, scaffold, validate } from "./plugins.ts";
+import { decideProposal, listProposals, propose, PROPOSED } from "./pluginProposals.ts";
 import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, listPlugins, permitPlugin, readDraft, readPlugin, requestPlugin, saveDraft, trustPlugin, uninstallPlugin } from "./pluginRecord.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
@@ -69,7 +70,8 @@ import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate
 import { noteSlug } from "./slug.ts";
 import { NO_SOURCES, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listSources, photoContact, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
 import { referencesIn } from "./references.ts";
-import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
+import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
+import { linkHash } from "./linkSeal.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
 import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed } from "./todos.ts";
@@ -131,7 +133,7 @@ export interface Context {
   author: Author;
   /** True for a plugin that runs shut off from the app, which is told only what its permissions name: nothing of uploads or of who a mention means. One running with full trust is told what its member is. */
   shutOff: boolean;
-  /** False for a plugin that runs shut off and wasn't given members.read: it is told no member's name or id, even as who last wrote a note. */
+  /** False for a guest, and for a plugin that runs shut off and wasn't given members.read: they are told no other member's name or id, even as who wrote something. */
   namesMembers: boolean;
   workspaceId: string;
   /** The person acting, or the person an agent acts for. Null for whoever opened a link. */
@@ -213,7 +215,8 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   }
   if (actor.kind === "plugin") author = { kind: "plugin", pluginId: actor.pluginId, name: (plugin as { name: string }).name, onBehalfOf: actor.personId };
   const shutOff = plugin !== null && "allowed" in plugin && plugin.allowed !== "all";
-  const namesMembers = !shutOff || (plugin as { allowed: ReadonlySet<string> }).allowed.has("member.list");
+  // A guest, and whoever opens a link, is told no member's name; a shut-off plugin only with members.read.
+  const namesMembers = standing.role !== null && (!shutOff || (plugin as { allowed: ReadonlySet<string> }).allowed.has("member.list"));
   const ctx: Context = { db, actor, author, shutOff, namesMembers, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
   return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
 }
@@ -303,8 +306,11 @@ export const authorOf = (kind: string, id: string, name: string | null, owner: s
       ? { kind: "plugin", pluginId: id, name: name ?? "A plugin", onBehalfOf: owner ?? "" }
       : { kind: "member", personId: id, name: name ?? "Someone" };
 
-/** `author` as the one asking may be told of them: to a plugin that may not read members' names, another member is "A member", and an agent or a plugin acts for nobody named. The member it runs for is told as they are. */
-function unnamed(ctx: Context, author: Author): Author {
+/** Whether `op` is an agent's request that waits for an admin, rather than done. */
+const proposing = (ctx: Context, op: { type: OpType }) => ctx.author.kind === "agent" && PROPOSED.has(op.type);
+
+/** `author` as the one asking may be told of them: to a guest, or a plugin that may not read members' names, another member is "A member", and an agent or a plugin acts for nobody named. The asker is told of themself as they are. */
+export function unnamed(ctx: Context, author: Author): Author {
   if (ctx.namesMembers) return author;
   if (author.kind === "member") return author.personId === ctx.personId ? author : { kind: "member", personId: "", name: "A member" };
   return author.onBehalfOf === ctx.personId ? author : { ...author, onBehalfOf: "" };
@@ -1256,10 +1262,10 @@ interface Standing {
 
 const standingOf = (steps: readonly Step[]): Standing => ({ reverted: revertedBy(steps), reverts: new Set(steps.filter((s) => s.reverts).map((s) => s.revision)) });
 
-const toEntry = (r: ChangeRow, { reverted, reverts }: Standing): ChangeEntry => ({
+const toEntry = (ctx: Context, r: ChangeRow, { reverted, reverts }: Standing): ChangeEntry => ({
   revision: r.revision,
   baseRevision: r.base_revision,
-  author: authorOf(r.author_kind, r.author_id, r.name, r.agent_owner),
+  author: unnamed(ctx, authorOf(r.author_kind, r.author_id, r.name, r.agent_owner)),
   createdAt: r.created_at,
   label: r.label,
   reverts: revertsOf(r.reverts),
@@ -1354,11 +1360,11 @@ async function loadWithHistory(ctx: Context, ids: readonly string[]): Promise<Ma
 }
 
 /** A revert's conflicts as a preview tells them: who made the later changes, and where each is on the diffs of the changes asked for, a run of them at a time. */
-function toldConflicts(history: readonly Recorded[], found: Reverting, asked?: readonly number[]): RevertConflict[] {
+function toldConflicts(ctx: Context, history: readonly Recorded[], found: Reverting, asked?: readonly number[]): RevertConflict[] {
   const runs = asked ? runsOf(asked.filter((r) => r <= history.length)) : [];
   return found.conflicts.map((c) => ({
     ...c,
-    later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })),
+    later: c.later.map((revision) => ({ revision, author: unnamed(ctx, history[revision - 1]!.named) })),
     runs: runs.map((run) => ({ revision: run.to, ...linesAsOf(history, found, run.to, c.line, c.kept.length) })),
   }));
 }
@@ -1978,7 +1984,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const seen = new Set(dailies.length ? (await seenAmong(ctx, "any", IDS_IN, JSON.stringify(dailies))).map((r) => r.id) : []);
       return {
         completions: mine
-          .map((c) => ({ on: c.done_on, at: c.created_at, by: authorOf(c.author_kind, c.author_id, c.name, c.agent_owner), dailyNoteId: c.daily_note_id && seen.has(c.daily_note_id) ? c.daily_note_id : null }))
+          .map((c) => ({ on: c.done_on, at: c.created_at, by: unnamed(ctx, authorOf(c.author_kind, c.author_id, c.name, c.agent_owner)), dailyNoteId: c.daily_note_id && seen.has(c.daily_note_id) ? c.daily_note_id : null }))
           .reverse(),
       };
     },
@@ -2092,7 +2098,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       await countLines(ctx, [op.id]);
       const { results } = await ctx.db.prepare(`SELECT ${CHANGE_COLUMNS} WHERE c.note_id = ? ORDER BY c.revision`).bind(op.id).all<ChangeRow>();
       const standing = standingOf(results.map(stepOf));
-      return results.map((r) => toEntry(r, standing));
+      return results.map((r) => toEntry(ctx, r, standing));
     },
   },
 
@@ -2115,7 +2121,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const lines = runsOfLines(blame(results.map((r) => ({ changes: ChangeSet.fromJSON(JSON.parse(r.diff)), reverts: revertsOf(r.reverts) }))));
       const named = new Set(lines.map((run) => run.revision));
       const standing = standingOf(results.map(stepOf));
-      const changes = results.filter((r) => named.has(r.revision)).map((r) => toEntry(r, standing));
+      const changes = results.filter((r) => named.has(r.revision)).map((r) => toEntry(ctx, r, standing));
       const owners = [...new Set(changes.flatMap((c) => (c.author.kind === "agent" ? [c.author.onBehalfOf] : [])))];
       // Who an agent is for is who is in the workspace, which only someone who may list its members is told.
       const { results: members } = owners.length && ctx.role && !ctx.sight.within
@@ -2170,7 +2176,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const author = op.author;
       const choose: Choose = author ? revertBy(author) : op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!);
       const { row, history, reverts, found, changes } = await takingBack(ctx, op.id, "view", choose, op.resolve);
-      return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts: toldConflicts(history, found, op.revisions) };
+      return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts: toldConflicts(ctx, history, found, op.revisions) };
     },
   },
 
@@ -2258,7 +2264,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           removed: r.removed,
           firstAt: r.first_at,
           lastAt: r.last_at,
-          authors: (authors.get(r.note_id) ?? []).map((w) => authorOf(w.author_kind, w.author_id, w.name, w.agent_owner)),
+          authors: (authors.get(r.note_id) ?? []).map((w) => unnamed(ctx, authorOf(w.author_kind, w.author_id, w.name, w.agent_owner))),
         })),
         next: last && { lastAt: last.last_at, noteId: last.note_id },
       };
@@ -2327,7 +2333,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         }
       }
       return {
-        changes: page.map((r) => ({ ...toEntry(r, standing.get(r.note_id)!), noteId: r.note_id, noteTitle: r.title, diff: diffs.get(`${r.note_id}/${r.revision}`) ?? null })),
+        changes: page.map((r) => ({ ...toEntry(ctx, r, standing.get(r.note_id)!), noteId: r.note_id, noteTitle: r.title, diff: diffs.get(`${r.note_id}/${r.revision}`) ?? null })),
         next: last && { createdAt: last.created_at, noteId: last.note_id, revision: last.revision },
       };
     },
@@ -2346,7 +2352,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         )
         .bind(ctx.workspaceId, ctx.sight.bind)
         .all<Pick<ChangeRow, "author_kind" | "author_id" | "name" | "agent_owner">>();
-      return results.map((r) => authorOf(r.author_kind, r.author_id, r.name, r.agent_owner));
+      return results.map((r) => unnamed(ctx, authorOf(r.author_kind, r.author_id, r.name, r.agent_owner)));
     },
   },
 
@@ -2416,7 +2422,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           ...{ noteId: note.id, noteTitle: note.title, revision: note.revision },
           runs: runs.map((run) => {
             const made = changes.slice(run.from - 1, run.to);
-            const authors = new Map(made.map((r) => [`${r.author_kind}:${r.author_id}`, authorOf(r.author_kind, r.author_id, r.name, r.agent_owner)]));
+            const authors = new Map(made.map((r) => [`${r.author_kind}:${r.author_id}`, unnamed(ctx, authorOf(r.author_kind, r.author_id, r.name, r.agent_owner))]));
             return { ...run, saves: made.length, firstAt: made[0]!.created_at, lastAt: made.at(-1)!.created_at, authors: [...authors.values()], label: made.at(-1)!.label, diff: textDiff(texts.get(run.from - 1)!, texts.get(run.to)!) };
           }),
         };
@@ -2454,7 +2460,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             already: item.revisions ? revertible(history, item.revisions).already : [],
             diff: lineDiff(row.text, changes),
             overlaps: found.overlaps,
-            conflicts: toldConflicts(history, found, item.revisions),
+            conflicts: toldConflicts(ctx, history, found, item.revisions),
           };
         } catch (err) {
           // One note that can't be reverted is no reason to show nothing of the others.
@@ -2612,7 +2618,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         )
         .bind(ctx.workspaceId, ctx.sight.bind)
         .all<SummaryRow & { state_by: string; state_by_kind: AuthorRef["kind"]; state_by_name: string | null; state_by_owner: string | null }>();
-      return results.map((row): TrashedNote => ({ ...toSummary(ctx, row), trashedAt: row.state_at!, trashedBy: authorOf(row.state_by_kind, row.state_by, row.state_by_name, row.state_by_owner) }));
+      return results.map((row): TrashedNote => ({ ...toSummary(ctx, row), trashedAt: row.state_at!, trashedBy: unnamed(ctx, authorOf(row.state_by_kind, row.state_by, row.state_by_name, row.state_by_owner)) }));
     },
   },
 
@@ -2880,7 +2886,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx) {
       const token = ctx.actor.kind === "visitor" ? ctx.actor.token : "";
       const [link, folders, notes] = await ctx.db.batch<{ kind: "public" | "signed_in"; note_id: string | null; folder_id: string | null; name: string | null } & FolderRow & SummaryRow>([
-        ctx.db.prepare("SELECT g.kind, g.note_id, g.folder_id, f.name FROM grants g LEFT JOIN folders f ON f.id = g.folder_id WHERE g.token = ?").bind(token),
+        ctx.db.prepare(`SELECT g.kind, g.note_id, g.folder_id, f.name FROM grants g LEFT JOIN folders f ON f.id = g.folder_id WHERE ${BY_TOKEN("g")}`).bind(await linkHash(token), token),
         ctx.db.prepare(`SELECT ${FOLDER_COLUMNS} WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`).bind(ctx.workspaceId, ctx.sight.bind),
         ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} ORDER BY n.title COLLATE NOCASE, n.id`).bind(ctx.workspaceId, ctx.sight.bind),
       ]);
@@ -2998,9 +3004,17 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "plugin.list": { needs: "view", members: true, run: (ctx) => listPlugins(ctx) },
   // Making, installing and permitting plugins is the member's, and their agent's as it acts in their role: an admin's agent does what an admin does, and a member's what the member may. No plugin does any of it, and an agent limited to folders or to reading does none of what changes it.
   "plugin.read": { needs: "view", by: "owner", members: true, run: (ctx, op) => readPlugin(ctx, op.id) },
-  "plugin.install": { needs: "manage", by: "owner", members: true, run: (ctx, op) => installPlugin(ctx, op) },
-  "plugin.uninstall": { needs: "manage", by: "owner", members: true, run: (ctx, op) => uninstallPlugin(ctx, op.id) },
-  "plugin.permit": { needs: "manage", by: "owner", members: true, run: (ctx, op) => permitPlugin(ctx, op) },
+  // An admin's agent asks, and an admin approves in the app: see PROPOSED in pluginProposals.ts.
+  "plugin.install": { needs: "manage", by: "owner", members: true, run: (ctx, op) => (proposing(ctx, op) ? propose(ctx, op) : installPlugin(ctx, op)) },
+  "plugin.uninstall": { needs: "manage", by: "owner", members: true, run: (ctx, op) => (proposing(ctx, op) ? propose(ctx, op) : uninstallPlugin(ctx, op.id)) },
+  "plugin.permit": { needs: "manage", by: "owner", members: true, run: (ctx, op) => (proposing(ctx, op) ? propose(ctx, op) : permitPlugin(ctx, op)) },
+  "plugin.proposals": { needs: "view", by: "owner", members: true, run: (ctx) => listProposals(ctx) },
+  "plugin.decide": {
+    needs: "manage",
+    by: "member",
+    members: true,
+    run: (ctx, op) => decideProposal(ctx, op.id, op.approve, (admin, request, pluginId) => (request.type === "plugin.install" ? installPlugin(admin, request, pluginId) : request.type === "plugin.permit" ? permitPlugin(admin, request) : uninstallPlugin(admin, request.id))),
+  },
   // A viewer asks too, so this needs no more than belonging to the workspace.
   "plugin.request": { needs: "view", by: "owner", members: true, changes: true, run: (ctx, op) => requestPlugin(ctx, op) },
   "plugin.scaffold": {
