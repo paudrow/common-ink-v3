@@ -219,7 +219,15 @@ export const Op = z.discriminatedUnion("type", [
    * `includeArchived: "only"` lists the archived notes and no live one.
    */
   z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived }),
-  z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles, mentionNames: MentionNames }),
+  z.object({
+    type: z.literal("note.create"),
+    text: NoteText.default(""),
+    folderId: Id.optional(),
+    linkTitles: LinkTitles,
+    mentionNames: MentionNames,
+    /** Chosen by the writer. A create sent again with the same id returns the note from the first time. */
+    writeId: z.string().min(1).max(64).optional(),
+  }),
   /** The note, and for each note its text links to by id, that note's title now. A note in Trash is read as any other, and its `state` says where it is. */
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
   z.object({
@@ -1709,6 +1717,15 @@ export interface Reference {
 export const MAX_AGENT_NAME = 60;
 export const DEFAULT_EXPIRY_DAYS = 90;
 export const MAX_EXPIRY_DAYS = 365;
+
+/** A member's live clipper sign-in, as Settings lists it. */
+export interface ClipperGrantView {
+  id: string;
+  extensionId: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+  expiresAt: number;
+}
 
 export interface Agent {
   id: string;

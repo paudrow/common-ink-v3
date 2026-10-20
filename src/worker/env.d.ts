@@ -16,6 +16,8 @@ interface InkSettings {
   EMBED_ORIGIN?: string;
   /** A site kept for opening files in a tab, such as https://files.commonink.example. Without one a PDF is downloaded. */
   FILE_ORIGIN?: string;
+  /** The Chrome extension ids the clipper may sign in from, separated by commas. Without one no clipper signs in. */
+  CLIPPER_EXTENSION_IDS?: string;
 }
 
 interface Env extends InkSettings {}

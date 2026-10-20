@@ -74,6 +74,10 @@ import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
 import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed } from "./todos.ts";
 
+/** The note an author already made with a write id, so a create sent again makes one note. Served by changes_by_author_write. */
+export const PRIOR_WRITE = `SELECT c.note_id AS id FROM changes c JOIN notes n ON n.id = c.note_id
+  WHERE c.write_id = ?1 AND c.revision = 1 AND c.base_revision = 0 AND n.workspace_id = ?2 AND c.author_kind = ?3 AND c.author_id = ?4`;
+
 /** Who is performing an operation, and where. */
 export type Actor =
   /** A signed-in person, in a workspace they are a member of or a guest in. */
@@ -1776,6 +1780,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.create": {
     needs: "edit",
     async run(ctx, op) {
+      if (op.writeId) {
+        const prior = await ctx.db
+          .prepare(PRIOR_WRITE)
+          .bind(op.writeId, ctx.workspaceId, ctx.author.kind, authorId(ctx))
+          .first<{ id: string }>();
+        if (prior) return linked(toNote(ctx, await loadNote(ctx, prior.id, "edit", "opens")), []);
+      }
       const folder = await loadFolder(ctx, op.folderId, "edit");
       const id = newId();
       const revision = op.text ? 1 : 0;
@@ -1787,7 +1798,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed);
-      await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text)), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
+      await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text), { writeId: op.writeId }), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
       return linked(toNote(ctx, row), unresolved);
     },
   },

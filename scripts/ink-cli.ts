@@ -58,8 +58,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   restore ID                          bring a note back from Trash, to the folder it was in
   trashed                             the notes in Trash, and when each is removed for good
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
-  create [--text TEXT] [--folder ID] [--link-titles resolve|resolve-strict|keep] [--mention-names keep]
-                                      a new note (text from stdin if --text is left out)
+  create [--text TEXT] [--folder ID] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep]
+                                      a new note (text from stdin if --text is left out). The same --write-id again returns the first note
   write ID --base N [--text TEXT] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--on DAY]
                                       replace a note's text (from stdin if --text is left out)
   edit ID --base N (--edits JSON | --from N --to N --text TEXT) [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--on DAY]
@@ -604,7 +604,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "create":
         tool = "create_note";
-        args = { text: flags.get("text") ?? (await io.stdin()), ...given({ folderId: ["folder"], linkTitles: ["link-titles"], mentionNames: ["mention-names"] }) };
+        args = { text: flags.get("text") ?? (await io.stdin()), ...given({ folderId: ["folder"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], writeId: ["write-id"] }) };
         break;
       case "write":
         if (!flags.has("base")) throw new UsageError("write needs --base, the revision you read");

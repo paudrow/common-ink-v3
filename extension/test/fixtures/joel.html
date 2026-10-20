@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="profile" href="http://gmpg.org/xfn/11">
+<link rel="pingback" href="https://www.joelonsoftware.com/xmlrpc.php">
+
+<title>Things You Should Never Do, Part I &#8211; Joel on Software</title>
+<meta name='robots' content='max-image-preview:large' />
+
+<link rel='dns-prefetch' href='//s0.wp.com' />
+<link rel='dns-prefetch' href='//fonts.googleapis.com' />
+<link rel='dns-prefetch' href='//v0.wordpress.com' />
+<link rel='preconnect' href='//i0.wp.com' />
+<link rel='preconnect' href='//c0.wp.com' />
+<link rel="alternate" type="application/rss+xml" title="Joel on Software &raquo; Feed" href="https://www.joelonsoftware.com/feed/" />
+<link rel="alternate" type="application/rss+xml" title="Joel on Software &raquo; Comments Feed" href="https://www.joelonsoftware.com/comments/feed/" />
+<link rel="alternate" title="oEmbed (JSON)" type="application/json+oembed" href="https://www.joelonsoftware.com/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.joelonsoftware.com%2F2000%2F04%2F06%2Fthings-you-should-never-do-part-i%2F" />
+<link rel="alternate" title="oEmbed (XML)" type="text/xml+oembed" href="https://www.joelonsoftware.com/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.joelonsoftware.com%2F2000%2F04%2F06%2Fthings-you-should-never-do-part-i%2F&#038;format=xml" />
+
+
+
+
+
+<link rel='stylesheet' id='cloudflare-stream-block-style-css-css' href='https://www.joelonsoftware.com/wp-content/plugins/cloudflare-stream/dist/blocks.style.build.css?ver=1671234854' media='all' />
+
+
+
+<link rel='stylesheet' id='editor-style-css' href='https://www.joelonsoftware.com/wp-content/themes/editor-redux/style.css?ver=7.1.3' media='all' />
+<link rel='stylesheet' id='editor-font-awesome-css-css' href='https://www.joelonsoftware.com/wp-content/themes/editor-redux/inc/fontawesome/font-awesome.css?ver=4.1.0' media='screen' />
+<link rel='stylesheet' id='editor-fonts-css' href='//fonts.googleapis.com/css?family=Source%20Sans%20Pro%3A400%2C600%2C700%2C400italic%2C600italic%2C700italic%7CRoboto%20Condensed%3A300%2C400%2C700%2C300italic%2C400italic%2C700italic&#038;subset=latin%2Clatin-ext' media='all' />
+
+
+<link rel="https://api.w.org/" href="https://www.joelonsoftware.com/wp-json/" /><link rel="alternate" title="JSON" type="application/json" href="https://www.joelonsoftware.com/wp-json/wp/v2/posts/923" /><link rel="EditURI" type="application/rsd+xml" title="RSD" href="https://www.joelonsoftware.com/xmlrpc.php?rsd" />
+
+<link rel="canonical" href="https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/" />
+<link rel='shortlink' href='https://wp.me/p83KNI-eT' />
+	
+	<meta name="description" content="Netscape 6.0 is finally going into its first public beta. There never was a version 5.0. The last major release, version 4.0, was released almost three years ago. Three years is an awfully long time in the Internet world. During this time, Netscape sat by, helplessly, as their market share plummeted. It&#039;s a bit smarmy&hellip;" />
+
+
+<meta property="og:type" content="article" />
+<meta property="og:title" content="Things You Should Never Do, Part I" />
+<meta property="og:url" content="https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/" />
+<meta property="og:description" content="Netscape 6.0 is finally going into its first public beta. There never was a version 5.0. The last major release, version 4.0, was released almost three years ago. Three years is an awfully long tim…" />
+<meta property="article:published_time" content="2000-04-06T00:15:24+00:00" />
+<meta property="article:modified_time" content="2016-12-05T19:28:06+00:00" />
+<meta property="og:site_name" content="Joel on Software" />
+<meta property="og:image" content="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/11969842.jpg?fit=400%2C400&#038;ssl=1" />
+<meta property="og:image:width" content="400" />
+<meta property="og:image:height" content="400" />
+<meta property="og:image:alt" content="" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:text:title" content="Things You Should Never Do, Part I" />
+<meta name="twitter:image" content="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/11969842.jpg?fit=240%2C240&amp;ssl=1" />
+<meta name="twitter:card" content="summary" />
+
+
+<link rel="icon" href="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/11969842.jpg?fit=32%2C32&#038;ssl=1" sizes="32x32" />
+<link rel="icon" href="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/11969842.jpg?fit=192%2C192&#038;ssl=1" sizes="192x192" />
+<link rel="apple-touch-icon" href="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/11969842.jpg?fit=180%2C180&#038;ssl=1" />
+<meta name="msapplication-TileImage" content="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/11969842.jpg?fit=270%2C270&#038;ssl=1" />
+
+</head>
+
+<body class="wp-singular post-template-default single single-post postid-923 single-format-standard wp-theme-editor-redux">
+
+
+<div id="page" class="hfeed site container">
+
+	<a class="skip-link screen-reader-text" href="#content">Skip to content</a>
+
+	
+		<header id="masthead" class="site-header light" role="banner">
+		
+		<ul class="toggle-bar" role="tablist">
+			
+			<li id="panel-1" class="current" role="presentation">
+				<a href="#tab-1" role="tab" aria-controls="tab-1" aria-selected="true" class="current nav-toggle" data-tab="tab-1"><i class="fa fa-bars"></i><span class="screen-reader-text">View menu</span></a>
+			</li>
+
+			
+			
+			
+			<li id="panel-3" role="presentation">
+				<a href="#tab-3" role="tab" aria-controls="tab-3" aria-selected="false" class="folder-toggle" data-tab="tab-3"><i class="fa fa-folder"></i><i class="fa fa-folder-open"></i><span class="screen-reader-text">View sidebar</span></a>
+			</li>
+		</ul>
+
+		<div id="tabs" class="toggle-tabs">
+			<div class="site-header-inside">
+				
+				<div id="tab-1" class="tab-content current fadeIn">
+					<div class="site-branding">
+						
+													<h1 class="site-title"><a href="https://www.joelonsoftware.com/" rel="home">Joel on Software</a></h1>
+							<h2 class="site-description"></h2>
+											</div>
+
+					<nav id="site-navigation" class="main-navigation" role="navigation">
+											</nav>
+
+					
+					<div id="front-widgets" class="widget-area" role="complementary">
+
+	<aside id="text-3" class="widget widget_text"><h2 class="widget-title">Your host</h2>			<div class="textwidget"><a href="https://www.joelonsoftware.com/about-me/"><img data-recalc-dims="1" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/Pong.png?w=730&#038;ssl=1" notsrc="https://www.joelonsoftware.com/wp-content/uploads/2016/12/11969842-1.jpg" /></a><p>I’m Joel Spolsky, a software developer in New York City. <a href="https://www.joelonsoftware.com/about-me/">More about me</a>.</p>
+</div>
+		</aside>
+</div>
+
+				</div>
+
+				
+				
+				
+				<div id="tab-3" class="tab-content animated fadeIn" role="tabpanel" aria-labelledby="panel-3" aria-hidden="true">
+					<div id="secondary" class="widget-area" role="complementary">
+
+	<aside id="search-3" class="widget widget_search">
+<form role="search" method="get" class="search-form" action="https://www.joelonsoftware.com/search-results/" id="cse-search-box">
+	<div>
+		<input type="hidden" name="cx" value="004631902266951669168:g9jvyociwrg" />
+		<input type="hidden" name="ie" value="UTF-8" />
+	</div>
+	<input type="search" class="search-field" placeholder="Search &hellip;" value="" name="q" title="Search for:" />
+	</label>
+	<input type="submit" class="search-submit" name="sa"><span class="screen-reader-text">Search</span></button>
+</form>
+</aside><aside id="text-2" class="widget widget_text">			<div class="textwidget"><img data-recalc-dims="1" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/newdesign-books.png?w=730&#038;ssl=1" style="float: left; margin-right: 15px;" />Read the archives in dead-tree format! Many of these articles have been collected into <a href="https://www.joelonsoftware.com/buy-the-books/">four books</a>, available at your favorite bookstore. It’s an excellent way to read the site in the bath, or throw it at your boss.</div>
+		</aside><aside id="text-4" class="widget widget_text"><h2 class="widget-title">Careers</h2>			<div class="textwidget"><p><img data-recalc-dims="1" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/jobs.jpg?w=730&#038;ssl=1" /></p>
+<p>Ready to level up? <a href="http://stackoverflow.com/jobs">Stack Overflow Jobs</a> is the job site that puts the needs of developers first. Whether you want to take control of your search or <a href="http://stackoverflow.com/jobs/why-jobs">let employers discover you</a>, we’re on a mission to help every developer find a job they love.</p>
+<p>Looking to hire smart programmers who get things done? <a href="https://www.stackoverflowbusiness.com/talent">Stack Overflow Talent</a> is a fully-customized sourcing solution that helps you understand, reach, and attract developers on the platform they trust most. Find the right candidates for your jobs. <a href="https://www.stackoverflowbusiness.com/talent/request-a-demo?utm_source=joelonsoftware&utm_medium=referral&utm_term=learn-more">Learn more.</a></p>
+</div>
+		</aside><aside id="text-6" class="widget widget_text">			<div class="textwidget"><p><a href="http://stackoverflow.com"><img data-recalc-dims="1" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/so-logo.png?w=730&#038;ssl=1" /></a></p>
+<p>For my day job, I'm the co-founder and CEO of <a href="http://stackoverflow.com">Stack Overflow</a>, the largest online community for programmers to learn, share their knowledge, and level up. Each month, more than 40 million professional and aspiring programmers visit Stack Overflow to ask and answer questions and find better jobs. Stack Overflow is also the flagship site of the <a href="http://stackexchange.com">Stack Exchange network</a>, 160+ question and answer sites dedicated to all kinds of topics from cooking to gaming. According to Quantcast, Stack Overflow is the 30th largest web property in the United States and in the top 100 in the world.<br />
+<a href="https://stackoverflow.com/users/story/4"><br />
+<img data-recalc-dims="1" src="https://i0.wp.com/stackexchange.com/users/flair/4.png?resize=208%2C58&#038;ssl=1" width="208" height="58" alt="profile for Joel Spolsky on Stack Exchange, a network of free, community-driven Q&amp;A sites" title="profile for Joel Spolsky on Stack Exchange, a network of free, community-driven Q&amp;A sites"><br />
+</a></p>
+</div>
+		</aside><aside id="text-7" class="widget widget_text">			<div class="textwidget"><p><a href="http://fogcreek.com/"><img data-recalc-dims="1" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2016/12/fc-logo.png?w=730&#038;ssl=1" /></a><br />
+I also founded <a href="http://fogcreek.com/">Fog Creek Software</a>, one of the most influential small tech companies in the world. As an independent, privately-owned company, we’ve been making customers happy since the turn of the century. We share what we've learned about how to make great software, both by writing about our ideas and by creating products, like <a href="http://www.fogcreek.com/fogbugz">FogBugz</a>, <a href="http://trello.com">Trello</a> and <a href="https://gomix.com/">Gomix</a>, that help others make great technology. As a result, Fog Creek's impact on the world of developers rivals companies a thousand times our size.</p>
+</div>
+		</aside><aside id="twitter_timeline-4" class="widget widget_twitter_timeline"><h2 class="widget-title">Twitter! Twitter!</h2><a class="twitter-timeline" data-height="400" data-theme="light" data-border-color="#e8e8e8" data-tweet-limit="1" data-lang="EN" data-partner="jetpack" data-chrome="noheader nofooter noborders" href="https://twitter.com/spolsky" href="https://twitter.com/spolsky">My Tweets</a></aside>
+</div>
+				</div>
+			</div>
+		</div>
+	</header>
+	<div id="content" class="site-content fadeInFast">
+
+	<div id="primary" class="content-area">
+		<main id="main" class="site-main" role="main">
+
+		
+			
+<article id="post-923" class="post post-923 type-post status-publish format-standard hentry category-top-10 category-ceo category-news">
+	
+	
+	<header class="entry-header">
+				<div class="entry-date">
+			<span class="posted-on"><a href="https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/" rel="bookmark"><time class="entry-date published" datetime="2000-04-06T00:15:24+00:00">April 6, 2000</time><time class="updated" datetime="2016-12-05T19:28:06+00:00">December 5, 2016</time></a></span><span class="byline"> by </span> <span class="author vcard"><a class="url fn n" href="https://www.joelonsoftware.com/author/joelonsoftware/">Joel Spolsky</a></span>		</div>
+		
+		<h1 class="entry-title">Things You Should Never Do, Part I</h1>	</header>
+
+	
+<div class="entry-meta">
+
+	<ul class="meta-list">
+					<li class="meta-cat"><a href="https://www.joelonsoftware.com/category/reading-lists/top-10/" rel="category tag">Top 10</a>, <a href="https://www.joelonsoftware.com/category/reading-lists/ceo/" rel="category tag">CEO</a>, <a href="https://www.joelonsoftware.com/category/news/" rel="category tag">News</a></li>
+									</ul>
+</div>
+
+	<div class="entry-content">
+		<p>Netscape 6.0 is finally going into its first public beta. There never was a version 5.0. The last major release, version 4.0, was released almost three years ago. Three years is an <i>awfully</i> long time in the Internet world. During this time, Netscape sat by, helplessly, as their market share plummeted.</p>
+<p>It&#8217;s a bit smarmy of me to criticize them for waiting so long between releases. They didn&#8217;t do it <i>on purpose</i>, now, did they?</p>
+<p>Well, yes. They did. They did it by making the <b>single worst strategic mistake</b> that any software company can make:</p>
+<p><img data-recalc-dims="1" decoding="async" hspace="4" align="right" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2000/04/Upper_West_Side_Brownstones_2.jpg?w=730&#038;ssl=1" />They decided to rewrite the code from scratch.</p>
+<p>Netscape wasn&#8217;t the first company to make this mistake. Borland made the same mistake when they bought Arago and tried to make it into dBase for Windows, a doomed project that took so long that Microsoft Access ate their lunch, then they made it again in rewriting Quattro Pro from scratch and astonishing people with how few features it had. Microsoft almost made the same mistake, trying to rewrite Word for Windows from scratch in a doomed project called Pyramid which was shut down, thrown away, and swept under the rug. Lucky for Microsoft, they had never stopped working on the old code base, so they had something to ship, making it merely a financial disaster, not a strategic one.</p>
+<p>We&#8217;re programmers. Programmers are, in their hearts, architects, and the first thing they want to do when they get to a site is to bulldoze the place flat and build something grand. We&#8217;re not excited by incremental renovation: tinkering, improving, planting flower beds.</p>
+<p>There&#8217;s a subtle reason that programmers always want to throw away the code and start over. The reason is that they think the old code is a mess. And here is the interesting observation: <i>they are probably wrong.</i> The reason that they think the old code is a mess is because of a cardinal, fundamental law of programming:</p>
+<p style="TEXT-ALIGN: center; FONT-SIZE: 120%; FONT-WEIGHT: bold">It’s harder to read code than to write it.</p>
+<p>This is why code reuse is so hard. This is why everybody on your team has a different function they like to use for splitting strings into arrays of strings. They write their own function because it&#8217;s easier and more fun than figuring out how the old function works.</p>
+<p><img data-recalc-dims="1" decoding="async" hspace="4" align="left" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2000/04/Columbus_Ave_Barber_Shop.jpg?w=730&#038;ssl=1" />As a corollary of this axiom, you can ask almost any programmer today about the code they are working on. &#8220;It&#8217;s a big hairy mess,&#8221; they will tell you. &#8220;I&#8217;d like nothing better than to throw it out and start over.&#8221;</p>
+<p>Why is it a mess?</p>
+<p>&#8220;Well,&#8221; they say, &#8220;look at this function. It is two pages long! None of this stuff belongs in there! I don&#8217;t know what half of these API calls are for.&#8221; </p>
+<p>Before Borland&#8217;s new spreadsheet for Windows shipped, Philippe Kahn, the colorful founder of Borland, was quoted a lot in the press bragging about how Quattro Pro would be much better than Microsoft Excel, because it was written from scratch. All new source code! As if source code <i>rusted</i>.</p>
+<p><p>The idea that new code is better than old is patently absurd. Old code has been <i>used</i>. It has been <i>tested</i>. <i>Lots</i> of bugs have been found, and they&#8217;ve been <i>fixed</i>. There&#8217;s nothing wrong with it. It doesn&#8217;t acquire bugs just by sitting around on your hard drive. Au contraire, baby! Is software supposed to be like an old Dodge Dart, that rusts just sitting in the garage? Is software like a teddy bear that&#8217;s kind of gross if it&#8217;s not made out of <i>all new material</i>?</p>
+<p><p>Back to that two page function. Yes, I know, it&#8217;s just a simple function to display a window, but it has grown little hairs and stuff on it and nobody knows why. Well, I&#8217;ll tell you why: those are bug fixes. One of them fixes that bug that Nancy had when she tried to install the thing on a computer that didn&#8217;t have Internet Explorer. Another one fixes that bug that occurs in low memory conditions. Another one fixes that bug that occurred when the file is on a floppy disk and the user yanks out the disk in the middle. That LoadLibrary call is ugly but it makes the code work on old versions of Windows 95.</p>
+<p>Each of these bugs took weeks of real-world usage before they were found. The programmer might have spent a couple of days reproducing the bug in the lab and fixing it. If it&#8217;s like a lot of bugs, the fix might be one line of code, or it might even be a couple of characters, but a lot of work and time went into those two characters.</p>
+<p>When you throw away code and start from scratch, you are throwing away all that knowledge. All those collected bug fixes. Years of programming work.</p>
+<p>You are throwing away your market leadership. You are giving a gift of two or three years to your competitors, and believe me, that is a <i>long</i> time in software years.</p>
+<p>You are putting yourself in an extremely dangerous position where you will be shipping an old version of the code for several years, completely unable to make any strategic changes or react to new features that the market demands, because you don&#8217;t have shippable code. You might as well just close for business for the duration.</p>
+<p>You are wasting an outlandish amount of money writing code that already exists.</p>
+<p><img data-recalc-dims="1" decoding="async" align="center" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2000/04/Columbus_Ave.jpg?w=730&#038;ssl=1" /></p>
+<p>Is there an alternative? The consensus seems to be that the old Netscape code base was <i>really </i>bad. Well, it might have been bad, but, you know what? It worked pretty darn well on an awful lot of real world computer systems.</p>
+<p>When programmers say that their code is a holy mess (as they always do), there are three kinds of things that are wrong with it.</p>
+<p>First, there are architectural problems. The code is not factored correctly. The networking code is popping up its own dialog boxes from the middle of nowhere; this should have been handled in the UI code. These problems can be solved, one at a time, by carefully moving code, refactoring, changing interfaces. They can be done by one programmer working carefully and checking in his changes all at once, so that nobody else is disrupted. Even fairly major architectural changes can be done without <i>throwing away the code</i>. On the Juno project we spent several months rearchitecting at one point: just moving things around, cleaning them up, creating base classes that made sense, and creating sharp interfaces between the modules. But we did it carefully, with our existing code base, and we didn&#8217;t introduce new bugs or throw away working code.</p>
+<p>A second reason programmers think that their code is a mess is that it is inefficient. The rendering code in Netscape was rumored to be slow. But this only affects a small part of the project, which you can optimize or even rewrite. You don&#8217;t have to rewrite the whole thing. When optimizing for speed, 1% of the work gets you 99% of the bang.</p>
+<p>Third, the code may be doggone ugly. One project I worked on actually had a data type called a FuckedString. Another project had started out using the convention of starting member variables with an underscore, but later switched to the more standard &#8220;m_&#8221;. So half the functions started with &#8220;_&#8221; and half with &#8220;m_&#8221;, which looked ugly. Frankly, this is the kind of thing you solve in five minutes with a macro in Emacs, not by starting from scratch.</p>
+<p>It&#8217;s important to remember that when you start from scratch there is <b>absolutely no reason</b> to believe that you are going to do a better job than you did the first time. First of all, you probably don&#8217;t even have the same programming team that worked on version one, so you don&#8217;t actually have &#8220;more experience&#8221;. You&#8217;re just going to make most of the old mistakes again, and introduce some new problems that weren&#8217;t in the original version. </p>
+<p><img data-recalc-dims="1" decoding="async" hspace="4" align="left" src="https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2008/01/Lincoln_Center_Trees.jpg?w=730&#038;ssl=1" />The old mantra <i>build one to throw away</i> is dangerous when applied to large scale commercial applications. If you are writing code experimentally, you may want to rip up the function you wrote last week when you think of a better algorithm. That&#8217;s fine. You may want to refactor a class to make it easier to use. That&#8217;s fine, too. But throwing away the whole program is a dangerous folly, and if Netscape actually had some adult supervision with software industry experience, they might not have shot themselves in the foot so badly.</p>
+			</div>
+
+</article>
+
+
+
+	<div id="post-footer-widgets" class="widget-area" role="complementary">
+
+	<aside id="text-8" class="widget widget_text"><h2 class="widget-title">Subscribe!</h2>			<div class="textwidget"><p>You&#8217;re reading <a href="https://www.joelonsoftware.com/">Joel on Software</a>, stuffed with years and years of completely raving mad articles about software development, managing software teams, designing user interfaces, running successful software companies, and rubber duckies.</p>
+<p>If you want to know when I publish something new, I recommend getting an RSS reader like <a href="https://newsblur.com/">NewsBlur</a> and subscribing to my <a href="https://www.joelonsoftware.com/feed/">RSS feed</a>.</p>
+</div>
+		</aside>
+</div>
+
+<div class="author-info">
+	<div class="author-avatar">
+		<img alt='' src='https://secure.gravatar.com/avatar/4f742758d6ff8a422a0d154b351751a90a10542fda27afe910c1e16cb3779bf4?s=64&#038;d=mm&#038;r=pg' srcset='https://secure.gravatar.com/avatar/4f742758d6ff8a422a0d154b351751a90a10542fda27afe910c1e16cb3779bf4?s=128&#038;d=mm&#038;r=pg 2x' class='avatar avatar-64 photo' height='64' width='64' decoding='async'/>	</div>
+
+	<div class="author-description">
+		<h2 class="author-title"><span class="author-heading">About the author.</span></h2>
+
+		<p class="author-bio">
+			In 2000 I co-founded Fog Creek Software, where we created lots of cool things like the FogBugz bug tracker, Trello, and Glitch. I also worked with Jeff Atwood to create Stack Overflow and served as CEO of Stack Overflow from 2010-2019.
+
+Today I serve as the chairman of the board for <a href="https://stackoverflow.com/">Stack Overflow</a>, <a href="https://glitch.com/">Glitch</a>, and <a href="https://hash.ai/">HASH</a>.		</p>
+	</div>
+</div>
+
+				<nav class="navigation post-navigation" role="navigation">
+		<h1 class="screen-reader-text">Post navigation</h1>
+		<div class="nav-links">
+			<div class="nav-previous"><a href="https://www.joelonsoftware.com/2000/04/06/20000406/" rel="prev"><span class="meta-nav">&larr; Previous Post</span> 2000/04/06</a></div><div class="nav-next"><a href="https://www.joelonsoftware.com/2000/04/10/20000410/" rel="next"><span class="meta-nav">Next Post &rarr;</span> 2000/04/10</a></div>		</div>
+	</nav>
+		
+			
+		
+		</main>
+	</div>
+
+	</div>
+
+	<footer id="colophon" class="site-footer" role="contentinfo">
+		<div class="site-info">
+			<a class="powered-by" href="https://wordpress.org/">
+				Proudly powered by WordPress			</a>
+		</div>
+	</footer>
+</div>
+
+
+				<meta
+					id="bilmur"
+					property="bilmur:data"
+					content=""
+					data-provider="wp.cloud"
+					data-service="pressable.com"
+					data-custom-props="{&quot;wpcomsp&quot;:&quot;1&quot;,&quot;woo_active&quot;:&quot;0&quot;}"
+					data-site-tz="Etc/GMT-0"
+					data-site-v="d3093b300f5a706eb1e3d23bf351a1e8"
+				>
+					<div style="display:none">
+			<div class="grofile-hash-map-e215aff4c20f1e1759f0b74a2703f04d">
+		</div>
+		</div>
+		
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+		
+		
+</body>
+</html>
+

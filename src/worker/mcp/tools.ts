@@ -1,6 +1,6 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { timeIn } from "../../core/history.ts";
-import { agentActor, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
+import { PRIOR_WRITE, agentActor, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
 import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
 import { CAPABILITY_NAMES } from "../../core/plugins.ts";
 import { MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
@@ -9,6 +9,7 @@ import { ASK_NOTE_SYNTAX, syntaxDescription, syntaxText as noteSyntaxText } from
 import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
+import { CLIPPER_TOOLS } from "../../core/clipper.ts";
 import type { Sources } from "../../core/sources.ts";
 
 /** What a tool call comes back with: text for the agent, and whether it failed. */
@@ -282,8 +283,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "create_note",
-    description: `${ASK_NOTE_SYNTAX} Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} ${MENTIONS} ${TODOS} Needs the editor or admin role.`,
-    inputSchema: object({ text: { type: "string", description: "The note's markdown" }, folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"), linkTitles, mentionNames }),
+    description: `${ASK_NOTE_SYNTAX} Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. Send the same writeId again after a failed call and the note is created once. ${LINKS} ${MENTIONS} ${TODOS} Needs the editor or admin role.`,
+    inputSchema: object({
+      text: { type: "string", description: "The note's markdown" },
+      folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"),
+      linkTitles,
+      mentionNames,
+      writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry return the note from the first call" },
+    }),
     op: "note.create",
     example: { text: "# Plan\n\nSee [[Budget]].", folderId: FOLDER },
   },
@@ -1078,9 +1085,17 @@ The arguments beside query are from before it could say them, and narrow it furt
   },
 ];
 
+const MAX_WRITE_ID = 64;
+const CLIPPER_WRITE = "clipper:";
+
+/** Who calls a tool: an agent, or the clipper as its member, which reaches only `CLIPPER_TOOLS`. */
+export type Caller = ConnectedAgent & { clipper?: true };
+
+const reaches = (caller: Caller | undefined, name: string) => !caller?.clipper || CLIPPER_TOOLS.has(name);
+
 /** A tool as an agent is shown it: its description ends with its example, and its schema still takes each argument's old name. */
-export const toolList = () =>
-  TOOLS.map((tool) => {
+export const toolList = (caller?: Caller) =>
+  TOOLS.filter((tool) => reaches(caller, tool.name)).map((tool) => {
     const schema = tool.inputSchema as { properties: Record<string, Record<string, unknown>> };
     const old = Object.entries(oldNames(tool)).map(([was, name]) => [was, { ...schema.properties[name], deprecated: true, description: `The old name of ${name}, still taken. Use ${name}` }]);
     return {
@@ -1158,9 +1173,10 @@ function fromBase64(given: unknown): Uint8Array | null {
 }
 
 /** Runs a tool as `agent`. Failures the agent can act on come back as an error result, not a protocol error. */
-export async function callTool(db: D1Database, agent: ConnectedAgent, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null }): Promise<ToolResult | null> {
+export async function callTool(db: D1Database, agent: Caller, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null }): Promise<ToolResult | null> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return null;
+  if (!reaches(agent, name)) return text(`forbidden: The clipper can only list workspaces and folders and create notes. ${name} is for agents`, true);
   try {
     const { workspaceId: workspace, fields } = opArguments(tool, args);
     if (name === "note_syntax") return text(noteSyntaxText());
@@ -1177,7 +1193,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
-    const actor = agentActor(agent, workspaceId);
+    const actor: Actor = agent.clipper ? { kind: "member", personId: agent.personId, workspaceId } : agentActor(agent, workspaceId);
     const written = async (answer: unknown) => text(withTimes(answer, timeIn((await timeZoneOf(db, workspaceId, agent.personId)) ?? "UTC"), tool.times ? new Set([...TIME_KEYS, ...tool.times]) : TIME_KEYS));
     if (name === "upload_file") {
       const { name: fileName, base64, folderId } = fields;
@@ -1186,6 +1202,13 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (bytes.byteLength > MAX_INLINE_UPLOAD_BYTES) throw new OpError("invalid", `upload_file takes at most ${MAX_INLINE_UPLOAD_BYTES / 1024 / 1024} MB. Send a larger file with start_upload`);
       const upload = await perform(db, actor, { type: "upload.create", name: fileName as string, size: bytes.byteLength, ...(folderId === undefined ? {} : { folderId: folderId as string }) }, Date.now(), sources, { bucket: reached.bucket, body: new Response(bytes).body });
       return written(withLine(upload));
+    }
+    if (agent.clipper && name === "create_note" && typeof fields.writeId === "string") {
+      // The clipper writes as its member, so its write ids are its own, and a replay finds only a note it made. It can't read notes, so it is told the id alone.
+      if (fields.writeId.length > MAX_WRITE_ID - CLIPPER_WRITE.length) throw new OpError("invalid", `The clipper's writeId is at most ${MAX_WRITE_ID - CLIPPER_WRITE.length} characters`);
+      fields.writeId = CLIPPER_WRITE + fields.writeId;
+      const prior = await db.prepare(PRIOR_WRITE).bind(fields.writeId, workspaceId, "member", agent.personId).first<{ id: string }>();
+      if (prior) return text({ id: prior.id });
     }
     const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
     return written(tool.told ? tool.told(answer as never, reached.origin) : answer);

@@ -7,6 +7,7 @@ import { sweep } from "../core/oauth.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
+import { handleClipper, handleClipperApi } from "./clipper.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
 import { handleOAuth } from "./oauth.ts";
@@ -134,12 +135,14 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   if (fileSite) return fileSite;
   if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
   if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
+  if (url.pathname === "/clipper/connect" || url.pathname === "/clipper/revoke") return handleClipper(req, env, url);
   if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
   if (url.pathname.startsWith("/oauth/") || url.pathname.startsWith("/.well-known/oauth-")) {
     return answered(url.pathname, () => handleOAuth(req, env, url), () => json({ error: "server_error", error_description: BROKE }, 500));
   }
   const broke = () => json({ error: "unknown", message: BROKE }, 500);
   if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(url.pathname, () => handleAgentsApi(req, env, url), broke);
+  if (url.pathname === "/api/clipper" || url.pathname.startsWith("/api/clipper/")) return answered(url.pathname, () => handleClipperApi(req, env, url), broke);
   if (url.pathname === "/api/oauth/request" || url.pathname === "/api/oauth/consent" || url.pathname === "/api/oauth/deny") return answered(url.pathname, () => handleOAuthConsent(req, env, url), broke);
   if (url.pathname.startsWith("/api/")) return answered(url.pathname, () => handleApi(req, env, url), broke);
   return SHARED_PAGE.test(url.pathname) ? env.ASSETS.fetch(req).then(unlistedPage) : env.ASSETS.fetch(req);

@@ -93,18 +93,43 @@ const post = (heights: Heights): AddressEmbed => ({
       // A post says how tall it is once it is drawn. One that never says is shown a while after its page has loaded.
       const shown = arriving(into, frame);
       let late: ReturnType<typeof setTimeout> | undefined;
+      let giveUp: ReturnType<typeof setTimeout> | undefined;
       let waiting = true;
       const arrived = () => {
+        if (!waiting) return;
         waiting = false;
         clearTimeout(late);
+        clearTimeout(giveUp);
         shown.arrived();
       };
-      frame.addEventListener("load", () => {
+      // A frame that never loads would otherwise hold the gray placeholder for good. The post is still a link.
+      const failed = () => {
+        if (!waiting) return;
+        waiting = false;
         clearTimeout(late);
-        if (waiting) late = setTimeout(arrived, SAYS_NOTHING);
+        clearTimeout(giveUp);
+        frame.remove();
+        shown.arrived();
+        const link = into.appendChild(el("a", "media-post-link", config));
+        link.href = config;
+        link.target = "_blank";
+        link.rel = "noreferrer noopener";
+        resize(LINK_HEIGHT);
+      };
+      const arm = () => {
+        clearTimeout(giveUp);
+        giveUp = setTimeout(failed, GIVES_UP);
+      };
+      frame.addEventListener("load", () => {
+        if (!waiting) return;
+        clearTimeout(late);
+        clearTimeout(giveUp);
+        late = setTimeout(arrived, SAYS_NOTHING);
       });
+      frame.addEventListener("error", failed);
+      arm();
       const said = (event: MessageEvent) => {
-        if (event.source !== frame.contentWindow || event.origin !== found.origin) return;
+        if (!frame.isConnected || event.source !== frame.contentWindow || event.origin !== found.origin) return;
         const height = found.tall(event.data);
         if (height === null) return;
         heights.remember(found.key, height);
@@ -115,11 +140,15 @@ const post = (heights: Heights): AddressEmbed => ({
       const themed = onTheme((theme) => {
         clearTimeout(late);
         waiting = true;
+        into.querySelector(".media-post-link")?.remove();
+        if (!frame.isConnected) into.append(frame);
         shown.again();
         frame.src = found.frame(theme);
+        arm();
       });
       return () => {
         clearTimeout(late);
+        clearTimeout(giveUp);
         removeEventListener("message", said);
         themed();
       };
@@ -129,6 +158,12 @@ const post = (heights: Heights): AddressEmbed => ({
 
 /** How long after its page has loaded a post that hasn't said how tall it is is shown anyway, in milliseconds. */
 const SAYS_NOTHING = 2500;
+
+/** How long a frame is given to load before the room shows a link to the post instead, in milliseconds. */
+const GIVES_UP = 8000;
+
+/** How tall the room is once it holds that link, in pixels. */
+const LINK_HEIGHT = 48;
 
 interface Heights {
   of(post: string): number | undefined;

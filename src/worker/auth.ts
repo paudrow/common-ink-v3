@@ -25,9 +25,16 @@ const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
  * that was ended, by its person signing out everywhere or by an admin, is nobody's, there too.
  */
 export async function sessionPersonId(req: Request, env: Env, url: URL): Promise<string | null> {
+  return (await sessionOf(req, env, url))?.personId ?? null;
+}
+
+/** The session a request is from, with how many times its person had been signed out everywhere when it began. */
+export async function sessionOf(req: Request, env: Env, url: URL): Promise<{ personId: string; ended: number } | null> {
   const data = env.SESSION_SECRET ? await verify<{ personId?: string; ended?: number }>(cookie(req, SESSION_COOKIE), env.SESSION_SECRET) : null;
-  if (typeof data?.personId === "string") return (await sessionHolds(env.DB, data.personId, data.ended ?? 0)) ? data.personId : null;
-  return devSignIn(env, url) ? (await signIn(env.DB, DEV_USER)).personId : null;
+  if (typeof data?.personId === "string") return (await sessionHolds(env.DB, data.personId, data.ended ?? 0)) ? { personId: data.personId, ended: data.ended ?? 0 } : null;
+  if (!devSignIn(env, url)) return null;
+  const dev = await signIn(env.DB, DEV_USER);
+  return { personId: dev.personId, ended: dev.sessionsEnded };
 }
 
 const allowedEmails = (value: string | undefined) => new Set((value ?? "").split(/[\s,]+/).map((e) => e.trim().toLowerCase()).filter(Boolean));

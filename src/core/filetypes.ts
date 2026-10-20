@@ -78,6 +78,7 @@ const classOf = (known: Known): FileClass => (known.type === PDF ? "pdf" : known
 
 /** Every type a file is served as other than {@link BYTES}. */
 export const KNOWN_TYPES: readonly string[] = KNOWN.map((known) => known.type);
+export const IMAGE_ENDINGS: readonly string[] = [...new Set(KNOWN.flatMap((known) => (known.kind === "image" ? known.endings : [])))];
 /** The types served as a class of file. A file of no known type is text or other by its name's ending. */
 export const typesOf = (cls: FileClass): string[] => KNOWN.filter((known) => classOf(known) === cls).map((known) => known.type);
 

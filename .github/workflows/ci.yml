@@ -31,6 +31,12 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm run check
+      - run: npm run extension:build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: extension-dist
+          path: extension/dist
+          if-no-files-found: error
 
   # Every PR gets a Preview at https://pr-<number>-common-ink-v3.draftox.workers.dev with its own D1
   # database, open without a login, linked from one comment that each push updates.

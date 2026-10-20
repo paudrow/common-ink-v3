@@ -1,0 +1,110 @@
+[
+  {
+    "id": "guardian",
+    "category": "news",
+    "url": "https://www.theguardian.com/technology/2014/feb/18/doge-such-questions-very-answered",
+    "title": "What is Doge? | Internet | The Guardian"
+  },
+  {
+    "id": "bbc",
+    "category": "news",
+    "url": "https://www.bbc.com/news/articles/c3eweygrjzd7o",
+    "title": "Oil facilities hit in deadly overnight attack on St Petersburg"
+  },
+  {
+    "id": "newyorker",
+    "category": "paywall",
+    "url": "https://www.newyorker.com/magazine/2026/10/19/the-first-candid",
+    "title": "The First Candid | The New Yorker"
+  },
+  {
+    "id": "fox",
+    "category": "ads",
+    "url": "https://www.foxnews.com/politics/minnesota-senate-race-takes-bizarre-turn-dark-family-history-uncovered",
+    "title": "Peggy Flanagan's grandfather escaped psychiatric custody twice: report | Fox News"
+  },
+  {
+    "id": "verge",
+    "category": "ads",
+    "url": "https://www.theverge.com/column/1008432/horror-popular-widows-bay-resident-evil",
+    "title": "Horror is big business | The Verge"
+  },
+  {
+    "id": "substack",
+    "category": "substack",
+    "url": "https://www.astralcodexten.com/p/meetups-everywhere-2026-times-and",
+    "title": "Meetups Everywhere 2026: Times & Places - by Skyler"
+  },
+  {
+    "id": "medium",
+    "category": "medium",
+    "url": "https://medium.com/@ev/welcome-to-medium-9e53ca408c48",
+    "title": "Medium"
+  },
+  {
+    "id": "mdn",
+    "category": "docs",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/article",
+    "title": "<article> HTML article contents element - HTML | MDN"
+  },
+  {
+    "id": "python",
+    "category": "docs",
+    "url": "https://docs.python.org/3/tutorial/appetite.html",
+    "title": "1. Whetting Your Appetite — Python 3.15.0 documentation"
+  },
+  {
+    "id": "github",
+    "category": "github",
+    "url": "https://github.com/microsoft/TypeScript",
+    "title": "GitHub - microsoft/TypeScript: TypeScript is a superset of JavaScript that compiles to clean JavaScript output. · GitHub"
+  },
+  {
+    "id": "wikipedia",
+    "category": "wikipedia",
+    "url": "https://en.wikipedia.org/wiki/Markdown",
+    "title": "Markdown - Wikipedia"
+  },
+  {
+    "id": "recipe",
+    "category": "recipe",
+    "url": "https://www.bbcgoodfood.com/recipes/air-fryer-salmon",
+    "title": "Air fryer salmon recipe | Good Food"
+  },
+  {
+    "id": "youtube",
+    "category": "youtube",
+    "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+    "title": "Me at the zoo - YouTube"
+  },
+  {
+    "id": "tweet",
+    "category": "tweet",
+    "url": "https://x.com/jack/status/20",
+    "title": "jack on X: \"just setting up my twttr\" / X"
+  },
+  {
+    "id": "graham",
+    "category": "blog",
+    "url": "https://paulgraham.com/avg.html",
+    "title": "Beating the Averages"
+  },
+  {
+    "id": "joel",
+    "category": "blog",
+    "url": "https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/",
+    "title": "Things You Should Never Do, Part I – Joel on Software"
+  },
+  {
+    "id": "reddit-old",
+    "category": "reddit",
+    "url": "https://old.reddit.com/r/announcements/comments/5e1i7w/a_new_look_for_the_test_post/",
+    "title": "A new look for the test post : announcements"
+  },
+  {
+    "id": "reddit-new",
+    "category": "reddit",
+    "url": "https://www.reddit.com/r/announcements/comments/shreddit/shreddit_sample/",
+    "title": "Shreddit sample : r/announcements"
+  }
+]

@@ -1,5 +1,6 @@
 // The built app as a deploy runs it, on this machine: the Worker from wrangler.jsonc serving dist/,
-// with its own local D1 and R2 under --state, migrated first, and dev sign-in on as on a Preview. CI's
+// with its own local D1 and R2 under --state, migrated first, dev sign-in on as on a Preview, and the
+// unpacked clipper's id allowed to sign in, as the dev server allows it. CI's
 // browser tests run against it, one on each runner, so no test waits on a server another part shares.
 //
 //   npm run build && node scripts/built-worker.ts [--port 8787] [--state .wrangler/built]
@@ -9,6 +10,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
+import { unpackedExtensionId } from "./extension-id.ts";
 
 const { values } = parseArgs({ options: { port: { type: "string", default: "8787" }, state: { type: "string", default: ".wrangler/built" } } });
 const state = values.state!;
@@ -28,6 +30,8 @@ spawn(
     "DEV_SIGN_IN:1",
     "--var",
     `SESSION_SECRET:${randomBytes(32).toString("hex")}`,
+    "--var",
+    `CLIPPER_EXTENSION_IDS:${unpackedExtensionId()}`,
     "--show-interactive-dev-session=false",
   ],
   { stdio: "inherit" },

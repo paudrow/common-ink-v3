@@ -1,0 +1,107 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf8;
+  --bg-elev: #ffffff;
+  --ink: #1f1e1c;
+  --muted: #6f6b66;
+  --line: #e7e4df;
+  --accent: #5b5bd6;
+  --on-accent: #ffffff;
+  --accent-soft: rgb(91 91 214 / 0.12);
+  --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  font: 14px/1.45 var(--prose);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171716;
+    --bg-elev: #1f1f1d;
+    --ink: #e8e6e3;
+    --muted: #a8a39b;
+    --line: #2e2d2b;
+    --accent: #8f8ff0;
+    --accent-soft: rgb(143 143 240 / 0.18);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  width: 360px;
+  background: var(--bg);
+}
+
+main { padding: 16px 16px 18px; }
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+p { margin: 0 0 10px; }
+
+.muted { color: var(--muted); font-size: 13px; }
+
+label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+input, select, button, summary { font: inherit; color: inherit; }
+
+input, select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+
+select { cursor: pointer; }
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+
+button.quiet {
+  background: transparent;
+  color: var(--accent);
+}
+
+button:disabled { opacity: 0.5; cursor: default; }
+
+.row { display: flex; gap: 8px; margin-top: 14px; }
+.row button { flex: 1; }
+
+.notice {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+a { color: var(--accent); }
+
+.excerpt {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  max-height: 3.2em;
+  overflow: hidden;
+}
+
+.paste { margin-top: 14px; color: var(--muted); font-size: 13px; }
+.paste summary { cursor: pointer; }
+.paste button { margin-top: 0; }

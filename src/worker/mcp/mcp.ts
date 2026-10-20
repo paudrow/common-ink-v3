@@ -1,13 +1,14 @@
 // The MCP endpoint, https://<host>/mcp: Streamable HTTP in its stateless form, one JSON-RPC message (or a
 // batch) per POST, answered as JSON. An agent signs in with the bearer token its member made for it; it
 // never has a session cookie, so a web page can't make it act. See docs/mcp.md.
-import { authenticateAgent, type ConnectedAgent } from "../../core/agents.ts";
+import { authenticateAgent } from "../../core/agents.ts";
+import { authenticateClipper } from "../../core/clipper.ts";
 import type { Sources } from "../../core/sources.ts";
 import { logFault } from "../../core/logs.ts";
 import { BROKE } from "../../core/protocol.ts";
 import { ASK_NOTE_SYNTAX } from "../../core/noteSyntax.ts";
 import { metadataUrl } from "../oauth.ts";
-import { callTool, toolList, type Reached } from "./tools.ts";
+import { callTool, toolList, type Caller, type Reached } from "./tools.ts";
 
 const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 /** Room for upload_file's base64 of a file of MAX_INLINE_UPLOAD_BYTES, and the rest of the message. */
@@ -45,7 +46,18 @@ export const bearerToken = (req: Request): string | null => /^Bearer\s+(\S+)$/i.
 export async function handleMcp(req: Request, env: Env, sources?: Sources): Promise<Response> {
   const token = bearerToken(req);
   const agent = token ? await authenticateAgent(env.DB, token) : null;
-  if (!agent) return unauthorized(new URL(req.url), token !== null);
+  const clipper = !agent && token ? await authenticateClipper(env.DB, token) : null;
+  if (!agent && !clipper) return unauthorized(new URL(req.url), token !== null);
+  // A clipper grant is the member who allowed it, limited to the clipper's tools. The note is theirs, and it is not an agent.
+  const caller: Caller = agent ?? {
+    agentId: clipper!.grantId,
+    personId: clipper!.personId,
+    name: "Clipper",
+    workspaceId: null,
+    readOnly: false,
+    folderIds: null,
+    clipper: true,
+  };
 
   if (req.method !== "POST") return json({ error: "method_not_allowed", message: "POST JSON-RPC messages to /mcp" }, 405, { Allow: "POST" });
   if (!req.headers.get("Content-Type")?.toLowerCase().startsWith("application/json")) return json({ error: "unsupported_media_type", message: "Send application/json" }, 415);
@@ -67,7 +79,7 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   const out: unknown[] = [];
   for (const message of messages) {
     // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
-    const answer = await handleMessage(env, agent, message, sources, { origin: new URL(req.url).origin, bucket: env.FILES }).catch((err: unknown) => {
+    const answer = await handleMessage(env, caller, message, sources, { origin: new URL(req.url).origin, bucket: env.FILES }).catch((err: unknown) => {
       logFault("An MCP message", err);
       const id = (message as { id?: unknown } | null)?.id;
       return fail(typeof id === "string" || typeof id === "number" ? id : null, -32603, BROKE);
@@ -78,7 +90,7 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   return json(batch ? out : out[0]);
 }
 
-async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown, sources: Sources | undefined, reached: Reached): Promise<unknown | null> {
+async function handleMessage(env: Env, agent: Caller, message: unknown, sources: Sources | undefined, reached: Reached): Promise<unknown | null> {
   const m = (typeof message === "object" && message !== null ? message : {}) as Request_;
   const hasId = m.id !== undefined;
   const id: Id = hasId && (typeof m.id === "string" || typeof m.id === "number" || m.id === null) ? m.id : null;
@@ -100,7 +112,7 @@ async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown, 
     case "ping":
       return reply(id, {});
     case "tools/list":
-      return reply(id, { tools: toolList() });
+      return reply(id, { tools: toolList(agent) });
     case "tools/call": {
       if (typeof params.name !== "string") return fail(id, -32602, "Name the tool to call");
       const args = params.arguments ?? {};

@@ -17,6 +17,17 @@ describe("notes", () => {
     expect(reopened.slug).toBe("groceries");
   });
 
+  it("returns the same note when create is sent again with the same writeId", async () => {
+    const ada = await newMember();
+    const first = await perform(env.DB, ada, { type: "note.create", text: "# Once\n\nhello", writeId: "clip-1" });
+    const again = await perform(env.DB, ada, { type: "note.create", text: "# Twice\n\nno", writeId: "clip-1" });
+    const other = await perform(env.DB, ada, { type: "note.create", text: "# Other\n\nyes", writeId: "clip-2" });
+
+    expect(again.id).toBe(first.id);
+    expect(again.text).toBe("# Once\n\nhello");
+    expect(other.id).not.toBe(first.id);
+  });
+
   it("refuses a merge that would make the note longer than any one write may be", async () => {
     const ada = await newMember();
     const note = await perform(env.DB, ada, { type: "note.create", text: "start" });

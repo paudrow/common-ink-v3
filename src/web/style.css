@@ -2709,6 +2709,20 @@ button.link:hover {
   opacity: 0;
 }
 
+/* A post whose frame never loaded: the address, as a link, in the room the frame would have had. */
+.media-post-link {
+  display: block;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 12px 14px;
+  overflow: hidden;
+  color: var(--accent);
+  font-family: var(--prose);
+  font-size: calc(15px * var(--text-scale));
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 /* A video before it is played: its picture, what it is called along the top, and a play mark in the middle. */
 .media-play {
   position: relative;
