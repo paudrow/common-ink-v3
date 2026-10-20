@@ -157,7 +157,7 @@ _Avoid_: Label, project
 A search of the text of notes a member can see, including todo lines, and tags. Every word typed must be in the note, each matching the start of a word, ignoring case and accents. Words in double quotes match as a phrase, and `#name` narrows to notes with that tag. Notes whose title matches come first, then the latest changed. Archived notes are excluded unless included, and trashed notes always.
 
 **Quick open**:
-A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included. With nothing typed it lists the open tabs, each with its pane, then the places visited lately.
+A list of notes, uploads and calendar events a member can see, matched on title, filename, or an event's title and day. Archived and trashed items are excluded unless included. With nothing typed it lists the open tabs, each with its pane, then the places visited lately.
 
 ## Editor
 
