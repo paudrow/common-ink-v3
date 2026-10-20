@@ -107,7 +107,7 @@ describe("clipper sign-in", () => {
     expect(uploaded.status).toBe(201);
     expect(((await uploaded.json()) as { kind?: string }).kind).toBe("file");
 
-    const again = await connectClipper(env.DB, ada.personId, EXTENSION);
+    const again = (await connectClipper(env.DB, { personId: ada.personId, ended: 0 }, EXTENSION))!;
     expect(await authenticateClipper(env.DB, token)).toBeNull();
     const replaced = await authenticateClipper(env.DB, again.token);
     expect(replaced?.personId).toBe(ada.personId);
@@ -170,10 +170,25 @@ describe("what a clipper token reaches", () => {
     expect(asMember.status).toBe(200);
   });
 
+  it("isn't allowed when the person is signed out everywhere after the session that asked was checked, and nothing is written", async () => {
+    const ada = await member();
+    const { token: before } = await allow(ada.cookie);
+    // The session was read with no sign-out since, and then the person was signed out everywhere before the grant was written.
+    const session = { personId: ada.personId, ended: 0 };
+    await perform(env.DB, { kind: "member", personId: ada.personId, workspaceId: ada.workspaceId }, { type: "member.signOut", memberId: ada.personId, agents: false });
+    const grants = () => env.DB.prepare("SELECT id, revoked_at FROM clipper_grants WHERE person_id = ? ORDER BY created_at").bind(ada.personId).all<{ id: string; revoked_at: number | null }>();
+    const was = (await grants()).results;
+    expect(await connectClipper(env.DB, session, EXTENSION)).toBeNull();
+    expect((await grants()).results).toEqual(was);
+    expect(await authenticateClipper(env.DB, before)).toBeNull();
+    // The session that began after the sign-out may allow it.
+    expect(await connectClipper(env.DB, { ...session, ended: 1 }, EXTENSION)).not.toBeNull();
+  });
+
   it("lapses after 90 days", async () => {
     const ada = await member();
     const now = Date.now();
-    const { token } = await connectClipper(env.DB, ada.personId, EXTENSION, now);
+    const { token } = (await connectClipper(env.DB, { personId: ada.personId, ended: 0 }, EXTENSION, now))!;
     expect((await authenticateClipper(env.DB, token, now + 89 * DAY))?.personId).toBe(ada.personId);
     expect(await authenticateClipper(env.DB, token, now + 90 * DAY)).toBeNull();
   });

@@ -1,6 +1,6 @@
 import { whoAmI } from "../core/accounts.ts";
 import { CLIPPER_DAYS, authenticateClipper, clipperExtensionIds, clipperRedirect, connectClipper, listClipperGrants, revokeClipperGrant } from "../core/clipper.ts";
-import { sessionPersonId } from "./auth.ts";
+import { sessionOf, sessionPersonId } from "./auth.ts";
 import { PAGE, written } from "./headers.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 
@@ -22,13 +22,13 @@ export async function handleClipper(req: Request, env: Env, url: URL): Promise<R
   const back = clipperRedirect(url.searchParams.get("redirect") ?? (req.method === "POST" ? await postedRedirect(req) : null), allowed);
   if (!back) return page("That address can't receive a clipper", "<p>Only the Common Ink Clipper can sign in here. Open it and choose Sign in again.</p>", 400);
   const { redirect, extensionId } = back;
-  const personId = await sessionPersonId(req, env, url);
-  if (!personId) {
+  const session = await sessionOf(req, env, url);
+  if (!session) {
     const next = `/clipper/connect?${new URLSearchParams({ redirect })}`;
     return new Response(null, { status: 302, headers: { Location: `/auth/google?${new URLSearchParams({ next })}`, "Cache-Control": "no-store" } });
   }
   if (req.method === "GET") {
-    const name = (await whoAmI(env.DB, personId)).person.name;
+    const name = (await whoAmI(env.DB, session.personId)).person.name;
     // Allow answers with a redirect to the extension, which a form may follow only to an origin its page's form-action names.
     const policy = written({ ...PAGE, "form-action": ["'self'", new URL(redirect).origin] });
     return page(
@@ -42,9 +42,10 @@ export async function handleClipper(req: Request, env: Env, url: URL): Promise<R
   }
   if (req.method !== "POST") return page("Allow the clipper from its page", "", 405);
   if (req.headers.get("Origin") !== url.origin) return page("Allow the clipper from Common Ink", "", 403);
-  const { token } = await connectClipper(env.DB, personId, extensionId);
+  const allowedNow = await connectClipper(env.DB, session, extensionId);
+  if (!allowedNow) return page("You were signed out", "<p>You were signed out everywhere while this was open, so the clipper wasn't allowed. Sign in again, then choose Sign in in the clipper.</p>", 401);
   const to = new URL(redirect);
-  to.hash = new URLSearchParams({ token }).toString();
+  to.hash = new URLSearchParams({ token: allowedNow.token }).toString();
   return new Response(null, { status: 302, headers: { Location: to.href, "Cache-Control": "no-store" } });
 }
 

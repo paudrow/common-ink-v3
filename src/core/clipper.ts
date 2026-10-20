@@ -48,23 +48,27 @@ export function clipperRedirect(value: string | null, allowed: readonly string[]
 }
 
 /**
- * Allows the clipper for `personId`. A previous grant stops working. The token is shown only this once.
- * The grant holds the person's sign-out count, so it ends when they are signed out everywhere, by
- * themselves or by an admin, as their browser sessions do.
+ * Allows the clipper for the person of `session`. A previous grant stops working. The token is shown only
+ * this once. The grant holds the sign-out count of the session that allowed it, so it ends when the person
+ * is signed out everywhere, by themselves or by an admin, as their browser sessions do. Null, and nothing
+ * written, when they were signed out everywhere after that session began, however close to now.
  */
-export async function connectClipper(db: D1Database, personId: string, extensionId: string, now = Date.now()): Promise<{ grantId: string; token: string }> {
+export async function connectClipper(db: D1Database, session: { personId: string; ended: number }, extensionId: string, now = Date.now()): Promise<{ grantId: string; token: string } | null> {
+  const { personId, ended } = session;
   const token = TOKEN_PREFIX + b64url(crypto.getRandomValues(new Uint8Array(32)));
   const grantId = newId();
-  await db.batch([
-    db.prepare("UPDATE clipper_grants SET revoked_at = ? WHERE person_id = ? AND revoked_at IS NULL").bind(now, personId),
+  const [, made] = await db.batch([
+    db
+      .prepare("UPDATE clipper_grants SET revoked_at = ?1 WHERE person_id = ?2 AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM people WHERE id = ?2 AND sessions_ended = ?3)")
+      .bind(now, personId, ended),
     db
       .prepare(
         `INSERT INTO clipper_grants (id, person_id, token_prefix, token_hash, extension_id, created_at, expires_at, sessions_ended)
-           SELECT ?, id, ?, ?, ?, ?, ?, sessions_ended FROM people WHERE id = ?`,
+           SELECT ?, id, ?, ?, ?, ?, ?, sessions_ended FROM people WHERE id = ? AND sessions_ended = ?`,
       )
-      .bind(grantId, token.slice(0, TOKEN_PREFIX.length + 4), await hashToken(token), extensionId, now, now + CLIPPER_MS, personId),
+      .bind(grantId, token.slice(0, TOKEN_PREFIX.length + 4), await hashToken(token), extensionId, now, now + CLIPPER_MS, personId, ended),
   ]);
-  return { grantId, token };
+  return made!.meta.changes ? { grantId, token } : null;
 }
 
 /** What makes a grant work: not revoked, not past its time, and the person not signed out everywhere since. */
