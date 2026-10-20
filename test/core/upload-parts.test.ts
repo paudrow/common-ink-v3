@@ -92,7 +92,7 @@ describe("a file sent in parts", () => {
 
     // While its parts arrive it is no upload to anyone, its sender included.
     const hidden = async () => {
-      expect(await toolJson<unknown[]>(token, "list_uploads")).toEqual([]);
+      expect((await toolJson<{ uploads: unknown[] }>(token, "list_uploads")).uploads).toEqual([]);
       expect(await tool(token, "read_upload", { uploadId: sending.id })).toEqual({ isError: true, text: "not_found: No such upload" });
       expect((await get(workspace, token, sending.id)).status).toBe(404);
       expect(await perform(env.DB, ada, { type: "upload.list" })).toEqual([]);
@@ -108,7 +108,7 @@ describe("a file sent in parts", () => {
     expect(done).toMatchObject({ id: sending.id, name: "episode-12.mp3", type: "audio/mpeg", kind: "audio", size, state: "live", line: `::audio{${sending.id}}` });
     expect(await toolJson(token, "finish_upload", { uploadId: sending.id }), "finished again, it answers the same").toEqual(done);
     expect(await perform(env.DB, ada, { type: "upload.storage" })).toEqual({ bytes: size, files: 1, trashedBytes: 0, pendingBytes: 0 });
-    expect((await toolJson<{ id: string }[]>(token, "list_uploads")).map((u) => u.id)).toEqual([sending.id]);
+    expect(((await toolJson<{ uploads: { id: string }[] }>(token, "list_uploads")).uploads).map((u) => u.id)).toEqual([sending.id]);
 
     const whole = await get(workspace, token, sending.id);
     expect(whole.status).toBe(200);

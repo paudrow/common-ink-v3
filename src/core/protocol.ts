@@ -158,6 +158,8 @@ const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.lit
  * trash.list covers a note in Trash.
  */
 const IncludeArchived = z.boolean().default(false);
+/** A page of a listing that is all of it when no `limit` is asked. */
+const Page = { limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).default(0) };
 /** For a listing of notes that can also be asked for the archived ones alone, with `"only"`. */
 const Archived = z.union([z.boolean(), z.literal("only")]).default(false);
 /** The orders a search answers in. `match` is notes whose title matches first, then the latest changed. */
@@ -216,9 +218,10 @@ export const Op = z.discriminatedUnion("type", [
    * archived or trashed, is not in it to be told of: ask with `includeArchived`, and trash.list.
    * `folderId` lists the notes in that folder. A folder the asker can't see lists nothing, and the
    * note is still in the list with no folder. `tag` lists only the notes with that tag, ignoring case.
-   * `includeArchived: "only"` lists the archived notes and no live one.
+   * `includeArchived: "only"` lists the archived notes and no live one. `limit` and `offset` take a
+   * page of the list; without `limit` it is all of it.
    */
-  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived }),
+  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived, ...Page }),
   z.object({
     type: z.literal("note.create"),
     text: NoteText.default(""),
@@ -648,9 +651,10 @@ export const Op = z.discriminatedUnion("type", [
   /**
    * The uploads the asker can see that `query` finds, in the query language (docs/search.md), latest
    * first: with no query, every live one. `folderId` narrows to one folder's own uploads and
-   * `includeArchived` covers archived ones too, as `is:archived` does.
+   * `includeArchived` covers archived ones too, as `is:archived` does. `limit` and `offset` take a page
+   * of the list; without `limit` it is all of it.
    */
-  z.object({ type: z.literal("upload.list"), query: z.string().max(MAX_SEARCH_LENGTH).default(""), ...Days, folderId: Id.optional(), includeArchived: IncludeArchived }),
+  z.object({ type: z.literal("upload.list"), query: z.string().max(MAX_SEARCH_LENGTH).default(""), ...Days, folderId: Id.optional(), includeArchived: IncludeArchived, ...Page }),
   /** One upload, and the notes the asker can see that refer to it. */
   z.object({ type: z.literal("upload.read"), id: Id }),
   /** The bytes of one upload. Over HTTP it is `GET /api/workspaces/<id>/uploads/<upload id>`. */

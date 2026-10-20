@@ -9,7 +9,7 @@ const chosenFolders = (form: Locator) => form.getByRole("radio", { name: /^Only 
 /** The folders offered, each by its path. */
 const offered = (form: Locator) => () => form.getByRole("group", { name: "Folders it reaches" }).getByRole("checkbox").evaluateAll((boxes) => boxes.map((box) => box.getAttribute("aria-label")));
 const pick = (form: Locator, path: string) => form.getByRole("group", { name: "Folders it reaches" }).getByRole("checkbox", { name: path, exact: true });
-const titles = (agent: ReturnType<typeof agentWith>) => async () => (await agent.tool<Note[]>("list_notes", {})).map((n) => n.title).sort();
+const titles = (agent: ReturnType<typeof agentWith>) => async () => (await agent.tool<{ notes: Note[] }>("list_notes", {})).notes.map((n) => n.title).sort();
 
 /** Ada's workspace with Projects, Plans inside it, and Journal beside them, each with a note. */
 async function workspaceWithFolders(page: Page) {

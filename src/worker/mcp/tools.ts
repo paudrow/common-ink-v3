@@ -1,13 +1,12 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { timeIn } from "../../core/history.ts";
-import { PRIOR_WRITE, agentActor, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
+import { PRIOR_WRITE, agentActor, isReadOnlyOp, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
 import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
 import { CAPABILITY_NAMES } from "../../core/plugins.ts";
 import { MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
 import { writtenUpload } from "../../core/uploadRefs.ts";
 import { ASK_NOTE_SYNTAX, syntaxDescription, syntaxText as noteSyntaxText } from "../../core/noteSyntax.ts";
-import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
-import { RULE_GRAMMAR } from "../../core/recurrence.ts";
+import { MAX_SEARCH_LENGTH, SCOPES, queryLanguage, type Scope } from "../../core/query.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 import { CLIPPER_TOOLS } from "../../core/clipper.ts";
 import type { Sources } from "../../core/sources.ts";
@@ -19,7 +18,7 @@ export interface ToolResult {
 }
 
 const text = (value: unknown, isError = false): ToolResult => ({
-  content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
+  content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }],
   ...(isError ? { isError: true } : {}),
 });
 
@@ -48,6 +47,8 @@ interface Tool {
   times?: string[];
   /** What the agent is told of the operation's answer, when that is more than the answer: `origin` is the server's address. */
   told?: (answer: never, origin: string) => unknown;
+  /** The key a page of the operation's list is told under, with next. The operation is asked for one more than limit, to know whether there are more. */
+  pages?: string;
 }
 
 /** Each argument's old name, taken for the name it has now: `workspace` for every tool, and the operation's own field for an argument renamed. */
@@ -151,18 +152,17 @@ const linkTitles = {
 };
 const mentionNames = { type: "string", enum: ["resolve", "keep"], description: 'What to do with mentions you add, @[[Name]] or @[[id]]. "resolve", the default, stores a mention of the one member with that name by their id, as @[[id|Name]], and refuses the write when several members have the name. A name no member has stays a name. "keep" leaves every mention as you wrote it.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
-/** The query language, as much of it as a model needs to write a query unaided. It is read from the filters' table, as docs/search.md is. */
-const QUERY = (scope: Scope) =>
-  `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or ${scope === "uploads" ? "an uploader:" : "an editor:"} naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`;
+const MAX_PAGE = 200;
+const page = (what: string) => ({
+  limit: { type: "integer", minimum: 1, maximum: MAX_PAGE, description: `How many ${what}; default 50` },
+  offset: { type: "integer", minimum: 0, description: "Where the page starts: next, from the page before" },
+});
 const queryDays = {
   today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
   zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is the zone your member's settings name, or UTC" },
 };
 const TODOS =
-  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\
-" +
-  RULE_GRAMMAR +
-  "\ndone:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.";
+  'A todo is a checkbox line in a note: - [ ] open, - [x] done, with tokens on the line such as !! for its priority, due:2026-10-14, @[[Name]] to assign it, and every:2w or every:mon,thu to make it repeat. query_syntax {"scope":"todos"} lists every token and every rule of every:.';
 const LINKS =
   "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; one no note has the title of stays as written and is listed in the answer's unresolved. Text in code is left alone.";
 const MENTIONS =
@@ -257,14 +257,17 @@ export const TOOLS: Tool[] = [
   {
     name: "list_notes",
     description:
-      `The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, to notes with a tag, or to notes whose text changed since a time. ${LIFE}`,
+      `The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, to notes with a tag, or to notes whose text changed since a time. The answer is notes, 50 at a time; pass next as offset for more, until it is null. ${LIFE}`,
     inputSchema: object({
       folderId: folderId("Only notes in this folder, from list_folders"),
       updatedSince: time("Only notes whose text or state changed at or after this time. A note trashed since is in list_trash"),
       tag: { type: "string", description: "Only notes with this tag, without the #, ignoring case" },
       includeArchived: archivedToo,
+      ...page("notes"),
     }),
     op: "note.list",
+    defaults: { limit: 50 },
+    pages: "notes",
     example: { workspaceId: WORKSPACE, folderId: FOLDER, updatedSince: "2026-10-01T00:00:00Z" },
   },
   {
@@ -280,6 +283,12 @@ export const TOOLS: Tool[] = [
     description: syntaxDescription(),
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     example: {},
+  },
+  {
+    name: "query_syntax",
+    description: "Every form a query can take: of search with scope notes, of list_todos with todos, and of list_uploads with uploads. For todos it also lists every token a todo's line can hold and every rule of every:. It writes nothing.",
+    inputSchema: { type: "object", properties: { scope: { type: "string", enum: [...SCOPES], description: "Whose queries: notes for search, todos for list_todos, uploads for list_uploads" } }, required: ["scope"], additionalProperties: false },
+    example: { scope: "todos" },
   },
   {
     name: "create_note",
@@ -366,11 +375,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see that query finds: with no query, every open one. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more.\
-\
-${QUERY("todos")}\
-\
-The arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The todos in the notes you can see that query finds: with no query, every open one. Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more. A query is filters and words, such as: due:<today priority:>=medium -tag:someday, assignee:@me, is:done, or: call folder:"Common Ink". query_syntax {"scope":"todos"} lists every form, and every token a todo's line can hold. The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
       query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
       ...queryDays,
@@ -387,7 +392,7 @@ The arguments beside query are from before it could say them, and narrow it furt
       noteId: { type: "string", description: "Only the todos in this note" },
       sort: { type: "string", enum: [...TODO_SORTS], description: "The order, when the query has no sort:, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
       limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
-      offset: { type: "integer", minimum: 0, description: "The next of the page before" },
+      offset: { type: "integer", minimum: 0, description: "Where the page starts: next, from the page before" },
     }),
     op: "todo.list",
     example: { dueTo: "2026-10-14", sort: "priority" },
@@ -412,8 +417,7 @@ The arguments beside query are from before it could say them, and narrow it furt
         done: { type: "boolean", description: "True checks it off, false opens it again" },
         importance: { type: "integer", minimum: 0, maximum: 3, description: "Its priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
-        every: { type: ["string", "null"], description: `How it repeats, as written after every:, or null to stop it repeating. The rules:\
-${RULE_GRAMMAR}` },
+        every: { type: ["string", "null"], description: 'How it repeats, as written after every:, such as 2w, mon,thu, last-fri or 1m-times-5, or null to stop it repeating. query_syntax {"scope":"todos"} lists every rule' },
         skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Not together with done" },
         assign: { type: "string", description: "Someone to assign it to, by writing a mention of them on the line: a member's id or name, or anyone else's name. Assigning gives nobody access and tells nobody." },
         unassign: { type: "string", description: "Someone to take it from: a member's id or name, or anyone else's name as the line writes it. Refused when the todo isn't assigned to them." },
@@ -488,7 +492,7 @@ ${RULE_GRAMMAR}` },
   },
   {
     name: "search",
-    description: `Find the notes you can see with a query: words, each matching the start of a word in the note, ignoring case and accents, and filters. Todos and tags are text like any other, so their words are found too. A query with no word and no filter finds nothing: list_notes lists. Notes whose title matches come first, then the latest changed, unless the query's sort: or else sort asks for another order. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless the query says is:archived, and notes in Trash unless it says is:trashed. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.\n\n${QUERY("notes")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
+    description: `Find the notes you can see with a query: words, each matching the start of a word in the note, ignoring case and accents, and filters. Todos and tags are text like any other, so their words are found too. A query with no word and no filter finds nothing: list_notes lists. Notes whose title matches come first, then the latest changed, unless the query's sort: or else sort asks for another order. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless the query says is:archived, and notes in Trash unless it says is:trashed. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again. A query is words and filters, such as: budget "second quarter" #money -is:archived, folder:"Common Ink" editor:@me updated:>=7d, or: has:open-todo OR has:backlink. query_syntax {"scope":"notes"} lists every form. The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object(
       {
         query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'What to find, such as: budget "second quarter" #money -is:archived, or: editor:@me updated:>=7d (has:open-todo OR has:backlink)' },
@@ -498,7 +502,7 @@ ${RULE_GRAMMAR}` },
         hasTodos: { type: "boolean", description: "True for only the notes with an open todo. In the query: has:open-todo" },
         sort: { enum: ["match", "recent", "created", "title"], description: "match, the default: title matches first, then the latest changed. recent: the latest changed. created: the latest made. title: by title. The query's sort: wins over it" },
         limit: { type: "integer", minimum: 1, maximum: 50, description: "How many notes; default 20" },
-        offset: { type: "integer", minimum: 0, description: "The next of the page before" },
+        offset: { type: "integer", minimum: 0, description: "Where the page starts: next, from the page before" },
       },
       ["query"],
     ),
@@ -545,18 +549,17 @@ ${RULE_GRAMMAR}` },
   },
   {
     name: "list_uploads",
-    description: `The uploads you can see that query finds, latest uploaded first unless its sort: says otherwise: with no query, every live one. Each has its id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, private, state, access, which is edit or view, and uses: how many notes you can see show it. An upload you can't see is never listed or counted, and reads as no such upload everywhere. Archived uploads are left out unless the query says is:archived, and those in Trash unless it says is:trashed. ${UPLOADS}\
-\
-${QUERY("uploads")}\
-\
-The arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The uploads you can see that query finds, latest uploaded first unless its sort: says otherwise: with no query, every live one. Each has its id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, private, state, access, which is edit or view, and uses: how many notes you can see show it. An upload you can't see is never listed or counted, and reads as no such upload everywhere. Archived uploads are left out unless the query says is:archived, and those in Trash unless it says is:trashed. The answer is uploads, 50 at a time; pass next as offset for more, until it is null. ${UPLOADS} A query is filters and words, such as: type:image uploader:@me, size:>1mb used:no -type:video, or: name:report uploaded:>=7d. query_syntax {"scope":"uploads"} lists every form. The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
       query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: "Which uploads, such as: type:image uploader:@me, or: size:>1mb used:no -type:video" },
       ...queryDays,
       folderId: folderId("Only uploads in this folder, not those of the folders inside it, from list_folders. In the query, folder: takes the folders inside too"),
       includeArchived: { type: "boolean", description: "True to cover archived uploads too, which are left out otherwise. In the query: is:archived" },
+      ...page("uploads"),
     }),
     op: "upload.list",
+    defaults: { limit: 50 },
+    pages: "uploads",
     example: { query: 'type:image uploader:@me' },
   },
   {
@@ -1093,17 +1096,23 @@ export type Caller = ConnectedAgent & { clipper?: true };
 
 const reaches = (caller: Caller | undefined, name: string) => !caller?.clipper || CLIPPER_TOOLS.has(name);
 
-/** A tool as an agent is shown it: its description ends with its example, and its schema still takes each argument's old name. */
+/** The tools that change something and only add to what there is, so a client can tell them from those that change or remove. */
+export const ADDITIVE = new Set(["create_note", "create_folder", "daily_note", "upload_file", "start_upload", "resume_upload", "finish_upload", "refer_record", "create_event", "request_plugin_permission", "rebuild_links", "rebuild_todos"]);
+/** The tools that reach the member's data sources, outside Common Ink. */
+export const OPEN_WORLD = new Set(["list_events", "update_event", "create_event", "list_contacts", "read_record", "refer_record", "read_person", "notes_about_record"]);
+
+/** Whether a tool changes nothing, by its operation as a read-only token is refused. Of the tools with no operation, only upload_file writes. */
+export const readsOnly = (tool: Tool) => (tool.op ? isReadOnlyOp(tool.op) : tool.name !== "upload_file");
+
+/** A tool as an agent is shown it: its description ends with its example. */
 export const toolList = (caller?: Caller) =>
-  TOOLS.filter((tool) => reaches(caller, tool.name)).map((tool) => {
-    const schema = tool.inputSchema as { properties: Record<string, Record<string, unknown>> };
-    const old = Object.entries(oldNames(tool)).map(([was, name]) => [was, { ...schema.properties[name], deprecated: true, description: `The old name of ${name}, still taken. Use ${name}` }]);
-    return {
-      name: tool.name,
-      description: `${tool.description}\n\nExample: ${JSON.stringify(tool.example)}`,
-      inputSchema: { ...schema, properties: { ...schema.properties, ...Object.fromEntries(old) } },
-    };
-  });
+  TOOLS.filter((tool) => reaches(caller, tool.name)).map((tool) => ({
+    name: tool.name,
+    title: `${tool.name[0]!.toUpperCase()}${tool.name.slice(1).replaceAll("_", " ")}`,
+    description: `${tool.description}\n\nExample: ${JSON.stringify(tool.example)}`,
+    inputSchema: tool.inputSchema,
+    annotations: { readOnlyHint: readsOnly(tool), destructiveHint: !readsOnly(tool) && !ADDITIVE.has(tool.name), openWorldHint: OPEN_WORLD.has(tool.name) },
+  }));
 
 /** How near two names are, for a guess at the one meant: the same once case, _ and - are set aside. */
 const loosely = (name: string) => name.toLowerCase().replace(/[_-]/g, "");
@@ -1180,6 +1189,10 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
   try {
     const { workspaceId: workspace, fields } = opArguments(tool, args);
     if (name === "note_syntax") return text(noteSyntaxText());
+    if (name === "query_syntax") {
+      if (!SCOPES.includes(fields.scope as Scope)) throw new OpError("invalid", `scope is ${SCOPES.join(", ")}`);
+      return text(queryLanguage(fields.scope as Scope));
+    }
     const me = await whoAmI(db, agent.personId);
     // A token pinned to one workspace sees only that one, as if the member belonged to no other.
     if (agent.workspaceId) me.workspaces = me.workspaces.filter((w) => w.id === agent.workspaceId);
@@ -1209,6 +1222,12 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       fields.writeId = CLIPPER_WRITE + fields.writeId;
       const prior = await db.prepare(PRIOR_WRITE).bind(fields.writeId, workspaceId, "member", agent.personId).first<{ id: string }>();
       if (prior) return text({ id: prior.id });
+    }
+    if (tool.pages) {
+      const { limit, offset = 0 } = fields as { limit: unknown; offset?: number };
+      if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE) throw new OpError("invalid", `limit is a whole number from 1 to ${MAX_PAGE}`);
+      const listed = (await perform(db, actor, { ...fields, limit: limit + 1, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket })) as unknown[];
+      return written({ [tool.pages]: listed.slice(0, limit), next: listed.length > limit ? offset + limit : null });
     }
     const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
     return written(tool.told ? tool.told(answer as never, reached.origin) : answer);

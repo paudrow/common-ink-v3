@@ -86,7 +86,7 @@ const files = [{ ...config.r2_buckets[0], bucket_name: bucket }];
 const { triggers: _, ...untimed } = config;
 const writeConfig = (uuid: string) => {
   const binding = { ...config.d1_databases[0], database_name: database, database_id: uuid };
-  const previews = { d1_databases: [binding], r2_buckets: files, vars: { DEV_SIGN_IN: "1" } };
+  const previews = { d1_databases: [binding], r2_buckets: files, ratelimits: config.ratelimits, vars: { DEV_SIGN_IN: "1" } };
   writeFileSync(GENERATED, JSON.stringify({ ...untimed, d1_databases: [binding], r2_buckets: files, previews }, null, 2));
 };
 writeConfig(db.uuid);

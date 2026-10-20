@@ -859,7 +859,7 @@ describe("a connection is an agent", () => {
     const absent = await tool(claude, "read_note", { id: "zzzzzzzzzzzz" });
     expect((await tool(claude, "read_note", { id: outNote.id })).text).toBe(absent.text);
     expect(absent).toMatchObject({ isError: true, text: "not_found: No such note" });
-    expect((await tool(claude, "list_notes")).json().map((n: { id: string }) => n.id)).toEqual([inNote.id]);
+    expect((await tool(claude, "list_notes")).json().notes.map((n: { id: string }) => n.id)).toEqual([inNote.id]);
     expect((await tool(claude, "write_note", { id: outNote.id, baseRevision: 1, text: "# Overwritten" })).isError).toBe(true);
     expect((await tool(claude, "create_note", { folderId: outside.id, text: "# Planted" })).isError).toBe(true);
     expect((await perform(env.DB, ada, { type: "note.read", id: outNote.id })).text).toBe("# Out words");

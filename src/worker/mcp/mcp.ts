@@ -13,6 +13,10 @@ import { callTool, toolList, type Caller, type Reached } from "./tools.ts";
 const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 /** Room for upload_file's base64 of a file of MAX_INLINE_UPLOAD_BYTES, and the rest of the message. */
 const MAX_BODY = 6_000_000;
+/** One request is one Worker invocation, with a fixed number of subrequests, so a batch is held to a few messages. */
+const MAX_BATCH = 20;
+/** What an agent is told when it has made more tool calls than MCP_CALLS allows it in a minute (wrangler.jsonc). */
+export const RATE_LIMITED = "rate_limited: Too many calls. An agent makes at most 300 a minute. Wait a minute, then call again.";
 
 const SERVER = { name: "common-ink", version: "0.1.0" };
 const INSTRUCTIONS =
@@ -76,6 +80,7 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   const batch = Array.isArray(body);
   const messages = (batch ? body : [body]) as unknown[];
   if (batch && messages.length === 0) return json(fail(null, -32600, "An empty batch"), 400);
+  if (messages.length > MAX_BATCH) return json(fail(null, -32600, `A batch holds at most ${MAX_BATCH} messages`), 400);
   const out: unknown[] = [];
   for (const message of messages) {
     // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
@@ -117,6 +122,13 @@ async function handleMessage(env: Env, agent: Caller, message: unknown, sources:
       if (typeof params.name !== "string") return fail(id, -32602, "Name the tool to call");
       const args = params.arguments ?? {};
       if (typeof args !== "object" || args === null || Array.isArray(args)) return fail(id, -32602, "arguments must be an object");
+      if (!env.MCP_CALLS) throw new Error("The MCP_CALLS rate limit isn't bound");
+      // A fault in the limiter lets the call through: it guards against a runaway agent, and isn't worth every agent's calls.
+      const allowed = await env.MCP_CALLS.limit({ key: agent.agentId }).then(
+        (outcome) => outcome.success,
+        (err: unknown) => (logFault("The MCP_CALLS rate limit", err), true),
+      );
+      if (!allowed) return reply(id, { content: [{ type: "text", text: RATE_LIMITED }], isError: true });
       const result = await callTool(env.DB, agent, params.name, args as Record<string, unknown>, sources, reached);
       return result ? reply(id, result) : fail(id, -32602, `No such tool: ${params.name}`);
     }

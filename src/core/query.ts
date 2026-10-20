@@ -1,4 +1,5 @@
 import { FILE_CLASSES, KNOWN_TYPES, TEXT_ENDINGS, typesOf, type FileClass } from "./filetypes.ts";
+import { RULE_GRAMMAR } from "./recurrence.ts";
 import { isDay, nameKey } from "./todos.ts";
 
 /**
@@ -983,6 +984,18 @@ export const syntaxText = (scope: Scope) =>
   syntax(scope)
     .map((row) => `${row.form}: ${row.means}`)
     .join("\n");
+
+/** What a todo's line can hold, every rule of `every:` among it, for a model that is to write one unaided. */
+const TODO_TOKENS = `A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:
+${RULE_GRAMMAR}
+done:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.`;
+
+/** Every form a query of `scope` can take, and for todos what a todo's line can hold: what query_syntax answers and `ink syntax` prints. */
+export const queryLanguage = (scope: Scope) =>
+  [
+    `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or ${scope === "uploads" ? "an uploader:" : "an editor:"} naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`,
+    ...(scope === "todos" ? [TODO_TOKENS] : []),
+  ].join("\n\n");
 
 const table = (scope: Scope) => ["| Write | It finds | Example |", "| --- | --- | --- |", ...syntax(scope).map((row) => `| \`${row.form.replace(/\|/g, "\\|")}\` | ${row.means} | \`${row.example}\` |`)].join("\n");
 

@@ -105,7 +105,7 @@ describe("editing an agent", () => {
 
     expect(edited).toEqual({ ...agent, readOnly: true, lastUsedAt: expect.any(Number) });
     expect((await tool(token, "create_note", { text: "# After" })).text).toContain("A read-only token can't note.create");
-    expect((await tool(token, "list_notes")).json()).toHaveLength(1);
+    expect((await tool(token, "list_notes")).json().notes).toHaveLength(1);
     await editAgent(env.DB, ada.personId, agent.id, { readOnly: false });
     expect((await tool(token, "create_note", { text: "# Again" })).isError).toBe(false);
   });
@@ -202,7 +202,7 @@ describe("a token pinned to one workspace", () => {
 
     const workspaces = (await tool(token, "list_workspaces")).json().workspaces;
     expect(workspaces.map((w: { id: string }) => w.id)).toEqual([team.workspaceId]);
-    expect((await tool(token, "list_notes")).json().map((n: { id: string }) => n.id)).toEqual([theirs.id]);
+    expect((await tool(token, "list_notes")).json().notes.map((n: { id: string }) => n.id)).toEqual([theirs.id]);
     expect((await tool(token, "read_note", { id: theirs.id })).json().text).toBe("# Team's");
     expect(await tool(token, "read_note", { id: mine.id })).toMatchObject({ isError: true, text: "not_found: No such note" });
     expect(await tool(token, "list_notes", { workspace: ada.workspaceId })).toMatchObject({ isError: true, text: "not_found: No such workspace" });
@@ -239,7 +239,7 @@ describe("a read-only token", () => {
     const { agent, token } = await connectAgent(env.DB, ada.personId, "Reader", { readOnly: true });
     expect(agent.readOnly).toBe(true);
 
-    expect((await tool(token, "list_notes")).json()).toHaveLength(1);
+    expect((await tool(token, "list_notes")).json().notes).toHaveLength(1);
     expect((await tool(token, "read_note", { id: note.id })).json().text).toBe("# Mine");
     expect((await tool(token, "note_history", { id: note.id })).json()).toHaveLength(1);
     expect((await tool(token, "list_workspaces")).json().readOnly).toBe(true);

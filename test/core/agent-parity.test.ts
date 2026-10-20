@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { run, type Io } from "../../scripts/ink-cli.ts";
 import { z } from "zod";
 import { Id, Op, type OpInput, type OpType } from "../../src/core/protocol.ts";
-import { NOT_FOR_AGENTS, OVER_HTTP, opArguments, toolList, TOOLS } from "../../src/worker/mcp/tools.ts";
+import { RULE_GRAMMAR } from "../../src/core/recurrence.ts";
+import { SCOPES, syntax } from "../../src/core/query.ts";
+import { NOT_FOR_AGENTS, OVER_HTTP, callTool, opArguments, toolList, TOOLS, type Caller } from "../../src/worker/mcp/tools.ts";
 
 const ID = "aaaaaaaaaaaa";
 const AUTHOR = `agent:${ID}`;
@@ -108,6 +110,8 @@ const COMMANDS: Record<string, string[][]> = {
   read_record: [["record", ID]],
   notes_about_record: [["notes-about", "google-calendar", "primary e1"]],
 };
+/** Tools whose ink command answers on this machine, with no token, as the tool would. */
+const OFFLINE = ["query_syntax"];
 
 describe("what an agent can do, against what the web app can", () => {
   it("has one tool for every operation, or a reason it has none", () => {
@@ -220,7 +224,7 @@ describe("what an agent can do, against what the web app can", () => {
   });
 
   it("has an ink command for every tool, with a flag for every argument", async () => {
-    for (const tool of TOOLS) {
+    for (const tool of TOOLS.filter((t) => !OFFLINE.includes(t.name))) {
       const sent = new Set<string>();
       for (const argv of COMMANDS[tool.name] ?? []) {
         const io = {
@@ -231,14 +235,27 @@ describe("what an agent can do, against what the web app can", () => {
             const { name, arguments: args } = JSON.parse(init.body as string).params;
             expect(name, argv.join(" ")).toBe(tool.name);
             for (const key of Object.keys(args)) sent.add(key);
-            return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "OK" }] } });
+            return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: '{"next":null}' }] } });
           }) as unknown as typeof fetch,
         };
         expect(await run(argv, io), argv.join(" ")).toBe(0);
       }
       expect([...sent].sort(), `ink has no way to send every argument of ${tool.name}; add a command and list it in COMMANDS`).toEqual(argumentsOf(tool).sort());
     }
-    expect(Object.keys(COMMANDS).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+    expect([...Object.keys(COMMANDS), ...OFFLINE].sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  });
+
+  it("prints with ink syntax, with no token, what query_syntax answers: every form of each scope, and for todos every rule of every:", async () => {
+    const agent: Caller = { agentId: ID, personId: ID, name: "Claude", workspaceId: null, readOnly: false, folderIds: null };
+    for (const scope of SCOPES) {
+      const answered = await callTool({} as D1Database, agent, "query_syntax", { scope });
+      const said: string[] = [];
+      expect(await run(["syntax", ...(scope === "notes" ? [] : [scope])], { env: {}, stdin: async () => "", out: (line) => said.push(line), fetch: (async () => expect.unreachable()) as unknown as typeof fetch })).toBe(0);
+      expect(said.join("\n"), scope).toBe(answered!.content[0]!.text);
+      for (const row of syntax(scope)) expect(said.join("\n"), `${scope} ${row.form}`).toContain(`${row.form}: ${row.means}`);
+      for (const rule of RULE_GRAMMAR.split("\n")) expect(said.join("\n").includes(rule), `${scope} ${rule}`).toBe(scope === "todos");
+    }
+    expect(await callTool({} as D1Database, agent, "query_syntax", { scope: "people" })).toEqual({ content: [{ type: "text", text: "invalid: scope is notes, todos, uploads" }], isError: true });
   });
 
   it("reads a yes or no only as true or false, and asks the server nothing otherwise: a mistyped no must never allow", async () => {
@@ -319,15 +336,16 @@ describe("what each argument is called", () => {
     expect(named).toEqual(new Set(["noteId", "noteIds", "folderId", "parentId", "after", "ref", "uploadId", "pluginId"]));
   });
 
-  it("still takes each argument's old name, shown in the schema as deprecated", () => {
+  it("still takes each argument's old name, and shows only the name it has now", () => {
     const listed = toolList();
     for (const tool of TOOLS.filter((t) => t.op)) {
-      const { properties, required } = listed.find((t) => t.name === tool.name)!.inputSchema as { properties: Record<string, { deprecated?: boolean }>; required: string[] };
-      expect(properties.workspace, tool.name).toMatchObject({ deprecated: true });
-      expect(required.filter((name) => properties[name]?.deprecated), tool.name).toEqual([]);
+      const { properties } = listed.find((t) => t.name === tool.name)!.inputSchema as { properties: Record<string, unknown> };
+      expect(Object.keys(properties), tool.name).not.toContain("workspace");
+      expect(opArguments(tool, { workspace: "w" }), tool.name).toEqual({ workspaceId: "w", fields: { ...tool.defaults } });
       for (const [name, field] of Object.entries(tool.renames ?? {})) {
-        expect(properties[field], `${tool.name} ${field}`).toMatchObject({ deprecated: true, description: `The old name of ${name}, still taken. Use ${name}` });
-        expect(opArguments(tool, { [field]: ID }).fields).toEqual(opArguments(tool, { [name]: ID }).fields);
+        expect(Object.keys(properties), `${tool.name} ${field}`).not.toContain(field);
+        expect(opArguments(tool, { [field]: ID }).fields, `${tool.name} ${field}`).toEqual({ ...tool.defaults, [field]: ID });
+        expect(opArguments(tool, { [name]: ID }).fields, `${tool.name} ${name}`).toEqual({ ...tool.defaults, [field]: ID });
       }
     }
     expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(40);
@@ -352,8 +370,8 @@ describe("what each argument is called", () => {
 
   it("takes a time as ISO 8601 or as milliseconds, and gives create_folder's ifExists its default", () => {
     const notes = TOOLS.find((t) => t.name === "list_notes")!;
-    expect(opArguments(notes, { updatedSince: "2026-10-15T09:30:00-07:00" }).fields).toEqual({ updatedSince: Date.UTC(2026, 9, 15, 16, 30) });
-    expect(opArguments(notes, { updatedSince: 5 }).fields).toEqual({ updatedSince: 5 });
+    expect(opArguments(notes, { updatedSince: "2026-10-15T09:30:00-07:00" }).fields).toEqual({ updatedSince: Date.UTC(2026, 9, 15, 16, 30), limit: 50 });
+    expect(opArguments(notes, { updatedSince: 5, limit: 3 }).fields).toEqual({ updatedSince: 5, limit: 3 });
     expect(() => opArguments(notes, { updatedSince: "last tuesday" })).toThrow("updatedSince must be a time");
     expect(opArguments(TOOLS.find((t) => t.name === "create_folder")!, { name: "Skills" }).fields).toEqual({ name: "Skills", ifExists: "return" });
     expect(opArguments(TOOLS.find((t) => t.name === "create_folder")!, { name: "Skills", ifExists: "error" }).fields).toEqual({ name: "Skills", ifExists: "error" });

@@ -105,10 +105,55 @@ describe("an agent's answers", () => {
     const made = await agent.json("create_note", { text: "# Plan" });
     expect(made.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00$/);
 
-    expect((await agent.json("list_notes", { updatedSince: made.updatedAt })).map((n: { id: string }) => n.id)).toEqual([made.id]);
-    expect(await agent.json("list_notes", { updatedSince: Date.parse(made.updatedAt) + 1 })).toEqual([]);
+    expect((await agent.json("list_notes", { updatedSince: made.updatedAt })).notes.map((n: { id: string }) => n.id)).toEqual([made.id]);
+    expect(await agent.json("list_notes", { updatedSince: Date.parse(made.updatedAt) + 1 })).toEqual({ notes: [], next: null });
     expect((await agent.json("history_summary", { from: "2026-01-01", to: new Date(Date.parse(made.updatedAt) + 1).toISOString() })).notes).toHaveLength(1);
     expect(await agent.call("list_notes", { updatedSince: "yesterday" })).toEqual({ isError: true, text: "invalid: updatedSince must be a time: ISO 8601, such as 2026-10-15T09:30:00-07:00, or milliseconds since 1970" });
+  });
+});
+
+describe("a listing an agent pages through", () => {
+  it("gives every note once across its pages, newest change first, with next null on the last, and the web app every note at once", async () => {
+    const { ada, agent } = await connected();
+    for (let i = 0; i < 7; i++) await agent.json("create_note", { text: `# Note ${i}` });
+    const all = (await perform(env.DB, ada, { type: "note.list" })).map((note) => note.id);
+    expect(all).toHaveLength(7);
+
+    const pages: { notes: { id: string }[]; next: number | null }[] = [];
+    for (let offset: number | null = 0; offset !== null; offset = pages.at(-1)!.next) pages.push(await agent.json("list_notes", { limit: 3, offset }));
+    expect(pages.map((page) => [page.notes.length, page.next])).toEqual([[3, 3], [3, 6], [1, null]]);
+    expect(pages.flatMap((page) => page.notes.map((note) => note.id))).toEqual(all);
+    expect((await agent.json("list_notes")).notes).toHaveLength(7);
+    for (const limit of [0, 201, "50"]) expect(await agent.call("list_notes", { limit })).toEqual({ isError: true, text: "invalid: limit is a whole number from 1 to 200" });
+  });
+
+  it("gives every upload once across its pages, and the web app every upload at once", async () => {
+    const { ada, agent } = await connected();
+    for (let i = 0; i < 3; i++) await agent.json("upload_file", { name: `note-${i}.txt`, base64: btoa(`note ${i}`) });
+    const all = (await perform(env.DB, ada, { type: "upload.list" })).map((upload) => upload.id);
+    expect(all).toHaveLength(3);
+    const first = await agent.json("list_uploads", { limit: 2 });
+    const second = await agent.json("list_uploads", { limit: 2, offset: first.next });
+    expect([first.next, second.next]).toEqual([2, null]);
+    expect([...first.uploads, ...second.uploads].map((upload: { id: string }) => upload.id)).toEqual(all);
+  });
+
+  it("is printed whole by the ink command, which asks for every page", async () => {
+    const asked: unknown[] = [];
+    const said: string[] = [];
+    const fetch_ = async (_url: string, init: RequestInit) => {
+      const { arguments: args } = JSON.parse(init.body as string).params;
+      asked.push(args);
+      const notes = Array.from({ length: args.offset === 0 ? args.limit : 1 }, (_, i) => ({ id: `n${args.offset + i}` }));
+      return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify({ notes, next: args.offset === 0 ? args.limit : null }) }] } });
+    };
+    expect(await run(["notes", "--tag", "money"], { env: { INK_TOKEN: "cink_x" }, stdin: async () => "", out: (line) => said.push(line), fetch: fetch_ as unknown as typeof fetch })).toBe(0);
+    expect(asked).toEqual([
+      { tag: "money", limit: 200, offset: 0 },
+      { tag: "money", limit: 200, offset: 200 },
+    ]);
+    const printed = JSON.parse(said.join("\n")) as { id: string }[];
+    expect([printed.length, printed[0]!.id, printed.at(-1)!.id]).toEqual([201, "n0", "n200"]);
   });
 });
 
@@ -130,13 +175,12 @@ describe("an agent's arguments", () => {
     expect(await agent.call("list_folders", { workspace_id: ada.workspaceId })).toEqual({ isError: true, text: 'invalid: list_folders takes no "workspace_id": did you mean "workspaceId"? It takes workspaceId.' });
   });
 
-  it("are named in each tool's schema with the old names marked deprecated, and each description ends with an example", async () => {
+  it("are named in each tool's schema by the name they have now alone, and each description ends with an example", async () => {
     const { agent } = await connected();
     const tools = await agent.tools();
     const read = tools.find((t) => t.name === "read_note")!;
     expect(read.inputSchema.required).toEqual(["noteId"]);
-    expect(read.inputSchema.properties.id).toMatchObject({ deprecated: true, description: "The old name of noteId, still taken. Use noteId" });
-    expect(read.inputSchema.properties.workspace).toMatchObject({ deprecated: true });
+    expect(Object.keys(read.inputSchema.properties)).toEqual(["workspaceId", "noteId", "revision"]);
     expect(read.description).toMatch(/\n\nExample: \{"noteId":"[a-z0-9]{12}"\}$/);
     expect(tools.every((t) => /\n\nExample: \{.*\}$/.test(t.description))).toBe(true);
   });

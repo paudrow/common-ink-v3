@@ -174,6 +174,9 @@ type Handler<K extends OpType> = {
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
 
+/** Whether an operation changes nothing, which is all a read-only token may ask. */
+export const isReadOnlyOp = (type: OpType) => HANDLERS[type].needs === "view" && !HANDLERS[type].changes;
+
 /** Every operation on a workspace. The web app, CLI, and MCP server all come through here. */
 export async function perform<T extends OpInput>(db: D1Database, actor: Actor | Visitor, input: T, now = Date.now(), sources: Sources = NO_SOURCES, files: Files = NO_FILES): Promise<Results[T["type"]]> {
   const parsed = Op.safeParse(input);
@@ -187,7 +190,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   // Whoever holds a link is let into the operations made for them and no other, whatever is added later.
   if ((actor.kind === "visitor") !== (handler.by === "visitor")) throw new OpError("forbidden", actor.kind === "visitor" ? `A link can't ${op.type}` : `Only a link can ${op.type}`);
   if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
-  if (actor.kind === "agent" && actor.scope?.readOnly && (handler.needs !== "view" || handler.changes)) throw new OpError("forbidden", `A read-only token can't ${op.type}`);
+  if (actor.kind === "agent" && actor.scope?.readOnly && !isReadOnlyOp(op.type)) throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if ((handler.members || handler.own) && standing.sight.within) throw new OpError("forbidden", `An agent limited to folders can't ${op.type}`);
   // A plugin is refused everything but what a permission it was given names. Members run plugins, so a guest's is refused whatever it asks, before anything is said of the plugin.
   // The plugins that come with Common Ink are the app's, so a guest's app has them too: each acts as the guest, within what it declares. A draft is a member's.
@@ -1769,9 +1772,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .prepare(
           `SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR (n.folder_id = ?2 AND EXISTS (SELECT 1 FROM folders f WHERE f.workspace_id = ?1 AND f.id = ?2 AND ${SEEN_FOLDER("f", "?4")}))) AND (?3 IS NULL OR n.updated_at >= ?3 OR n.state_at >= ?3) AND ${SEEN("n", "?4", listing(op.includeArchived))}
              AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = ?5))
-           ORDER BY n.updated_at DESC`,
+           ORDER BY n.updated_at DESC, n.id LIMIT ?6 OFFSET ?7`,
         )
-        .bind(ctx.workspaceId, op.folderId ?? null, op.updatedSince ?? null, ctx.sight.bind, op.tag === undefined ? null : nameKey(op.tag))
+        .bind(ctx.workspaceId, op.folderId ?? null, op.updatedSince ?? null, ctx.sight.bind, op.tag === undefined ? null : nameKey(op.tag), op.limit ?? -1, op.offset)
         .all<SummaryRow>();
       return results.map((row) => toSummary(ctx, row));
     },

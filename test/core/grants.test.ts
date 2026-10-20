@@ -649,7 +649,7 @@ describe("an agent", () => {
     const claude = { agentId: agent.id, personId: gus.personId, name: "Claude", workspaceId: ada.workspaceId, readOnly: false, folderIds: null };
 
     expect(JSON.parse((await tool(claude, "list_workspaces")).text).workspaces).toEqual([{ id: ada.workspaceId, name: "Ada's workspace", role: "guest" }]);
-    expect(JSON.parse((await tool(claude, "list_notes")).text)).toMatchObject([{ id: plan.id, title: "Plan", access: "edit", folderId: null }]);
+    expect(JSON.parse((await tool(claude, "list_notes")).text).notes).toMatchObject([{ id: plan.id, title: "Plan", access: "edit", folderId: null }]);
     expect(await tool(claude, "read_note", { id: other.id })).toEqual({ isError: true, text: "not_found: No such note" });
     expect(await tool(claude, "read_note", { id: "zzzzzzzzzzzz" })).toEqual({ isError: true, text: "not_found: No such note" });
     expect((await tool(claude, "write_note", { id: plan.id, baseRevision: 1, text: "# Plan\n\nby the guest's agent" })).isError).toBe(false);
@@ -668,9 +668,9 @@ describe("an agent", () => {
     await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: true });
     const of = async (personId: string, readOnly = false) => ({ agentId: (await connectAgent(env.DB, personId, "Claude", { readOnly })).agent.id, personId, name: "Claude", workspaceId: null, readOnly, folderIds: null });
 
-    expect(JSON.parse((await tool(await of(ada.personId), "list_notes", { workspace: ada.workspaceId })).text)).toEqual([]);
+    expect(JSON.parse((await tool(await of(ada.personId), "list_notes", { workspace: ada.workspaceId })).text).notes).toEqual([]);
     expect(await tool(await of(ada.personId), "note_history", { workspace: ada.workspaceId, id: diary.id })).toEqual({ isError: true, text: "not_found: No such note" });
-    expect(JSON.parse((await tool(await of(eve.personId), "list_notes", { workspace: ada.workspaceId })).text)).toMatchObject([{ title: "Diary", private: true, access: "edit" }]);
+    expect(JSON.parse((await tool(await of(eve.personId), "list_notes", { workspace: ada.workspaceId })).text).notes).toMatchObject([{ title: "Diary", private: true, access: "edit" }]);
     expect(await tool(await of(eve.personId, true), "write_note", { workspace: ada.workspaceId, id: diary.id, baseRevision: 1, text: "# No" })).toEqual({ isError: true, text: "forbidden: A read-only token can't note.write" });
   });
 

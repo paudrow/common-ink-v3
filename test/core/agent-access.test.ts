@@ -235,7 +235,7 @@ describe("an agent's access is its member's", () => {
     }
     expect(JSON.parse((await tool(token, "history", { workspace, noteIds: [hers.id] })).text).changes).toEqual([]);
     expect(JSON.parse((await tool(token, "revert_author", { workspace, author: { kind: "member", id: grace.personId } })).text)).toEqual({ reverted: [], emptied: [], failed: [], next: null });
-    expect(JSON.parse((await tool(token, "list_notes", { workspace, folderId: herFolder.id })).text)).toEqual([]);
+    expect(JSON.parse((await tool(token, "list_notes", { workspace, folderId: herFolder.id })).text).notes).toEqual([]);
     expect((await tool(token, "create_note", { workspace, text: "# Planted", folderId: herFolder.id })).text).toBe("not_found: No such folder");
     expect((await tool(token, "delete_folder", { workspace, id: herFolder.id })).text).toBe("not_found: No such folder");
     expect((await perform(env.DB, grace, { type: "note.read", id: hers.id })).text).toBe("# Grace's\n\nSecret");

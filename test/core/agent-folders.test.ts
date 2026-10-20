@@ -99,8 +99,8 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const w = await world();
     const claude = await asAgent(w.limited.token);
 
-    expect(idsOf(await claude.json<Note[]>("list_notes"))).toEqual([w.deep.id, w.inside.id].sort());
-    expect(await claude.json("list_notes", { folderId: w.journal })).toEqual([]);
+    expect(idsOf((await claude.json<{ notes: Note[] }>("list_notes")).notes)).toEqual([w.deep.id, w.inside.id].sort());
+    expect((await claude.json<{ notes: Note[] }>("list_notes", { folderId: w.journal })).notes).toEqual([]);
     expect(await claude.json("list_folders")).toEqual({
       unsortedId: null,
       folders: [
@@ -245,7 +245,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     await perform(env.DB, w.ada, { type: "note.move", id: w.inside.id, folderId: w.journal });
     expect(await claude.call("read_note", { id: w.inside.id })).toEqual(NO_NOTE);
     expect(await claude.call("note_history", { id: w.inside.id })).toEqual(NO_NOTE);
-    expect(idsOf(await claude.json<Note[]>("list_notes"))).toEqual([w.deep.id]);
+    expect(idsOf((await claude.json<{ notes: Note[] }>("list_notes")).notes)).toEqual([w.deep.id]);
     expect((await claude.json<{ changes: { noteId: string }[] }>("history")).changes.every((c) => c.noteId === w.deep.id)).toBe(true);
 
     await perform(env.DB, w.ada, { type: "note.move", id: w.outside.id, folderId: w.plans });
@@ -254,21 +254,21 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     // No operation moves a folder yet. Whatever comes to, the limit is read from where each folder is at the time.
     await env.DB.prepare("UPDATE folders SET parent_id = NULL WHERE id = ?").bind(w.plans).run();
     expect(await claude.call("read_note", { id: w.deep.id })).toEqual(NO_NOTE);
-    expect(await claude.json("list_notes")).toEqual([]);
+    expect((await claude.json<{ notes: Note[] }>("list_notes")).notes).toEqual([]);
     await env.DB.prepare("UPDATE folders SET parent_id = ? WHERE id = ?").bind(w.projects, w.journal).run();
-    expect(idsOf(await claude.json<Note[]>("list_notes"))).toEqual([w.inside.id]);
+    expect(idsOf((await claude.json<{ notes: Note[] }>("list_notes")).notes)).toEqual([w.inside.id]);
   });
 
   it("is left with nothing, and never with everything, once its folders are deleted", async () => {
     const w = await world();
     const { agent, token } = await connectAgent(env.DB, w.ada.personId, "Narrow", { workspaceId: w.ada.workspaceId, folderIds: [w.plans] });
     const narrow = await asAgent(token);
-    expect(idsOf(await narrow.json<Note[]>("list_notes"))).toEqual([w.deep.id]);
+    expect(idsOf((await narrow.json<{ notes: Note[] }>("list_notes")).notes)).toEqual([w.deep.id]);
 
     await perform(env.DB, w.ada, { type: "note.move", id: w.deep.id, folderId: w.projects });
     await perform(env.DB, w.ada, { type: "folder.delete", id: w.plans });
 
-    expect(await narrow.json("list_notes")).toEqual([]);
+    expect((await narrow.json<{ notes: Note[] }>("list_notes")).notes).toEqual([]);
     expect(await narrow.json("list_folders")).toEqual({ unsortedId: null, folders: [] });
     expect(await narrow.call("read_note", { id: w.deep.id })).toEqual(NO_NOTE);
     expect(await narrow.json("history_authors")).toEqual([]);
@@ -409,12 +409,12 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     // Tags and their counts are of its own notes.
     expect(await claude.json("list_tags")).toEqual({ tags: [{ name: "insidetag", notes: 1 }, { name: "sharedtag", notes: 1 }], indexing: false });
     expect(await claude.json("list_tags", { includeArchived: true })).toEqual({ tags: [{ name: "insidetag", notes: 1 }, { name: "sharedtag", notes: 1 }], indexing: false });
-    expect(idsOf(await claude.json<Note[]>("list_notes", { tag: "sharedtag", includeArchived: true }))).toEqual([tagged.id]);
-    expect(await claude.json("list_notes", { tag: "hushtag", includeArchived: true })).toEqual(await claude.json("list_notes", { tag: "nosuchtag", includeArchived: true }));
+    expect(idsOf((await claude.json<{ notes: Note[] }>("list_notes", { tag: "sharedtag", includeArchived: true })).notes)).toEqual([tagged.id]);
+    expect((await claude.json<{ notes: Note[] }>("list_notes", { tag: "hushtag", includeArchived: true })).notes).toEqual((await claude.json<{ notes: Note[] }>("list_notes", { tag: "nosuchtag", includeArchived: true })).notes);
     expect(await claude.json("todo_filters", { includeArchived: true })).toEqual({ tags: ["insidetag", "sharedtag"], assignees: [] });
 
     // The archived notes and Trash it is shown are its own.
-    expect(idsOf(await claude.json<Note[]>("list_notes", { includeArchived: "only" }))).toEqual([filed.id]);
+    expect(idsOf((await claude.json<{ notes: Note[] }>("list_notes", { includeArchived: "only" })).notes)).toEqual([filed.id]);
     expect(idsOf(await claude.json<Note[]>("list_trash"))).toEqual([binned.id]);
     expect((await claude.json<{ noteCount: number }[] & { folders: { id: string; noteCount: number }[] }>("list_folders")).folders.map((f) => [f.id, f.noteCount]).sort()).toEqual([[w.plans, 1], [w.projects, 2]].sort());
 
@@ -725,7 +725,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const claude = await asAgent(w.limited.token);
     for (const kept of ["null", "[]", "0", '""', "false", "[null]", '[["x"]]', "{}", "not json"]) {
       await env.DB.prepare("UPDATE agents SET folder_ids = ? WHERE id = ?").bind(kept, w.limited.agent.id).run();
-      expect(await claude.json("list_notes"), kept).toEqual([]);
+      expect((await claude.json<{ notes: Note[] }>("list_notes")).notes, kept).toEqual([]);
       expect((await listAgents(env.DB, w.ada.personId)).find((a) => a.id === w.limited.agent.id)!.folderIds, kept).toEqual([]);
     }
   });
@@ -758,7 +758,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const { token } = await connectAgent(env.DB, gus, "Claude", { workspaceId: ada.workspaceId, folderIds: [team] });
     const claude = await asAgent(token);
     // The note shared with the guest alone is in a folder outside the limit, so it is outside too.
-    expect(idsOf(await claude.json<Note[]>("list_notes"))).toEqual([shared.id]);
+    expect(idsOf((await claude.json<{ notes: Note[] }>("list_notes")).notes)).toEqual([shared.id]);
     expect(await claude.call("read_note", { id: lone.id })).toEqual(NO_NOTE);
     expect(await claude.call("write_note", { id: lone.id, baseRevision: 1, text: "# Lone-note\n\nMine now" })).toEqual(NO_NOTE);
     expect(await claude.call("write_note", { id: shared.id, baseRevision: 1, text: "# Shared\n\nMine now" })).toEqual({ isError: true, text: "forbidden: You can read this note, and not change it" });
@@ -767,7 +767,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     // The grant is taken back: the folder is still the agent's limit, and there is nothing in it for the guest any more.
     const grants = await perform(env.DB, ada, { type: "grant.list", folderId: team });
     await perform(env.DB, ada, { type: "grant.revoke", id: grants.grants.find((g) => g.to.kind === "person")!.id });
-    expect(await claude.json("list_notes")).toEqual([]);
+    expect((await claude.json<{ notes: Note[] }>("list_notes")).notes).toEqual([]);
     expect(await claude.call("read_note", { id: shared.id })).toEqual(NO_NOTE);
   });
 
@@ -775,7 +775,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const w = await world();
     const all = [w.deep.id, w.inside.id, w.loose.id, w.outside.id].sort();
     expect(idsOf(await perform(env.DB, w.ada, { type: "note.list" }))).toEqual(all);
-    expect(idsOf(await (await asAgent(w.scribe.token)).json<Note[]>("list_notes"))).toEqual(all);
+    expect(idsOf((await (await asAgent(w.scribe.token)).json<{ notes: Note[] }>("list_notes")).notes)).toEqual(all);
     expect((await perform(env.DB, w.ada, { type: "folder.list" })).unsortedId).not.toBeNull();
   });
 });
@@ -787,14 +787,14 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
     const edit = (change: object) => editAgent(env.DB, w.ada.personId, w.limited.agent.id, change as never);
 
     expect((await edit({ folderIds: [w.journal] })).folderIds).toEqual([w.journal]);
-    expect(idsOf(await claude.json<Note[]>("list_notes"))).toEqual([w.outside.id]);
+    expect(idsOf((await claude.json<{ notes: Note[] }>("list_notes")).notes)).toEqual([w.outside.id]);
     expect(await claude.call("read_note", { id: w.inside.id })).toEqual(NO_NOTE);
 
     expect((await edit({ folderIds: null })).folderIds).toBeNull();
-    expect((await claude.json<Note[]>("list_notes")).length).toBe(4);
+    expect(((await claude.json<{ notes: Note[] }>("list_notes")).notes).length).toBe(4);
 
     expect(await edit({ folderIds: [w.plans], readOnly: true })).toMatchObject({ folderIds: [w.plans], readOnly: true });
-    expect(idsOf(await claude.json<Note[]>("list_notes"))).toEqual([w.deep.id]);
+    expect(idsOf((await claude.json<{ notes: Note[] }>("list_notes")).notes)).toEqual([w.deep.id]);
     expect((await claude.call("write_note", { id: w.deep.id, baseRevision: 2, text: "# No" })).text).toBe("forbidden: A read-only token can't note.write");
     // An edit that says nothing of folders leaves the limit as it is.
     expect(await edit({ readOnly: false })).toMatchObject({ folderIds: [w.plans], readOnly: false });
@@ -879,7 +879,7 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
     const marks = [...w.marks, "Photo-outside", "Scan-outside", "Binned-outside", "Album-outside", "bytes-outside", "loose-outside"];
 
     const claude = await asAgent(w.limited.token);
-    expect(idsOf(await claude.json<{ id: string }[]>("list_uploads", { includeArchived: true }))).toEqual([inside.id]);
+    expect(idsOf((await claude.json<{ uploads: { id: string }[] }>("list_uploads", { includeArchived: true })).uploads)).toEqual([inside.id]);
     expect(await claude.call("list_uploads", { folderId: w.journal })).toEqual(await claude.call("list_uploads", { folderId: MISSING }));
     expect(await claude.call("list_uploads", { folderId: MISSING })).toEqual(NO_FOLDER);
     expect(await claude.json("list_trashed_uploads")).toEqual([]);
@@ -910,13 +910,13 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
     const grace = await addMember(w.ada, "editor", "Grace-outside");
     await upload(grace, "Grace-photo-outside.png", PNG, { folderId: w.journal });
     marks.push("Grace-outside", grace.personId);
-    const finds = async (query: string) => idsOf(await claude.json<{ id: string }[]>("list_uploads", { query, today: "2026-10-15" }));
+    const finds = async (query: string) => idsOf((await claude.json<{ uploads: { id: string }[] }>("list_uploads", { query, today: "2026-10-15" })).uploads);
     for (const query of ["", "type:image", "type:pdf OR type:other", "-type:image", "used:yes", "used:no", "outside", "name:outside", "size:>0", "size:<1kb", "uploaded:>=2020-01-01", "is:open OR is:archived OR is:trashed", "is:private OR -is:private", "uploader:@me OR -uploader:@me", "sort:size-desc"]) {
       expect((await finds(query)).filter((id) => id !== inside.id), query).toEqual([]);
     }
     expect(await finds("type:image")).toEqual([inside.id]);
     // The picture inside is shown by a note inside and one outside: it is told of the one it sees.
-    expect((await claude.json<{ id: string; uses: number }[]>("list_uploads", { query: "used:yes" })).map((u) => [u.id, u.uses])).toEqual([[inside.id, 1]]);
+    expect(((await claude.json<{ uploads: { id: string; uses: number }[] }>("list_uploads", { query: "used:yes" })).uploads).map((u) => [u.id, u.uses])).toEqual([[inside.id, 1]]);
     expect(await finds('uploader:"Ada Lovelace"')).toEqual([inside.id]);
     // A name it asks by is said back to it, so these are asked apart from what is checked for marks below.
     const echo = await asAgent(w.limited.token);

@@ -125,6 +125,7 @@ describe("MCP protocol", () => {
       "list_notes",
       "read_note",
       "note_syntax",
+      "query_syntax",
       "create_note",
       "write_note",
       "edit_note",
@@ -210,6 +211,37 @@ describe("MCP protocol", () => {
     expect(list.result.tools.find((t: { name: string }) => t.name === "write_note").description).toContain("call note_syntax");
   });
 
+  it("answers a batch of at most 20 messages, and a bigger one with nothing but a refusal", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const twenty = (await (await call(token, Array.from({ length: 20 }, (_, i) => rpc("ping", {}, i)))).json()) as unknown[];
+    expect(twenty).toHaveLength(20);
+    const refused = await call(token, Array.from({ length: 21 }, (_, i) => rpc("ping", {}, i)));
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "A batch holds at most 20 messages" } });
+  });
+
+  it("answers a tool call past an agent's limit as a tool error the model reads, and counts nothing but tool calls", async () => {
+    const { token, agent } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const keys: string[] = [];
+    const limited: Env = { ...env, MCP_CALLS: { limit: async ({ key }: { key: string }) => (keys.push(key), { success: false }) } as RateLimit };
+    const post = (body: unknown) => send(new Request(URL_, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body) }), limited);
+
+    const answered = await post([rpc("initialize", { protocolVersion: "2025-06-18" }, 1), rpc("tools/list", {}, 2), rpc("ping", {}, 3), rpc("tools/call", { name: "list_folders", arguments: {} }, 4)]);
+    expect(answered.status).toBe(200);
+    const [init, list, ping, called] = (await answered.json()) as any[];
+    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 84, {}]);
+    expect(called).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: "rate_limited: Too many calls. An agent makes at most 300 a minute. Wait a minute, then call again." }], isError: true } });
+    expect(keys).toEqual([agent.id]);
+  });
+
+  it("lets a tool call through when the limiter itself fails", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const broken: Env = { ...env, MCP_CALLS: { limit: async () => Promise.reject(new Error("limiter down")) } as RateLimit };
+    const answered = await send(new Request(URL_, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(rpc("tools/call", { name: "query_syntax", arguments: { scope: "notes" } }, 1)) }), broken);
+    const { result } = (await answered.json()) as any;
+    expect([result.isError, result.content[0].text.startsWith("The query language")]).toEqual([undefined, true]);
+  });
+
   it("note_syntax answers with an example of a form and takes nothing else", async () => {
     const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
     const { text, isError } = await tool(token, "note_syntax");
@@ -257,7 +289,7 @@ describe("MCP tools", () => {
     expect(again.revision).toBe(2);
     expect((await tool(token, "read_note", { id: created.id, revision: 1 })).json().text).toBe("# Plan\n\nStep one");
 
-    expect((await tool(token, "list_notes")).json()).toEqual([expect.objectContaining({ id: created.id, revision: 2 })]);
+    expect((await tool(token, "list_notes")).json().notes).toEqual([expect.objectContaining({ id: created.id, revision: 2 })]);
     const history = (await tool(token, "note_history", { id: created.id })).json();
     expect(history.map((h: { revision: number }) => h.revision)).toEqual([1, 2]);
   });
@@ -303,7 +335,7 @@ describe("MCP tools", () => {
     expect(await tool(token, "create_note", { text: "# Hi", folder_id: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder_id": did you mean "folderId"? It takes workspaceId, text, folderId, linkTitles, mentionNames, writeId.' });
     expect(await tool(token, "create_note", { text: "# Hi", folder: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder". It takes workspaceId, text, folderId, linkTitles, mentionNames, writeId.' });
     expect(await tool(token, "list_workspaces", { all: true })).toMatchObject({ isError: true, text: 'invalid: list_workspaces takes no "all". It takes no arguments.' });
-    expect((await tool(token, "list_notes")).json()).toEqual([]);
+    expect((await tool(token, "list_notes")).json().notes).toEqual([]);
   });
 
   it("reports a failure as a tool error the agent can read", async () => {
@@ -323,7 +355,7 @@ describe("what an agent can reach", () => {
 
     expect(await tool(token, "read_note", { id: secret.id })).toMatchObject({ isError: true, text: "not_found: No such note" });
     expect(await tool(token, "list_notes", { workspace: grace.workspaceId })).toMatchObject({ isError: true, text: "not_found: No such workspace" });
-    expect((await tool(token, "list_notes")).json()).toEqual([]);
+    expect((await tool(token, "list_notes")).json().notes).toEqual([]);
   });
 
   it("is capped by the member's role: a viewer's agent reads but can't write", async () => {
@@ -516,7 +548,7 @@ describe("the ink command", () => {
     const lines: string[] = [];
     const vars = { INK_TOKEN: "cink_x", INK_URL: "https://ink.test/" };
 
-    expect(await run(["notes"], io(vars))).toBe(0);
+    expect(await run(["tags"], io(vars))).toBe(0);
     expect(await run(["read", "aaaaaaaaaaaa", "--revision", "2", "--workspace", "w"], io(vars))).toBe(0);
     expect(await run(["write", "aaaaaaaaaaaa", "--base", "3"], io(vars, "# Piped"))).toBe(0);
     expect(await run(["create", "--text", "# Hi"], io(vars))).toBe(0);
@@ -525,7 +557,7 @@ describe("the ink command", () => {
 
     expect(seen.every((s) => s.url === "https://ink.test/mcp" && s.auth === "Bearer cink_x")).toBe(true);
     expect(seen.map((s) => [s.body.params.name, s.body.params.arguments])).toEqual([
-      ["list_notes", {}],
+      ["list_tags", {}],
       ["read_note", { noteId: "aaaaaaaaaaaa", revision: 2, workspaceId: "w" }],
       ["write_note", { noteId: "aaaaaaaaaaaa", baseRevision: 3, text: "# Piped" }],
       ["create_note", { text: "# Hi" }],
