@@ -4,6 +4,9 @@
 
 const RULES: readonly [RegExp, string][] = [
   [/\bBearer\s+\S+/gi, "Bearer …"],
+  // Stripe's keys, and the fragment of one it quotes when refusing it: a secret key, a restricted key, a webhook's secret.
+  [/\b(sk|rk)_(test|live)_\S+/g, "$1_…"],
+  [/\bwhsec_\S+/g, "whsec_…"],
   // An agent's token, and OAuth's: a code (cink_ac_), an access token (cink_at_) and a refresh token (cink_rt_).
   [/\bcink_[A-Za-z0-9_-]+/g, "cink_…"],
   // What an OAuth app sends, in a form or in an address: a verifier proves it made the request, and the request's id is how a member answers it.

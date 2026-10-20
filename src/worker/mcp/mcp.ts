@@ -7,6 +7,7 @@ import { BROKE } from "../../core/protocol.ts";
 import { ASK_NOTE_SYNTAX } from "../../core/noteSyntax.ts";
 import { tokenHolder } from "../auth.ts";
 import { TooLarge, cappedJson } from "../body.ts";
+import { chargingOf } from "../billing.ts";
 import { metadataUrl } from "../oauth.ts";
 import { opName, report, told, type Trace } from "../report.ts";
 import { callTool, toolList, type Caller, type Reached } from "./tools.ts";
@@ -143,7 +144,7 @@ export async function handleMcp(req: Request, env: Env, sources: Sources | undef
   const out: Answer[] = [];
   for (const m of messages.map(asRequest)) {
     // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
-    const answer = await handleMessage(env, caller, m, sources, { origin: url.origin, bucket: env.FILES }, req.headers).catch((err: unknown) => {
+    const answer = await handleMessage(env, caller, m, sources, { origin: url.origin, bucket: env.FILES, charging: chargingOf(env) }, req.headers).catch((err: unknown) => {
       trace.fault = err;
       trace.op = opName(m.method === "tools/call" ? `tools/call:${String((m.params as { name?: unknown } | undefined)?.name)}` : m.method);
       return finish(eraOf(m), fail(typeof m.id === "string" || typeof m.id === "number" ? m.id : null, -32603, BROKE));

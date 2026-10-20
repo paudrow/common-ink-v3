@@ -10,6 +10,7 @@ import { OpError, PART_BYTES, type OpErrorCode, type OpenedUpload } from "../cor
 import { passHolder } from "../core/uploads.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { listed, sessionPersonId, tokenHolder } from "./auth.ts";
+import { chargingOf } from "./billing.ts";
 import { sign, verify } from "./session.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 
@@ -95,7 +96,7 @@ async function upload(req: Request, env: Env, url: URL, workspaceId: string): Pr
   }
   if (typeof named !== "object" || named === null) return json({ error: "invalid", message: `${UPLOAD_HEADER} isn't an object` }, 400);
   try {
-    return json(await perform(env.DB, who.actor, { ...named, type: "upload.create", size: Number(length) } as never, Date.now(), undefined, { bucket: env.FILES, body: req.body }), 201);
+    return json(await perform(env.DB, who.actor, { ...named, type: "upload.create", size: Number(length) } as never, Date.now(), undefined, { bucket: env.FILES, body: req.body }, chargingOf(env)), 201);
   } catch (err) {
     return refused(err);
   }
@@ -116,7 +117,7 @@ async function exported(req: Request, env: Env, url: URL, workspaceId: string): 
   const asked = url.searchParams;
   const op = { type: "export.open", notes: asked.get("notes") === "1", ...(asked.has("after") ? { after: asked.get("after") } : {}), ...(asked.has("through") ? { through: asked.get("through") } : {}) };
   try {
-    const { workspace, body } = await perform(env.DB, who.actor, op as never, Date.now(), undefined, { bucket: env.FILES });
+    const { workspace, body } = await perform(env.DB, who.actor, op as never, Date.now(), undefined, { bucket: env.FILES }, chargingOf(env));
     const [part, of] = [asked.get("part"), asked.get("of")].map((n) => (n && /^\d{1,5}$/.test(n) ? Number(n) : 1)) as [number, number];
     const name = of > 1 ? `${workspace} export, part ${part} of ${of}.zip` : `${workspace} export.zip`;
     const { "Accept-Ranges": _, ...sealed } = SEALED;
@@ -145,7 +146,7 @@ async function part(req: Request, env: Env, secret: string, number: number): Pro
         body: req.body,
         pass: secret,
         ...(length && /^\d+$/.test(length) ? { declared: Number(length) } : {}),
-      }),
+      }, chargingOf(env)),
     );
   } catch (err) {
     return refused(err);
@@ -194,7 +195,7 @@ interface SiteFile extends Record<string, unknown> {
 async function siteAddress(env: Env, actor: Actor, workspaceId: string, id: string): Promise<string | null> {
   const origin = fileOrigin(env);
   if (!origin || actor.kind !== "member" || !env.SESSION_SECRET) return null;
-  const upload = await perform(env.DB, actor, { type: "upload.read", id });
+  const upload = await perform(env.DB, actor, { type: "upload.read", id }, Date.now(), undefined, undefined, chargingOf(env));
   if (fileClass(upload) !== "pdf") return null;
   return `${origin}/file/${await sign({ workspaceId, uploadId: id, personId: actor.personId } satisfies SiteFile, siteKey(env), SITE_SECONDS)}`;
 }
@@ -216,7 +217,7 @@ export function fileSiteResponse(req: Request, env: Env, url: URL): Promise<Resp
     const named = await verify<SiteFile>(at[1], siteKey(env));
     if (!named) return gone();
     try {
-      const opened = await perform(env.DB, { kind: "member", personId: named.personId, workspaceId: named.workspaceId }, { type: "upload.open", id: named.uploadId }, Date.now(), undefined, { bucket: env.FILES, asked: req.headers });
+      const opened = await perform(env.DB, { kind: "member", personId: named.personId, workspaceId: named.workspaceId }, { type: "upload.open", id: named.uploadId }, Date.now(), undefined, { bucket: env.FILES, asked: req.headers }, chargingOf(env));
       if (fileClass(opened.upload) !== "pdf") {
         void opened.body?.cancel();
         return gone();
@@ -250,7 +251,7 @@ export async function handleFiles(req: Request, env: Env, url: URL): Promise<Res
     // Asked to open in a tab: a PDF goes to the file site, where there is one, and anything else is answered here as ever.
     const site = url.searchParams.get("open") === "tab" ? await siteAddress(env, who.actor, workspaceId!, id) : null;
     if (site) return new Response(null, { status: 302, headers: { Location: site, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
-    return served(req, await perform(env.DB, who.actor, { type: "upload.open", id }, Date.now(), undefined, { bucket: env.FILES, asked: req.headers }));
+    return served(req, await perform(env.DB, who.actor, { type: "upload.open", id }, Date.now(), undefined, { bucket: env.FILES, asked: req.headers }, chargingOf(env)));
   } catch (err) {
     return refused(err);
   }

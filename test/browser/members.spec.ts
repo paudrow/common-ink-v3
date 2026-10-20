@@ -174,8 +174,8 @@ test("a workspace's only admin can't leave or stop being admin, and anyone else 
   await expect(member(page, "Ada Lovelace").getByLabel("Role of Ada Lovelace")).toBeDisabled();
   await expect(member(page, "Ada Lovelace").getByRole("button", { name: "Leave" })).toBeDisabled();
   const mine = (await me(page)).person.id;
-  await expect(perform(page, { type: "member.leave" })).rejects.toThrow("A workspace needs an admin. Make someone else an admin first.");
-  await expect(perform(page, { type: "member.setRole", memberId: mine, as: "editor" })).rejects.toThrow("A workspace needs an admin.");
+  await expect(perform(page, { type: "member.leave" })).rejects.toThrow("You pay for this workspace, so you can't leave it yet.");
+  await expect(perform(page, { type: "member.setRole", memberId: mine, as: "editor" })).rejects.toThrow("Ada Lovelace pays for this workspace, so they stay an admin.");
 
   await switchTo(grace, "Ada's workspace");
   await openMembers(grace);

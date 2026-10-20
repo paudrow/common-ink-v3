@@ -1,3 +1,4 @@
+import type { Billing, Interval } from "../core/billing.ts";
 import { partSpan, partsLeft, planParts } from "../core/parts.ts";
 import { tellFault } from "./faults.ts";
 import { NO_SUCH_WORKSPACE, type Agent, type ClipperGrantView, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type SendingUpload, type Shared, type Upload } from "../core/protocol.ts";
@@ -264,5 +265,16 @@ export const disconnectAgent = (id: string) => request<unknown>(`/api/agents/${i
 /** The member's own clipper sign-ins that still work. */
 export const listClipperGrants = () => request<{ grants: ClipperGrantView[] }>("/api/clipper").then((r) => r.grants);
 export const revokeClipperGrant = (id: string) => request<unknown>(`/api/clipper/${id}`, { method: "DELETE" });
+
+/** Whether this Common Ink charges, and where the signed-in person's plan stands. */
+export const getBilling = () => request<Billing>("/api/billing");
+
+const sentToStripe = (path: string, body?: unknown) =>
+  request<{ url: string }>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) }).then((r) => r.url);
+
+/** Where Stripe Checkout takes a subscription by the month or the year. */
+export const checkoutAt = (interval: Interval) => sentToStripe("/api/billing/checkout", { interval });
+/** Where Stripe's Customer Portal shows the person's card, invoices and subscription. */
+export const portalAt = () => sentToStripe("/api/billing/portal");
 
 export const signOut = () => fetch("/auth/sign-out", { method: "POST", credentials: "same-origin" });

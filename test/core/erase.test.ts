@@ -135,6 +135,7 @@ async function sharing() {
   await env.DB.batch([
     env.DB.prepare("INSERT INTO source_refs (id, person_id, data_source, record_id, created_at) VALUES (?, ?, 'google-calendar', 'lunch', 0)").bind(crypto.randomUUID().slice(0, 12), grace.personId),
     env.DB.prepare("INSERT INTO sample_records (person_id, record_id, revision, data) VALUES (?, 'e1', 1, '{}')").bind(grace.personId),
+    env.DB.prepare("INSERT INTO billing (person_id, trial_ends, updated_at) VALUES (?, 0, 0)").bind(grace.personId),
   ]);
 
   return { ada, grace, graceEmail, graceAlone, bob, bobEmail, shared, secret, daily, kept, mention, file, hidden, parts, aloneFile, toBob, link: link!, agentToken, byAgent, oauth, clipper, google, sources, plugin: theirs };
@@ -147,11 +148,11 @@ describe("deleting an account", () => {
     // The check below means something only if the person was in every one of these to begin with.
     expect(before).toEqual(
       expect.arrayContaining([
-        "agents.person_id", "changes.author_id", "changes.author_owner", "clipper_grants.person_id", "completions.author_id", "daily_notes.person_id", "grants.email", "grants.granted_by", "grants.person_id",
+        "agents.person_id", "billing.person_id", "changes.author_id", "changes.author_owner", "clipper_grants.person_id", "completions.author_id", "daily_notes.person_id", "grants.email", "grants.granted_by", "grants.person_id",
         "invites.email", "invites.invited_by", "labels.author_id", "members.person_id", "mentions.who", "notes.created_by", "notes.private_owner", "notes.text", "notes.updated_by", "notes.updated_by_owner",
         "oauth_requests.person_id", "people.email", "people.id", "pins.person_id", "plugin_drafts.person_id", "plugin_installs.installed_by", "plugin_permissions.decided_by", "plugin_requests.requested_by",
         "plugin_trust.person_id", "sample_records.person_id", "settings.person_id", "source_connections.account", "source_connections.person_id", "source_refs.person_id", "uploads.created_by",
-        "uploads.private_owner", "uploads.uploaded_by", "visits.person_id",
+        "uploads.private_owner", "uploads.uploaded_by", "visits.person_id", "workspaces.owner_id",
       ]),
     );
 
@@ -214,6 +215,31 @@ describe("deleting an account", () => {
     await perform(env.DB, ada, { type: "member.setRole", memberId: grace.personId, as: "admin" });
     expect(await outcome(ada, { type: "account.delete", confirm: await emailOf(ada) })).toBe("done");
     expect((await perform(env.DB, grace, { type: "member.list" })).map((m) => m.name)).toEqual(["Grace Hopper"]);
+  });
+
+  it("hands each workspace they paid for that stays to its earliest remaining admin, by when they joined and then by id", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve Editor");
+    const grace = await addMember(ada, "admin", "Grace Hopper");
+    const bob = await addMember(ada, "admin", "Bob Babbage");
+    const kate = await addMember(ada, "admin", "Kate Kept");
+    // Bob joined before Grace, and Kate with Bob; an editor who joined first is no admin to take it.
+    const joined = (who: Actor, at: number) => env.DB.prepare("UPDATE members SET joined_at = ? WHERE workspace_id = ? AND person_id = ?").bind(at, ada.workspaceId, who.personId).run();
+    await joined(eve, 1);
+    await joined(bob, 2);
+    await joined(kate, 2);
+    await joined(grace, 3);
+    const earliest = [bob, kate].map((p) => p.personId).sort()[0]!;
+    const ownerOf = async (workspaceId: string) => (await env.DB.prepare("SELECT owner_id FROM workspaces WHERE id = ?").bind(workspaceId).first<{ owner_id: string }>())?.owner_id;
+    expect(await ownerOf(ada.workspaceId)).toBe(ada.personId);
+
+    expect(await outcome(ada, { type: "account.delete", confirm: await emailOf(ada) })).toBe("done");
+    expect(await ownerOf(ada.workspaceId)).toBe(earliest);
+    const owned = (await whoAmI(env.DB, earliest)).workspaces.find((w) => w.id === ada.workspaceId);
+    expect(owned).toMatchObject({ name: "Ada's workspace", owned: true });
+    // The new owner is held to what the owner is: they stay an admin, and can't leave.
+    const next = [bob, kate].find((p) => p.personId === earliest)!;
+    expect(await outcome(next, { type: "member.leave" })).toBe("invalid: You pay for this workspace, so you can't leave it yet. Write to support@commonink.app to hand it to another admin.");
   });
 
   it("keeps the person's data sources, and tells Google nothing, when the batch itself refuses", async () => {

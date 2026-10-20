@@ -76,6 +76,7 @@ import { NO_SOURCES, calendarFor, calendarSettings, contactCards, createContact,
 import { referencesIn } from "./references.ts";
 import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { linkHash } from "./linkSeal.ts";
+import { READ_ONLY, type Charging } from "./billing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
 import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed } from "./todos.ts";
@@ -146,11 +147,15 @@ export interface Context {
   role: Role | null;
   /** What they can see and do. Every read of a note or a folder is checked against it. */
   sight: Sight;
+  /** True while the workspace's owner's plan has lapsed. Only an operation that `protects` runs then, and it may only take access away. */
+  readOnly: boolean;
   now: number;
   /** Where the asker's data sources come from. */
   sources: Sources;
   /** Where uploads' bytes are kept, and the bytes that came with this operation. */
   files: Files;
+  /** Billing, when it is on. */
+  charging: Charging | null;
 }
 
 type Access = "view" | "edit" | "manage";
@@ -179,6 +184,15 @@ type Handler<K extends OpType> = {
   changes?: true;
   /** Set when it answers from what is the asker's own and in no folder, as their data sources are and how far they have read: an agent limited to folders is refused it. */
   own?: true;
+  /** Set when it changes what is in the workspace, or who sees it, though it needs no more than `view`: a read-only workspace refuses it. */
+  alters?: true;
+  /**
+   * Set when it only ever takes access or data away (a grant, a link, someone's sessions, the whole
+   * workspace) and never adds or publishes any. A read-only workspace still lets whoever may do it by
+   * their own role do it, so an admin can cut someone off, or delete the workspace, while the owner's
+   * plan has lapsed.
+   */
+  protects?: true;
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
 
@@ -186,14 +200,22 @@ type Handler<K extends OpType> = {
 export const isReadOnlyOp = (type: OpType) => HANDLERS[type].needs === "view" && !HANDLERS[type].changes;
 
 /** Every operation on a workspace. The web app, CLI, and MCP server all come through here. */
-export async function perform<T extends OpInput>(db: D1Database, actor: Actor | Visitor, input: T, now = Date.now(), sources: Sources = NO_SOURCES, files: Files = NO_FILES): Promise<Results[T["type"]]> {
+export async function perform<T extends OpInput>(
+  db: D1Database,
+  actor: Actor | Visitor,
+  input: T,
+  now = Date.now(),
+  sources: Sources = NO_SOURCES,
+  files: Files = NO_FILES,
+  charging: Charging | null = null,
+): Promise<Results[T["type"]]> {
   const parsed = Op.safeParse(input);
   if (!parsed.success) throw new OpError("invalid", z.prettifyError(parsed.error));
   const op = parsed.data;
   const handler = HANDLERS[op.type] as Handler<OpType>;
 
   if (actor.kind === "agent" && actor.scope?.pinnedWorkspaceId && actor.scope.pinnedWorkspaceId !== actor.workspaceId) throw new OpError("not_found", NO_SUCH_WORKSPACE);
-  const standing = actor.kind === "visitor" ? await standingByLink(db, actor.token, actor.personId) : await standingIn(db, actor.personId, actor.workspaceId, actor.kind === "agent" ? (actor.scope?.folderIds ?? null) : null);
+  const standing = actor.kind === "visitor" ? await standingByLink(db, actor.token, actor.personId) : await standingIn(db, actor.personId, actor.workspaceId, actor.kind === "agent" ? (actor.scope?.folderIds ?? null) : null, charging, now, handler.protects);
   if (!standing) throw new OpError("not_found", NO_SUCH_WORKSPACE);
   // Whoever holds a link is let into the operations made for them and no other, whatever is added later.
   if ((actor.kind === "visitor") !== (handler.by === "visitor")) throw new OpError("forbidden", actor.kind === "visitor" ? `A link can't ${op.type}` : `Only a link can ${op.type}`);
@@ -210,7 +232,10 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
     // What is the member's alone is no plugin's, full trust or not: it is asked in the member's own name, where their role is what is checked.
     if (handler.by === "member" || handler.by === "owner" || (plugin.allowed !== "all" && !plugin.allowed.has(op.type))) throw new OpError("forbidden", `${plugin.name} isn't permitted to ${op.type}`);
   }
-  if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
+  if (handler.members && !standing.role) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
+  // What is left a person in a read-only workspace is what is theirs alone (their settings, pins, drafts and data sources, signing out, leaving), and taking access away.
+  if (standing.readOnly && !handler.protects && (handler.needs !== "view" || handler.alters)) throw new OpError("forbidden", READ_ONLY);
+  if (!ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
 
   let author: Author = { kind: "member", personId: standing.personId ?? "", name: standing.name };
   if (actor.kind === "agent") {
@@ -221,7 +246,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   const shutOff = plugin !== null && "allowed" in plugin && plugin.allowed !== "all";
   // A guest, and whoever opens a link, is told no member's name; a shut-off plugin only with members.read.
   const namesMembers = standing.role !== null && (!shutOff || (plugin as { allowed: ReadonlySet<string> }).allowed.has("member.list"));
-  const ctx: Context = { db, actor, author, shutOff, namesMembers, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
+  const ctx: Context = { db, actor, author, shutOff, namesMembers, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, readOnly: standing.readOnly, now, sources, files, charging };
   return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
 }
 
@@ -2893,31 +2918,32 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "member.signOut": {
     needs: "view",
     by: "member",
+    protects: true,
     run(ctx, op) {
       if (op.memberId !== ctx.personId && ctx.role !== "admin") throw new OpError("forbidden", "Only an admin signs out someone else");
       return signOut(asking(ctx), op.memberId, op.agents);
     },
   },
   "invite.list": { needs: "manage", by: "member", run: (ctx) => listInvites(ctx.db, ctx.workspaceId) },
-  "invite.revoke": { needs: "manage", by: "member", run: (ctx, op) => revokeInvite(asking(ctx), op.id) },
+  "invite.revoke": { needs: "manage", by: "member", protects: true, run: (ctx, op) => revokeInvite(asking(ctx), op.id) },
 
   // Deleting an account or a workspace can't be undone, so only the person does it, signed in: see NOT_FOR_AGENTS.
   "account.read": { needs: "view", by: "member", run: (ctx) => accountDeletion(ctx.db, ctx.personId!) },
   "account.delete": {
     needs: "view",
     by: "member",
-    run: (ctx, op) => deleteAccount({ db: ctx.db, personId: ctx.personId!, now: ctx.now, sources: ctx.sources, bucket: ctx.files.bucket }, op.confirm),
+    run: (ctx, op) => deleteAccount({ db: ctx.db, personId: ctx.personId!, now: ctx.now, sources: ctx.sources, bucket: ctx.files.bucket, charging: ctx.charging }, op.confirm),
   },
-  "workspace.delete": { needs: "manage", by: "member", run: (ctx, op) => deleteWorkspace({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now, bucket: ctx.files.bucket }, op.confirm) },
+  "workspace.delete": { needs: "manage", by: "member", protects: true, run: (ctx, op) => deleteWorkspace({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now, bucket: ctx.files.bucket }, op.confirm) },
 
   // Who a note is shared with is not in history either, and a link can put a note before the whole internet. Only the member decides it: see NOT_FOR_AGENTS.
   "grant.list": { needs: "view", by: "member", run: (ctx, op) => listGrants(ctx, op) },
   // What each needs of its item is `canShare`'s to say: a viewer who owns a private note shares it, and can change nothing else.
-  "grant.set": { needs: "view", by: "member", members: true, run: (ctx, op) => setGrant(ctx, op, op, op.access) },
-  "grant.link": { needs: "view", by: "member", members: true, run: (ctx, op) => linkTo(ctx, op, op.link) },
-  "grant.revoke": { needs: "view", by: "member", members: true, run: (ctx, op) => revokeGrant(ctx, op.id) },
+  "grant.set": { needs: "view", by: "member", members: true, alters: true, run: (ctx, op) => setGrant(ctx, op, op, op.access) },
+  "grant.link": { needs: "view", by: "member", members: true, alters: true, run: (ctx, op) => linkTo(ctx, op, op.link) },
+  "grant.revoke": { needs: "view", by: "member", members: true, alters: true, protects: true, run: (ctx, op) => revokeGrant(ctx, op.id) },
   // A viewer who made a note while they were an editor is still the one who made it.
-  "note.setPrivate": { needs: "view", by: "member", members: true, run: (ctx, op) => setPrivate(ctx, op.id, op.private) },
+  "note.setPrivate": { needs: "view", by: "member", members: true, alters: true, run: (ctx, op) => setPrivate(ctx, op.id, op.private) },
 
   "shared.open": {
     needs: "view",
@@ -2977,7 +3003,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   // As for a note: the one change nothing takes back, so only the member does it.
   "upload.purge": { needs: "edit", by: "member", members: true, run: (ctx, op) => purgeUpload(ctx, op.id) },
   "upload.trashed": { needs: "view", run: (ctx) => trashedUploads(ctx) },
-  "upload.setPrivate": { needs: "view", by: "member", members: true, run: (ctx, op) => setUploadPrivate(ctx, op.id, op.private) },
+  "upload.setPrivate": { needs: "view", by: "member", members: true, alters: true, run: (ctx, op) => setUploadPrivate(ctx, op.id, op.private) },
 
   // A data source is the asker's own, so each of these needs no more than being in the workspace it is asked in, and answers nothing of anyone else.
   // It is in no folder either: an agent limited to folders reads the labels its notes hold, as any other reader does, and nothing of the records.
@@ -3058,7 +3084,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     run: (ctx, op) => decideProposal(ctx, op.id, op.approve, (admin, request, pluginId) => (request.type === "plugin.install" ? installPlugin(admin, request, pluginId) : request.type === "plugin.permit" ? permitPlugin(admin, request) : uninstallPlugin(admin, request.id))),
   },
   // A viewer asks too, so this needs no more than belonging to the workspace.
-  "plugin.request": { needs: "view", by: "owner", members: true, changes: true, run: (ctx, op) => requestPlugin(ctx, op) },
+  "plugin.request": { needs: "view", by: "owner", members: true, changes: true, alters: true, run: (ctx, op) => requestPlugin(ctx, op) },
   "plugin.scaffold": {
     needs: "view",
     by: "owner",

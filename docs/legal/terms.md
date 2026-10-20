@@ -53,7 +53,7 @@ Common Ink can show embeds from other sites, such as YouTube, X and Bluesky, and
 
 ## Price
 
-[Common Ink is free during early access. If we introduce paid plans, we will tell you before they start, and you will never be charged unless you choose a paid plan.]
+[Common Ink is free during early access. When paid plans start, a new account gets a 14-day free trial, with no card needed. After it, the plan costs $8 a month or $60 a year, paid through Stripe. A plan renews at the end of each period until you cancel it in Settings, under Plan. A plan you cancel lasts to the end of the period you paid for, and a period you have started is not refunded. If a payment fails, Stripe tries your card again for 7 days. If your plan ends, the workspaces you own turn read-only, and everyone in them can still read and copy out every note. We will tell you at least 30 days before a price changes.]
 
 ## The service as it is
 

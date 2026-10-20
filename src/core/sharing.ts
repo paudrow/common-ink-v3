@@ -1,4 +1,5 @@
 import { SEEN, SEEN_FOLDER, canShare, folderAsked, itemAsked, type ItemFacts } from "./access.ts";
+import { READ_ONLY } from "./billing.ts";
 import { newId } from "./ids.ts";
 import { loadFolder, loadNote, type Context, type NoteRow } from "./operations.ts";
 import { loadUpload } from "./uploads.ts";
@@ -35,13 +36,14 @@ async function itemOf(ctx: Context, on: On): Promise<Item> {
 
 const mayShare = (ctx: Context, item: Item) => canShare(item.facts ? itemAsked(ctx.sight, item.facts) : folderAsked(ctx.sight, item.id));
 
+const isPrivate = (item: Item) => item.facts !== undefined && item.facts.private_owner !== null;
+
 /**
  * On a member a grant narrows, which is deciding who in the workspace sees what: an admin's to do
  * and to undo. On one's own private note it is what lets that member in, so it is the owner's.
  */
 function narrowing(ctx: Context, item: Item): void {
-  const ownPrivate = item.facts !== undefined && item.facts.private_owner !== null;
-  if (ctx.role !== "admin" && !ownPrivate) throw new OpError("forbidden", "Only an admin can change what this person can see here");
+  if (ctx.role !== "admin" && !isPrivate(item)) throw new OpError("forbidden", "Only an admin can change what this person can see here");
 }
 
 function sharing(ctx: Context, item: Item): void {
@@ -252,6 +254,8 @@ export async function revokeGrant(ctx: Context, id: string): Promise<{ id: strin
   }
   sharing(ctx, item);
   if (row.role) narrowing(ctx, item);
+  // `grant.revoke` protects, so it runs in a read-only workspace, where it may only take access away. Taking away a grant that narrows a member widens what they see.
+  if (row.role && !isPrivate(item) && ctx.readOnly) throw new OpError("forbidden", READ_ONLY);
   await ctx.db.prepare("DELETE FROM grants WHERE id = ?").bind(id).run();
   return { id };
 }

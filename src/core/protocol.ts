@@ -1902,6 +1902,10 @@ export interface WorkspaceSummary {
   id: string;
   name: string;
   role: Standing;
+  /** Set while billing is on and the plan of the person who pays for the workspace has lapsed: everyone there can read, and nobody can change it. */
+  readOnly?: true;
+  /** Set when the person asking is its owner, who pays for it. */
+  owned?: true;
 }
 
 export interface Me {

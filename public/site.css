@@ -584,6 +584,40 @@ details p {
   color: color-mix(in srgb, var(--ink) 82%, var(--paper));
 }
 
+/* Pricing: the two ways to pay for the one plan, side by side where there is room. */
+.plans {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 2rem;
+  margin: 1.5rem 0 0;
+}
+
+.plans div {
+  border-top: 1px solid var(--rule);
+  padding-top: 0.75rem;
+}
+
+.plans dt {
+  font: 0.92rem var(--mono);
+  color: var(--muted);
+}
+
+.plans dd {
+  margin: 0.15rem 0 0;
+}
+
+.plans .price {
+  font: 700 2.2rem/1.2 var(--mono);
+  letter-spacing: -0.02em;
+}
+
+.plans .price span {
+  font-size: 0.95rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
 /* HTML in a note: the block as it is written beside what the note draws from it. */
 .html-demo {
   display: grid;
@@ -820,6 +854,7 @@ details p {
 /* A phone: the blame column folds into a line above each run. */
 @media (max-width: 760px) {
   .features,
+  .plans,
   .html-demo {
     grid-template-columns: minmax(0, 1fr);
   }

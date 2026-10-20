@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Me, MeHere } from "../core/protocol.ts";
+import { READ_ONLY_THEIRS, READ_ONLY_YOURS } from "../core/billing.ts";
 import { ApiError, getMe, onRefused, perform, session, signOut, workspaceOfInvite, workspaceOfNote } from "./api.ts";
 import { showing, targetOf, type Target } from "./leads.ts";
 import { useRoute, type Place } from "./router.ts";
@@ -214,6 +215,25 @@ function InWorkspace({ me, at: { workspace, place }, navigate, choose, noteIsHer
           <button type="button" className="button small" onClick={() => void getMe().catch(() => {})}>
             Try again
           </button>
+        </p>
+      )}
+      {/* The other banners stand where this one does, and say what is wrong for now, so it waits for them. */}
+      {workspace.readOnly && !signedOut && status.kind !== "loading" && status.kind !== "unread" && (
+        <p role="alert" className="settings-banner read-only">
+          {workspace.owned ? READ_ONLY_YOURS : READ_ONLY_THEIRS}
+          {workspace.owned && (
+            <a
+              className="button small"
+              href="/settings/plan"
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                navigate("/settings/plan");
+              }}
+            >
+              See plans
+            </a>
+          )}
         </p>
       )}
       {status.kind === "loading" && (

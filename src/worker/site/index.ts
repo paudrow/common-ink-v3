@@ -1,3 +1,5 @@
+import { pricing } from "./pricing.ts";
+import { billingOn } from "../billing.ts";
 import { devSignIn, sessionOf } from "../auth.ts";
 import { landing } from "./landing.ts";
 import { renderPage, type DocsNav, type SitePage } from "./layout.ts";
@@ -20,7 +22,7 @@ export const SITE: ReadonlyMap<string, SiteRoute> = new Map<string, SiteRoute>([
   ["/", { page: landing, signedOutOnly: true }],
   // The landing for anyone, so it can be seen signed in, and on this machine and Previews, where nobody is signed out.
   ["/welcome", { page: landing, signedOutOnly: false }],
-  ...[...prose, ...docs].map((page): [string, SiteRoute] => [page.path, { page, signedOutOnly: false }]),
+  ...[pricing, ...prose, ...docs].map((page): [string, SiteRoute] => [page.path, { page, signedOutOnly: false }]),
 ]);
 
 export const SITEMAP_PATH = "/sitemap.xml";
@@ -45,5 +47,5 @@ export async function siteResponse(req: Request, env: Env, url: URL): Promise<Re
   if (!route) return null;
   const signedIn = (await sessionOf(req, env, url)) !== null;
   if (route.signedOutOnly && signedIn) return null;
-  return answer(req, env, url, renderPage(route.page, { signedIn, origin: url.origin, signIn: SIGN_IN }), "text/html; charset=utf-8");
+  return answer(req, env, url, renderPage(route.page, { signedIn, origin: url.origin, signIn: SIGN_IN, billing: billingOn(env) }), "text/html; charset=utf-8");
 }

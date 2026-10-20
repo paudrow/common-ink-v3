@@ -105,8 +105,9 @@ Common Ink sends your notes, files, calendar and contacts to no AI model of its 
 
 - **Cloudflare** runs Common Ink: the Worker that answers every request, the D1 database, the R2 bucket that holds uploads, and the Worker's logs. Its data centers may be outside your country.
 - **Google** signs you in, and holds your calendar and contacts if you connect them.
+- [**Stripe** takes payment when you subscribe. It holds your card and billing details, and Common Ink keeps only your Stripe customer and subscription ids, your plan, and when it renews. Stripe's own privacy policy covers what it holds.]
 
-The Worker sends requests to no other service. Some features make your browser talk to other sites directly:
+The Worker sends requests to no other service [but Stripe, to start a payment, open your billing page, or cancel your subscription when you delete your account]. Some features make your browser talk to other sites directly:
 
 - Embeds of YouTube videos, posts on X, and Bluesky posts load from those services (YouTube's from `youtube-nocookie.com`).
 - The Weather plugin, when you add it to your Dashboard, sends your browser's location or a place you type to Open-Meteo and BigDataCloud.
@@ -141,7 +142,7 @@ Your browser's local storage keeps preferences such as the workspace you last op
 
 ## Deleting your data
 
-**Your account.** You delete your account in Settings, under Account. It removes your name and email, your settings, your private notes and private uploads, your calendar and contacts connection (once your account is gone, Common Ink asks Google to end its access), your clipper, the invites you sent and those sent to you, the grants waiting for your email, and every workspace you are the only member of. Your agents stop at once. Your changes in workspaces shared with others stay, attributed to "A former member", with no name or email, and so do the agents that made changes there, as "A former member's agent". Where someone else mentioned you in their notes, the mention keeps your name as they wrote it: that text is theirs. If you are the only admin of a workspace that others are in, you first make another member an admin, or delete the workspace.
+**Your account.** You delete your account in Settings, under Account. It removes your name and email, your settings, your private notes and private uploads, your calendar and contacts connection (once your account is gone, Common Ink asks Google to end its access), your clipper, the invites you sent and those sent to you, the grants waiting for your email, and every workspace you are the only member of. Your agents stop at once. Your changes in workspaces shared with others stay, attributed to "A former member", with no name or email, and so do the agents that made changes there, as "A former member's agent". Where someone else mentioned you in their notes, the mention keeps your name as they wrote it: that text is theirs. If you are the only admin of a workspace that others are in, you first make another member an admin, or delete the workspace. [If you subscribe, deleting your account first cancels your subscription at Stripe, at once and with no refund, and deletes Common Ink's record of your plan. A workspace you pay for that others are in passes to its longest-standing other admin, who pays for it from then on.]
 
 **A workspace.** An admin deletes a workspace in Settings. From that moment nobody reaches it: its members, invites, grants, share links and the agents limited to it go at once. Its notes, their history, its uploads and their bytes, and its folders are then erased, most often in the same request, and otherwise by the hourly job.
 

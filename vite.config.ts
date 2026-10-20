@@ -10,7 +10,7 @@ import { unpackedExtensionId } from "./scripts/extension-id.ts";
  * server loads nothing else from .dev.vars. On this machine the optional ones are named too when
  * .dev.vars has them, so a Google client put there signs people in and reads their data sources.
  */
-const OPTIONAL = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "TOKEN_KEY", "ALLOWED_EMAILS"];
+const OPTIONAL = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "TOKEN_KEY", "ALLOWED_EMAILS", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_MONTH", "STRIPE_PRICE_YEAR", "TRIAL_DAYS"];
 const inDevVars = () => (existsSync(".dev.vars") ? OPTIONAL.filter((name) => new RegExp(`^${name}=`, "m").test(readFileSync(".dev.vars", "utf8"))) : []);
 
 /** The dev server alone offers the clipper, built fresh from extension/ on each download; a deploy has no such address. */

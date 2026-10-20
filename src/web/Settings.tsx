@@ -31,6 +31,7 @@ import { documentOf, type Problem } from "./settings.ts";
 import {
   ACCOUNT,
   KEYBOARD,
+  PLAN,
   UNKNOWN,
   filterLayout,
   layoutOf,
@@ -40,6 +41,7 @@ import type { AccountDeletion, ClipperGrantView, ExportPlan, UploadStorage } fro
 import { formatBytes } from "./plugins/uploads/sizing.ts";
 import { clipperTarget } from "./plugins/lib/clipperLink.ts";
 import { listClipperGrants, revokeClipperGrant } from "./api.ts";
+import { PlanSection, useBilling } from "./Plan.tsx";
 
 const NOT_JSON = "Settings are one JSON object, such as {}.";
 
@@ -287,6 +289,8 @@ function Options({
   const [narrowed, setNarrowed] = useState(false);
   const needle = typed.trim().toLowerCase();
   const filtering = needle !== "" || modified;
+  const [billing, setBilling] = useBilling();
+  const charging = billing?.on ? billing : null;
 
   const whole = layoutOf(settings);
   const found = filtering
@@ -308,19 +312,22 @@ function Options({
     found.categories
       .filter((c) => (c.pluginId !== null) === plugins)
       .map(entry);
-  // Account holds no setting, so a search never finds it.
+  // Account and Plan hold no setting, so a search never finds them.
   const own = [
     ...listed(false),
     ...(found.shortcuts.length > 0 ? [entry(KEYBOARD)] : []),
     ...(filtering ? [] : [entry(ACCOUNT)]),
+    ...(filtering || !charging ? [] : [entry(PLAN)]),
   ];
   const plugins = listed(true);
   const rest = unknown.length > 0 ? [entry(UNKNOWN)] : [];
   const entries = [...own, ...plugins, ...rest];
   const all = filtering && !narrowed;
-  const current = all
-    ? null
-    : (entries.find((e) => e.id === picked) ?? entries[0] ?? null);
+  // Plan is not listed until billing is read, and what stands in for it meanwhile would flash.
+  const current =
+    all || (picked === PLAN.id && billing === undefined)
+      ? null
+      : (entries.find((e) => e.id === picked) ?? entries[0] ?? null);
   const shown = (id: string) => all || current?.id === id;
   const total =
     found.categories.reduce((sum, c) => sum + c.rows.length, 0) +
@@ -429,6 +436,14 @@ function Options({
         {current?.id === ACCOUNT.id ? (
           <div className="settings-pane">
             <AccountSection account={account} />
+          </div>
+        ) : current?.id === PLAN.id && charging ? (
+          <div className="settings-pane">
+            <PlanSection
+              billing={charging}
+              onBilling={setBilling}
+              clearQuery={() => go(`${ROOT}/${PLAN.id}`, { replace: true })}
+            />
           </div>
         ) : (
           <fieldset

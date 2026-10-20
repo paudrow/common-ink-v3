@@ -1,6 +1,7 @@
 import { NotThatPerson, sessionHolds, signIn, whoAmI } from "../core/accounts.ts";
 import { authenticateAgent, type ConnectedAgent } from "../core/agents.ts";
 import { authenticateClipper, type ClipperGrant } from "../core/clipper.ts";
+import { billingOn } from "./billing.ts";
 import { authorizeUrl, covers, exchange, isGoogleSource, REACHING_SCOPES, revoke, SOURCE_SCOPES, type Asking, type GoogleConfig, type GoogleSourceId, type GoogleTokens } from "./google.ts";
 import { connectionOf, keepTokens } from "./sources/connections.ts";
 import { PROVIDER as GOOGLE } from "./sources/google.ts";
@@ -55,10 +56,11 @@ const allowedEmails = (value: string | undefined) => new Set((value ?? "").split
  * the list ends every way they had in at once, their sessions, agents, OAuth apps and clipper, as if
  * they had been signed out everywhere; putting them back lets those work again. Wherever Google
  * sign-in is set up the list is checked, as sign-in checks it, so an empty list lets nobody in. Where
- * it isn't, nobody signs in by Google, and where dev sign-in is on anyone is anyone.
+ * it isn't, nobody signs in by Google, and where dev sign-in is on anyone is anyone. Where billing is
+ * on, sign-in lets anyone in, so the list keeps nobody out here either.
  */
 export async function listed(env: Env, url: URL, personId: string): Promise<boolean> {
-  if (devSignIn(env, url) || !env.GOOGLE_CLIENT_ID) return true;
+  if (devSignIn(env, url) || !env.GOOGLE_CLIENT_ID || billingOn(env)) return true;
   const allowed = allowedEmails(env.ALLOWED_EMAILS);
   const email = await env.DB.prepare("SELECT email FROM people WHERE id = ?").bind(personId).first<string>("email");
   return email !== null && allowed.has(email);
@@ -231,8 +233,8 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
       return back(state.next);
     }
     // The list says who may use this Common Ink at all. An invite says which workspace, and lets nobody past the list.
-    // Where dev sign-in is on, anyone can already be anyone, so the list keeps nobody out.
-    if (!devSignIn(env, url) && !allowedEmails(env.ALLOWED_EMAILS).has(granted.email)) {
+    // Where dev sign-in is on, anyone can already be anyone, so the list keeps nobody out. Where billing is on, anyone may sign up and start a trial.
+    if (!devSignIn(env, url) && !billingOn(env) && !allowedEmails(env.ALLOWED_EMAILS).has(granted.email)) {
       await discard(granted.tokens);
       return page("Not on the list", `<p>${escape(granted.email)} can't use this Common Ink yet. <a href="/auth/google">Use another account</a>.</p>`, 403);
     }

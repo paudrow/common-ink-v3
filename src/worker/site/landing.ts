@@ -1,3 +1,4 @@
+import { PLANS, TRIAL_DAYS } from "../../core/billing.ts";
 import { SUPPORT, wayIn, type SitePage, type Visit } from "./layout.ts";
 
 const heading = (text: string, id: string) => `<h2 id="${id}">${text}</h2>`;
@@ -35,7 +36,7 @@ const hero = (visit: Visit) => `
     ${wayIn(visit)}
     <a class="quiet" href="#agents">How agents connect</a>
   </div>
-  ${visit.signedIn ? "" : `<p class="fine">Early access. To join, write to <a href="mailto:${SUPPORT}">${SUPPORT}</a>.</p>`}
+  ${visit.signedIn ? "" : visit.billing ? `<p class="fine">${TRIAL_DAYS}-day free trial. No card needed.</p>` : `<p class="fine">Early access. To join, write to <a href="mailto:${SUPPORT}">${SUPPORT}</a>.</p>`}
 </section>`;
 
 const agents = `
@@ -94,12 +95,12 @@ const rest = `
   <dl class="features">${FEATURES.map(([name, line]) => `<div><dt>${name}</dt><dd>${line}</dd></div>`).join("")}</dl>
 </section>`;
 
-const questions = `
+const questions = (visit: Visit) => `
 <section aria-labelledby="questions">
   ${heading("Questions", "questions")}
   <details><summary>Is there AI built in?</summary><p>No. You bring your own agent.</p></details>
   <details><summary>Do you train AI on my notes?</summary><p>No, and we don't sell your data.</p></details>
-  <details><summary>What does it cost?</summary><p>Nothing during early access.</p></details>
+  <details><summary>What does it cost?</summary><p>${visit.billing ? `${PLANS.month.label}, or ${PLANS.year.label}, after a ${TRIAL_DAYS}-day free trial.` : "Nothing during early access."} <a href="/pricing">See pricing</a>.</p></details>
 </section>`;
 
 const end = (visit: Visit) => `
@@ -113,5 +114,5 @@ export const landing: SitePage = {
   title: "Common Ink",
   description: "A markdown notebook your AI agent can read, edit and extend, where every line shows who wrote it.",
   kind: "landing",
-  body: (visit) => [hero(visit), agents, history, extend, rest, questions, end(visit)].join("\n"),
+  body: (visit) => [hero(visit), agents, history, extend, rest, questions(visit), end(visit)].join("\n"),
 };
