@@ -2,6 +2,7 @@ import * as codemirrorLanguage from "@codemirror/language";
 import * as codemirrorState from "@codemirror/state";
 import * as codemirrorView from "@codemirror/view";
 import * as react from "react";
+import { onByDefault } from "../core/ownPlugins.ts";
 import { codeHash, type DraftSummary, type InstalledPlugin, type PluginRecord } from "../core/plugins.ts";
 import { ApiError, perform, performAsPlugin, trustedModule } from "./api.ts";
 import type { Plugin } from "./plugin-api.ts";
@@ -94,6 +95,8 @@ export const inPagePlugin = (plugin: InstalledPlugin, load: () => Promise<Start>
 
 export interface InstallerOptions {
   workspaceId: string;
+  /** Whether this is a development server or a Preview, where the app's demo plugins are on until a member turns them off. */
+  dev: boolean;
   /** The workspace's record as last read, or null before it has been, and for a guest, who is told none. */
   record(): PluginRecord | null;
   /** The member's own drafts as last read. */
@@ -112,7 +115,7 @@ export interface InstallerOptions {
 }
 
 /** Makes the plugins the host is to run of the record and the member's drafts, keeping the code it has already fetched. */
-export function createInstaller({ workspaceId, record, drafts, reread, changed, ended }: InstallerOptions): { list(): Installed[] } {
+export function createInstaller({ workspaceId, dev, record, drafts, reread, changed, ended }: InstallerOptions): { list(): Installed[] } {
   const asked = new Map<string, Promise<unknown>>();
   /** Asks once for each key, and again only after a failure. */
   const once = <T,>(key: string, load: () => Promise<T>): Promise<T> => {
@@ -212,7 +215,7 @@ export function createInstaller({ workspaceId, record, drafts, reread, changed, 
   return {
     list() {
       const running = new Map<string, string>();
-      const listed = originals().map(({ plugin, origin }): Installed => {
+      const made = ({ plugin, origin }: ReturnType<typeof originals>[number]): Installed => {
         const run = runOf(plugin);
         const base = { origin, after: PLACED_AFTER[plugin.id] };
         if (run.as === "full-trust") {
@@ -224,6 +227,10 @@ export function createInstaller({ workspaceId, record, drafts, reread, changed, 
         // A full-trust plugin that isn't running says why on its page, in one line, and has no failure to show.
         if (run.as === "refused") return { ...base, version: JSON.stringify(["refused", run.why, versionOf(plugin)]), plugin: whyNotTrusted(plugin) !== null && !draftOf(plugin)?.running ? idlePlugin(plugin) : refusedPlugin(plugin, run.why) };
         return { ...base, version: JSON.stringify([run.as, versionOf(run.plugin)]), plugin: shutOff(run) };
+      };
+      const listed = originals().map((original) => {
+        const one = made(original);
+        return { ...one, plugin: { ...one.plugin, enabledByDefault: onByDefault(original.plugin, dev) } };
       });
       if ([...ran].some(([id, key]) => running.get(id) !== key)) end();
       return listed;

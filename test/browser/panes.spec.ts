@@ -615,7 +615,7 @@ for (const [name, splits, panes] of [
     const others = await Promise.all(Array.from({ length: panes }, (_, i) => tabs(page, i).allInnerTexts()));
 
     const pages = await modes(page).getByRole("link").allInnerTexts();
-    expect(pages).toEqual(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Dice", "Plugins"]);
+    expect(pages).toEqual(["Dashboard", "Search", "Today", "Todos", "Calendar", "Contacts", "Uploads", "History", "Trash", "Dice", "Plugins"]);
     const opensThere = async (label: string) => {
       for (let i = 0; i < panes; i++) await expect(tabs(page, i)).toHaveText(i === there ? [label] : others[i]!);
       await expect(group(page, there + 1)).toHaveAttribute("data-focused", "true");
