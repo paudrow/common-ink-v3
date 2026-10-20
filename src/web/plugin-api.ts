@@ -495,8 +495,9 @@ export interface Slots {
     /**
      * Asked to open a note, a folder's list or a page, in place of the app going to it. Call
      * `app.show` with what ends up in front. With `background` it is opened without being put in front.
+     * With `here`, a note open in another pane opens in the one in front too, and isn't gone to there.
      */
-    open?: (tab: Opened, options: { preview: boolean; background?: boolean }) => void;
+    open?: (tab: Opened, options: { preview: boolean; background?: boolean; here?: boolean }) => void;
     /**
      * What it has in front whatever the address says, such as the tab that was last in front, or null
      * with nothing open. The app asks it at an address that names no page, to know a tab kept on a
@@ -628,9 +629,10 @@ export interface EditorProps extends ViewProps {
   /**
    * Draws the editor for a note. `onEdit` is called on each change typed or pasted. With `focus`
    * the editor takes the cursor once the note is there, and then calls `onFocused`: for a note the
-   * view moved to another part of itself, where its editor is drawn anew.
+   * view moved to another part of itself, where its editor is drawn anew. With `behind`, it is one of
+   * several editors of the note and not the one in front, so a note opened to take the cursor leaves it alone.
    */
-  renderNote: (noteId: string, options?: { onEdit?: () => void; focus?: boolean; onFocused?: () => void }) => ReactNode;
+  renderNote: (noteId: string, options?: { onEdit?: () => void; focus?: boolean; onFocused?: () => void; behind?: boolean }) => ReactNode;
   /** Draws a folder's list of notes, with whatever is in the `folder` slot. */
   renderFolder: (folderId: string) => ReactNode;
   /** Draws an open note's own buttons for its group's tab row, before Focus: the `tool` slot's. Nothing for a note not known yet. */
@@ -1042,9 +1044,11 @@ export interface App {
    * Opens a note. There is one preview in the window at most: a preview takes the place of the one there, a folder's list among them, wherever in the
    * editor area that is. `focus` puts the cursor in its
    * editor. `background` opens it in a tab of its own, which is kept, without leaving what is in
-   * front. Where the editor area has no tabs the note is opened as it otherwise would be.
+   * front. Where the editor area has no tabs the note is opened as it otherwise would be. A note
+   * already open in another pane is gone to there, and a preview opens where the window's preview
+   * is, unless `here`: picked by the member in the pane in front, from a breadcrumb's list, a link or a search, it opens in that pane. A folder's list leaves it out, so a list beside a note shows each note it opens in the pane that has it.
    */
-  openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean }): void;
+  openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean; here?: boolean }): void;
   /** Opens a folder's list of notes: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
   openFolder(folderId: string, options?: { preview?: boolean }): void;
   /**

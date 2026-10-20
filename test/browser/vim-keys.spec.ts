@@ -470,6 +470,9 @@ test("Ctrl-w h and l move between the sidebar, the sides of a split and the insp
   await run("Split editor right");
   await expect(editor(page, 1)).toContainText("right words");
   const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
+  // A note split off is copied, so the copy left in the first group is closed, and Third is in front there.
+  await group(1).getByTitle("Close Right", { exact: true }).click();
+  await expect(editor(page, 0)).toContainText("third words");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await pinPanel(page, "Info");
   await expect(inspector).toBeVisible();

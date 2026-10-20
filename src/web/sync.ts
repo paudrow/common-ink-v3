@@ -5,6 +5,7 @@ import type { Filed, Note, OpInput, Results, RevertedNotes, Written } from "../c
 import { IN_TRASH } from "../core/lifecycle.ts";
 import { applyChanges, changesBetween } from "../core/text.ts";
 import { ApiError, getMe, perform, session } from "./api.ts";
+import { mirrored } from "./openNotes.ts";
 import { forget, keep, kept, type Kept, type NoteWrite } from "./stash.ts";
 import { today } from "./time.ts";
 
@@ -143,7 +144,7 @@ async function retry(typing: Kept) {
 export const committed = (noteId: string) =>
   recovered.then((sending) => sending.get(noteId)).then(() => Promise.all([...unsaved].filter((sync) => sync.noteId === noteId).map((sync) => sync.commit())));
 
-/** The sync of each note open in an editor. A note has at most one tab, so at most one sync. */
+/** The sync of each note open in an editor. A note open in several panes has one sync, which every one of its editors shares. */
 const open = new Map<string, NoteSync>();
 
 /** Sends what's typed in a note now, without waiting for a pause. */
@@ -250,6 +251,16 @@ export async function undoOrRedo(workspaceId: string, op: Step): Promise<Note | 
 const fromServer = Annotation.define<boolean>();
 
 /**
+ * What an editor of a note is told: the note as each write leaves it, and how saving goes. A note
+ * open in several editors is saved once, so `onSaved` is told to the first of them, and `lead` says
+ * which editor is to act on a state, as by saying the note was refused, and not only show it.
+ */
+interface Listener {
+  onSaved: (note: Note) => void;
+  onState: (state: SaveState, lead: boolean) => void;
+}
+
+/**
  * Commits a note's typing as one change on a pause or when the editor loses focus. A write that
  * fails is sent again unchanged, with the same id, until the server acknowledges it; typing in the
  * meantime waits for the next write. The server's merge is applied over that typing.
@@ -270,17 +281,17 @@ export class NoteSync {
   private failing = false;
   /** Whether the member's last step was an undo in the editor, which is what a redo then puts back. */
   private undidHere = false;
-  private view: EditorView | null = null;
-  /** The document once the editor has closed; later merges apply here instead of to the view. */
+  /** The editors the note is open in, the one last opened at the end. Each holds the same text. */
+  private views: EditorView[] = [];
+  private listeners = new Map<EditorView, Listener>();
+  /** The document once the last editor has closed; later merges apply here instead of to the views. */
   private closedDoc: Text | null = null;
   /** Whether nothing is to be sent, because the server would refuse it: the note is in Trash. What is typed is kept, and counts as unsaved. */
   private held = false;
 
-  constructor(
+  private constructor(
     private readonly workspaceId: string,
     note: Note,
-    private readonly onSaved: (note: Note) => void,
-    private readonly onState: (state: SaveState) => void,
   ) {
     this.noteId = note.id;
     this.key = `${PAGE}:${note.id}`;
@@ -288,21 +299,51 @@ export class NoteSync {
     this.savedText = note.text;
   }
 
+  /** The sync of a note already open in another editor, which a new one shares, or a new one from the note as it was read. */
+  static of(workspaceId: string, note: Note): NoteSync {
+    return open.get(note.id) ?? new NoteSync(workspaceId, note);
+  }
+
+  /** The text every editor of the note holds now, for one opened beside them: typing not yet saved included. Null before the first editor. */
+  get text(): string | null {
+    return this.views[0]?.state.doc.toString() ?? null;
+  }
+
+  private onSaved(note: Note) {
+    [...this.listeners.values()][0]?.onSaved(note);
+  }
+
+  private onState(state: SaveState) {
+    this.lastState = state;
+    [...this.listeners.values()].forEach((listener, i) => listener.onState(state, i === 0));
+  }
+
+  private lastState: SaveState = "saved";
+
   readonly extension = [
-    EditorView.updateListener.of((update) => this.onUpdate(update)),
+    EditorView.updateListener.of((update) => {
+      if (update.focusChanged && update.view.hasFocus) this.lastIn = update.view;
+      this.onUpdate(update);
+    }),
     EditorView.focusChangeEffect.of((_, focusing) => {
       if (!focusing) void this.commit();
       return null;
     }),
   ];
 
-  attach(view: EditorView) {
-    this.view = view;
+  /** Follows an editor of the note, and tells it the note as each write leaves it and how saving goes, starting with how it goes now: shown, not acted on again. */
+  attach(view: EditorView, listener: Listener) {
+    this.views.push(view);
+    this.listeners.set(view, listener);
     open.set(this.noteId, this);
+    listener.onState(this.lastState, false);
   }
 
+  /** The editor the member was last in, whose undo has what was typed there. */
+  private lastIn: EditorView | null = null;
+
   private doc(): Text | null {
-    return this.closedDoc ?? this.view?.state.doc ?? null;
+    return this.closedDoc ?? this.views[0]?.state.doc ?? null;
   }
 
   get dirty(): boolean {
@@ -310,12 +351,16 @@ export class NoteSync {
   }
 
   private onUpdate(update: ViewUpdate) {
-    if (!update.docChanged || update.transactions.some((tr) => tr.annotation(fromServer))) return;
+    if (!update.docChanged || update.transactions.some((tr) => tr.annotation(fromServer) || tr.annotation(mirrored))) return;
+    this.lastIn = update.view;
     if (!update.transactions.some((tr) => tr.isUserEvent("undo") || tr.isUserEvent("redo"))) this.undidHere = false;
     if (this.typedSinceWrite) this.typedSinceWrite = this.typedSinceWrite.compose(update.changes);
     unsaved.add(this);
     this.onState("unsaved");
     this.schedule(PAUSE_MS);
+    // The note's other editors take the change, kept out of their undo: each editor undoes what was typed in it.
+    // One whose text isn't what this change was made to, as while a merge is being put in each in turn, takes it from the server's answer instead.
+    for (const other of this.views) if (other !== update.view && other.state.doc.eq(update.startState.doc)) other.dispatch({ changes: update.changes, filter: false, annotations: [mirrored.of(true), Transaction.addToHistory.of(false)] });
   }
 
   private schedule(ms: number) {
@@ -430,7 +475,8 @@ export class NoteSync {
     if (this.closedDoc) this.closedDoc = changes.apply(this.closedDoc);
     // Kept out of the editor's undo stack, so the member's undo never takes back someone else's change.
     // Not filtered, so it reaches the editor of a member who can't change the note themselves.
-    else this.view?.dispatch({ changes, filter: false, annotations: [fromServer.of(true), Transaction.addToHistory.of(false)] });
+    // Each of the note's editors takes it; past the first it is a copy, so what follows the note's changes hears it once.
+    else this.views.forEach((view, i) => view.dispatch({ changes, filter: false, annotations: [fromServer.of(true), Transaction.addToHistory.of(false), ...(i ? [mirrored.of(true)] : [])] }));
   }
 
   /** Stops sending while `held`, and sends what was typed meanwhile when it is let go. */
@@ -442,11 +488,13 @@ export class NoteSync {
 
   /** Undoes or redoes in the editor alone. False when the step belongs to the note's history instead. */
   stepHere(type: Step["type"]): boolean {
-    if (!this.view) return false;
-    if (type === "note.redo") return this.undidHere && redo(this.view);
-    const unsent = this.view.state.doc.toString() !== (this.unacknowledged?.text ?? this.savedText);
-    this.undidHere = (unsent || this.failing) && undo(this.view);
-    if (this.undidHere && this.failing && this.view.state.doc.toString() === this.savedText) {
+    // In the editor the member is in, or was last in, whose undo has what was typed there.
+    const view = this.views.find((v) => v.hasFocus) ?? (this.lastIn && this.views.includes(this.lastIn) ? this.lastIn : this.views.at(-1));
+    if (!view) return false;
+    if (type === "note.redo") return this.undidHere && redo(view);
+    const unsent = view.state.doc.toString() !== (this.unacknowledged?.text ?? this.savedText);
+    this.undidHere = (unsent || this.failing) && undo(view);
+    if (this.undidHere && this.failing && view.state.doc.toString() === this.savedText) {
       // The write that failed held only what was just undone. Sent later it would be recorded and then
       // deleted, and the next undo would take the deletion back.
       clearTimeout(this.timer);
@@ -477,10 +525,15 @@ export class NoteSync {
     await this.take(await perform(this.workspaceId, { type: "note.read", id: this.noteId }));
   }
 
-  /** Stop following the view, which can be destroyed right after, and commit what was typed. */
-  async close(): Promise<void> {
+  /** Stop following an editor, which can be destroyed right after, and commit what was typed. The note's other editors go on as they were. */
+  async close(view: EditorView | null): Promise<void> {
+    if (view) {
+      this.views = this.views.filter((v) => v !== view);
+      this.listeners.delete(view);
+    }
+    if (this.views.length) return void (await this.commit());
     if (open.get(this.noteId) === this) open.delete(this.noteId);
-    this.closedDoc = this.view?.state.doc ?? null;
+    this.closedDoc ??= view?.state.doc ?? null;
     // A write on its way decides whether there is anything left to send, and gives up on typing the server refused.
     while (this.inFlight) await this.inFlight;
     if (!unsaved.has(this)) return;

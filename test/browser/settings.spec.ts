@@ -800,7 +800,8 @@ test("Settings opened from a note in a split in focus mode leaves focus mode, th
   const groups = page.getByRole("region", { name: /^Editor group/ });
   await expect(groups).toHaveCount(2);
   const tabsOf = (n: number) => page.getByRole("region", { name: `Editor group ${n}` }).getByRole("tab");
-  await expect(tabsOf(1)).toHaveText(["Other"]);
+  // A note split off is copied, so Draft is in both groups.
+  await expect(tabsOf(1)).toHaveText(["Other", "Draft"]);
   await expect(tabsOf(2)).toHaveText(["Draft"]);
   const editor = page.getByRole("region", { name: "Editor group 2" }).getByRole("textbox", { name: "Note text" });
   await editor.getByText("The first line of the draft.").click();
@@ -839,7 +840,7 @@ test("Settings opened from a note in a split in focus mode leaves focus mode, th
   await page.keyboard.press("ControlOrMeta+.");
   await expect(app).not.toHaveAttribute("data-focus-mode");
   await expect(groups).toHaveCount(2);
-  await expect(tabsOf(1)).toHaveText(["Other"]);
+  await expect(tabsOf(1)).toHaveText(["Other", "Draft"]);
   await expect(tabsOf(2)).toHaveText(["Draft"]);
 });
 

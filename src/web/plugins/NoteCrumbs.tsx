@@ -83,7 +83,8 @@ export function NoteCrumbs({ app, host, note }: ViewProps & { host: PluginHost; 
           if (id === GO) return app.openFolder(crumb.folderId);
           const entry = entries.find((e) => e.id === id)!;
           if (entry.kind === "folder") app.openFolder(id);
-          else app.openNote(id, { preview: true, focus: true });
+          // In this pane, whether or not another pane has it.
+          else app.openNote(id, { preview: true, focus: true, here: true });
         }}
       />
     ));

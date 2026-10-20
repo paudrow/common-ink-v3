@@ -13,7 +13,7 @@ import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import { readOnly } from "./readOnly.ts";
 import { fontLoaded } from "./noteFont.ts";
-import { openNote } from "./openNotes.ts";
+import { inEditorOf, openNote } from "./openNotes.ts";
 import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, worthRetrying, type SaveState } from "./sync.ts";
 
@@ -174,11 +174,9 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         setRead({ access: note.access, state: note.state });
         const inTrash = (now.current.state ?? note.state) === "trashed";
         const writable = (now.current.access ?? note.access) === "edit" && !inTrash;
-        const { text } = note;
-        sync = syncRef.current = new NoteSync(workspaceId, note, onSaved, (state) => {
-          setSaveState(state);
-          if (state === "rejected" || state === "inTrash") now.current.onRejected(state);
-        });
+        sync = syncRef.current = NoteSync.of(workspaceId, note);
+        // Opened beside another editor of the note, it starts from what that one holds, typing not yet saved included.
+        const text = sync.text ?? note.text;
         sync.hold(inTrash);
         view = viewRef.current = new EditorView({
           parent: host.current,
@@ -211,9 +209,17 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
             ],
           }),
         });
-        sync.attach(view);
+        sync.attach(view, {
+          onSaved,
+          onState: (state, lead) => {
+            setSaveState(state);
+            if (lead && (state === "rejected" || state === "inTrash")) now.current.onRejected(state);
+          },
+        });
         // A note that took a while to load doesn't take the cursor from a field the member has since gone to, or from a menu opened meanwhile.
-        if (!dismissing() && !typingIn(document.activeElement) && (!note.text || now.current.focus)) view.focus();
+        // Another editor of this note is no field gone to since: it is where a note split off was split from.
+        const elsewhere = typingIn(document.activeElement) && !inEditorOf(document.activeElement, noteId);
+        if (!dismissing() && !elsewhere && (!note.text || now.current.focus)) view.focus();
         if (now.current.focus) now.current.onFocused();
       },
       (err: unknown) => {
@@ -228,7 +234,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       cancelled = true;
       clearTimeout(again);
       syncRef.current = viewRef.current = null;
-      void sync?.close();
+      void sync?.close(view);
       view?.destroy();
     };
   }, [workspaceId, noteId, gone, onLoaded, onSaved, embedded, completed, added, locked, attempt, under]);

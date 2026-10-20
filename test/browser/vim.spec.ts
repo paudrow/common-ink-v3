@@ -72,6 +72,8 @@ test("vim mode is off until it is turned on on the Plugins page, and turning it 
   await page.waitForTimeout(200);
   await expect(page).toHaveURL(/\/note\/beta-/);
   await run(page, "Split editor right");
+  // A note split off is copied, so the copy left in the first group is closed, and Alpha is in front there.
+  await page.getByRole("tablist", { name: "Open notes" }).nth(0).getByTitle("Close Beta", { exact: true }).click();
   await expect(editors(page)).toHaveCount(2);
 
   await run(page, "Go to Plugins");

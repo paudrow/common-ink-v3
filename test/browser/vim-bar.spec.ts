@@ -120,6 +120,9 @@ for (const side of ["right", "down"] as const) {
     await page.keyboard.press("Enter");
     await run(page, `Split editor ${side}`);
     await expect(editor(page, 1)).toContainText("Right");
+    // A note split off is copied, so the copy left in the first group is closed, and Left is in front there.
+    await group(page, 1).getByTitle("Close Right", { exact: true }).click();
+    await expect(editor(page, 0)).toContainText("Left");
     await expect(page.locator(".cm-vim-panel")).toHaveCount(2);
     const main = await box(page, "main");
     for (const n of [0, 1]) {

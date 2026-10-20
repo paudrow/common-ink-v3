@@ -1,4 +1,4 @@
-import { StateEffect, type ChangeDesc, type EditorState, type Text } from "@codemirror/state";
+import { Annotation, StateEffect, type ChangeDesc, type EditorState, type Text, type Transaction } from "@codemirror/state";
 import { EditorView, ViewPlugin } from "@codemirror/view";
 import { useSyncExternalStore } from "react";
 
@@ -8,6 +8,10 @@ export interface OpenNote {
   /** What is selected in it, each range on a line of its own. Empty when nothing is. */
   selected: string;
 }
+
+/** A change typed in another editor of the same note, put in this one so the two read the same. */
+export const mirrored = Annotation.define<boolean>();
+const isMirrored = (tr: Transaction) => tr.annotation(mirrored) === true;
 
 /** Every editor a note is open in, the one the member was last in at the end. One that opens while another is being written in takes nothing over. */
 const editors = new Map<string, EditorView[]>();
@@ -24,6 +28,9 @@ const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => void listeners.delete(listener);
 };
+
+/** Whether an element is in one of a note's editors. */
+export const inEditorOf = (el: Element | null, noteId: string) => !!el && (editors.get(noteId) ?? []).some((view) => view.dom.contains(el));
 
 /** Whether a note is open in an editor now. */
 export const isOpen = (noteId: string) => editors.has(noteId);
@@ -93,12 +100,15 @@ export function onNoteMoves(listener: Heard) {
 export const openNote = (noteId: string) =>
   ViewPlugin.define((view) => {
     const others = () => (editors.get(noteId) ?? []).filter((other) => other !== view);
+    const beside = others().length > 0;
     editors.set(noteId, view.hasFocus ? [...others(), view] : [view, ...others()]);
     const asked = putting.get(noteId);
     putting.delete(noteId);
     const put = asked && asked.until > Date.now() ? asked.at : undefined;
-    if (put === undefined) cursors.set(noteId, view.state.selection.main.head);
-    else {
+    // An editor opened beside another of the note leaves the cursor where the member has it there.
+    if (put === undefined) {
+      if (!beside) cursors.set(noteId, view.state.selection.main.head);
+    } else {
       cursors.set(noteId, put);
       queueMicrotask(() => place(view, put));
     }
@@ -107,7 +117,8 @@ export const openNote = (noteId: string) =>
       update(update) {
         if (update.focusChanged && view.hasFocus) editors.set(noteId, [...others(), view]);
         if (update.selectionSet) cursors.set(noteId, update.state.selection.main.head);
-        if (update.docChanged) heard.changed(noteId, update.changes);
+        // A note open in several editors changes in each of them at once: the change is told once, from the editor it was made in.
+        if (update.docChanged && !update.transactions.some(isMirrored)) heard.changed(noteId, update.changes);
         for (const tr of update.transactions) for (const e of tr.effects) if (e.is(noteJump)) heard.jumped(noteId, e.value);
         if (update.docChanged || update.selectionSet || update.focusChanged) changed();
       },

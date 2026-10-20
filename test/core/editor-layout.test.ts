@@ -136,22 +136,48 @@ describe("splitting", () => {
     });
   });
 
-  it("moves a note that already has a tab as it is, a preview still a preview unless the member dragged it there, and the group it empties goes", () => {
+  it("copies a note split off from the menu, kept, so it shows in both groups, even a group's only tab", () => {
     const ab: EditorLayout = { groups: [{ id: "1", tabs: [{ kind: "note", id: "a", preview: false }, { kind: "note", id: "b", preview: true }], active: note("b") }], focusedGroupId: "1" };
-    const moved = (preview: boolean) => ({
+
+    expect(editorReducer(ab, { type: "split", groupId: "1", side: "right", tab: note("b") })).toEqual({
+      groups: [ab.groups[0], { id: "2", tabs: [{ kind: "note", id: "b", preview: false }], active: note("b") }],
+      focusedGroupId: "2",
+    });
+    expect(editorReducer(layout, { type: "split", groupId: "3", side: "right", tab: note("b") })).toEqual({
+      groups: [layout.groups[0], layout.groups[1], { id: "4", tabs: [{ kind: "note", id: "b", preview: false }], active: note("b") }],
+      focusedGroupId: "4",
+    });
+  });
+
+  it("moves a note dragged out of a group as it is, a preview kept once the member dragged it, and the group it empties goes; its tabs in other groups stay", () => {
+    const ab: EditorLayout = { groups: [{ id: "1", tabs: [{ kind: "note", id: "a", preview: false }, { kind: "note", id: "b", preview: true }], active: note("b") }], focusedGroupId: "1" };
+
+    expect(editorReducer(ab, { type: "split", groupId: "1", side: "right", tab: note("b"), keep: true, from: "1" })).toEqual({
       groups: [
         { id: "1", tabs: [{ kind: "note", id: "a", preview: false }], active: note("a") },
-        { id: "2", tabs: [{ kind: "note", id: "b", preview }], active: note("b") },
+        { id: "2", tabs: [{ kind: "note", id: "b", preview: false }], active: note("b") },
       ],
       focusedGroupId: "2",
     });
-
-    expect(editorReducer(ab, { type: "split", groupId: "1", side: "right", tab: note("b") })).toEqual(moved(true));
-    expect(editorReducer(ab, { type: "split", groupId: "1", side: "right", tab: note("b"), keep: true })).toEqual(moved(false));
-    expect(editorReducer(layout, { type: "split", groupId: "1", side: "left", tab: note("b") })).toEqual({
+    expect(editorReducer(layout, { type: "split", groupId: "1", side: "left", tab: note("b"), keep: true, from: "3" })).toEqual({
       groups: [{ id: "4", tabs: [{ kind: "note", id: "b", preview: false }], active: note("b") }, layout.groups[0]],
       focusedGroupId: "4",
     });
+    const twice: EditorLayout = { ...layout, groups: [layout.groups[0]!, layout.groups[1]!, { id: "5", tabs: [{ kind: "note", id: "b", preview: false }], active: note("b") }] };
+    expect(editorReducer(twice, { type: "split", groupId: "1", side: "left", tab: note("b"), keep: true, from: "5" }).groups.map((g) => [g.id, g.tabs.map((t) => t.id)])).toEqual([
+      ["6", ["b"]],
+      ["1", ["a"]],
+      ["3", ["b"]],
+    ]);
+  });
+
+  it("moves a folder or a page, which has a tab in one group only", () => {
+    const listed: EditorLayout = { groups: [{ id: "1", tabs: [{ kind: "note", id: "a", preview: false }, { kind: "folder", id: "f", preview: false }], active: folder("f") }], focusedGroupId: "1" };
+
+    expect(editorReducer(listed, { type: "split", groupId: "1", side: "right", tab: folder("f") }).groups.map((g) => [g.id, g.tabs.map((t) => t.id)])).toEqual([
+      ["1", ["a"]],
+      ["2", ["f"]],
+    ]);
   });
 
   it("beside a group that isn't there changes nothing, and so does any other action on one: the tab stays where it was", () => {
@@ -172,6 +198,53 @@ describe("splitting", () => {
       groups: [{ id: "2", tabs: [{ kind: "note", id: "a", preview: false }], active: note("a") }],
       focusedGroupId: "2",
     });
+  });
+});
+
+describe("opening a note open in another group", () => {
+  const layout: EditorLayout = {
+    groups: [
+      { id: "1", tabs: [{ kind: "note", id: "a", preview: false }], active: note("a") },
+      { id: "2", tabs: [{ kind: "folder", id: "f", preview: true }], active: folder("f") },
+    ],
+    focusedGroupId: "2",
+  };
+
+  it("goes to it there, as going back does", () => {
+    expect(editorReducer(layout, { type: "open", tab: note("a"), preview: true })).toEqual({ ...layout, focusedGroupId: "1" });
+  });
+
+  it("picked here, opens it in the focused group too: in place of its preview, or else kept", () => {
+    expect(editorReducer(layout, { type: "open", tab: note("a"), preview: true, here: true })).toEqual({
+      groups: [layout.groups[0], { id: "2", tabs: [{ kind: "note", id: "a", preview: true }], active: note("a") }],
+      focusedGroupId: "2",
+    });
+    const kept: EditorLayout = { ...layout, groups: [layout.groups[0]!, { id: "2", tabs: [{ kind: "folder", id: "f", preview: false }], active: folder("f") }] };
+    expect(editorReducer(kept, { type: "open", tab: note("a"), preview: false, background: true, here: true }).groups[1]!.tabs.map((t) => t.id)).toEqual(["f", "a"]);
+  });
+
+  it("picked here, opens in the focused group whatever group the window's preview is in, kept when that is another", () => {
+    const previewElsewhere: EditorLayout = {
+      groups: [
+        { id: "1", tabs: [{ kind: "note", id: "b", preview: true }], active: note("b") },
+        { id: "2", tabs: [{ kind: "folder", id: "f", preview: false }], active: folder("f") },
+      ],
+      focusedGroupId: "2",
+    };
+    // Not picked here, it takes the preview's place in the other group, as it always did.
+    expect(editorReducer(previewElsewhere, { type: "open", tab: note("c"), preview: true }).focusedGroupId).toBe("1");
+    expect(editorReducer(previewElsewhere, { type: "open", tab: note("c"), preview: true, here: true })).toEqual({
+      groups: [previewElsewhere.groups[0], { id: "2", tabs: [{ kind: "folder", id: "f", preview: false }, { kind: "note", id: "c", preview: false }], active: note("c") }],
+      focusedGroupId: "2",
+    });
+    // With no preview anywhere, it is the window's preview.
+    const none: EditorLayout = { ...previewElsewhere, groups: [{ ...previewElsewhere.groups[0]!, tabs: [{ kind: "note", id: "b", preview: false }] }, previewElsewhere.groups[1]!] };
+    expect(editorReducer(none, { type: "open", tab: note("c"), preview: true, here: true }).groups[1]!.tabs).toEqual([{ kind: "folder", id: "f", preview: false }, { kind: "note", id: "c", preview: true }]);
+  });
+
+  it("picked here, a folder still has one tab, and is gone to where it is", () => {
+    const listed: EditorLayout = { ...layout, groups: [layout.groups[1]!, { id: "3", tabs: [{ kind: "note", id: "a", preview: false }], active: note("a") }], focusedGroupId: "3" };
+    expect(editorReducer(listed, { type: "open", tab: folder("f"), preview: true, here: true }).focusedGroupId).toBe("2");
   });
 });
 
@@ -208,10 +281,22 @@ describe("dropping a tab from another group on a tab bar", () => {
       focusedGroupId: "1",
     };
 
-    expect(editorReducer(layout, { type: "drop", groupId: "2", index: 1, tab: note("a") })).toEqual({
+    expect(editorReducer(layout, { type: "drop", groupId: "2", index: 1, tab: note("a"), from: "1" })).toEqual({
       groups: [{ id: "2", tabs: [{ kind: "note", id: "b", preview: false }, { kind: "note", id: "a", preview: false }], active: note("a") }],
       focusedGroupId: "2",
     });
+  });
+
+  it("dropped from outside the groups, as a note's card is, opens it there too and leaves the tab it has", () => {
+    const layout: EditorLayout = {
+      groups: [
+        { id: "1", tabs: [{ kind: "note", id: "a", preview: false }], active: note("a") },
+        { id: "2", tabs: [{ kind: "note", id: "b", preview: false }], active: note("b") },
+      ],
+      focusedGroupId: "1",
+    };
+
+    expect(editorReducer(layout, { type: "drop", groupId: "2", index: 1, tab: note("a") }).groups.map((g) => g.tabs.map((t) => t.id))).toEqual([["a"], ["b", "a"]]);
   });
 });
 
@@ -492,11 +577,11 @@ describe("splitting down", () => {
 
   it("puts the new group under the one it was split from, or over it", () => {
     expect(editorReducer(ab, { type: "split", groupId: "1", side: "down", tab: note("b") })).toEqual({
-      groups: [g("1", "a"), g("2", "b")],
+      groups: [ab.groups[0], g("2", "b")],
       focusedGroupId: "2",
       split: { direction: "column", panes: ["1", "2"], sizes: [1, 1] },
     });
-    expect(editorReducer(ab, { type: "split", groupId: "1", side: "up", tab: note("b") })).toEqual({
+    expect(editorReducer(ab, { type: "split", groupId: "1", side: "up", tab: note("b"), keep: true, from: "1" })).toEqual({
       groups: [g("2", "b"), g("1", "a")],
       focusedGroupId: "2",
       split: { direction: "column", panes: ["2", "1"], sizes: [1, 1] },
@@ -555,7 +640,7 @@ describe("splitting down", () => {
   it("moves a group's only tab to its other side without leaving an empty group", () => {
     const row: EditorLayout = { groups: [g("1", "a"), g("2", "b")], focusedGroupId: "1" };
 
-    expect(editorReducer(row, { type: "split", groupId: "1", side: "down", tab: note("b") })).toEqual({
+    expect(editorReducer(row, { type: "split", groupId: "1", side: "down", tab: note("b"), keep: true, from: "2" })).toEqual({
       groups: [g("1", "a"), g("3", "b")],
       focusedGroupId: "3",
       split: { direction: "column", panes: ["1", "3"], sizes: [1, 1] },
@@ -603,7 +688,7 @@ describe("dropping a tab on the middle of a group", () => {
       focusedGroupId: "1",
     };
 
-    expect(editorReducer(layout, { type: "add", groupId: "2", tab: note("b") })).toEqual({
+    expect(editorReducer(layout, { type: "add", groupId: "2", tab: note("b"), from: "1" })).toEqual({
       groups: [
         { id: "1", tabs: [{ kind: "note", id: "a", preview: false }], active: note("a") },
         { id: "2", tabs: [{ kind: "note", id: "c", preview: false }, { kind: "note", id: "b", preview: false }], active: note("b") },

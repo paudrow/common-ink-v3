@@ -162,6 +162,9 @@ test("back goes to the pane the member was in, in a split, and to a tab closed s
   await openNote(page, "Beta");
   await runCommand(page, "Split editor right");
   await expect(tabsOf(page, 1)).toHaveText(["Beta"]);
+  // A note split off is copied, so the copy left in the first pane is closed, and Alpha is in front there.
+  await page.getByRole("tablist", { name: "Open notes" }).nth(0).getByTitle("Close Beta", { exact: true }).click();
+  await expect(tabsOf(page, 0)).toHaveText(["Alpha"]);
   await editorIn(page, 0).click();
   await expectAt(page, /^\/note\/alpha-/);
   await editorIn(page, 1).click();
@@ -322,8 +325,9 @@ test("quick open with nothing typed lists the tabs open with their panes, then t
   await page.keyboard.press("ControlOrMeta+p");
   const palette = page.getByRole("dialog", { name: "Go to note" });
   const options = palette.getByRole("option");
-  await expect(options.locator(".palette-label")).toHaveText(["Alpha", "Gamma", "Beta", "All notes", "Todos", "Dashboard", "Delta"]);
-  await expect(options.locator(".palette-hint")).toHaveText(["Open in pane 1 · Unsorted", "Open in pane 1 · Unsorted", "Open in pane 2 · Unsorted", "Recent · Folder", "Recent · Page", "Recent · Page", "Unsorted"]);
+  // A note split off is copied, so Beta is listed once for each pane it is open in.
+  await expect(options.locator(".palette-label")).toHaveText(["Alpha", "Gamma", "Beta", "Beta", "All notes", "Todos", "Dashboard", "Delta"]);
+  await expect(options.locator(".palette-hint")).toHaveText(["Open in pane 1 · Unsorted", "Open in pane 1 · Unsorted", "Open in pane 1 · Unsorted", "Open in pane 2 · Unsorted", "Recent · Folder", "Recent · Page", "Recent · Page", "Unsorted"]);
   await page.keyboard.press("Enter");
   await expectAt(page, /^\/note\/alpha-/);
   await expect(groupOf(page, 0)).toHaveAttribute("data-focused", "true");

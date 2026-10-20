@@ -1,7 +1,7 @@
 import { EditorView, ViewPlugin } from "@codemirror/view";
 import { writtenLink, type Plugin } from "../../plugin-api.ts";
 import { listable } from "../lib/listable.ts";
-import { editorKey, redraw } from "../lib/live.ts";
+import { editorKey, isEditorOf, redraw } from "../lib/live.ts";
 import { matching } from "../lib/match.ts";
 import { openPage } from "../lib/opening.ts";
 import { linkAt } from "./at.ts";
@@ -32,7 +32,8 @@ export const links: Plugin = {
       const all = notes();
       return all ? (all.find((n) => n.id === noteId) ?? null) : undefined;
     };
-    const open = (noteId: string, how?: { background: boolean }) => host.app().openNote(noteId, how?.background ? { background: true } : { preview: true, focus: true });
+    // A link opens its note in the pane it is in, whether or not another pane has it.
+    const open = (noteId: string, how?: { background: boolean }) => host.app().openNote(noteId, how?.background ? { background: true, here: true } : { preview: true, focus: true, here: true });
 
     host.completions.register({
       id: "links",
@@ -80,7 +81,8 @@ export const links: Plugin = {
       title: "Follow the link at the cursor",
       group: "Editor",
       run() {
-        const view = focused() ?? editors.get(host.app().noteId ?? "");
+        const inFront = host.app().noteId;
+        const view = focused() ?? (inFront ? [...editors].findLast(([key]) => isEditorOf(key, inFront))?.[1] : undefined);
         const to = view && linkAt(view.state, view.state.selection.main.head);
         if (!to) return;
         if ("page" in to) openPage(to.page);

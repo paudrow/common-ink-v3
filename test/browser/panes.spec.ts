@@ -65,6 +65,8 @@ test("in a split down, a folder's list, a note and a page are each as tall as th
   await folderRow(page, "Unsorted").dblclick();
   await tab(page, "Alpha").click({ button: "right" });
   await menuItem(page, "Split down").click();
+  // A note split off is copied, so the copy left above is closed: the list is in the top half and the note below.
+  await tabBar(page, 0).getByTitle("Close Alpha", { exact: true }).click();
   await expect(tabs(page, 0)).toHaveText(["Unsorted"]);
   await expect(tabs(page, 1)).toHaveText(["Alpha"]);
 
@@ -239,7 +241,8 @@ test("the window has one italic tab, which is where the next thing opens whichev
   await menuItem(page, "Close").click();
   await tab(page, "Beta").click({ button: "right" });
   await menuItem(page, "Split right").click();
-  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  // A note split off is copied, so Beta is in both panes.
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
 
   // A folder clicked with each pane in front in turn: the first opens in the pane in front, and the italic tab is then where the next opens, whichever pane is in front.
@@ -247,7 +250,7 @@ test("the window has one italic tab, which is where the next thing opens whichev
     await tab(page, pane === 1 ? "Alpha" : "Beta", pane - 1).click();
     await folderRow(page, folder).click();
     await expect(tabs(page, 1)).toHaveText(["Beta", folder]);
-    await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+    await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
     await expect(group(page, 2)).toHaveAttribute("data-focused", "true");
     await expect.poll(() => previews(page)).toEqual([folder]);
   }
@@ -291,12 +294,13 @@ test("the window has one italic tab, which is where the next thing opens whichev
   await page.goForward();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
 
-  // Split off from its menu it is the same italic tab in a pane of its own; Keep open, a double click or typing keeps it.
+  // Split off from its menu it is copied into a pane of its own, kept there, and the italic tab stays where it was; Keep open, a double click or typing keeps that one.
   await tab(page, "Gamma", 1).click({ button: "right" });
   await menuItem(page, "Split down").click();
+  await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
   await expect(tabs(page, 2)).toHaveText(["Gamma"]);
   await expect.poll(() => previews(page)).toEqual(["Gamma"]);
-  await tab(page, "Gamma", 2).click({ button: "right" });
+  await tab(page, "Gamma", 1).click({ button: "right" });
   await menuItem(page, "Keep open").click();
   await expect.poll(() => previews(page)).toEqual([]);
   await folderRow(page, "Ideas").click();
@@ -309,7 +313,7 @@ test("the window has one italic tab, which is where the next thing opens whichev
   await folderRow(page, "Plans").click();
   await expect.poll(() => previews(page)).toEqual(["Plans"]);
   await dragOnto(page, tab(page, "Plans", 2), body(page, 1), 0.5, 0.5);
-  await expect(tabs(page, 0)).toHaveText(["Alpha", "Plans"]);
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Plans"]);
   await expect.poll(() => previews(page)).toEqual([]);
 });
 
@@ -327,7 +331,7 @@ test("a layout kept with an italic tab in each pane opens with one, in the pane 
     localStorage.setItem(key, JSON.stringify(layout));
   });
   await page.reload();
-  await expect(tabs(page, 0)).toHaveText(["All notes", "Alpha"]);
+  await expect(tabs(page, 0)).toHaveText(["All notes", "Alpha", "Beta"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
   await expect.poll(() => previews(page)).toEqual(["Beta"]);
 });
@@ -434,6 +438,8 @@ test("Back retraces every open in a split, whatever was clicked between them", a
   await folderRow(page, "Unsorted").dblclick();
   await tab(page, "Alpha").click({ button: "right" });
   await menuItem(page, "Split down").click();
+  // A note split off is copied, so the copy left above is closed, and the upper pane shows the folder.
+  await tabBar(page, 0).getByTitle("Close Alpha", { exact: true }).click();
   await expect(tabs(page, 0)).toHaveText(["Unsorted"]);
   await expect(tabs(page, 1)).toHaveText(["Alpha"]);
   const address = () => new URL(page.url()).pathname;
@@ -555,7 +561,8 @@ test("a tab's menu opens from the keyboard, and a tab moves to the next pane and
   await run(page, "Show tab menu");
   await menuItem(page, "Split right").focus();
   await page.keyboard.press("Enter");
-  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  // A note split off is copied, so Beta is in both panes, and moved back it is one tab again.
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
 
   // With one pane there is nowhere to move to; with two, next and previous are the other one.
@@ -569,8 +576,9 @@ test("a tab's menu opens from the keyboard, and a tab moves to the next pane and
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
   await tab(page, "Alpha").click();
   await run(page, "Move tab to previous group");
-  await expect(tabs(page)).toHaveText(["Beta", "Alpha"]);
-  await expect(tab(page, "Alpha")).toHaveAttribute("aria-selected", "true");
+  await expect(tabs(page, 0)).toHaveText(["Beta"]);
+  await expect(tabs(page, 1)).toHaveText(["Beta", "Alpha"]);
+  await expect(tab(page, "Alpha", 1)).toHaveAttribute("aria-selected", "true");
 });
 
 /** Where every pane and both sidebars are, to the pixel. */
