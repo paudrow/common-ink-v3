@@ -1,6 +1,6 @@
 import { ChangeSet, MapMode } from "@codemirror/state";
 import { z } from "zod";
-import { blame, runsOfLines } from "./blame.ts";
+import { blame, runsOfLines, tickedLines } from "./blame.ts";
 import type { ConnectedAgent } from "./agents.ts";
 import { SEEN, SEEN_FOLDER, allows, canShare, folderLevel, itemAsked, itemLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { DAILY_FOLDER, dailySettings, dailyText, filedOn, memberZone, type DailySettings } from "./daily.ts";
@@ -37,6 +37,7 @@ import {
   type ListedFolder,
   type NoteAbout,
   type ListedTodo,
+  type Ticking,
   type Mentioned,
   type Note,
   type NoteDiff,
@@ -930,6 +931,25 @@ async function listedTodo(ctx: Context, row: NoteRow, at: { revision: number; li
   const listed = todosIn(then.text).find((todo) => todo.line === at.line && todo.text === at.text);
   const now = !listed ? null : followed(then.since, listed.from);
   return now === null ? undefined : todosIn(row.text).find((t) => t.from <= now && now <= t.from + t.text.length);
+}
+
+/**
+ * When the done todo on each line of `notes` was ticked, by each note's id and the revision it was
+ * read at, from the History up to that revision: one read of the changes of them all.
+ */
+async function tickedIn(ctx: Context, notes: ReadonlyMap<string, number>): Promise<(noteId: string, line: number) => Ticking | null> {
+  if (notes.size === 0) return () => null;
+  const { results } = await ctx.db
+    .prepare(`SELECT c.diff, ${CHANGE_COLUMNS} JOIN json_each(?) j ON j.key = c.note_id AND c.revision <= j.value ORDER BY c.note_id, c.revision`)
+    .bind(JSON.stringify(Object.fromEntries(notes)))
+    .all<ChangeRow & { diff: string }>();
+  const byNote = Map.groupBy(results, (r) => r.note_id);
+  const lines = new Map([...byNote].map(([id, changes]) => [id, { changes, ticked: tickedLines(changes.map((r) => ChangeSet.fromJSON(JSON.parse(r.diff)))) }]));
+  return (noteId, line) => {
+    const note = lines.get(noteId);
+    const change = note?.changes[(note.ticked[line] ?? 0) - 1];
+    return change ? { at: change.created_at, by: authorOf(change.author_kind, change.author_id, change.name, change.agent_owner) } : null;
+  };
 }
 
 /** Where `at` is after each of the changes `since`, one at a time. Null when one of them deleted the text it was in. */
@@ -1921,6 +1941,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const page = listed.page.map((r) => ({ r, todo: parseTodo(r.text) }));
       const members = (await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []))).byId;
       const tagged = page.filter(({ r }) => r.tags !== "[]").map(({ r }) => r.note_id);
+      const ticked = await tickedIn(ctx, new Map(page.filter(({ r }) => r.done === 1).map(({ r }) => [r.note_id, r.revision])));
       const texts = new Map(
         tagged.length === 0 ? [] : (await ctx.db.prepare("SELECT id, text FROM notes WHERE id IN (SELECT value FROM json_each(?1))").bind(JSON.stringify([...new Set(tagged)])).all<{ id: string; text: string }>()).results.map((n) => [n.id, n.text]),
       );
@@ -1938,6 +1959,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             every: todo?.every?.written ?? null,
             recurs: todo?.every ? ruleLabel(todo.every.rule) : null,
             lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
+            completed: r.done === 1 ? ticked(r.note_id, r.line) : null,
             tags: JSON.parse(r.tags) as string[],
             tagsElsewhere: tagsBesides(texts.get(r.note_id) ?? "", r.line),
             assignees: mentionedIn(members, todo?.assignees ?? []),
@@ -2022,7 +2044,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const mine = (await completionsNow(ctx, row.id)).filter(({ at }) => at === todo.from).map((f) => f.completion);
       const dailies = [...new Set(mine.flatMap((c) => (c.daily_note_id ? [c.daily_note_id] : [])))];
       const seen = new Set(dailies.length ? (await seenAmong(ctx, "any", IDS_IN, JSON.stringify(dailies))).map((r) => r.id) : []);
+      const ticked = await tickedIn(ctx, new Map(todo.done ? [[row.id, row.revision]] : []));
       return {
+        completed: ticked(row.id, todo.line),
         completions: mine
           .map((c) => ({ on: c.done_on, at: c.created_at, by: unnamed(ctx, authorOf(c.author_kind, c.author_id, c.name, c.agent_owner)), dailyNoteId: c.daily_note_id && seen.has(c.daily_note_id) ? c.daily_note_id : null }))
           .reverse(),

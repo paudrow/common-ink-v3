@@ -7083,6 +7083,35 @@ button.diff-fold:hover {
   min-height: 18px;
 }
 
+/* When a done todo was ticked, said quietly after its chips, as words and not a pill: it opens nothing. */
+.todo-ticked {
+  color: var(--muted);
+  font: calc(11.5px * var(--text-scale))/1 var(--prose);
+  white-space: nowrap;
+}
+
+/* A ticked box's card in a note: when it was ticked, and by whom. It is the pointer's, so it takes no press. */
+.md-ticked-card {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: 500 calc(12px * var(--text-scale))/1.3 var(--prose);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.md-ticked-by {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 /* What is set on a todo, as pills, as v1 drew them: each opens a popover under itself, and a tag's narrows the list. */
 .todo-chip {
   display: inline-flex;

@@ -1069,8 +1069,51 @@ test("an undo that can't reach the server says so where a failed save does", asy
   await expect(editorLines(page)).toHaveText(["kept"]);
   await expect(page.getByRole("status")).toHaveText("Saved");
   await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.getByRole("status")).toHaveText("There's nothing of yours to undo in this note");
+  await expect(editorLines(page)).toHaveText(["kept"]);
+});
+
+test("undo stops at a new note's first save, right after it, after a tab switch, after a reload, and after an agent's edit", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const claude = await connectAgent(page, "Claude");
+  await perform(page, { type: "note.create", text: "# Other" });
+  await page.reload();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
+  await expect(editor(page)).toBeFocused();
+  await page.keyboard.type("# Kept");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  const id = /([a-z0-9]{12})$/.exec(page.url())![1]!;
+  const nothing = async () => {
+    await expect(page.getByRole("status")).toHaveText("There's nothing of yours to undo in this note");
+    await expect(editorLines(page)).toHaveText(["# Kept"]);
+    await expect.poll(() => text(page, id)).toBe("# Kept");
+  };
+
+  await page.keyboard.press("ControlOrMeta+z");
+  await nothing();
+
+  await openAllNotes(page);
+  await editOf(page, "Other").click();
+  await expect(editorLines(page).first()).toHaveText("# Other");
+  await page.getByRole("tab", { name: "Kept" }).click();
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+z");
+  await nothing();
+
+  await page.reload();
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+z");
+  await nothing();
+
+  await claude.tool<Note>("write_note", { id, baseRevision: 1, text: "# Kept\n\nFrom Claude." });
+  await page.reload();
+  await expect(editorLines(page)).toHaveText(["# Kept", "", "From Claude."]);
+  await editor(page).click();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(page.getByRole("status")).toHaveText("There's nothing of yours to undo in this note");
+  await expect.poll(() => text(page, id)).toBe("# Kept\n\nFrom Claude.");
+  expect(await hows(page, id)).toEqual(["edit", "edit"]);
 });
 
 test("an agent's edit read into the editor while the member types is never what the member's undo takes back", async ({ page }) => {

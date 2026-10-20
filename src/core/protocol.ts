@@ -1031,6 +1031,8 @@ export interface ListedTodo {
   recurs: string | null;
   /** When it was last checked off and how many times, for a todo that recurs and has been. */
   lastDone: LastDone | null;
+  /** When its line was ticked and by whom: the change that last made it done. Null for an open todo. */
+  completed: Ticking | null;
   /** The tags of the note it is in. The ones written on its own line are those `text` has. */
   tags: string[];
   /** The note's tags written on its other lines, which stay with the note whatever this line becomes. */
@@ -1072,6 +1074,9 @@ export interface Completion {
   /** The daily note it was filed on, when the one asking can see it. */
   dailyNoteId: string | null;
 }
+
+/** The change that ticked a todo's line: when it was made and who made it. */
+export type Ticking = Pick<Completion, "at" | "by">;
 
 export interface Folder {
   id: string;
@@ -1521,7 +1526,8 @@ export interface Results {
   /** Each name once, ignoring case, as a note writes it. */
   "todo.filters": { tags: string[]; assignees: Mentioned[] };
   "todo.set": Written;
-  "todo.history": { completions: Completion[] };
+  /** `completed` is as todo.list gives it. */
+  "todo.history": { completions: Completion[]; completed: Ticking | null };
   "daily.open": Note;
   "daily.find": { note: NoteSummary | null };
   "pin.list": NoteSummary[];

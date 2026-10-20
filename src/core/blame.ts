@@ -1,6 +1,7 @@
 import { ChangeSet, Text } from "@codemirror/state";
 import type { Reverts } from "./protocol.ts";
 import { anchored, lift, terminated } from "./text.ts";
+import { parseTodo } from "./todos.ts";
 
 /*
  * Who wrote each line of a note: the change that last wrote or edited it. An edit inside a line, one
@@ -28,17 +29,18 @@ function stretchesOf(change: ChangeSet, a: Text, b: Text): Stretch[] {
   return stretches;
 }
 
-/** Each line of a text, made each line of the text `stretches` turn it into: each line of that text they write is `by` it, counted from 0. May change `lines`, and returns the lines after. */
-function relined<T>(lines: T[], stretches: readonly Stretch[], by: (line: number) => T): T[] {
+/** Each line of a text, made each line of the text `stretches` turn it into: each line of that text they write is `by` it, counted from 0, and the stretch it is in. May change `lines`, and returns the lines after. */
+function relined<T>(lines: T[], stretches: readonly Stretch[], by: (line: number, stretch: Stretch) => T): T[] {
   if (stretches.every(([aFrom, aTo, bFrom, bTo]) => aTo - aFrom === bTo - bFrom)) {
-    for (const [aFrom, aTo] of stretches) for (let n = aFrom; n < aTo; n++) lines[n] = by(n);
+    for (const stretch of stretches) for (let n = stretch[0]; n < stretch[1]; n++) lines[n] = by(n, stretch);
     return lines;
   }
   const after: T[] = [];
   let kept = 0;
-  for (const [aFrom, aTo, bFrom, bTo] of stretches) {
+  for (const stretch of stretches) {
+    const [aFrom, aTo, bFrom, bTo] = stretch;
     for (; kept < aFrom; kept++) after.push(lines[kept]!);
-    for (let n = bFrom; n < bTo; n++) after.push(by(n));
+    for (let n = bFrom; n < bTo; n++) after.push(by(n, stretch));
     kept = aTo;
   }
   for (; kept < lines.length; kept++) after.push(lines[kept]!);
@@ -90,6 +92,41 @@ export function blame(history: readonly Written[]): number[] {
     if (takenOut.has(i + 1)) replaced.set(i + 1, linesIn(stretches, doc, lines));
     const back = reverts && putBack([...reverts.revisions].sort((a, b) => a - b).flatMap((r) => replaced.get(r) ?? []));
     lines = relined(lines, stretches, (n) => (back && n < next.lines - 1 && back(next.line(n + 1).text)) || i + 1);
+    doc = next;
+  }
+  lines.length = doc.length ? doc.lines - 1 : 0;
+  return lines;
+}
+
+/**
+ * For each line of the note that `history` leaves, top to bottom, the revision that ticked it: the
+ * change that made it a done todo when it wasn't one. A change that edits a done todo and leaves it
+ * done keeps the revision it had, and so does one that moves it, taking it out and writing it as it
+ * was somewhere else. Every line that isn't a done todo is 0.
+ */
+export function tickedLines(history: readonly ChangeSet[]): number[] {
+  let doc = Text.empty;
+  let lines = [0];
+  for (const [i, changes] of history.entries()) {
+    const change = anchored(lift(changes), doc);
+    const next = change.apply(doc);
+    const stretches = stretchesOf(change, doc, next);
+    const moved = putBack(linesIn(stretches, doc, lines).filter((line) => line.revision));
+    const was = lines;
+    const done = (n: number) => n < next.lines - 1 && !!parseTodo(next.line(n + 1).text)?.done;
+    const kept = new Map<Stretch, (n: number) => number>();
+    /** The tick an edited line keeps from the line it was. Where the change wrote as many lines as it took out, that is the line in its place. Otherwise the ticked lines it took out go to the done lines it wrote, in order, when there are as many of each, and to none when there aren't. */
+    const keptBy = ([aFrom, aTo, bFrom, bTo]: Stretch) => {
+      if (aTo - aFrom === bTo - bFrom) return (n: number) => was[aFrom + n - bFrom] ?? 0;
+      const ticks = was.slice(aFrom, aTo).filter(Boolean);
+      const written = Array.from({ length: bTo - bFrom }, (_, k) => bFrom + k).filter(done);
+      return (n: number) => (ticks.length === written.length ? (ticks[written.indexOf(n)] ?? 0) : 0);
+    };
+    lines = relined(lines, stretches, (n, stretch) => {
+      if (!done(n)) return 0;
+      if (!kept.has(stretch)) kept.set(stretch, keptBy(stretch));
+      return kept.get(stretch)!(n) || moved(next.line(n + 1).text) || i + 1;
+    });
     doc = next;
   }
   lines.length = doc.length ? doc.lines - 1 : 0;

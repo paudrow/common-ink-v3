@@ -724,7 +724,7 @@ describe("the history of a recurring todo", () => {
   it("is refused as a conflict for a todo that was changed since it was listed, and is nothing for a todo never checked off", async () => {
     const ada = await newMember();
     const note = await create(ada, WATER);
-    expect(await history(ada, note.id, 0, WATER)).toEqual({ completions: [] });
+    expect(await history(ada, note.id, 0, WATER)).toEqual({ completions: [], completed: null });
     expect(await codeOf(history(ada, note.id, 0, "- [ ] Something else"))).toBe("conflict");
   });
 });

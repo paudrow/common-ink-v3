@@ -6,7 +6,17 @@ import { MOD, openPage, opens } from "../lib/opening.ts";
 
 const hidden = Decoration.replace({});
 const code = Decoration.mark({ class: "md-code" });
-const quote = Decoration.line({ class: "md-quote" });
+/** A quote's line `depth` quotes in, pulled back by its `>`s when it has them so its words start where its wrapped rows do. */
+const quoteLines = new Map<string, Decoration>();
+const quote = (depth: number, pulled: boolean) => {
+  const key = `${depth}${pulled}`;
+  let line = quoteLines.get(key);
+  if (!line) quoteLines.set(key, (line = Decoration.line({ class: "md-quote", attributes: { style: `--md-quote-hang: ${depth * QUOTE_EM}em; --md-quote-pull: ${pulled ? depth * QUOTE_EM : 0}em` } })));
+  return line;
+};
+/** How much room each `>` and the space after it take, in the text's own size, whatever their letters' widths. */
+const QUOTE_EM = 1;
+const quoteMarks = Decoration.mark({ class: "md-quote-marks" });
 const rule = Decoration.line({ class: "md-rule" });
 const hangs = [1, 2, 3, 4, 5, 6].map((level) => Decoration.mark({ class: `md-hang md-hang-${level}` }));
 
@@ -25,8 +35,9 @@ const link = (url: string, written: boolean) => Decoration.mark({ class: "md-lin
  * stays the text it is.
  *
  * A mark at the start of a line is never taken out of it: a heading's `#`s hang in the margin,
- * drawn or not, and a quote's `>` and a rule's dashes keep their place and are only not painted. So
- * the first word of every line is where it was. A mark inside a line (`**`, a backtick, a link's
+ * drawn or not, a quote's `>`s hang in the room before its words, and a rule's dashes keep their
+ * place. A quote's and a rule's marks are only not painted. So the first word of every line is where
+ * it was. A mark inside a line (`**`, a backtick, a link's
  * address) is taken out, and shown again with the cursor on its construct: the words before it on
  * the line stay where they are, and the words after it move over by the mark's width.
  */
@@ -60,9 +71,15 @@ function marks(view: EditorView): Range<Decoration>[] {
           } else if (!lineTouched(state, node.from)) drawn.push(hidden.range(node.from - /[ \t]*$/.exec(state.sliceDoc(node.node.parent.from, node.from))![0].length, node.to));
         } else if (name === "QuoteMark") {
           if (off(node)) drawn.push(ghost.range(node.from, node.to));
-        } else if (name === "Blockquote") {
+        } else if (name === "Blockquote" && !within(node.node, "Blockquote")) {
+          // The outermost quote draws every line, a quote inside it as well: each line's `>`s say how deep it is.
+          // A quote in a list item hangs nothing, since its lines are hung by the item's words.
+          const listed = within(node.node, "ListItem");
           for (let line = state.doc.lineAt(Math.max(node.from, from)); line.from <= Math.min(node.to, to); line = state.doc.line(line.number + 1)) {
-            drawn.push(quote.range(line.from));
+            const written = /^[ \t]*(?:>[ \t]?)*/.exec(line.text)![0];
+            const depth = listed ? 0 : written.split(">").length - 1;
+            drawn.push(quote(listed ? 0 : Math.max(depth, 1), depth > 0).range(line.from));
+            if (depth) drawn.push(quoteMarks.range(line.from, line.from + written.length));
             if (line.number >= state.doc.lines) break;
           }
         } else if (name === "InlineCode") {
@@ -88,6 +105,11 @@ function marks(view: EditorView): Range<Decoration>[] {
     });
   }
   return drawn;
+}
+
+function within(node: { parent: { name: string; parent: unknown } | null }, name: string): boolean {
+  for (let up = node.parent; up; up = up.parent as typeof up) if (up.name === name) return true;
+  return false;
 }
 
 const LINKS = new Set(["Link", "Autolink", "URL"]);
@@ -120,7 +142,10 @@ const look = EditorView.baseTheme({
   ".md-code": { backgroundColor: "var(--code-bg)", borderRadius: "4px", padding: "0.1em 0.3em" },
   ".md-link": { color: "var(--accent)", textDecoration: "underline", textUnderlineOffset: "2px" },
   ".md-link[data-href]": { cursor: "pointer" },
-  ".md-quote": { borderLeft: "3px solid var(--line-strong)", paddingLeft: "0.6em !important", color: "var(--muted)" },
+  // A line's `>`s hang in a box as wide as its depth, in the room before its words, so a quote that wraps starts each row at one place.
+  ".md-quote": { borderLeft: "3px solid var(--line-strong)", paddingLeft: "calc(0.6em + var(--md-quote-hang)) !important", textIndent: "calc(-1 * var(--md-quote-pull))", color: "var(--muted)" },
+  ".md-quote > *": { textIndent: "0" },
+  ".md-quote-marks": { display: "inline-block", width: "var(--md-quote-pull)", whiteSpace: "pre", verticalAlign: "bottom" },
   ".md-rule": { backgroundImage: "linear-gradient(var(--line-strong), var(--line-strong))", backgroundSize: "100% 1px", backgroundPosition: "center", backgroundRepeat: "no-repeat" },
   // In the margin, on the heading's first row: a box that reaches back as far as it is wide, with the mark at its right edge, so
   // it takes no room and the words start where they would without it. It stays in the line's flow, so a heading with no words
