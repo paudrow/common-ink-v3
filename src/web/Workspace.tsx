@@ -249,6 +249,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate, onSwit
   const [installer] = useState(() =>
     createInstaller({
       workspaceId,
+      dev: me.dev,
       record: () => recordNow.current,
       drafts: () => draftsNow.current,
       reread: () => reread.current(),
