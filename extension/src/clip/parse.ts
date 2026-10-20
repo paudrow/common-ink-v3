@@ -1,9 +1,13 @@
+import { INLINE_CLIP_CAP, INLINE_IMAGE_CAP } from "./tree.ts";
 import type { Capture, ClipMode, HtmlTree } from "./types.ts";
 
 const MODES = new Set<ClipMode>(["page", "selection", "link", "image", "element"]);
 const MAX_NODES = 8_000;
 const MAX_DEPTH = 40;
 const MAX_TEXT = 200_000;
+const MAX_ATTR = 8_000;
+/** How long a `data:` URL of `bytes` bytes is: four characters of base64 for every three bytes, after a header. */
+const written = (bytes: number) => Math.ceil(bytes / 3) * 4 + 200;
 
 export class CaptureError extends Error {
   readonly name = "CaptureError";
@@ -13,7 +17,7 @@ export class CaptureError extends Error {
 }
 
 export function parseCapture(value: unknown): Capture {
-  const nodes = { n: 0 };
+  const nodes = { n: 0, inline: 0 };
   if (!isRecord(value)) throw new CaptureError("The clip was empty.");
   const mode = value.mode;
   if (typeof mode !== "string" || !MODES.has(mode as ClipMode)) throw new CaptureError("The clip was empty.");
@@ -33,14 +37,16 @@ export function parseCapture(value: unknown): Capture {
   };
 }
 
-function parseTree(value: unknown, depth: number, nodes: { n: number }): HtmlTree {
+function parseTree(value: unknown, depth: number, nodes: { n: number; inline: number }): HtmlTree {
   if (nodes.n++ > MAX_NODES) throw new CaptureError("This page is too large to clip.");
   if (depth > MAX_DEPTH) throw new CaptureError("This page is too large to clip.");
   if (!isRecord(value) || typeof value.tag !== "string") throw new CaptureError("The clip was empty.");
   const attrs: Record<string, string> = {};
   if (isRecord(value.attrs)) {
     for (const [key, item] of Object.entries(value.attrs)) {
-      if (typeof item === "string" && key.length < 40) attrs[key] = item.slice(0, 8_000);
+      if (typeof item !== "string" || key.length >= 40) continue;
+      if (key === "src" && item.startsWith("data:")) inlineSrc(item, attrs, nodes);
+      else attrs[key] = item.slice(0, MAX_ATTR);
     }
   }
   const children: HtmlTree[] = [];
@@ -49,6 +55,19 @@ function parseTree(value: unknown, depth: number, nodes: { n: number }): HtmlTre
   }
   const text = typeof value.text === "string" ? value.text.slice(0, MAX_TEXT) : "";
   return { tag: value.tag.slice(0, 40).toLowerCase(), attrs, children, text };
+}
+
+/**
+ * An image written into the page is carried whole, up to the caps the clip holds it to, or left out
+ * and marked too big. Cut short, its base64 would still read as an image, and a broken one would be saved.
+ */
+function inlineSrc(src: string, attrs: Record<string, string>, nodes: { inline: number }) {
+  if (src.length > written(INLINE_IMAGE_CAP) || nodes.inline + src.length > written(INLINE_CLIP_CAP)) {
+    attrs["data-clip-skip"] = "inline-too-big";
+    return;
+  }
+  nodes.inline += src.length;
+  attrs.src = src;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
