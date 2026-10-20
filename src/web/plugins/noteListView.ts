@@ -62,23 +62,26 @@ export type Life = (typeof LIVES)[number]["id"];
 
 const STATE_WORDS = new Set(["open", "archived", "trashed"]);
 
-/** A query with every `is:open`, `is:archived` and `is:trashed` taken out, so a new choice replaces the last. */
-function withoutState(node: QueryNode | null): QueryNode | null {
+/** A query with every filter `drop` names taken out, so a new choice replaces the last. */
+function without(node: QueryNode | null, drop: (filter: Extract<QueryNode, { kind: "filter" }>) => boolean): QueryNode | null {
   if (!node) return null;
   if (node.kind === "text") return node;
-  if (node.kind === "filter") return node.key === "is" && STATE_WORDS.has(node.value) ? null : node;
+  if (node.kind === "filter") return drop(node) ? null : node;
   if (node.kind === "not") {
-    const of = withoutState(node.of);
+    const of = without(node.of, drop);
     return of ? { kind: "not", of } : null;
   }
   const of = node.of.flatMap((child) => {
-    const next = withoutState(child);
+    const next = without(child, drop);
     return next ? [next] : [];
   });
   if (of.length === 0) return null;
   if (of.length === 1) return of[0]!;
   return { kind: node.kind, of };
 }
+
+/** A query with every `is:open`, `is:archived` and `is:trashed` taken out. */
+const withoutState = (node: QueryNode | null) => without(node, (f) => f.key === "is" && STATE_WORDS.has(f.value));
 
 /**
  * The search bar with one choice of notes written into it. What was already asked for stays, and an
@@ -101,6 +104,38 @@ export function lifeOf(text: string): Life {
   if (open && archived) return "all";
   if (archived) return "archived";
   return "active";
+}
+
+/** The choice of notes by their todos, written into the search bar beside the choice of which notes. */
+export const TODO_CHOICES = [
+  { id: "any", label: "Any", clause: "" },
+  { id: "open", label: "Open todos", clause: "has:open-todo" },
+  { id: "done", label: "All done", clause: "has:todo no:open-todo" },
+] as const;
+
+export type TodoChoice = (typeof TODO_CHOICES)[number]["id"];
+
+const TODO_WORDS = new Set(["todo", "open-todo"]);
+
+/** The search bar with one choice of todos written into it, in place of the one already there. A query that can't be read becomes the choice alone. */
+export function withTodos(text: string, choice: TodoChoice): string {
+  const clause = TODO_CHOICES.find((item) => item.id === choice)!.clause;
+  const read = parseQuery(text, "notes");
+  if (!read.ok) return clause;
+  const rest = printQuery({ ...read.query, where: without(read.query.where, (f) => f.key === "has" && TODO_WORDS.has(f.value)) });
+  return [rest, clause].filter(Boolean).join(" ");
+}
+
+/** Which choice of todos the search bar is showing: one only when the bar asks for it among everything else it asks, not inside an OR. */
+export function todosOf(text: string): TodoChoice {
+  const read = parseQuery(text, "notes");
+  const where = read.ok ? read.query.where : null;
+  const all = !where ? [] : where.kind === "and" ? where.of : [where];
+  const asks = (value: string) => all.some((n) => n.kind === "filter" && n.key === "has" && n.value === value);
+  const refuses = (value: string) => all.some((n) => n.kind === "not" && n.of.kind === "filter" && n.of.key === "has" && n.of.value === value);
+  if (asks("open-todo")) return "open";
+  if (asks("todo") && refuses("open-todo")) return "done";
+  return "any";
 }
 
 /** What the list itself is of, for the same choice the search bar shows. */

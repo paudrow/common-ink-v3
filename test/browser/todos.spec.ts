@@ -1609,8 +1609,41 @@ test("a link in a todo's words shows what the note shows: its note's title or it
   await menuOf(page, "Buy what");
   await expect(menu(page)).toHaveAccessibleName("More for Buy what Groceries lists");
   await page.keyboard.press("Escape");
-  await row(page, "Buy what").locator(".todo-words").click();
+  // The words around the link are pressed to edit them.
+  await row(page, "Buy what").locator(".todo-words").click({ position: { x: 4, y: 4 } });
   await expect(rows(page).getByRole("textbox")).toHaveValue(`Buy what [[${groceries.id}]] lists`);
+  await page.keyboard.press("Escape");
+  // A link to a note there is isn't: it reads as words and opens nothing.
+  await row(page, "Ask about").locator(".todo-link").click();
+  await expect(rows(page).getByRole("textbox")).toHaveValue("Ask about [[zzzzzzzzzzzz]]");
+  await page.keyboard.press("Escape");
+  // The link itself opens its note.
+  await row(page, "Buy what").locator(".todo-link").click();
+  await expect(rows(page).getByRole("textbox")).toHaveCount(0);
+  await expect(editor(page)).toContainText("Milk.");
+});
+
+test("a link out in a todo's words reads as its words, as the note draws it, and opens its page in a new tab while the words around it still edit", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "note.create", text: "# Errands\n\n- [ ] Read [the docs](https://example.com/docs) and https://example.org/bare, not [this](javascript:alert(1)) or `https://example.net/code`\n" });
+  await page.goto("/todos");
+  await expect(words(page)).toHaveText(["Read the docs and https://example.org/bare, not [this](javascript:alert(1)) or `https://example.net/code`"]);
+  await expect(row(page, "Read").locator(".todo-link")).toHaveText(["the docs", "https://example.org/bare"]);
+  await expect(row(page, "Read").locator(".todo-words")).toHaveAccessibleName("Edit Read the docs and https://example.org/bare, not [this](javascript:alert(1)) or `https://example.net/code`");
+  await page.evaluate(() => {
+    (window as unknown as { opened: unknown[][] }).opened = [];
+    window.open = (...args: unknown[]) => ((window as unknown as { opened: unknown[][] }).opened.push(args), null);
+  });
+  await row(page, "Read").getByText("the docs").click();
+  await row(page, "Read").getByText("https://example.org/bare").click();
+  expect(await page.evaluate(() => (window as unknown as { opened: unknown[][] }).opened)).toEqual([
+    ["https://example.com/docs", "_blank", "noopener,noreferrer"],
+    ["https://example.org/bare", "_blank", "noopener,noreferrer"],
+  ]);
+  await expect(rows(page).getByRole("textbox")).toHaveCount(0);
+  // The words around them are pressed to edit them, as written.
+  await row(page, "Read").locator(".todo-words").click({ position: { x: 4, y: 4 } });
+  await expect(rows(page).getByRole("textbox")).toHaveValue("Read [the docs](https://example.com/docs) and https://example.org/bare, not [this](javascript:alert(1)) or `https://example.net/code`");
   await page.keyboard.press("Escape");
 });
 

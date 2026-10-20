@@ -4,6 +4,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType } from "@codemirror/view
 import { isReading } from "../../plugin-api.ts";
 import { drawnMath } from "../lib/drawnMath.ts";
 import { drawnInState, placed, writable } from "../lib/live.ts";
+import { openPage } from "../lib/opening.ts";
 import { replacing } from "../lib/rewrite.ts";
 import { inlineMarkdown } from "./inline.ts";
 import { openMenu } from "./menu.ts";
@@ -196,6 +197,14 @@ class TableWidget extends WidgetType {
     /** The table with what has been typed in `cell`. */
     const committed = (cell: HTMLElement) => setCell(drawn.get(el)!.table, atOf(cell), typedIn(cell));
 
+    // A link in a cell opens its page, as a link in the note does; the rest of the cell is pressed to type in it.
+    el.addEventListener("mousedown", (event) => {
+      const link = event.button === 0 && event.target instanceof Element ? event.target.closest<HTMLElement>("[data-href]") : null;
+      if (!link || link.closest(".md-cell-typing")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openPage(link.dataset.href!);
+    });
     // A click on a cell's edge is a click in the cell.
     el.addEventListener("mousedown", (event) => {
       const inside = event.target instanceof HTMLTableCellElement ? event.target.querySelector<HTMLElement>("[data-focus][contenteditable]") : null;

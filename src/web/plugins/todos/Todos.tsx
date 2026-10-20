@@ -10,6 +10,8 @@ import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
+import { linksOut, type LinkOut } from "./linksOut.ts";
+import { openPage } from "../lib/opening.ts";
 import { CHIP_NAMES, PRIORITY, pickerLabel, picking, tagged, type Opened, type PickingEvent, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
@@ -105,25 +107,34 @@ function linkText(link: WrittenLink, titleOf: TitleOf): string {
   return title || "Untitled";
 }
 
+/** Every link in a todo's words, to a note or out of the app, in the order they are written; one written inside another is left out. */
+type Marked = { from: number; to: number } & ({ kind: "note"; link: WrittenLink } | { kind: "out"; out: LinkOut } | { kind: "tag" });
+
+function linksIn(words: string): Marked[] {
+  const all: Marked[] = [...linksOn(words).map((link) => ({ from: link.from, to: link.to, kind: "note" as const, link })), ...linksOut(words).map((out) => ({ from: out.from, to: out.to, kind: "out" as const, out }))].sort((a, b) => a.from - b.from);
+  let at = 0;
+  return all.filter((each) => each.from >= at && ((at = each.to), true));
+}
+
 /** A todo's words as they read, each link as the words it shows: what the row is called by. */
 const plainly = (words: string, titleOf: TitleOf) => {
   let said = "";
   let at = 0;
-  for (const link of linksOn(words)) {
-    said += words.slice(at, link.from) + linkText(link, titleOf);
-    at = link.to;
+  for (const each of linksIn(words)) {
+    said += words.slice(at, each.from) + (each.kind === "note" ? linkText(each.link, titleOf) : each.kind === "out" ? each.out.text : "");
+    at = each.to;
   }
   return said + words.slice(at);
 };
 
-/** A todo's words with the tags written in them drawn as tags, and its links as the words they show. */
-function Words({ words, titleOf }: { words: string; titleOf: TitleOf }) {
-  const marks = [...linksOn(words).map((link) => ({ ...link, link })), ...tagsOn(words).map((tag) => ({ ...tag, link: null }))].sort((a, b) => a.from - b.from);
-  const parts: (string | { tag: string } | { link: WrittenLink })[] = [];
+/** A todo's words with the tags written in them drawn as tags, and its links as the words they show. With `onLink`, a link to a note the member can see opens it when pressed, ⌘-pressed in a tab behind, and a link out opens its page in a new tab, as a note's links do. */
+function Words({ words, titleOf, onLink }: { words: string; titleOf: TitleOf; onLink?: (noteId: string, background: boolean) => void }) {
+  const marks: Marked[] = [...linksIn(words), ...tagsOn(words).map((tag) => ({ from: tag.from, to: tag.to, kind: "tag" as const }))].sort((a, b) => a.from - b.from);
+  const parts: (string | { tag: string } | { link: WrittenLink } | { out: LinkOut })[] = [];
   let at = 0;
   for (const mark of marks) {
     if (mark.from < at) continue;
-    parts.push(words.slice(at, mark.from), mark.link ? { link: mark.link } : { tag: words.slice(mark.from, mark.to) });
+    parts.push(words.slice(at, mark.from), mark.kind === "note" ? { link: mark.link } : mark.kind === "out" ? { out: mark.out } : { tag: words.slice(mark.from, mark.to) });
     at = mark.to;
   }
   parts.push(words.slice(at));
@@ -135,6 +146,36 @@ function Words({ words, titleOf }: { words: string; titleOf: TitleOf }) {
         ) : "tag" in part ? (
           <span key={i} className="todo-tag">
             {part.tag}
+          </span>
+        ) : "out" in part ? (
+          <span
+            key={i}
+            className="todo-link"
+            data-opens={onLink ? true : undefined}
+            data-href={part.out.url}
+            title={onLink ? `${part.out.url}\nClick to open` : part.out.url}
+            onClick={(e) => {
+              if (!onLink) return;
+              // As a link out in a note does, it opens in a tab of the browser's own, and the words around it are still pressed to edit them.
+              e.stopPropagation();
+              openPage(part.out.url);
+            }}
+          >
+            {part.out.text}
+          </span>
+        ) : onLink && titleOf(part.link.target) != null ? (
+          <span
+            key={i}
+            className="todo-link"
+            data-opens
+            title={`Open ${titleOf(part.link.target) || "Untitled"}`}
+            onClick={(e) => {
+              // Pressing a link follows it; the words around it are still pressed to edit them.
+              e.stopPropagation();
+              onLink(part.link.target, e.metaKey || e.ctrlKey);
+            }}
+          >
+            {linkText(part.link, titleOf)}
           </span>
         ) : (
           <span key={i} className="todo-link">
@@ -183,8 +224,8 @@ interface RowProps {
  * or not: the due date, the repeat, the last time it was done, the priority, the first three tags and a
  * "+N" for the rest, and Add tag. Set, a chip says what it is; not set, it is a quiet word shown while
  * the row is pointed at or has the keyboard. Each opens a small popover under itself, and a tag's chip
- * narrows the list through its query; its cross, or Delete on it, takes the tag off. The row's menu, a right-click, Shift+F10 or the menu key, opens the note,
- * in front or beside the list.
+ * narrows the list through its query; its cross, or Delete on it, takes the tag off. A link in the words opens its note. The row's menu, a right-click,
+ * Shift+F10 or the menu key, opens the note, in front or beside the list.
  */
 function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, completing, gone, why, onChange, onUntag, onOpen, completions, onPicking, onTag }: RowProps) {
   /** While the words are edited, how tall they were, which their line keeps so that nothing under it moves. */
@@ -422,7 +463,7 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
               edit();
             }}
           >
-            <Words words={lead || words} titleOf={titleOf} />
+            <Words words={lead || words} titleOf={titleOf} onLink={(noteId, background) => app.openNote(noteId, background ? { background: true } : { preview: true, focus: true })} />
           </span>
         )}
       </span>

@@ -1254,11 +1254,15 @@ button.link:hover {
   margin-bottom: 8px;
 }
 
-.folder-list:not(:has(.note-life)) .query-bar {
+.folder-list:not(:has(.note-choices)) .query-bar {
   margin-bottom: 16px;
 }
 
-.folder-list .note-life {
+/* Which notes, and which by their todos, side by side under the bar, and one under the other where they don't fit. */
+.folder-list .note-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   margin-bottom: 16px;
 }
 
@@ -7049,6 +7053,14 @@ button.diff-fold:hover {
 
 .todo-words .todo-link {
   color: var(--accent-ink);
+}
+
+.todo-words .todo-link[data-opens] {
+  cursor: pointer;
+}
+
+.todo-words .todo-link[data-opens]:hover {
+  text-decoration: underline;
 }
 
 /* The words being edited, in place: a one-line field as wide as v1's where there is room, as tall as the line, laid over the row's

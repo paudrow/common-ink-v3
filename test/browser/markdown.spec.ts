@@ -117,6 +117,32 @@ test("markdown is drawn where it is written, only what the cursor is on shows it
   await expect.poll(() => read(page, note.id)).toBe(text.replace("---", "----"));
 });
 
+test("a link in a table cell shows it can be clicked and opens its page, a bare address too, and the rest of the cell is still typed in", async ({ page }) => {
+  await open(page, "# Shop\n\n| Item | Where |\n| --- | --- |\n| Press | [Harbor Freight](https://example.com/press) |\n| Brake | https://example.org/brake |\n\nAfter.");
+  await page.evaluate(() => {
+    (window as unknown as { opened: unknown[][] }).opened = [];
+    window.open = (...args: unknown[]) => ((window as unknown as { opened: unknown[][] }).opened.push(args), null);
+  });
+  const links = editor(page).locator(".md-table .md-link");
+  await expect(links).toHaveText(["Harbor Freight", "https://example.org/brake"]);
+  for (const link of await links.all()) expect(await link.evaluate((el) => getComputedStyle(el).cursor)).toBe("pointer");
+  await expect(links.first()).toHaveAttribute("title", "https://example.com/press\nClick to open");
+
+  await links.first().click();
+  await links.last().click();
+  expect(await page.evaluate(() => (window as unknown as { opened: unknown[][] }).opened)).toEqual([
+    ["https://example.com/press", "_blank", "noopener,noreferrer"],
+    ["https://example.org/brake", "_blank", "noopener,noreferrer"],
+  ]);
+  await expect(editor(page).locator(".md-cell-typing")).toHaveCount(0);
+
+  // The cell's own words are typed in, shown as written.
+  await cell(page, 1, 0).click();
+  await expect(cell(page, 1, 0)).toBeFocused();
+  await cell(page, 1, 1).focus();
+  await expect(cell(page, 1, 1)).toHaveText("[Harbor Freight](https://example.com/press)");
+});
+
 test("a drawn link opens in a new tab on a click, only for a web or mail address, and on a link the cursor is on a plain click is for the cursor and ⌘ or Ctrl-click opens it", async ({ page }) => {
   await open(page, "# Links\n\nSee [the docs](https://example.com/docs) or [this](javascript:alert(1)) or https://example.org/bare today.\n");
   await page.evaluate(() => {
