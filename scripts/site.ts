@@ -1,14 +1,15 @@
-// Writes src/worker/site/pages.gen.ts from site/*.md: each file is a page of the site at /<its name>.
-// Its first line, a `# ` heading, is the page's title, and its first paragraph is its description.
+// Writes src/worker/site/pages.gen.ts from site/*.md and docs/legal/*.md: each file is a page of the site
+// at /<its name>. Its first `# ` heading is the page's title, and its first paragraph is its description.
+// The legal drafts are read where they are kept, so the site never shows a copy that has fallen behind.
 // The Worker gets the pages as data and never sees marked.
 //
 //   node scripts/site.ts            write the pages
 //   node scripts/site.ts --check    fail when the written pages are not what site/*.md makes
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Marked, type Token, type Tokens } from "marked";
 
-const SOURCE = "site";
+const SOURCES = ["site", "docs/legal"];
 const OUT = "src/worker/site/pages.gen.ts";
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_DESCRIPTION = 160;
@@ -46,9 +47,9 @@ function described(text: string): string {
 
 function prose(file: string, markdown: string): Prose {
   const tokens = new Marked().lexer(markdown);
-  const first = tokens.findIndex((t) => t.type !== "space");
+  const first = tokens.findIndex((t) => t.type === "heading" && (t as Tokens.Heading).depth === 1);
   const heading = tokens[first];
-  if (heading?.type !== "heading" || (heading as Tokens.Heading).depth !== 1) throw new Error(`${file} must start with a "# " heading, its title.`);
+  if (!heading) throw new Error(`${file} needs a "# " heading, its title.`);
   const paragraph = tokens.find((t): t is Tokens.Paragraph => t.type === "paragraph");
   if (!paragraph) throw new Error(`${file} needs a paragraph, its description.`);
   const ids = new Map<string, number>();
@@ -68,12 +69,15 @@ function prose(file: string, markdown: string): Prose {
 
 function generated(): string {
   const pages: Record<string, Prose> = {};
-  for (const file of readdirSync(SOURCE).filter((f) => f.endsWith(".md")).sort()) {
-    const slug = file.slice(0, -".md".length);
-    if (!SLUG.test(slug)) throw new Error(`${SOURCE}/${file}: a page's file name is its address, so it may have only lowercase letters, digits and single hyphens.`);
-    pages[slug] = prose(`${SOURCE}/${file}`, readFileSync(`${SOURCE}/${file}`, "utf8"));
+  for (const source of SOURCES) {
+    for (const file of (existsSync(source) ? readdirSync(source) : []).filter((f) => f.endsWith(".md")).sort()) {
+      const slug = file.slice(0, -".md".length);
+      if (!SLUG.test(slug)) throw new Error(`${source}/${file}: a page's file name is its address, so it may have only lowercase letters, digits and single hyphens.`);
+      if (slug in pages) throw new Error(`${source}/${file}: another page is at /${slug} already.`);
+      pages[slug] = prose(`${source}/${file}`, readFileSync(`${source}/${file}`, "utf8"));
+    }
   }
-  return `// Written by scripts/site.ts from site/*.md. Edit those and run \`node scripts/site.ts\`.\n\nexport const PROSE = ${JSON.stringify(pages, null, 2)} as const;\n`;
+  return `// Written by scripts/site.ts from site/*.md and docs/legal/*.md. Edit those and run \`node scripts/site.ts\`.\n\nexport const PROSE = ${JSON.stringify(pages, null, 2)} as const;\n`;
 }
 
 const { values } = parseArgs({ options: { check: { type: "boolean", default: false } } });

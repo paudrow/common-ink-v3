@@ -24,7 +24,7 @@ const state = at === -1 ? ".wrangler/state" : args.splice(at, 2)[1];
 if (!state || state.startsWith("--")) throw new Error("--state takes a directory: --state .wrangler/test-state");
 execFileSync("node", ["scripts/site.ts"], { stdio: "inherit" });
 // A page of the site that is being written is seen as it is saved. One that doesn't make a page says why and leaves the last one.
-watch("site", () => spawnSync("node", ["scripts/site.ts"], { stdio: "inherit" }));
+for (const source of ["site", "docs/legal"]) if (existsSync(source)) watch(source, () => spawnSync("node", ["scripts/site.ts"], { stdio: "inherit" }));
 execFileSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state], { stdio: "inherit", env: { ...process.env, CI: "1" } });
 // Miniflare's Local Explorer answers raw SQL on the bucket and database to anyone who reaches the server, with no sign-in.
 spawn("npx", ["vite", "dev", ...args], { stdio: "inherit", env: { ...process.env, X_LOCAL_EXPLORER: "false", INK_STATE: state } }).on("exit", (code) => process.exit(code ?? 0));
