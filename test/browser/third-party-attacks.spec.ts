@@ -1,6 +1,6 @@
-import { expect, test, type Frame, type Page } from "@playwright/test";
+import { expect, type Frame, type Page } from "@playwright/test";
 import type { Capability } from "../../src/core/plugins.ts";
-import { anotherPerson, editOf, join, me, openAllNotes, ownFrame, panelIcon, perform, pinPanel, showPanel, signInAsNewPerson, THEIR_FRAMES } from "./helpers.ts";
+import { anotherPerson, editOf, join, me, openAllNotes, ownFrame, panelIcon, perform, pinPanel, showPanel, signInAsNewPerson, test, THEIR_FRAMES } from "./helpers.ts";
 import { asPlugin, codeHashOf, frameFor, install, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn } from "./third-party-helpers.ts";
 import { hostileCode, hostileManifest, VICTIM, VICTIM_CODE } from "./third-party-hostile.ts";
 

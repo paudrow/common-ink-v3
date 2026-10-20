@@ -1,7 +1,7 @@
 import { crc32, deflateSync } from "node:zlib";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
-import { perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { perform, runCommand, signInAsNewPerson, test } from "./helpers.ts";
 import { category } from "./settings-helpers.ts";
 
 let errors: string[];

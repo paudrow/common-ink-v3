@@ -463,7 +463,15 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     if (above < 0) scroller.current.scrollTop += above - HEAD_GAP;
   });
 
-  if (!app.folders || !app.notes) return null;
+  if (!app.folders || !app.notes)
+    return app.listingFailed ? (
+      <div className="notice" role="alert">
+        <p>Couldn't load your notes.</p>
+        <button type="button" className="button small" onClick={app.refresh}>
+          Try again
+        </button>
+      </div>
+    ) : null;
   if (!title) return <p className="notice">This folder doesn't exist, or you can't see it.</p>;
 
   const newIn = folderForNew(app, folderId);

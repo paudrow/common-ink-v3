@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { asViewerOfNote, perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { asViewerOfNote, perform, signInAsNewPerson, test } from "./helpers.ts";
 import { openPlugins } from "./plugins-helpers.ts";
 
 let errors: string[];

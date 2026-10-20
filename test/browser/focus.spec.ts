@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { perform, signInAsNewPerson, test } from "./helpers.ts";
 
 const group = (page: Page, n: number) => page.getByRole("region", { name: `Editor group ${n}` });
 const focusButton = (page: Page, n: number) => group(page, n).getByRole("button", { name: "Focus" });

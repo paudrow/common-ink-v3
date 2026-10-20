@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { editOf, folderRow, listedNotes, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { editOf, folderRow, listedNotes, openAllNotes, perform, signInAsNewPerson, test } from "./helpers.ts";
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const group = (page: Page) => page.locator(".group[data-front]");

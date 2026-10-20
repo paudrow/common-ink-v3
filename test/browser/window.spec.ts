@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, pinPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { perform, pinPanel, signInAsNewPerson, test, toggleInspector, toggleSidebar } from "./helpers.ts";
 
 const sidebar = (page: Page) => page.getByRole("complementary", { name: "Sidebar" });
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });

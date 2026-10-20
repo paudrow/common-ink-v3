@@ -817,6 +817,18 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
     expect(said).not.toMatch(/Ada|Eve Editor|Zed-agent/);
   });
 
+  it("reads through a folder's link a note archived in that folder, and lists only the live ones, as the folder does", async () => {
+    const w = await world();
+    const ada = w.actors["Ada, an admin"];
+    const old = await perform(env.DB, ada, { type: "note.create", folderId: w.folders.Team, text: "# Old team plan\n\nShelved." });
+    await perform(env.DB, ada, { type: "note.archive", id: old.id, archived: true });
+    const link = await perform(env.DB, ada, { type: "grant.link", folderId: w.folders.Team, link: "public" });
+    const visitor: Visitor = { kind: "visitor", token: link!.to.kind === "link" ? (link!.to.token ?? "") : "", personId: null };
+
+    expect((await perform(env.DB, visitor, { type: "shared.open" })).notes.map((n) => n.id).sort()).toEqual([w.notes.team, w.notes.deep].sort());
+    expect(await perform(env.DB, visitor, { type: "shared.read", id: old.id })).toMatchObject({ id: old.id, title: "Old team plan", text: "# Old team plan\n\nShelved." });
+  });
+
   it("refuses whoever holds a link everything but opening it, and refuses everyone else that", async () => {
     const w = await world();
     const ada = w.actors["Ada, an admin"];

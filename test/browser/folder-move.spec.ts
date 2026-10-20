@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, folderRow, join, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { anotherPerson, connectAgent, folderRow, join, perform, runCommand, signInAsNewPerson, test } from "./helpers.ts";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const notice = (page: Page) => page.getByRole("status").filter({ hasText: /Moved|Couldn't move/ });

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 import { category, closeSettings, group, json, openJson, openOptions, saveState, setPlugin, settingsDialog, typeJson } from "./settings-helpers.ts";
 
 let errors: string[];

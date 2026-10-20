@@ -1,6 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { category, group, json, openOptions, saveState, setPlugin, settingsDialog, typeJson } from "./settings-helpers.ts";
-import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {

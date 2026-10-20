@@ -170,6 +170,12 @@ function SharedNoteView({ token, noteId }: { token: string; noteId: string }) {
 
   const note = read.kind === "note" ? read.note : null;
   useEffect(() => {
+    if (!note) return;
+    const was = document.title;
+    document.title = note.title || "Untitled";
+    return () => void (document.title = was);
+  }, [note]);
+  useEffect(() => {
     if (!note || !el.current) return;
     linksTo(note);
     const view = new EditorView({

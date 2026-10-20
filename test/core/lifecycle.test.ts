@@ -5,7 +5,9 @@ import { connectAgent } from "../../src/core/agents.ts";
 import { IN_TRASH, TRASH_MS } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
 import type { OpInput } from "../../src/core/protocol.ts";
+import { UPLOAD_IN_TRASH } from "../../src/core/uploads.ts";
 import { addMember, newMember } from "./members.ts";
+import { upload } from "./uploading.ts";
 import { walk } from "./walking.ts";
 
 const create = (by: Actor, text: string, folderId?: string, now?: number) => perform(env.DB, by, { type: "note.create", text, folderId }, now);
@@ -17,7 +19,32 @@ const guest = async (ada: Actor, noteId: string, access: "view" | "edit"): Promi
   return { kind: "member", personId: (await signIn(env.DB, { email, name: "Gus Guest" })).personId, workspaceId: ada.workspaceId };
 };
 
+/** `env.DB`, where `first` runs just before the statement that archives or unarchives: as if someone did it in the moment between the read and the write. */
+const racing = (first: () => Promise<unknown>): D1Database =>
+  new Proxy(env.DB, {
+    get(db, key) {
+      const value = Reflect.get(db, key, db);
+      if (key !== "prepare") return typeof value === "function" ? value.bind(db) : value;
+      return (sql: string) => {
+        const statement = db.prepare(sql);
+        if (!/^UPDATE \w+ SET state = \?2,/.test(sql)) return statement;
+        return { bind: (...args: unknown[]) => ({ run: async () => (await first(), statement.bind(...args).run()) }) };
+      };
+    },
+  });
+
 describe("archive", () => {
+  it("refuses a note or an upload trashed in the moment since it was read, and doesn't say it archived it", async () => {
+    const ada = await newMember();
+    const note = await create(ada, "# Plan");
+    const file = await upload(ada, "plan.png");
+
+    await expect(perform(racing(() => perform(env.DB, ada, { type: "note.trash", id: note.id })), ada, { type: "note.archive", id: note.id, archived: true })).rejects.toMatchObject({ code: "conflict", message: IN_TRASH });
+    await expect(perform(racing(() => perform(env.DB, ada, { type: "upload.trash", id: file.id })), ada, { type: "upload.archive", id: file.id, archived: true })).rejects.toMatchObject({ code: "conflict", message: UPLOAD_IN_TRASH });
+    expect((await perform(env.DB, ada, { type: "trash.list" })).notes.map((n) => [n.title, n.state])).toEqual([["Plan", "trashed"]]);
+    expect((await perform(env.DB, ada, { type: "upload.trashed" })).map((u) => [u.name, u.state])).toEqual([["plan.png", "trashed"]]);
+  });
+
   it("is one operation each way, keeps the note's folder and id, and needs edit", async () => {
     const ada = await newMember();
     const vera = await addMember(ada, "viewer");

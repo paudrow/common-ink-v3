@@ -1423,6 +1423,12 @@ function isJsonObject(text: string) {
   }
 }
 
+/** How many folders deep a folder may be: one at the top is 1 deep. */
+export const MAX_FOLDER_DEPTH = 32;
+const TOO_DEEP = `Folders go at most ${MAX_FOLDER_DEPTH} deep`;
+/** The folder ?1 and every folder it is in, one row each. A null ?1, the top, is one row with a null id. */
+const ABOVE = "WITH RECURSIVE above(id) AS (SELECT ?1 UNION SELECT f.parent_id FROM folders f JOIN above ON f.id = above.id WHERE f.parent_id IS NOT NULL)";
+
 /** What has a place in a folder and a life: a note or an upload. Each is moved through its life by the same statements. */
 export type Kept = "notes" | "uploads";
 
@@ -1438,12 +1444,14 @@ export async function trashing(ctx: Context, id: string, only = "state IN ('live
   return meta.changes;
 }
 
-/** Archives a note or an upload, or brings it back. It does nothing to one in Trash. */
-export const archiving = (ctx: Context, table: Kept, id: string, state: "live" | "archived") =>
-  ctx.db
+/** Archives a note or an upload, or brings it back. It does nothing to one in Trash. It answers how many it changed. */
+export async function archiving(ctx: Context, table: Kept, id: string, state: "live" | "archived"): Promise<number> {
+  const { meta } = await ctx.db
     .prepare(`UPDATE ${table} SET state = ?2, state_at = ?3, state_by = ?4, state_by_kind = ?5 WHERE id = ?1 AND state IN ('live', 'archived')`)
     .bind(id, state, ctx.now, authorId(ctx), ctx.author.kind)
     .run();
+  return meta.changes;
+}
 
 /**
  * Brings a note or an upload back from Trash, to the state it had. Null when it was no longer there
@@ -2540,7 +2548,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row = await loadNote(ctx, op.id, "edit", "refused");
       const state = op.archived ? "archived" : "live";
       if (row.state === state) return toNote(ctx, row);
-      await archiving(ctx, "notes", row.id, state);
+      // Trashed or removed in the moment since it was read: read again, it is refused as it is now.
+      if (!(await archiving(ctx, "notes", row.id, state))) return toNote(ctx, await loadNote(ctx, op.id, "edit", "refused"));
       return toNote(ctx, { ...row, state, state_at: ctx.now });
     },
   },
@@ -2715,13 +2724,20 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const existing = async () => (await siblings(ctx, folder.parentId)).find((f) => folderKey(f.name) === folderKey(op.name));
       const there = await existing();
       if (!there) {
-        try {
-          await intoFolder(ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, ?, ?, ?)").bind(folder.id, ctx.workspaceId, folder.parentId, folder.name, folderKey(folder.name)).run(), folder.name);
-          return { ...folder, created: true };
-        } catch (err) {
-          // Made by someone else since it was looked for.
-          if (!(err instanceof OpError) || err.code !== "invalid" || op.ifExists !== "return") throw err;
-        }
+        // Made only while the parent is shallow enough, checked as it is written, so a move of the parent at the same moment can't take it past the cap.
+        const insert = ctx.db
+          .prepare(`${ABOVE} INSERT INTO folders (id, workspace_id, parent_id, name, name_key) SELECT ?2, ?3, ?1, ?4, ?5 WHERE (SELECT COUNT(id) FROM above) < ?6`)
+          .bind(folder.parentId, folder.id, ctx.workspaceId, folder.name, folderKey(folder.name), MAX_FOLDER_DEPTH);
+        const made = await intoFolder(insert.run(), folder.name).then(
+          (r) => r.meta.changes > 0,
+          (err) => {
+            // Made by someone else since it was looked for.
+            if (!(err instanceof OpError) || err.code !== "invalid" || op.ifExists !== "return") throw err;
+            return null;
+          },
+        );
+        if (made) return { ...folder, created: true };
+        if (made === false) throw new OpError("invalid", TOO_DEEP);
       }
       const found = there ?? (await existing());
       if (!found) throw new OpError("conflict", "The folder was being made and changed too fast to tell what is there. Nothing was made: send it again");
@@ -2759,20 +2775,24 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       if (op.parentId) await loadFolder(ctx, op.parentId, "edit");
       else if (!seesEveryFolder(ctx.sight)) throw new OpError("forbidden", guest ? "A guest can move a folder only into one shared with them" : "An agent limited to folders can move a folder only into one of them");
       // One statement, so two folders moved into each other at once can't both go: the second finds itself above where it would go.
+      // The folders in the one moved go with it, so the deepest of them is what can't go deeper than the cap. A tree already deeper, made before there was one, can still move up.
       const moved = await intoFolder(
         ctx.db
           .prepare(
-            `UPDATE folders SET parent_id = ?1 WHERE id = ?2 AND workspace_id = ?3 AND NOT EXISTS (
-               WITH RECURSIVE above(id) AS (SELECT ?1 UNION SELECT f.parent_id FROM folders f JOIN above ON f.id = above.id WHERE f.parent_id IS NOT NULL)
-               SELECT 1 FROM above WHERE id = ?2)`,
+            `UPDATE folders SET parent_id = ?1 WHERE id = ?2 AND workspace_id = ?3 AND NOT EXISTS (${ABOVE} SELECT 1 FROM above WHERE id = ?2)
+               AND (${ABOVE}, below(id, depth) AS (SELECT ?2, 1 UNION ALL SELECT f.id, below.depth + 1 FROM folders f JOIN below ON f.parent_id = below.id),
+                      was(id) AS (SELECT parent_id FROM folders WHERE id = ?2 UNION SELECT f.parent_id FROM folders f JOIN was ON f.id = was.id WHERE f.parent_id IS NOT NULL)
+                    SELECT (SELECT COUNT(id) FROM above) + (SELECT MAX(depth) FROM below) <= ?4 OR (SELECT COUNT(id) FROM above) <= (SELECT COUNT(id) FROM was))`,
           )
-          .bind(op.parentId, folder.id, ctx.workspaceId)
+          .bind(op.parentId, folder.id, ctx.workspaceId, MAX_FOLDER_DEPTH)
           .run(),
         folder.name,
       );
       if (!moved.meta.changes) {
         await loadFolder(ctx, op.id, "edit");
-        throw new OpError("invalid", "A folder can't go inside itself, or inside a folder in it");
+        if (op.parentId) await loadFolder(ctx, op.parentId, "edit");
+        const inside = await ctx.db.prepare(`${ABOVE} SELECT 1 FROM above WHERE id = ?2`).bind(op.parentId, folder.id).first();
+        throw new OpError("invalid", inside ? "A folder can't go inside itself, or inside a folder in it" : TOO_DEEP);
       }
       return toFolder(ctx, { ...folder, parent_id: op.parentId });
     },

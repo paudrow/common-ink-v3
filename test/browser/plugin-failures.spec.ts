@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { editOf, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { editOf, openAllNotes, perform, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 import { openPlugins } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });

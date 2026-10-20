@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, join, perform, signInAsNewPerson, test } from "./helpers.ts";
 import { install, openDetails, openPlugins, relist, type Written } from "./third-party-helpers.ts";
 
 let errors: string[];

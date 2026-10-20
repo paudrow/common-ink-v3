@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { editOf, listedNote, noteCard, openAllNotes, openKept, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { editOf, listedNote, noteCard, openAllNotes, openKept, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 import { settingsDialog } from "./settings-helpers.ts";
 
 /** Opens a note from the list of every note as a preview, which is what a click on its Edit does. */

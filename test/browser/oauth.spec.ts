@@ -1,5 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { newEmail, signInAs } from "./helpers.ts";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { newEmail, signInAs, test } from "./helpers.ts";
 
 /*
  * A hosted chat app connecting by OAuth, as a fake client drives it: it registers and trades its code by

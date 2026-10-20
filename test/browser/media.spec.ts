@@ -1,5 +1,5 @@
-import { expect, test, type Frame, type Page, type Request } from "@playwright/test";
-import { perform, signInAsNewPerson, ownFrame, THEIR_FRAMES } from "./helpers.ts";
+import { expect, type Frame, type Page, type Request } from "@playwright/test";
+import { ownFrame, perform, signInAsNewPerson, test, THEIR_FRAMES } from "./helpers.ts";
 import { PLAYER, standIns } from "./media-helpers.ts";
 
 let errors: string[];

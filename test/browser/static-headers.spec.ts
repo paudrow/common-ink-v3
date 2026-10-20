@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "./helpers.ts";
 
 const DATA = "default-src 'none'; frame-ancestors 'none'";
 

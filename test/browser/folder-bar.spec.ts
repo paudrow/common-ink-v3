@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { showPanel, anotherPerson, asViewerOfNote, folderRow, listedNotes, me, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { anotherPerson, asViewerOfNote, folderRow, listedNotes, me, noteCard, openAllNotes, perform, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {

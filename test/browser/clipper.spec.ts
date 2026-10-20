@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { chromium, expect, test, type Download } from "@playwright/test";
+import { chromium, expect, type Download } from "@playwright/test";
 import { unpackedExtensionId } from "../../scripts/extension-id.ts";
-import { agentWith, signInAsNewPerson } from "./helpers.ts";
+import { agentWith, signInAsNewPerson, test } from "./helpers.ts";
 
 // The dev server allows the unpacked clipper, whose id the key in extension/manifest.json fixes.
 const EXTENSION = unpackedExtensionId();

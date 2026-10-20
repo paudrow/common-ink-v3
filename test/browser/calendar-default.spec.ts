@@ -1,6 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { CalendarEvent } from "../../src/core/protocol.ts";
-import { connectAgent, perform, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, perform, signInAsNewPerson, test } from "./helpers.ts";
 
 const ZONE = "America/New_York";
 test.use({ timezoneId: ZONE });

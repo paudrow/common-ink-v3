@@ -1,6 +1,6 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { CalendarEvent, Me, OpInput } from "../../src/core/protocol.ts";
-import { anotherPerson, join, perform, runCommand, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, join, perform, runCommand, signInAsNewPerson, test, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {

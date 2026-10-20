@@ -388,13 +388,26 @@ describe("roles", () => {
   });
 });
 
+describe("removing yourself", () => {
+  it("is refused, so leaving always goes through Leave, which first asks that no private note is left with nobody", async () => {
+    const ada = await newMember("Ada Lovelace");
+    await addMember(ada, "admin", "Grace Hopper");
+    const secret = await perform(env.DB, ada, { type: "note.create", text: "# Diary" });
+    await perform(env.DB, ada, { type: "note.setPrivate", id: secret.id, private: true });
+
+    await expect(perform(env.DB, ada, { type: "member.remove", memberId: ada.personId })).rejects.toMatchObject({ code: "invalid", message: "Use Leave to leave a workspace" });
+    await expect(perform(env.DB, ada, { type: "member.leave" })).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining("You have a private note here") });
+    expect(await members(ada)).toEqual(["Ada Lovelace: admin", "Grace Hopper: admin"]);
+  });
+});
+
 describe("a workspace always has an admin", () => {
   it("so its only admin can't be demoted, removed, or leave, by themself or through an invite", async () => {
     const ada = await newMember("Ada Lovelace");
     const editor = await addMember(ada, "editor", "Edith Clarke");
 
     await expect(perform(env.DB, ada, { type: "member.setRole", memberId: ada.personId, as: "editor" })).rejects.toMatchObject(LAST_ADMIN);
-    await expect(perform(env.DB, ada, { type: "member.remove", memberId: ada.personId })).rejects.toMatchObject(LAST_ADMIN);
+    await expect(perform(env.DB, ada, { type: "member.remove", memberId: ada.personId })).rejects.toMatchObject({ code: "invalid", message: "Use Leave to leave a workspace" });
     await expect(perform(env.DB, ada, { type: "member.leave" })).rejects.toMatchObject(LAST_ADMIN);
     expect(await members(ada)).toEqual(["Ada Lovelace: admin", "Edith Clarke: editor"]);
 
@@ -595,6 +608,15 @@ describe("over HTTP, as a signed-in person", () => {
     expect(await asGrace(`/api/notes/${note.id}`)).toEqual({ status: 404, body: { error: "not_found" } });
     expect(((await asGrace("/api/me")).body as { workspaces: { name: string }[] }).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
   });
+
+  it("a session whose person is no longer there is signed out", async () => {
+    const personId = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO people (id, email, name, created_at) VALUES (?, ?, 'Gone Person', 0)").bind(personId, address()).run();
+    const asGone = await session(personId);
+    await env.DB.prepare("DELETE FROM people WHERE id = ?").bind(personId).run();
+
+    expect(await asGone("/api/me")).toEqual({ status: 401, body: { error: "signed_out" } });
+  });
 });
 
 describe("signing in as someone else without Google", () => {
@@ -609,5 +631,19 @@ describe("signing in as someone else without Google", () => {
     expect((await get(`https://commonink.app${path}`, { DEV_SIGN_IN: "1" })).status).toBe(404);
     expect((await get(`https://commonink.app${path}`, {})).status).toBe(404);
     expect((await get("https://commonink.app/api/me", { DEV_SIGN_IN: "1" })).status).toBe(401);
+  });
+
+  it("signs in only on a GET, as someone with an email of at most 254 characters and a name of at most 100", async () => {
+    const at = (query: Record<string, string>, method = "GET") =>
+      worker.fetch(new Request(`http://localhost:5314/auth/dev?${new URLSearchParams(query)}`, { method }) as never, { ...env, SESSION_SECRET: "test-secret", DEV_SIGN_IN: "1" }).then((res) => res.status);
+    const email = `${"a".repeat(242)}@example.com`;
+
+    expect(await at({ email, name: "N".repeat(100) })).toBe(302);
+    expect(await at({ email }, "HEAD")).toBe(302);
+    expect(await at({ email }, "POST")).toBe(405);
+    expect(await at({ email }, "PUT")).toBe(405);
+    expect(await at({ email: `a${email}` })).toBe(400);
+    expect(await at({ email: "nobody" })).toBe(400);
+    expect(await at({ email, name: "N".repeat(101) })).toBe(400);
   });
 });

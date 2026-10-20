@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { editOf, folderRow, listedNotes, noteCard, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { editOf, folderRow, listedNotes, noteCard, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 const tabs = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group).getByRole("tab");
 const tab = (page: Page, title: string) => tabs(page).filter({ hasText: new RegExp(`^${title}$`) });

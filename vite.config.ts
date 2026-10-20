@@ -30,6 +30,6 @@ const clipperDownload: Plugin = {
 
 // Builds only the web app; wrangler bundles the Worker, so one wrangler.jsonc serves dev, deploys, and Previews.
 export default defineConfig(({ command }) => ({
-  plugins: [react(), clipperDownload, command === "serve" && cloudflare({ config: { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } } })],
+  plugins: [react(), clipperDownload, command === "serve" && cloudflare({ persistState: { path: process.env.INK_STATE ?? ".wrangler/state" }, config: { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } } })],
   build: { outDir: "dist", emptyOutDir: true },
 }));

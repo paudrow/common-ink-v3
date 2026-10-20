@@ -1,6 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { perform, signInAsNewPerson, test } from "./helpers.ts";
 import { pdf, pdfOf } from "./pdfs.ts";
 
 let errors: string[];

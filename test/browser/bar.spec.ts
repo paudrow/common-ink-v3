@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { ownPlugin, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { ownPlugin, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 import { openDetails, pluginRow } from "./plugins-helpers.ts";
 
 const bar = (page: Page) => page.getByRole("group", { name: "Bottom bar" });

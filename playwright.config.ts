@@ -19,5 +19,5 @@ export default defineConfig({
     { name: "firefox", use: { ...devices["Desktop Firefox"], ignoreHTTPSErrors: true }, testMatch: "smoke.spec.ts" },
     { name: "webkit", use: { ...devices["Desktop Safari"], ignoreHTTPSErrors: true }, testMatch: "smoke.spec.ts" },
   ],
-  webServer: process.env.BASE_URL ? undefined : { command: "npm run dev -- --port 5198 --strictPort", url: baseURL, reuseExistingServer: true },
+  webServer: process.env.BASE_URL ? undefined : { command: "npm run dev -- --port 5198 --strictPort --state .wrangler/test-state", url: baseURL, reuseExistingServer: true },
 });

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, listedNotes, me, newEmail, openAllNotes, openKept, ownPlugin, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { anotherPerson, join, listedNotes, me, newEmail, openAllNotes, openKept, ownPlugin, perform, signInAs, signInAsNewPerson, test } from "./helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
 const membersPage = (page: Page) => page.getByRole("region", { name: "Members" });

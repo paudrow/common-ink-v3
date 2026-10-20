@@ -63,6 +63,7 @@ async function refusal({ db, workspaceId, personId }: Asking, doing: string, mem
   const asking = results.find((r) => r.person_id === personId);
   if (!asking) return new OpError("not_found", NO_SUCH_WORKSPACE);
   if (needs === "admin" && asking.role !== "admin") return new OpError("forbidden", `A ${asking.role} can't ${doing}`);
+  if (doing === "member.remove" && memberId === personId) return new OpError("invalid", "Use Leave to leave a workspace");
   if (!results.some((r) => r.person_id === memberId)) return new OpError("not_found", "No such member");
   const kept = needs === "member" ? await db.prepare(`SELECT COUNT(*) AS notes, COALESCE(SUM(n.state = 'trashed'), 0) AS trashed FROM notes n WHERE ${KEPT_PRIVATE}`).bind(workspaceId, personId).first<{ notes: number; trashed: number }>() : null;
   if (kept?.notes) return new OpError("invalid", ownsPrivate(kept.notes, kept.trashed));
@@ -96,7 +97,8 @@ export async function setRole(asking: Asking, memberId: string, role: Role): Pro
 export async function removeMember(asking: Asking, memberId: string): Promise<{ memberId: string }> {
   const { db, workspaceId, personId } = asking;
   const [removed] = await db.batch([
-    db.prepare(`DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?3 AND ${STILL_ADMIN} AND (role <> 'admin' OR ${ANOTHER_ADMIN})`).bind(workspaceId, personId, memberId),
+    // Leaving is `leave`'s, which first asks that nothing private of theirs is left with nobody.
+    db.prepare(`DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?3 AND ?3 <> ?2 AND ${STILL_ADMIN} AND (role <> 'admin' OR ${ANOTHER_ADMIN})`).bind(workspaceId, personId, memberId),
     orphaned(asking, { id: memberId }),
     ungranted(asking, memberId),
     released(asking, memberId),

@@ -1,5 +1,17 @@
-import { expect, test, type Frame, type Locator, type Page } from "@playwright/test";
+import { test as base, expect, type Frame, type Locator, type Page } from "@playwright/test";
 import type { Me, OpInput, Results, Role } from "../../src/core/protocol.ts";
+
+/** Playwright's `test`, which closes at the end of each test every browser context it opened beside its own: another person's, a visitor's. */
+export const test = base.extend<{ closesContexts: void }>({
+  closesContexts: [
+    async ({ browser }, use) => {
+      const before = new Set(browser.contexts());
+      await use();
+      await Promise.all(browser.contexts().filter((context) => !before.has(context)).map((context) => context.close()));
+    },
+    { auto: true },
+  ],
+});
 
 /** Signs in without Google, which only this machine and Previews allow (`devSignIn` in src/worker/auth.ts). `next` is where the app opens. */
 export async function signInAs(page: Page, email: string, name: string, next = "/") {

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { expect, type Page } from "@playwright/test";
+import { perform, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 import { frameFor, install, runCommand, toast, turnOn } from "./third-party-helpers.ts";
 import { standIns } from "./media-helpers.ts";
 import { pdf } from "./pdfs.ts";

@@ -23,6 +23,56 @@ async function paths(as: Actor) {
 const NO_FOLDER = { code: "not_found", message: "No such folder" };
 const INSIDE_ITSELF = { code: "invalid", message: "A folder can't go inside itself, or inside a folder in it" };
 
+describe("how deep folders go", () => {
+  const TOO_DEEP = { code: "invalid", message: "Folders go at most 32 deep" };
+  /** A chain of folders `levels` deep at the top, named by `name` and their depth. Answers the deepest. */
+  const chain = async (by: Actor, name: string, levels: number) => {
+    let at: string | undefined;
+    for (let level = 1; level <= levels; level++) at = await folder(by, `${name} ${level}`, at);
+    return at!;
+  };
+
+  it("makes a folder 32 deep, and none deeper", async () => {
+    const ada = await newMember();
+    const deepest = await chain(ada, "Level", 31);
+
+    const thirtySecond = await folder(ada, "Level 32", deepest);
+    await expect(perform(env.DB, ada, { type: "folder.create", name: "Level 33", parentId: thirtySecond })).rejects.toMatchObject(TOO_DEEP);
+    expect((await paths(ada)).at(-2)!.split("/")).toHaveLength(32);
+  });
+
+  it("moves a folder only where it and the folders in it stay at most 32 deep", async () => {
+    const ada = await newMember();
+    const thirty = await chain(ada, "Level", 30);
+    const two = await folder(ada, "Two");
+    const insideTwo = await folder(ada, "Inside two", two);
+    const three = await folder(ada, "Three");
+    await folder(ada, "Three C", await folder(ada, "Three B", three));
+
+    await expect(move(ada, three, thirty)).rejects.toMatchObject(TOO_DEEP);
+    expect(await paths(ada), "the refused move left it where it was").toContain("Three/Three B/Three C");
+    expect(await move(ada, two, thirty)).toEqual({ id: two, name: "Two", parentId: thirty });
+    expect((await paths(ada)).some((p) => p.endsWith("/Two/Inside two") && p.split("/").length === 32)).toBe(true);
+    await expect(move(ada, two, insideTwo), "inside itself is still said as it was").rejects.toMatchObject(INSIDE_ITSELF);
+  });
+
+  it("still moves up a tree that was deeper than 32 before there was a limit, and no deeper", async () => {
+    const ada = await newMember();
+    let parent: string | null = null;
+    const ids: string[] = [];
+    for (let level = 1; level <= 40; level++) {
+      const id = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+      await env.DB.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, ?, ?, ?)").bind(id, ada.workspaceId, parent, `Old ${level}`, `old ${level}`).run();
+      ids.push((parent = id));
+    }
+    const sub = await folder(ada, "Sub", await folder(ada, "Top"));
+
+    await expect(move(ada, ids[1]!, sub), "one level deeper than it was").rejects.toMatchObject(TOO_DEEP);
+    expect(await move(ada, ids[1]!, null), "up").toEqual({ id: ids[1], name: "Old 2", parentId: null });
+    await expect(move(ada, ids[1]!, ids[0]!), "back down to where it was is deeper than where it is now").rejects.toMatchObject(TOO_DEEP);
+  });
+});
+
 describe("moving a folder", () => {
   it("nests it in another and takes it back to the top, with its notes and the folders in it", async () => {
     const ada = await newMember();
