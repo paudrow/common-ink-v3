@@ -303,7 +303,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   const [host] = useState(() => {
     let created: Host;
     const account = accountOf(me, workspaceId);
-    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} adminElsewhere={me.workspaces.some((w) => w.id !== workspaceId && w.role === "admin")} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} />;
+    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} adminElsewhere={me.workspaces.some((w) => w.id !== workspaceId && w.role === "admin")} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} folders={app.folders} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
       id: "core",
@@ -529,6 +529,11 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     [workspaceId],
   );
   useEffect(() => void loadFolders(), [loadFolders]);
+
+  useEffect(() => {
+    const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (here !== me.timeZone) perform(workspaceId, { type: "timeZone.record", timeZone: here }).catch(() => {});
+  }, [workspaceId, me.timeZone]);
 
   const listedNotes = useRef(notes);
   listedNotes.current = notes;
@@ -1336,6 +1341,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
           storage={() => perform(workspaceId, { type: "upload.storage" })}
           exportPlan={() => perform(workspaceId, { type: "export.plan" })}
           account={account}
+          folders={tree}
           onClose={() => navigate(under.current.path + under.current.query, { replace: true })}
         >
           {overlayDrawn}

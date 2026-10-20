@@ -87,7 +87,7 @@ export { linesOutsideCode } from "../core/lines.ts";
 export { DAY_NAMES, MONTHS, MONTH_NAMES, WEEKDAYS, counted, describeRule, endLabel, isInterval, nextDue, occurrences, ordinal, parseRule, pastThe28th, ruleLabel, skippedTo, writeRule, type End, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
 
 /** The settings a daily note is made by, which the daily plugin declares under exactly these keys and the server reads. */
-export { DAILY_SETTINGS } from "../core/daily.ts";
+export { DAILY_FOLDER, DAILY_SETTINGS } from "../core/daily.ts";
 
 /** One time a recurring todo was checked off, as `todo.history` answers it. The protocol calls it `Completion`, which here is a list offered at the cursor. */
 export type TodoCompletion = Results["todo.history"]["completions"][number];
@@ -194,6 +194,11 @@ export type Setting = {
   | { type: "chords"; default: readonly string[] }
   /** Words, each at most `maxLength` characters, at most `maxItems` of them. */
   | { type: "list"; default: readonly string[]; maxItems: number; maxLength: number }
+  /**
+   * A folder the member can edit, by its id, picked from a list of them. `""` is the default, the
+   * folder `defaultFolder` names, which whoever reads the setting finds or makes.
+   */
+  | { type: "folder"; default: ""; defaultFolder: string }
 );
 
 export type SettingValue = boolean | string | number | readonly string[];

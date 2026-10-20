@@ -66,6 +66,8 @@ export function readSetting(setting: Setting, value: unknown): { value: SettingV
       }
       return { value: chords };
     }
+    case "folder":
+      return typeof value === "string" ? { value } : { reason: `Expected a folder's id in quotes, not ${shown(value)}` };
     case "list":
       if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return { reason: `Expected a list of words in quotes, such as ["one", "two"], not ${shown(value)}` };
       if (value.length > setting.maxItems) return { reason: `Expected at most ${setting.maxItems} of them` };

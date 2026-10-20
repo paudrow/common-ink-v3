@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { CAPABILITIES, HTML_EMBEDS, type DraftSummary, type InstalledPlugin, type PluginRecord } from "../core/plugins.ts";
 import { Icon } from "./icons.tsx";
 import { chordFor, chordLabel } from "./keybindings.ts";
-import type { Slots } from "./plugin-api.ts";
+import type { Folders, Slots } from "./plugin-api.ts";
 import { INSTALLED_EMBED, type Added, type Contributions, type Host } from "./pluginHost.ts";
 import { MoreMenu } from "./MoreMenu.tsx";
 import { InstallForm } from "./PluginInstall.tsx";
@@ -35,6 +35,8 @@ export interface PluginsProps {
   /** The address the app is at: `/plugins`, or `/plugins/<plugin id>` for one plugin's details. */
   path: string;
   go: (path: string) => void;
+  /** The workspace's folders, which a folder setting is picked from, or null while they are read. */
+  folders: Folders | null;
 }
 
 interface Props extends PluginsProps {
@@ -81,7 +83,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  * options, which are changed here as they are in Settings, its source to read, and its switch. For a third-party plugin
  * an admin decides its permissions here, and updates and uninstalls it.
  */
-export function PluginDetails({ plugin, contributed, host, store, workspaceId, personId, adminElsewhere, mac, record, onRecord, drafts, onDrafts, go }: Props) {
+export function PluginDetails({ plugin, contributed, host, store, workspaceId, personId, adminElsewhere, mac, record, onRecord, drafts, onDrafts, go, folders }: Props) {
   const changes = useRecordChanges(workspaceId, onRecord);
   const [updating, setUpdating] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -267,6 +269,7 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
                   modified={Object.hasOwn(settings.document, d.key)}
                   problems={settings.problems.filter((p) => p.key === d.key)}
                   mac={mac}
+                  folders={folders}
                   onSet={(value) => host.setSetting(d.key, value)}
                 />
               ))}

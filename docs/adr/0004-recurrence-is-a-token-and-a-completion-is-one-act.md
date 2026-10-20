@@ -55,3 +55,5 @@ Issue #20 asks for todos that recur, set through a chip, with a chip that says w
 - Taking back a completion made by someone else changes that person's daily note, which may be private to them, as a change by whoever took it back. They are told only of daily notes they can see.
 - Reverting an agent's changes takes out the heading of a daily note the agent's completion made, since that change was the agent's. The note is still the member's daily note for the day.
 - The server reads three of a member's settings (`daily.folder`, `daily.private`, `daily.timeZone`) to act for them. It still tells an agent none of them.
+
+**Amended 2026-10-20: with no `on`, the day is in the member's own zone (#130).** The `daily.timeZone` setting became an override. With none set, the server uses the time zone of the browser the member last used Common Ink in, which the app records on the person, and UTC only when there is neither (`memberZone` in `src/core/daily.ts`).

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DAILY_SETTINGS, today, type App, type Plugin, type PluginHost } from "../../plugin-api.ts";
+import { DAILY_FOLDER, DAILY_SETTINGS, today, type App, type Plugin, type PluginHost } from "../../plugin-api.ts";
 import { browserZone, dayTitled, todayIn, toward, type Asked } from "./days.ts";
 import { dayStepper } from "./steps.ts";
 
@@ -90,11 +90,11 @@ export const daily: Plugin = {
   icon: "today",
   settings: {
     [named(folder.key)]: {
-      type: "string",
+      type: "folder",
       default: folder.default,
-      maxLength: folder.maxLength,
+      defaultFolder: DAILY_FOLDER,
       title: "Daily notes folder",
-      description: "The folder at the top of the workspace that a new daily note is made in. It is made when it isn't there. Changing this leaves the daily notes already made where they are.",
+      description: `The folder a new daily note is made in, from the folders you can edit. ${DAILY_FOLDER}, at the top of the workspace, is made when it isn't there. Changing this leaves the daily notes already made where they are.`,
     },
     [named(isPrivate.key)]: {
       type: "boolean",
@@ -106,8 +106,8 @@ export const daily: Plugin = {
       type: "string",
       default: timeZone.default,
       maxLength: 64,
-      title: "Time zone for agents",
-      description: "A time zone by its IANA name, such as America/Chicago. It says what day it is when an agent completes a todo or opens a daily note without saying the day, and agents are given times in it. The app itself always uses this browser's day. Empty is UTC.",
+      title: "Time zone override",
+      description: "A time zone by its IANA name, such as America/Chicago, to use in place of the one Common Ink finds. It says what day it is when an agent completes a todo or opens a daily note without saying the day, and agents are given times in it. The app itself always uses this browser's day. Empty is the time zone of the browser you last used Common Ink in.",
     },
   },
   activate(host) {

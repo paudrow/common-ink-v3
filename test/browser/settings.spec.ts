@@ -403,7 +403,7 @@ test("one search finds settings in every category and keyboard shortcuts, a cate
   await search.fill("note");
   // Appearance's Text size says what it does to a note's text, Mentions has a setting about a private note, and Typewriter mode's height is a share of the note's.
   await expect.poll(names).toEqual(["Editor", "Appearance", "Note list", "Daily notes", "Mentions", "Typewriter mode", "Keyboard shortcuts"]);
-  await expect(group(page, "Daily notes").getByRole("textbox", { name: "Daily notes folder" })).toHaveValue("Journal");
+  await expect(group(page, "Daily notes").getByRole("combobox", { name: "Daily notes folder" })).toHaveValue("Journal");
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /New note/ })).toBeVisible();
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /Undo/ })).toHaveCount(0);
 

@@ -155,7 +155,8 @@ const Zone = z
  * What a query's days are read by. `today` is the day it is for the asker, which `today`, `yesterday`,
  * `tomorrow`, `7d` and `+7d` are counted from: the server never works it out, so a query with one of
  * them and no `today` is refused. `zone` is where a day begins and ends for `updated:` and `created:`.
- * Left out, it is the zone the member's settings name, or UTC.
+ * Left out, it is the member's zone: the one their `daily.timeZone` setting names, or else the one of
+ * the browser they last used Common Ink in, or else UTC.
  */
 const Days = { today: Day.optional(), zone: Zone.optional() };
 /** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done`, `last-fri`, `mar-1` or `1m-times-5`. docs/todos.md has every rule. */
@@ -266,8 +267,8 @@ export const Op = z.discriminatedUnion("type", [
     mentionNames: MentionNames,
     /**
      * The day it is for the writer, which counts when the write checks off a recurring todo: the todo
-     * is completed on that day, as todo.set does it. Left out, it is today in the time zone the
-     * member's settings name, or in UTC when they name none.
+     * is completed on that day, as todo.set does it. Left out, it is today in the member's zone, as
+     * `memberZone` picks it.
      */
     on: Day.optional(),
   }),
@@ -509,8 +510,9 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("todo.history"), id: Id, revision: Revision, line: z.number().int().min(0), text: z.string().max(MAX_NOTE_LENGTH) }),
   /**
    * The daily note of whoever asks, or of the member an agent acts for, for the day `on`: found, or
-   * made with the date as its heading, in the folder their settings name, which is made too if it
-   * isn't there. Left out, `on` is today in the time zone their settings name, or in UTC.
+   * made with the date as its heading, in the folder their settings pick or else in Daily at the top
+   * of the workspace, which is made too if it isn't there. Left out, `on` is today in their zone, as
+   * `memberZone` picks it.
    */
   z.object({ type: z.literal("daily.open"), on: Day.optional() }),
   /**
@@ -583,6 +585,12 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
     supersedes: z.string().min(1).max(64).optional(),
   }),
+  /**
+   * Keeps the time zone of the browser the member is using, which is theirs in every workspace and is
+   * the one the server takes their day and times in when nobody says them and their settings name none.
+   * Keeping the zone already kept changes nothing.
+   */
+  z.object({ type: z.literal("timeZone.record"), timeZone: Zone }),
   /** Everyone in the workspace, by name and role. Any member may ask. Only an admin is told emails, and no agent is. */
   z.object({ type: z.literal("member.list") }),
   /**
@@ -1559,6 +1567,7 @@ export interface Results {
   "folder.delete": { id: string };
   "settings.read": StoredSettings;
   "settings.write": StoredSettings;
+  "timeZone.record": { timeZone: string };
   "member.list": Member[];
   /** `member` when the email was already a member's, whose role this changed. Otherwise `invite`. */
   "member.invite": { member: Member; invite: null } | { member: null; invite: Invite };
@@ -1906,6 +1915,8 @@ export interface WorkspaceSummary {
 
 export interface Me {
   person: { id: string; email: string; name: string };
+  /** The time zone of the browser they last used Common Ink in, or null when none has said one yet. */
+  timeZone: string | null;
   workspaces: WorkspaceSummary[];
   /** True on this machine and in Previews, and never in production: there a test may put plugins on the page itself. */
   dev: boolean;
