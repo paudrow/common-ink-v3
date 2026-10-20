@@ -1,6 +1,7 @@
 // The MCP endpoint, https://<host>/mcp: Streamable HTTP in its stateless form, one JSON-RPC message (or a
-// batch) per POST, answered as JSON. An agent signs in with the bearer token its member made for it; it
-// never has a session cookie, so a web page can't make it act. See docs/mcp.md.
+// batch) per POST, answered as JSON. It speaks MCP 2026-07-28, where each request carries its version in
+// params._meta, beside the earlier versions that begin with initialize. An agent signs in with the bearer
+// token its member made for it; it never has a session cookie, so a web page can't make it act. See docs/mcp.md.
 import { authenticateAgent } from "../../core/agents.ts";
 import { authenticateClipper } from "../../core/clipper.ts";
 import type { Sources } from "../../core/sources.ts";
@@ -10,7 +11,12 @@ import { ASK_NOTE_SYNTAX } from "../../core/noteSyntax.ts";
 import { metadataUrl } from "../oauth.ts";
 import { callTool, toolList, type Caller, type Reached } from "./tools.ts";
 
-const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+const SUPPORTED = { modern: ["2026-07-28"], legacy: ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] };
+const ALL_VERSIONS = [...SUPPORTED.modern, ...SUPPORTED.legacy];
+const VERSION_KEY = "io.modelcontextprotocol/protocolVersion";
+const CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities";
+/** Tools change only when the server is deployed. */
+const TTL_MS = 3_600_000;
 /** Room for upload_file's base64 of a file of MAX_INLINE_UPLOAD_BYTES, and the rest of the message. */
 const MAX_BODY = 6_000_000;
 /** One request is one Worker invocation, with a fixed number of subrequests, so a batch is held to a few messages. */
@@ -29,9 +35,63 @@ interface Request_ {
   method?: unknown;
   params?: unknown;
 }
+type Params = Record<string, unknown>;
+/** A modern message names its version in params._meta and has no initialize; a legacy one began with initialize. */
+type Era = { kind: "legacy" } | { kind: "modern"; meta: Params };
+/** A message's answer and the HTTP status a single-message POST is answered with. */
+type Answer = { message: Out | null; status: number };
+type Out = { jsonrpc: "2.0"; id: Id; result: object } | { jsonrpc: "2.0"; id: Id; error: { code: number; message: string; data?: unknown } };
 
-const reply = (id: Id, result: unknown) => ({ jsonrpc: "2.0", id, result });
-const fail = (id: Id, code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
+const reply = (id: Id, result: object): Out => ({ jsonrpc: "2.0", id, result });
+const fail = (id: Id, code: number, message: string, data?: unknown): Out => ({ jsonrpc: "2.0", id, error: data === undefined ? { code, message } : { code, message, data } });
+
+const paramsOf = (m: Request_): Params => (typeof m.params === "object" && m.params !== null ? m.params : {}) as Params;
+
+function eraOf(m: Request_): Era {
+  const given = paramsOf(m)._meta;
+  const meta = (typeof given === "object" && given !== null ? given : {}) as Params;
+  return m.method === "server/discover" || VERSION_KEY in meta || CAPABILITIES_KEY in meta ? { kind: "modern", meta } : { kind: "legacy" };
+}
+
+/** A modern request's version, capabilities and mirrored headers, or the error that refuses it. */
+function refuseModern(id: Id, meta: Params, m: Request_, headers: Headers): Out | null {
+  const version = meta[VERSION_KEY];
+  const capabilities = meta[CAPABILITIES_KEY];
+  if (typeof version !== "string") return fail(id, -32602, `params._meta["${VERSION_KEY}"] is required`);
+  if (typeof capabilities !== "object" || capabilities === null || Array.isArray(capabilities)) return fail(id, -32602, `params._meta["${CAPABILITIES_KEY}"] is required, an object`);
+  if (!SUPPORTED.modern.includes(version)) return fail(id, -32022, "Unsupported protocol version", { supported: ALL_VERSIONS, requested: version });
+  if (m.method === "tools/call" && typeof paramsOf(m).name !== "string") return fail(id, -32602, "Name the tool to call");
+  const mirrored: Array<[string, unknown]> = [["MCP-Protocol-Version", version], ["Mcp-Method", m.method]];
+  if (m.method === "tools/call") mirrored.push(["Mcp-Name", paramsOf(m).name]);
+  for (const [name, body] of mirrored) {
+    const raw = headers.get(name);
+    const value = raw !== null && name === "Mcp-Name" ? decodeSentinel(raw) : raw;
+    if (value === null) return fail(id, -32020, `Header mismatch: the ${name} header is missing`);
+    if (value !== body) return fail(id, -32020, `Header mismatch: ${name} header value '${raw}' does not match body value '${String(body)}'`);
+  }
+  return null;
+}
+
+/** A header value that can't be plain ASCII is sent as =?base64?<UTF-8 as base64>?=. */
+function decodeSentinel(value: string): string {
+  const sentinel = /^=\?base64\?(.*)\?=$/.exec(value);
+  if (!sentinel) return value;
+  try {
+    return new TextDecoder().decode(Uint8Array.from(atob(sentinel[1]!), (c) => c.charCodeAt(0)));
+  } catch {
+    return value;
+  }
+}
+
+/** The HTTP status of a modern error, where the spec names one. Any other error is the model's to read, so it comes back as 200. */
+const STATUS_OF: Record<number, number> = { [-32600]: 400, [-32601]: 404, [-32603]: 500 };
+
+/** A modern result says it is complete and which server answered; a modern error carries its HTTP status. */
+function finish(era: Era, out: Out | null): Answer {
+  if (era.kind === "legacy" || out === null) return { message: out, status: 200 };
+  if ("error" in out) return { message: out, status: STATUS_OF[out.error.code] ?? 200 };
+  return { message: { ...out, result: { ...out.result, resultType: "complete", _meta: { ...(out.result as { _meta?: object })._meta, "io.modelcontextprotocol/serverInfo": SERVER } } }, status: 200 };
+}
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
@@ -81,43 +141,58 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   const messages = (batch ? body : [body]) as unknown[];
   if (batch && messages.length === 0) return json(fail(null, -32600, "An empty batch"), 400);
   if (messages.length > MAX_BATCH) return json(fail(null, -32600, `A batch holds at most ${MAX_BATCH} messages`), 400);
-  const out: unknown[] = [];
-  for (const message of messages) {
+  // A batch is for the versions before 2026-07-28, so one modern message in it is refused before anything is done.
+  if (batch && messages.some((message) => eraOf(asRequest(message)).kind === "modern"))
+    return json(fail(null, -32600, "A batch is for protocol versions before 2026-07-28; send one message per request"), 400);
+  const out: Answer[] = [];
+  for (const m of messages.map(asRequest)) {
     // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
-    const answer = await handleMessage(env, caller, message, sources, { origin: new URL(req.url).origin, bucket: env.FILES }).catch((err: unknown) => {
+    const answer = await handleMessage(env, caller, m, sources, { origin: new URL(req.url).origin, bucket: env.FILES }, req.headers).catch((err: unknown) => {
       logFault("An MCP message", err);
-      const id = (message as { id?: unknown } | null)?.id;
-      return fail(typeof id === "string" || typeof id === "number" ? id : null, -32603, BROKE);
+      return finish(eraOf(m), fail(typeof m.id === "string" || typeof m.id === "number" ? m.id : null, -32603, BROKE));
     });
-    if (answer) out.push(answer);
+    if (answer.message) out.push(answer);
   }
   if (out.length === 0) return new Response(null, { status: 202, headers: { "Cache-Control": "no-store" } });
-  return json(batch ? out : out[0]);
+  return batch ? json(out.map((answer) => answer.message)) : json(out[0]!.message, out[0]!.status);
 }
 
-async function handleMessage(env: Env, agent: Caller, message: unknown, sources: Sources | undefined, reached: Reached): Promise<unknown | null> {
-  const m = (typeof message === "object" && message !== null ? message : {}) as Request_;
+const asRequest = (message: unknown) => (typeof message === "object" && message !== null ? message : {}) as Request_;
+
+async function handleMessage(env: Env, agent: Caller, m: Request_, sources: Sources | undefined, reached: Reached, headers: Headers): Promise<Answer> {
+  const era = eraOf(m);
   const hasId = m.id !== undefined;
   const id: Id = hasId && (typeof m.id === "string" || typeof m.id === "number" || m.id === null) ? m.id : null;
-  if (m.jsonrpc !== "2.0" || typeof m.method !== "string") return fail(id, -32600, "Not a JSON-RPC 2.0 request");
+  if (m.jsonrpc !== "2.0" || typeof m.method !== "string") return finish(era, fail(id, -32600, "Not a JSON-RPC 2.0 request"));
   // A notification has no id and gets no answer.
-  if (!hasId) return null;
-  const params = (typeof m.params === "object" && m.params !== null ? m.params : {}) as Record<string, unknown>;
+  if (!hasId) return finish(era, null);
+  if (era.kind === "modern") {
+    const refused = refuseModern(id, era.meta, m, headers);
+    if (refused) return { message: refused, status: 400 };
+  }
+  return finish(era, await answerMethod(env, agent, era, id, m.method, paramsOf(m), sources, reached));
+}
 
-  switch (m.method) {
+async function answerMethod(env: Env, agent: Caller, era: Era, id: Id, method: string, params: Params, sources: Sources | undefined, reached: Reached): Promise<Out> {
+  switch (method) {
     case "initialize": {
+      if (era.kind === "modern") break;
       const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : "";
       return reply(id, {
-        protocolVersion: VERSIONS.includes(asked) ? asked : VERSIONS[0],
+        protocolVersion: SUPPORTED.legacy.includes(asked) ? asked : SUPPORTED.legacy[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER,
         instructions: INSTRUCTIONS,
       });
     }
     case "ping":
+      if (era.kind === "modern") break;
       return reply(id, {});
+    case "server/discover":
+      return reply(id, { supportedVersions: ALL_VERSIONS, capabilities: { tools: {} }, instructions: INSTRUCTIONS, ttlMs: TTL_MS, cacheScope: "public" });
     case "tools/list":
-      return reply(id, { tools: toolList(agent) });
+      // What a token sees depends on the token: a clipper's grant lists fewer tools.
+      return reply(id, era.kind === "modern" ? { tools: toolList(agent), ttlMs: TTL_MS, cacheScope: "private" } : { tools: toolList(agent) });
     case "tools/call": {
       if (typeof params.name !== "string") return fail(id, -32602, "Name the tool to call");
       const args = params.arguments ?? {};
@@ -132,7 +207,6 @@ async function handleMessage(env: Env, agent: Caller, message: unknown, sources:
       const result = await callTool(env.DB, agent, params.name, args as Record<string, unknown>, sources, reached);
       return result ? reply(id, result) : fail(id, -32602, `No such tool: ${params.name}`);
     }
-    default:
-      return fail(id, -32601, `No such method: ${m.method}`);
   }
+  return fail(id, -32601, `No such method: ${method}`);
 }

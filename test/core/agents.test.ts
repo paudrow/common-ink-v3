@@ -114,7 +114,9 @@ describe("MCP protocol", () => {
     expect(init.result).toMatchObject({ protocolVersion: "2025-06-18", serverInfo: { name: "common-ink" }, capabilities: { tools: {} } });
     expect(init.result.instructions).toContain("call note_syntax");
     const old = (await (await call(token, rpc("initialize", { protocolVersion: "1999-01-01" }))).json()) as any;
-    expect(old.result.protocolVersion).toBe("2025-06-18");
+    expect(old.result.protocolVersion).toBe("2025-11-25");
+    const newest = (await (await call(token, rpc("initialize", { protocolVersion: "2025-11-25", capabilities: {} }))).json()) as any;
+    expect([newest.result.protocolVersion, newest.result.resultType]).toEqual(["2025-11-25", undefined]);
 
     const note = await call(token, { jsonrpc: "2.0", method: "notifications/initialized" });
     expect(note.status).toBe(202);
@@ -263,6 +265,95 @@ describe("MCP protocol", () => {
     const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
     const answers = (await (await call(token, [rpc("ping", undefined, 1), { jsonrpc: "2.0", method: "notifications/initialized" }, rpc("tools/list", undefined, 2)])).json()) as any[];
     expect(answers.map((a) => a.id)).toEqual([1, 2]);
+  });
+});
+
+describe("MCP 2026-07-28", () => {
+  const META = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}, "io.modelcontextprotocol/clientInfo": { name: "t", version: "1" } };
+  const SERVER_INFO = { "io.modelcontextprotocol/serverInfo": { name: "common-ink", version: "0.1.0" } };
+  const post = async (token: string, body: unknown, headers: Record<string, string>) => {
+    const res = await send(new Request(URL_, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...headers }, body: JSON.stringify(body) }));
+    return { status: res.status, body: (await res.json()) as any };
+  };
+  const heads = (method: string, name?: string) => ({ "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": method, ...(name ? { "Mcp-Name": name } : {}) });
+  const querySyntax = { name: "query_syntax", arguments: { scope: "notes" }, _meta: META };
+
+  it("lists its tools for this token with how long the list keeps", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const { status, body } = await post(token, rpc("tools/list", { _meta: META }), { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list" });
+    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 84]);
+  });
+
+  it("calls a tool whose name the Mcp-Name header mirrors, plain or as base64, and refuses one that differs or a missing version header", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const plain = await post(token, rpc("tools/call", querySyntax), heads("tools/call", "query_syntax"));
+    expect([plain.status, plain.body.result.resultType, plain.body.result.isError, plain.body.result.content[0].text.startsWith("The query language")]).toEqual([200, "complete", undefined, true]);
+    const encoded = await post(token, rpc("tools/call", querySyntax), heads("tools/call", "=?base64?cXVlcnlfc3ludGF4?="));
+    expect([encoded.status, encoded.body.result.resultType]).toEqual([200, "complete"]);
+    expect(await post(token, rpc("tools/call", querySyntax, 7), heads("tools/call", "note_syntax"))).toEqual({
+      status: 400,
+      body: { jsonrpc: "2.0", id: 7, error: { code: -32020, message: "Header mismatch: Mcp-Name header value 'note_syntax' does not match body value 'query_syntax'" } },
+    });
+    const unversioned = await post(token, rpc("tools/call", querySyntax), { "Mcp-Method": "tools/call", "Mcp-Name": "query_syntax" });
+    expect([unversioned.status, unversioned.body.error.code]).toEqual([400, -32020]);
+    const unknown = await post(token, rpc("tools/call", { name: "delete_everything", arguments: {}, _meta: META }, 8), heads("tools/call", "delete_everything"));
+    expect(unknown).toEqual({ status: 200, body: { jsonrpc: "2.0", id: 8, error: { code: -32602, message: "No such tool: delete_everything" } } });
+    const accented = await post(token, rpc("tools/call", { name: "café", arguments: {}, _meta: META }, 9), heads("tools/call", `=?base64?${btoa(String.fromCharCode(...new TextEncoder().encode("café")))}?=`));
+    expect(accented).toEqual({ status: 200, body: { jsonrpc: "2.0", id: 9, error: { code: -32602, message: "No such tool: café" } } });
+    const nameless = await post(token, rpc("tools/call", { arguments: {}, _meta: META }, 10), heads("tools/call"));
+    expect(nameless).toEqual({ status: 400, body: { jsonrpc: "2.0", id: 10, error: { code: -32602, message: "Name the tool to call" } } });
+  });
+
+  it("answers server/discover with what it supports", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const { status, body } = await post(token, rpc("server/discover", { _meta: META }), heads("server/discover"));
+    expect(status).toBe(200);
+    expect({ ...body.result, instructions: body.result.instructions.startsWith("Common Ink is a markdown notes workspace.") }).toEqual({
+      resultType: "complete",
+      supportedVersions: ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"],
+      capabilities: { tools: {} },
+      instructions: true,
+      ttlMs: 3600000,
+      cacheScope: "public",
+      _meta: SERVER_INFO,
+    });
+  });
+
+  it("refuses a version it doesn't speak, naming the ones it does", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const meta = { ...META, "io.modelcontextprotocol/protocolVersion": "2099-01-01" };
+    expect(await post(token, rpc("tools/list", { _meta: meta }), { "MCP-Protocol-Version": "2099-01-01", "Mcp-Method": "tools/list" })).toEqual({
+      status: 400,
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code: -32022, message: "Unsupported protocol version", data: { supported: ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"], requested: "2099-01-01" } },
+      },
+    });
+  });
+
+  it("refuses a request without its client capabilities", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const { status, body } = await post(token, rpc("tools/list", { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } }), heads("tools/list"));
+    expect([status, body.error.code]).toEqual([400, -32602]);
+  });
+
+  it("has no initialize, ping or unknown method", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    const answers = await Promise.all(["initialize", "ping", "nope"].map((method) => post(token, rpc(method, { _meta: META }), heads(method))));
+    expect(answers.map(({ status, body }) => [status, body.error.code])).toEqual([
+      [404, -32601],
+      [404, -32601],
+      [404, -32601],
+    ]);
+  });
+
+  it("refuses a batch that holds a modern message and does nothing in it", async () => {
+    const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
+    expect(await post(token, [rpc("ping", {}, 1), rpc("tools/list", { _meta: META }, 2)], heads("tools/list"))).toEqual({
+      status: 400,
+      body: { jsonrpc: "2.0", id: null, error: { code: -32600, message: "A batch is for protocol versions before 2026-07-28; send one message per request" } },
+    });
   });
 });
 
