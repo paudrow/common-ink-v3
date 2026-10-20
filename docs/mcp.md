@@ -157,13 +157,13 @@ A file's bytes never travel in a tool call, but for a small one an agent already
          Authorization: Bearer cink_...
       ->  200 with the bytes
 
-`name` is required. `folderId` is optional, and the file goes to Unsorted without it. Uploading needs edit on the folder, so a viewer's agent and a read-only token are refused with 403. A workspace the token can't reach, and an upload the member can't see, answer 404. No token, or one Common Ink doesn't know, answers 401. `Content-Length` is required (411 without it) and the body must be exactly that long. Any type but `application/octet-stream` is refused with 415.
+`name` is required. `folderId` is optional, and the file goes to Unsorted without it. `writeId` is optional: any string of yours up to 64 characters, and a request sent again with the same one, after an answer that never came, answers the upload the first made (or 409 while the first is still arriving) and stores nothing more. `upload_file` and `start_upload` take it too; `start_upload` sent again with it answers as `resume_upload` does. Uploading needs edit on the folder, so a viewer's agent and a read-only token are refused with 403. A workspace the token can't reach, and an upload the member can't see, answer 404. No token, or one Common Ink doesn't know, answers 401. `Content-Length` is required (411 without it) and the body must be exactly that long. Any type but `application/octet-stream` is refused with 415.
 
 One request carries at most 80 MB, a little under the 100 MB a request to the Worker can be: a longer `Content-Length` is refused with 413 before any of the body is read. A larger file, up to 25 GB, goes in parts. There is no limit to a workspace's uploads together; Settings shows the members how much they take.
 
 ### A file in parts
 
-    start_upload {name, size, folderId?}
+    start_upload {name, size, folderId?, writeId?}
       ->  {id, partSize, partCount, stored: [], address: "https://commonink.app/api/upload-parts/<secret>/{part}", expiresAt}
 
     PUT <address with {part} replaced by 1, 2, ... partCount>

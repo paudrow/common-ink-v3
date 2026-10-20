@@ -4,7 +4,7 @@
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-10-01",
   "workers_dev": false,
-  "preview_urls": true,
+  "preview_urls": false,
   // The web app, built by Vite into dist. Pages are the single-page app. Every address except the built
   // files under /assets reaches the Worker first: it redirects www.commonink.app to commonink.app (assets
   // can't be matched by host, so it must see every path) and answers /sw.js, which the single-page
@@ -42,6 +42,6 @@
   "observability": { "enabled": true, "redact_query_string": true, "logs": { "invocation_logs": false } },
   // The optional settings are typed in src/worker/env.d.ts.
   "secrets": { "required": ["SESSION_SECRET"] }
-  // scripts/preview.ts adds the Previews' settings: their own D1 database, the bucket Previews share (common-ink-v3-uploads-preview), and dev sign-in. Production
-  // versions are served on the same workers.dev hosts as Previews, so dev sign-in must never be set here.
+  // Previews run on their own Worker, common-ink-v3-previews. scripts/preview.ts writes their settings: their own D1
+  // database, the bucket Previews share (common-ink-v3-uploads-preview), and dev sign-in, which must never be set here.
 }

@@ -604,7 +604,7 @@ describe("signing in as someone else without Google", () => {
     const path = "/auth/dev?email=second@example.com&name=Second";
 
     expect((await get(`http://localhost:5314${path}`, { DEV_SIGN_IN: "1" })).status).toBe(302);
-    expect((await get(`https://pr-14-common-ink-v3.draftox.workers.dev${path}`, { DEV_SIGN_IN: "1" })).status).toBe(302);
+    expect((await get(`https://pr-14-common-ink-v3-previews.draftox.workers.dev${path}`, { DEV_SIGN_IN: "1" })).status).toBe(302);
     expect((await get(`http://localhost:5314${path}`, {})).status).toBe(404);
     expect((await get(`https://commonink.app${path}`, { DEV_SIGN_IN: "1" })).status).toBe(404);
     expect((await get(`https://commonink.app${path}`, {})).status).toBe(404);

@@ -31,7 +31,7 @@ const withEmbedHost = (url: string) => worker.fetch(new Request(url) as never, {
 
 describe("the document an HTML embed is written into", () => {
   it("is served with an origin of its own and no network, whoever frames it and however", async () => {
-    for (const host of ["https://commonink.app", "https://pr-12-common-ink-v3.draftox.workers.dev", "http://localhost:5173"]) {
+    for (const host of ["https://commonink.app", "https://pr-12-common-ink-v3-previews.draftox.workers.dev", "http://localhost:5173"]) {
       const res = await get(`${host}/embed-frame`);
       expect(res.status, host).toBe(200);
       expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");

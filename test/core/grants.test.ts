@@ -179,6 +179,18 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     expect((await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).grants).toMatchObject([{ to: { kind: "person", email, personId, name: "Nia New", role: null } }]);
   });
 
+  it("doesn't tell an editor sharing by email what the address's owner is called; an admin is told", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const ed = await addMember(ada, "editor", "Ed");
+    const plan = await note(ed, "# Plan");
+    const nia = await newPerson(ada, "Nia New");
+
+    const grant = await share(ed, { noteId: plan.id }, nia.email, "view");
+    expect(grant.to).toEqual({ kind: "person", email: nia.email, personId: nia.personId, name: null, role: null });
+    expect((await perform(env.DB, ed, { type: "grant.list", noteId: plan.id })).grants.map((g) => g.to)).toEqual([grant.to]);
+    expect((await perform(env.DB, ada, { type: "grant.list", noteId: plan.id })).grants.map((g) => g.to)).toEqual([{ ...grant.to, name: "Nia New" }]);
+  });
+
   it("is not let in by a waiting grant whose maker can no longer share the item", async () => {
     const ada = await newMember("Ada Lovelace");
     const eve = await addMember(ada, "editor", "Eve Editor");
@@ -279,7 +291,7 @@ describe("a grant that names a member", () => {
     await perform(env.DB, ada, { type: "member.invite", email, as: "editor" });
     await signIn(env.DB, { email, name: "Ed Editor" });
 
-    const NARROWING = { code: "forbidden", message: "They are a member here, and only an admin can narrow what a member's role allows, or stop narrowing it" };
+    const NARROWING = { code: "forbidden", message: "Only an admin can change what this person can see here" };
     await expect(share(eve, { noteId: plan.id }, email, "view")).rejects.toMatchObject(NARROWING);
     const outside = await share(eve, { noteId: plan.id }, address(), "view");
     const narrowed = await share(ada, { noteId: plan.id }, email, "view");

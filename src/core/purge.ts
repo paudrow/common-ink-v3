@@ -162,7 +162,7 @@ const CLEAR_UPLOADS = 1000;
  * again after stopping partway, it removes what is left and nothing else. When it fails, every
  * upload it was removing is left as it is, unread, for the next run.
  */
-export async function clearUploads(db: D1Database, bucket: R2Bucket, now: number, log: (message: string) => void = console.error): Promise<Purged> {
+export async function clearUploads(db: D1Database, bucket: R2Bucket, now: number, log: (message: string) => void = logLine): Promise<Purged> {
   await db.batch([
     db.prepare("UPDATE uploads SET state = 'removing' WHERE state = 'trashed' AND state_at <= ?").bind(now - TRASH_MS),
     db.prepare("UPDATE uploads SET state = 'removing' WHERE state = 'pending' AND COALESCE(touched_at, created_at) <= ?").bind(now - PENDING_MS),

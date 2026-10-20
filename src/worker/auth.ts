@@ -1,4 +1,6 @@
 import { sessionHolds, signIn, whoAmI } from "../core/accounts.ts";
+import { authenticateAgent, type ConnectedAgent } from "../core/agents.ts";
+import { authenticateClipper, type ClipperGrant } from "../core/clipper.ts";
 import { authorizeUrl, covers, exchange, isGoogleSource, REACHING_SCOPES, revoke, SOURCE_SCOPES, type Asking, type GoogleConfig, type GoogleSourceId, type GoogleTokens } from "./google.ts";
 import { connectionOf, keepTokens } from "./sources/connections.ts";
 import { PROVIDER as GOOGLE } from "./sources/google.ts";
@@ -10,13 +12,18 @@ const STATE_COOKIE = "__Host-ink_google";
 const SESSION_SECONDS = 30 * 86_400;
 const STATE_SECONDS = 600;
 
-const DEV_HOSTS = /^(localhost|127\.0\.0\.1|\[::1\]|[a-z0-9-]+-common-ink-v3\.draftox\.workers\.dev)$/;
+const LOCAL_HOSTS = /^(localhost|127\.0\.0\.1|\[::1\])$/;
+/** A Preview's addresses on the Previews' own Worker: `pr-<n>-…` and each deployment's own `<hex>-…`. Production has no workers.dev address. */
+const PREVIEW_HOSTS = /^[a-z0-9-]+-common-ink-v3-previews\.draftox\.workers\.dev$/;
 
 /**
- * Dev sign-in is set only by the dev server and scripts/preview.ts. The host check keeps it off the
- * production domain, but production versions share the workers.dev hosts with Previews.
+ * Dev sign-in is set only by the dev server and scripts/preview.ts. On this machine it is the dev
+ * server's, which may also hold a Google client for trying sign-in. Anywhere else it is a Preview's,
+ * which has no Google client and no allowlist: where either is set this is production, and one stray
+ * DEV_SIGN_IN must not make anyone anyone there.
  */
-export const devSignIn = (env: Env, url: URL) => env.DEV_SIGN_IN === "1" && DEV_HOSTS.test(url.hostname);
+export const devSignIn = (env: Env, url: URL) =>
+  env.DEV_SIGN_IN === "1" && (LOCAL_HOSTS.test(url.hostname) || (PREVIEW_HOSTS.test(url.hostname) && !env.GOOGLE_CLIENT_ID && !env.ALLOWED_EMAILS));
 
 const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
 
@@ -30,14 +37,40 @@ export async function sessionPersonId(req: Request, env: Env, url: URL): Promise
 
 /** The session a request is from, with how many times its person had been signed out everywhere when it began. */
 export async function sessionOf(req: Request, env: Env, url: URL): Promise<{ personId: string; ended: number } | null> {
-  const data = env.SESSION_SECRET ? await verify<{ personId?: string; ended?: number }>(cookie(req, SESSION_COOKIE), env.SESSION_SECRET) : null;
-  if (typeof data?.personId === "string") return (await sessionHolds(env.DB, data.personId, data.ended ?? 0)) ? { personId: data.personId, ended: data.ended ?? 0 } : null;
+  const data = env.SESSION_SECRET ? await verify<{ t?: string; personId?: string; ended?: number }>(cookie(req, SESSION_COOKIE), env.SESSION_SECRET) : null;
+  // Each value signed with SESSION_SECRET says what it is, so one can't pass for another. Sessions began before that carry no tag, and lapse within 30 days of it.
+  if (typeof data?.personId === "string" && (data.t ?? "session") === "session") {
+    const ended = data.ended ?? 0;
+    return (await sessionHolds(env.DB, data.personId, ended)) && (await listed(env, url, data.personId)) ? { personId: data.personId, ended } : null;
+  }
   if (!devSignIn(env, url)) return null;
   const dev = await signIn(env.DB, DEV_USER);
   return { personId: dev.personId, ended: dev.sessionsEnded };
 }
 
 const allowedEmails = (value: string | undefined) => new Set((value ?? "").split(/[\s,]+/).map((e) => e.trim().toLowerCase()).filter(Boolean));
+
+/**
+ * Whether a person may still use this Common Ink: their email is on ALLOWED_EMAILS. Taking someone off
+ * the list ends every way they had in at once, their sessions, agents, OAuth apps and clipper, as if
+ * they had been signed out everywhere; putting them back lets those work again. Wherever Google
+ * sign-in is set up the list is checked, as sign-in checks it, so an empty list lets nobody in. Where
+ * it isn't, nobody signs in by Google, and where dev sign-in is on anyone is anyone.
+ */
+export async function listed(env: Env, url: URL, personId: string): Promise<boolean> {
+  if (devSignIn(env, url) || !env.GOOGLE_CLIENT_ID) return true;
+  const allowed = allowedEmails(env.ALLOWED_EMAILS);
+  const email = await env.DB.prepare("SELECT email FROM people WHERE id = ?").bind(personId).first<string>("email");
+  return email !== null && allowed.has(email);
+}
+
+/** Who a bearer token stands for, an agent (or OAuth app) or a clipper, while its person is still on the list. */
+export async function tokenHolder(env: Env, url: URL, token: string): Promise<{ agent: ConnectedAgent } | { clipper: ClipperGrant } | null> {
+  const agent = await authenticateAgent(env.DB, token);
+  if (agent) return (await listed(env, url, agent.personId)) ? { agent } : null;
+  const clipper = await authenticateClipper(env.DB, token);
+  return clipper && (await listed(env, url, clipper.personId)) ? { clipper } : null;
+}
 
 export const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -101,7 +134,7 @@ async function keepGrant(env: Env, personId: string, email: string, tokens: Goog
 async function startSession(env: Env, identity: { email: string; name: string }, next: string): Promise<Response> {
   const { personId, sessionsEnded } = await signIn(env.DB, identity);
   const headers = new Headers({ Location: safeNext(next) });
-  headers.append("Set-Cookie", setCookie(SESSION_COOKIE, await sign({ personId, ended: sessionsEnded }, env.SESSION_SECRET, SESSION_SECONDS), SESSION_SECONDS));
+  headers.append("Set-Cookie", setCookie(SESSION_COOKIE, await sign({ t: "session", personId, ended: sessionsEnded }, env.SESSION_SECRET, SESSION_SECONDS), SESSION_SECONDS));
   headers.append("Set-Cookie", setCookie(STATE_COOKIE, "", 0));
   return new Response(null, { status: 302, headers });
 }
@@ -130,7 +163,7 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
   const toGoogle = async (config: GoogleConfig, next: string, asking: Asking, connect?: string) => {
     const nonce = b64url(crypto.getRandomValues(new Uint8Array(16)));
     const { verifier, challenge } = await pkce();
-    const state = await sign({ nonce, verifier, next, ...(connect ? { connect } : {}) }, secret, STATE_SECONDS);
+    const state = await sign({ t: "state", nonce, verifier, next, ...(connect ? { connect } : {}) }, secret, STATE_SECONDS);
     const headers = new Headers({ Location: authorizeUrl(config, redirectUri, nonce, challenge, asking) });
     headers.append("Set-Cookie", setCookie(STATE_COOKIE, state, STATE_SECONDS));
     return headers;
@@ -156,7 +189,8 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
 
   if (url.pathname === "/auth/google/callback") {
     if (!google) return page("Google sign-in isn't set up", "<p>This Common Ink has no Google client.</p>", 503);
-    const state = await verify<{ nonce: string; verifier: string; next: string; connect?: string }>(cookie(req, STATE_COOKIE), secret);
+    const signed = await verify<{ t?: string; nonce: string; verifier: string; next: string; connect?: string }>(cookie(req, STATE_COOKIE), secret);
+    const state = signed?.t === "state" ? signed : null;
     const back = (to: string) => {
       const headers = new Headers({ Location: safeNext(to) });
       headers.append("Set-Cookie", setCookie(STATE_COOKIE, "", 0));
@@ -181,7 +215,11 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
       // The answer is kept for the person who asked, in the browser that asked, and only if it is their own account's.
       const personId = await sessionPersonId(req, env, url);
       const person = personId === state.connect ? (await whoAmI(env.DB, personId)).person : null;
-      if (!person || person.email !== granted.email) await discard(granted.tokens);
+      // Ending it at Google ends the whole agreement, so it is left to lapse when another person here keeps one from that account: on a shared browser, Google may answer for them.
+      if (!person || person.email !== granted.email) {
+        const keptHere = await env.DB.prepare("SELECT 1 FROM source_connections WHERE provider = ? AND account = ?").bind(GOOGLE, granted.email).first();
+        if (!keptHere) await discard(granted.tokens);
+      }
       if (!person) return page("Sign in again", `<p>You were signed out before Google answered. <a href="/auth/google">Sign in</a>.</p>`, 400);
       if (person.email !== granted.email) {
         return page("That's another Google account", `<p>You're signed in to Common Ink as ${escape(person.email)}, and Google answered for ${escape(granted.email)}. Your data sources come from the account you sign in with. <a href="${escape(safeNext(state.next))}">Go back</a>, or <a href="/auth/google?${escape(new URLSearchParams({ next: safeNext(state.next) }).toString())}">sign in with Google</a> as that account.</p>`, 400);

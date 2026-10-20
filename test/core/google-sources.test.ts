@@ -124,7 +124,8 @@ describe("tokens at rest", () => {
     expect(row).not.toMatch(/ACCESS-plain|REFRESH-plain/);
     const said = JSON.stringify([await ask({ type: "source.list" }), await ask({ type: "event.list", ...WEEK }), await ask({ type: "contact.list" }), await whoAmI(env.DB, ada.personId)]);
     expect(said).not.toMatch(/ACCESS-plain|REFRESH-plain|v1\.[A-Za-z0-9_-]{16}\./);
-    const me = await worker.fetch(new Request("https://commonink.app/api/me", { headers: { Cookie: `__Host-ink_session=${await sign({ personId: ada.personId }, SECRET, 600)}` } }) as never, configured());
+    const me = await worker.fetch(new Request("https://commonink.app/api/me", { headers: { Cookie: `__Host-ink_session=${await sign({ personId: ada.personId }, SECRET, 600)}` } }) as never, configured({ ALLOWED_EMAILS: (await whoAmI(env.DB, ada.personId)).person.email }));
+    expect(me.status).toBe(200);
     expect(await me.text()).not.toMatch(/ACCESS-plain|REFRESH-plain|token/i);
   });
 
@@ -611,10 +612,15 @@ describe("disconnecting", () => {
 });
 
 describe("signing in and connecting with Google", () => {
+  /** Who is on the list: two fixed emails, and everyone a session was made for here, since a session of someone off the list is nobody's. */
+  const listed = new Set(["ada@example.com", "eve@example.com"]);
   const visit = (path: string, cookies: Record<string, string> = {}, more: Partial<Env> = {}) =>
-    worker.fetch(new Request(`https://commonink.app${path}`, { headers: { Cookie: Object.entries(cookies).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("; ") }, redirect: "manual" }) as never, configured({ ALLOWED_EMAILS: "ada@example.com eve@example.com", ...more }));
+    worker.fetch(new Request(`https://commonink.app${path}`, { headers: { Cookie: Object.entries(cookies).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("; ") }, redirect: "manual" }) as never, configured({ ALLOWED_EMAILS: [...listed].join(" "), ...more }));
   const cookiesOf = (res: Response) => Object.fromEntries(res.headers.getSetCookie().map((c) => [c.slice(0, c.indexOf("=")), decodeURIComponent(c.slice(c.indexOf("=") + 1, c.indexOf(";")))]));
-  const sessionOf = async (personId: string) => ({ "__Host-ink_session": await sign({ personId }, SECRET, 600) });
+  const sessionOf = async (personId: string) => {
+    listed.add((await whoAmI(env.DB, personId)).person.email);
+    return { "__Host-ink_session": await sign({ t: "session", personId }, SECRET, 600) };
+  };
 
   /** The tokens Google was told to end. */
   const revoked: string[] = [];
@@ -759,6 +765,22 @@ describe("signing in and connecting with Google", () => {
     expect(swapped.status).toBe(400);
     expect(revoked).toEqual(["rt-other", "rt-other"]);
     for (const person of [ada, eve]) expect(await connectionOf(env.DB, person.personId, "google")).toBeNull();
+  });
+
+  it("leaves at Google the agreement of another account that someone here keeps, when it answers for that account by mistake", async () => {
+    const ada = await newMember("Ada");
+    const eve = await newMember("Eve");
+    const { email: eves } = (await whoAmI(env.DB, eve.personId)).person;
+    tokenEndpoint({ email: eves, scope: ALL_SCOPES.join(" "), refresh_token: "rt-eve" });
+    expect((await roundTrip("/auth/google/connect?source=google-calendar&next=/calendar", await sessionOf(eve.personId))).home.status).toBe(302);
+    expect(await connectionOf(env.DB, eve.personId, "google")).not.toBeNull();
+
+    // On a shared browser, Google answers Ada's request for Eve's account. Ending that would end Eve's.
+    tokenEndpoint({ email: eves, scope: ALL_SCOPES.join(" "), refresh_token: "rt-eve-again" });
+    const mistaken = await roundTrip("/auth/google/connect?source=google-calendar&next=/calendar", await sessionOf(ada.personId));
+    expect(await mistaken.home.text()).toContain("another Google account");
+    expect(revoked).toEqual([]);
+    expect(await connectionOf(env.DB, ada.personId, "google")).toBeNull();
   });
 
   it("asks Google for nothing but data sources it has, and nothing for someone signed out", async () => {

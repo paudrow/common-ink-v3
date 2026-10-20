@@ -37,13 +37,17 @@ In scope:
 
 Out of scope:
 
-- Previews: the per-PR test deployments on `workers.dev`. They sign anyone in as a test user on purpose and hold no real notes. A way to turn that on in production is in scope.
+- Previews: the per-PR test deployments at `*-common-ink-v3-previews.draftox.workers.dev`, on a Worker of their own. They sign anyone in as a test user on purpose and hold no real notes. A way to turn that on in production is in scope.
 - Denial of service by volume, and rate limits with no further harm.
 - Anything that needs the victim's unlocked device, browser profile or Google account, or a malicious browser extension.
 - Social engineering of people, phishing, and physical attacks.
 - Google's and Cloudflare's own services. Report those to them. How Common Ink uses them is in scope.
 - Reports from automated scanners with no shown impact, such as a missing header or cookie flag on its own, or software versions.
 - Self-XSS: script a person can only run against themself.
+
+## What a backup keeps
+
+The database is D1, whose Time Travel can restore it to any minute of the last 30 days. So a note purged from Trash, or a revoked token's hash, is gone from the app at once, and from Time Travel's history 30 days later. An upload purged from Trash is deleted from R2 when it is purged.
 
 ## Testing
 

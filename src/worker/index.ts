@@ -7,6 +7,7 @@ import { sweep } from "../core/oauth.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
+import { MAX_OP_BYTES, TooLarge, cappedJson } from "./body.ts";
 import { handleClipper, handleClipperApi } from "./clipper.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
@@ -100,8 +101,9 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     }
     let op: unknown;
     try {
-      op = await req.json();
-    } catch {
+      op = await cappedJson(req, MAX_OP_BYTES);
+    } catch (err) {
+      if (err instanceof TooLarge) return json({ error: "invalid", message: `An operation is at most ${MAX_OP_BYTES / 1_000_000} MB` }, 413);
       return json({ error: "invalid", message: "The body isn't JSON" }, 400);
     }
     if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, and a part of one at the address upload.start gives" }, 400);

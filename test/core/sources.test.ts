@@ -694,7 +694,7 @@ describe("the sample data", () => {
   it("is offered where dev sign-in is on and nowhere else, whatever is set", async () => {
     const ada = await newMember();
     expect((await offered({ DEV_SIGN_IN: "1" }, "localhost").of(ada.personId)).map((s) => s.info.id)).toEqual(["sample-calendar", "sample-contacts"]);
-    expect((await offered({ DEV_SIGN_IN: "1" }, "pr-48-common-ink-v3.draftox.workers.dev").of(ada.personId)).map((s) => s.info.id)).toEqual(["sample-calendar", "sample-contacts"]);
+    expect((await offered({ DEV_SIGN_IN: "1" }, "pr-48-common-ink-v3-previews.draftox.workers.dev").of(ada.personId)).map((s) => s.info.id)).toEqual(["sample-calendar", "sample-contacts"]);
     expect(await offered({ DEV_SIGN_IN: "1" }, "commonink.app").of(ada.personId)).toEqual([]);
     expect(await offered({}, "localhost").of(ada.personId)).toEqual([]);
     // Connecting it where it isn't offered connects nothing.

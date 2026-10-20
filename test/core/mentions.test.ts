@@ -296,7 +296,7 @@ describe("sharing with a member by naming them", () => {
     const grace = await addMember(ada, "editor", "Grace Hopper");
     const note = await create(eve, "# Ours");
 
-    expect(await codeOf(perform(env.DB, eve, { type: "grant.set", noteId: note.id, memberId: grace.personId, access: "view" }))).toMatch(/^forbidden: They are a member here/);
+    expect(await codeOf(perform(env.DB, eve, { type: "grant.set", noteId: note.id, memberId: grace.personId, access: "view" }))).toMatch(/^forbidden: Only an admin can change what this person can see here/);
   });
 });
 

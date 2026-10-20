@@ -34,5 +34,6 @@ spawn(
     `CLIPPER_EXTENSION_IDS:${unpackedExtensionId()}`,
     "--show-interactive-dev-session=false",
   ],
-  { stdio: "inherit" },
+  // No Local Explorer: it answers raw SQL to anyone who reaches the server.
+  { stdio: "inherit", env: { ...process.env, X_LOCAL_EXPLORER: "false" } },
 ).on("exit", (code) => process.exit(code ?? 0));

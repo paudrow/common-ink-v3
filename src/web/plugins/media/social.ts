@@ -38,9 +38,9 @@ const SITES: readonly Site[] = [
     name: "Bluesky",
     height: 360,
     origin: "https://embed.bsky.app",
-    // Its frame takes the account's DID and not its handle, and finding one from the other would mean asking Bluesky.
+    // Its frame takes the account's DID and not its handle, and finding one from the other would mean asking Bluesky. A did:web may hold a port as %3A; no other escape, so %2F can't reach another path.
     post(url, site) {
-      const post = site === "bsky.app" ? /^\/profile\/(did:(?:plc|web):[A-Za-z0-9.:%-]{1,253})\/post\/([a-z0-9]{1,20})\/?$/.exec(decodeURI(url.pathname)) : null;
+      const post = site === "bsky.app" ? /^\/profile\/(did:(?:plc|web):(?:[A-Za-z0-9.:-]|%3[Aa]){1,253})\/post\/([a-z0-9]{1,20})\/?$/.exec(decodeURI(url.pathname)) : null;
       return post ? `${post[1]}/app.bsky.feed.post/${post[2]}` : null;
     },
     // It says its height only to a page that gave it an id to say it with.

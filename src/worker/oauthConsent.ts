@@ -2,6 +2,7 @@
 import { OpError, type OpErrorCode } from "../core/protocol.ts";
 import { consent, deny, openRequest, redirectBack } from "../core/oauth.ts";
 import { sessionPersonId } from "./auth.ts";
+import { MAX_FORM_BYTES, TooLarge, cappedJson } from "./body.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -20,7 +21,7 @@ export async function handleOAuthConsent(req: Request, env: Env, url: URL): Prom
     }
     if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
     if (!req.headers.get("Content-Type")?.startsWith("application/json")) return json({ error: "invalid", message: "Send JSON" }, 400);
-    const body = (await req.json()) as { requestId?: unknown; name?: unknown; workspaceId?: unknown; readOnly?: unknown; folderIds?: unknown; expiresInDays?: unknown };
+    const body = (await cappedJson(req, MAX_FORM_BYTES)) as { requestId?: unknown; name?: unknown; workspaceId?: unknown; readOnly?: unknown; folderIds?: unknown; expiresInDays?: unknown };
     if (typeof body.requestId !== "string") return json({ error: "invalid", message: "Say which request" }, 400);
     if (url.pathname === "/api/oauth/deny") {
       const refused = await deny(env.DB, personId, body.requestId);
@@ -32,6 +33,7 @@ export async function handleOAuthConsent(req: Request, env: Env, url: URL): Prom
   } catch (err) {
     if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
     if (err instanceof SyntaxError) return json({ error: "invalid", message: "The body isn't JSON" }, 400);
+    if (err instanceof TooLarge) return json({ error: "invalid", message: err.message }, 413);
     throw err;
   }
 }

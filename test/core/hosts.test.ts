@@ -41,13 +41,13 @@ describe("other hosts answer for themselves", () => {
       "https://www.example.com/",
       "https://wwwcommonink.app/",
       "https://notwww.commonink.app/",
-      "https://pr-12-common-ink-v3.draftox.workers.dev/",
+      "https://pr-12-common-ink-v3-previews.draftox.workers.dev/",
       "https://common-ink-v3.draftox.workers.dev/?x=1",
       "http://localhost:5173/",
     ]) {
       expect(redirectFor(new URL(url)), url).toBeNull();
     }
-    for (const url of ["https://commonink.app/api/me", "https://v3.commonink.app/api/me", "https://pr-12-common-ink-v3.draftox.workers.dev/api/me"]) {
+    for (const url of ["https://commonink.app/api/me", "https://v3.commonink.app/api/me", "https://pr-12-common-ink-v3-previews.draftox.workers.dev/api/me"]) {
       const res = await get(url);
       expect(res.status, url).toBe(401);
       expect(res.headers.get("Location"), url).toBeNull();
@@ -62,7 +62,7 @@ describe("other hosts answer for themselves", () => {
 });
 
 describe("/sw.js retires the service worker v2 left behind", () => {
-  for (const host of ["commonink.app", "v3.commonink.app", "pr-12-common-ink-v3.draftox.workers.dev"]) {
+  for (const host of ["commonink.app", "v3.commonink.app", "pr-12-common-ink-v3-previews.draftox.workers.dev"]) {
     it(`is JavaScript, never kept, on ${host}`, async () => {
       const res = await get(`https://${host}/sw.js`);
       expect(res.status).toBe(200);

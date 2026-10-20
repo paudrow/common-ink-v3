@@ -2,12 +2,12 @@
 // batch) per POST, answered as JSON. It speaks MCP 2026-07-28, where each request carries its version in
 // params._meta, beside the earlier versions that begin with initialize. An agent signs in with the bearer
 // token its member made for it; it never has a session cookie, so a web page can't make it act. See docs/mcp.md.
-import { authenticateAgent } from "../../core/agents.ts";
-import { authenticateClipper } from "../../core/clipper.ts";
 import type { Sources } from "../../core/sources.ts";
 import { logFault } from "../../core/logs.ts";
 import { BROKE } from "../../core/protocol.ts";
 import { ASK_NOTE_SYNTAX } from "../../core/noteSyntax.ts";
+import { tokenHolder } from "../auth.ts";
+import { TooLarge, cappedJson } from "../body.ts";
 import { metadataUrl } from "../oauth.ts";
 import { callTool, toolList, type Caller, type Reached } from "./tools.ts";
 
@@ -109,13 +109,13 @@ export const bearerToken = (req: Request): string | null => /^Bearer\s+(\S+)$/i.
 
 export async function handleMcp(req: Request, env: Env, sources?: Sources): Promise<Response> {
   const token = bearerToken(req);
-  const agent = token ? await authenticateAgent(env.DB, token) : null;
-  const clipper = !agent && token ? await authenticateClipper(env.DB, token) : null;
-  if (!agent && !clipper) return unauthorized(new URL(req.url), token !== null);
+  const url = new URL(req.url);
+  const holder = token ? await tokenHolder(env, url, token) : null;
+  if (!holder) return unauthorized(url, token !== null);
   // A clipper grant is the member who allowed it, limited to the clipper's tools. The note is theirs, and it is not an agent.
-  const caller: Caller = agent ?? {
-    agentId: clipper!.grantId,
-    personId: clipper!.personId,
+  const caller: Caller = "agent" in holder ? holder.agent : {
+    agentId: holder.clipper.grantId,
+    personId: holder.clipper.personId,
     name: "Clipper",
     workspaceId: null,
     readOnly: false,
@@ -125,15 +125,11 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
 
   if (req.method !== "POST") return json({ error: "method_not_allowed", message: "POST JSON-RPC messages to /mcp" }, 405, { Allow: "POST" });
   if (!req.headers.get("Content-Type")?.toLowerCase().startsWith("application/json")) return json({ error: "unsupported_media_type", message: "Send application/json" }, 415);
-  const declared = Number(req.headers.get("Content-Length") ?? 0);
-  if (declared > MAX_BODY) return json({ error: "too_large" }, 413);
-
-  const raw = await req.text();
-  if (raw.length > MAX_BODY) return json({ error: "too_large" }, 413);
   let body: unknown;
   try {
-    body = JSON.parse(raw);
-  } catch {
+    body = await cappedJson(req, MAX_BODY);
+  } catch (err) {
+    if (err instanceof TooLarge) return json({ error: "too_large" }, 413);
     return json(fail(null, -32700, "The body isn't JSON"), 400);
   }
 
@@ -147,7 +143,7 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   const out: Answer[] = [];
   for (const m of messages.map(asRequest)) {
     // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
-    const answer = await handleMessage(env, caller, m, sources, { origin: new URL(req.url).origin, bucket: env.FILES }, req.headers).catch((err: unknown) => {
+    const answer = await handleMessage(env, caller, m, sources, { origin: url.origin, bucket: env.FILES }, req.headers).catch((err: unknown) => {
       logFault("An MCP message", err);
       return finish(eraOf(m), fail(typeof m.id === "string" || typeof m.id === "number" ? m.id : null, -32603, BROKE));
     });

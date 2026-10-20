@@ -10,6 +10,7 @@
 import { hashToken } from "../core/agents.ts";
 import { CHALLENGE, MAX_STATE, OAuthError, clientOf, exchangeCode, normalized, redirectBack, refreshTokens, registerClient, revokeToken, startRequest, type Tokens } from "../core/oauth.ts";
 import { MAX_NEXT, escape, page, sessionPersonId } from "./auth.ts";
+import { cappedBody } from "./body.ts";
 
 const NO_STORE = { "Cache-Control": "no-store", Pragma: "no-cache" };
 /** The most a body of any of these is: they carry a code, a token or a few addresses. */
@@ -48,32 +49,10 @@ const authorizationServer = (url: URL) => ({
 
 const metadata = (body: unknown) => Response.json(body, { headers: { "Cache-Control": "public, max-age=300" } });
 
-/**
- * A body as text, at most MAX_BODY long. It is read as it arrives and given up on past that, so a body
- * sent in chunks with no Content-Length can't be held whole. (`req.text()` on a form warns that the body may not be text.)
- */
+/** A body as text, at most MAX_BODY long. (`req.text()` on a form warns that the body may not be text.) */
 async function bodyOf(req: Request, tooLarge: () => OAuthError): Promise<string> {
-  if (Number(req.headers.get("Content-Length") ?? 0) > MAX_BODY) throw tooLarge();
-  const reader = req.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY) {
-      void reader.cancel();
-      throw tooLarge();
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.byteLength;
-  }
+  const bytes = await cappedBody(req, MAX_BODY);
+  if (!bytes) throw tooLarge();
   return new TextDecoder().decode(bytes);
 }
 

@@ -126,12 +126,13 @@ describe("notes", () => {
     expect(merged.text).toBe("mine too\n\ntheirs");
   });
 
-  it("keeps a history that works for a note created with Windows line endings or half a character pair", async () => {
+  it("keeps a history that works for a note created with Windows line endings, half a character pair or control characters", async () => {
     const ada = await newMember();
     for (const [given, kept] of [
       ["# Plan\r\n\r\n- [ ] one\r\n- [ ] two\rthree", "# Plan\n\n- [ ] one\n- [ ] two\nthree"],
       ["# Plan \uD83D\n\n- [ ] one \uDE00", "# Plan �\n\n- [ ] one �"],
       ["# Plan 😀\r\n", "# Plan 😀\n"],
+      ["# Plan\u0000\u0007\t\u001F\n", "# Plan��\t�\n"],
     ] as const) {
       const note = await perform(env.DB, ada, { type: "note.create", text: given });
       expect(note.text).toBe(kept);
