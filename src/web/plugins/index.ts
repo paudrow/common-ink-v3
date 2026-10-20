@@ -36,6 +36,7 @@ import { tags } from "./tags/index.tsx";
 import { timer } from "./timer.ts";
 import { todos } from "./todos/index.tsx";
 import { trash } from "./trash/index.tsx";
+import { typewriterMode } from "./typewriter/index.ts";
 import { uploads } from "./uploads/index.tsx";
 import { vim } from "./vim/index.ts";
 
@@ -85,6 +86,7 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [lineNumbers, "lineNumbers.ts"],
   [vim, "vim/index.ts"],
   [nightShift, "nightShift/index.ts"],
+  [typewriterMode, "typewriter/index.ts"],
 ];
 
 export const BUILT_INS: readonly Plugin[] = AT.map(([plugin]) => plugin);

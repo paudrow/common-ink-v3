@@ -22,7 +22,7 @@ export const vim: Plugin = {
       type: "boolean",
       default: false,
       title: "j and k move by the rows on screen",
-      description: "Off, j and k move by whole lines, as in vim, however many rows a long line wraps to, and gj and gk move by rows. On, j and k move by rows too, so the cursor can go into a wrapped line.",
+      description: "Off, j and k move by whole lines, as in vim, however many rows a long line wraps to, and gj and gk move by rows. On, j and k move by rows too, so the cursor can go into a wrapped line, except in visual line mode, which selects whole lines.",
     },
   },
   activate(host) {

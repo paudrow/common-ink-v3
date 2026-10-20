@@ -2010,6 +2010,21 @@ button.link:hover {
   padding-bottom: 50cqh;
 }
 
+/* Typewriter mode holds the cursor's line at a height in the pane, so there is room above the first line and under the last for each to be there, and no more. The plugin measures it, and the editor's own padding is not added to it. */
+.editor:has(> .cm-editor.cm-typewriter) {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.editor .cm-editor.cm-typewriter .cm-content {
+  padding-top: var(--typewriter-above, 50cqh);
+  padding-bottom: var(--typewriter-below, 50cqh);
+}
+
+.editor .cm-editor.cm-typewriter .cm-line.cm-typewriter-dim {
+  opacity: 0.35;
+}
+
 /* What an editor extension keeps under a note, such as vim's mode: at the foot of the note's pane, as wide as the pane, its words beginning where the note's text does. */
 .note-foot {
   display: flex;
