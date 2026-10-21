@@ -1,10 +1,21 @@
 import { execFileSync } from "node:child_process";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
+import { BaseSequencer, type TestSpecification } from "vitest/node";
 import { unpackedExtensionId } from "./scripts/extension-id.ts";
 
 // The Worker imports the site's pages, which are written, not committed.
 execFileSync("npm", ["run", "--silent", "site"], { stdio: ["ignore", "ignore", "inherit"] });
+
+// CI runs these in parts (--shard). Vitest parts the files by a hash of each path, which with CI's times left one
+// part twice as long as another; dealt out in path order, the access matrix's files sit side by side, so each part
+// gets its share.
+class Dealt extends BaseSequencer {
+  override async shard(files: TestSpecification[]) {
+    const { index, count } = this.ctx.config.shard!;
+    return [...files].sort((a, b) => (a.moduleId < b.moduleId ? -1 : 1)).filter((_, i) => i % count === index - 1);
+  }
+}
 
 export default defineConfig(async () => ({
   plugins: [
@@ -16,6 +27,7 @@ export default defineConfig(async () => ({
   test: {
     include: ["test/core/**/*.test.ts"],
     setupFiles: ["test/core/setup.ts"],
+    sequence: { sequencer: Dealt },
     // The stylesheet is read as text by a test, which an empty stand-in would pass.
     css: { include: [/style\.css/] },
   },
