@@ -10,7 +10,7 @@ Start a list item with a checkbox anywhere in a note outside a code block:
 - [ ] !! Call the bank due:2026-10-14 every:1m @[[Sam Okafor]] #money
 ```
 
-Any list mark works (`-`, `*`, `+`, `1.`), at any indent. `- [x]` is a done todo. The editor draws each option as a chip. Click a chip to change it from a popover instead of typing.
+Any list mark works (`-`, `*`, `+`, `1.`), at any indent. `- [x]` is a done todo, `- [-]` one you won't do, and `- [>]` one put off in the backlog. An abandoned todo is struck through and a backlogged one is dimmed. Both stay in their note and leave the Todos page until you ask for them with `is:abandoned` or `is:backlog`. Click either one's box to open it again. The editor draws each option as a chip. Click a chip to change it from a popover instead of typing.
 
 | Part | Written | Notes |
 | --- | --- | --- |
@@ -83,6 +83,8 @@ The query bar at the top narrows the list. It reads the same language as search,
 | `priority:>=medium #work` | Medium and High todos tagged `work` |
 | `has:repeat` | Repeating todos |
 | `is:done updated:>=7d` | Done todos in notes changed in the last week |
+| `is:backlog` | Todos put off in the backlog |
+| `is:open OR is:backlog` | Open todos and the backlog together |
 
 [Search](/docs/search) lists every filter.
 

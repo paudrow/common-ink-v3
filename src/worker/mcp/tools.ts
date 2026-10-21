@@ -6,6 +6,7 @@ import { CAPABILITY_NAMES } from "../../core/plugins.ts";
 import { EXPORT_PART_BYTES, EXPORT_PART_FILES, MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type ExportPlan, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
 import { EXPORT_INDEX, SHARED_WITH_ME } from "../../core/export.ts";
 import { noteLines } from "../../core/text.ts";
+import { STATES_WRITTEN, TODO_STATES } from "../../core/todos.ts";
 import { writtenUpload } from "../../core/uploadRefs.ts";
 import { ASK_NOTE_SYNTAX, syntaxDescription, syntaxText as noteSyntaxText } from "../../core/noteSyntax.ts";
 import { MAX_SEARCH_LENGTH, SCOPES, queryLanguage, type Scope } from "../../core/query.ts";
@@ -169,8 +170,7 @@ const queryDays = {
   today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
   zone: { type: "string", description: `Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is ${MEMBER_ZONE}` },
 };
-const TODOS =
-  'A todo is a checkbox line in a note: - [ ] open, - [x] done, with tokens on the line such as !! for its priority, due:2026-10-14, @[[Name]] to assign it, and every:2w or every:mon,thu to make it repeat. query_syntax {"scope":"todos"} lists every token and every rule of every:.';
+const TODOS = `A todo is a checkbox line in a note: ${STATES_WRITTEN}, with tokens on the line such as !! for its priority, due:2026-10-14, @[[Name]] to assign it, and every:2w or every:mon,thu to make it repeat. query_syntax {"scope":"todos"} lists every token and every rule of every:.`;
 const LINKS =
   "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; one no note has the title of stays as written and is listed in the answer's unresolved. Text in code is left alone.";
 const MENTIONS =
@@ -426,7 +426,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see that query finds: with no query, every open one. Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. A done one's completed says when its line was ticked and who ticked it, the change that last made it done, and is null for an open one. Due days are calendar dates. ${PAGES} A query is filters and words, such as: due:<today priority:>=medium -tag:someday, assignee:@me, is:done, or: call folder:"Common Ink". query_syntax {"scope":"todos"} lists every form, and every token a todo's line can hold. The arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The todos in the notes you can see that query finds: with no query, every open one. Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its state, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. A done one's completed says when its line was ticked and who ticked it, the change that last made it done, and is otherwise null. Due days are calendar dates. ${PAGES} A query is filters and words, such as: due:<today priority:>=medium -tag:someday, assignee:@me, is:backlog, or: call folder:"Common Ink". query_syntax {"scope":"todos"} lists every form, and every token a todo's line can hold. The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
       query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
       ...queryDays,
@@ -441,7 +441,7 @@ export const TOOLS: Tool[] = [
       includeCompleted: { type: "boolean", description: "True to list done todos too. In the query: is:open OR is:done" },
       includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
-      sort: { type: "string", enum: [...TODO_SORTS], description: "The order, when the query has no sort:, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
+      sort: { type: "string", enum: [...TODO_SORTS], description: "The order, when the query has no sort:, the open ones always first: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
       ...paging("todos", 100, 200),
     }),
     op: "todo.list",
@@ -457,18 +457,19 @@ export const TOOLS: Tool[] = [
   {
     name: "set_todo",
     description:
-      "Check a todo off, skip it, or change its priority, due date, how it repeats, who it is assigned to or its words, by rewriting its line in its note. Checking off a todo that repeats leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. A rule that ends (-times-N, -until-DAY) counts down, and its last time checks the todo off for good. skip moves a repeating todo to its next due date with nothing checked off, and is refused for one that doesn't repeat or is on its last time. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Set a todo's state, skip it, or change its priority, due date, how it repeats, who it is assigned to or its words, by rewriting its line in its note. Checking off a todo that repeats leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. A rule that ends (-times-N, -until-DAY) counts down, and its last time checks the todo off for good. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         noteId,
         revision: { type: "integer", minimum: 0, description: "The revision of the note the todo was listed at, from list_todos" },
         line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" },
         text: { type: "string", description: "The todo's line as written, from list_todos" },
-        done: { type: "boolean", description: "True checks it off, false opens it again" },
+        state: { type: "string", enum: [...TODO_STATES], description: "done [x] checks it off; open [ ], abandoned [-], backlog [>], which file nothing" },
+        done: { type: "boolean", description: "Old name: true is state done, false open" },
         importance: { type: "integer", minimum: 0, maximum: 3, description: "Its priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
         every: { type: ["string", "null"], description: 'How it repeats, as written after every:, such as 2w, mon,thu, last-fri or 1m-times-5, or null to stop it repeating. query_syntax {"scope":"todos"} lists every rule' },
-        skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Not together with done" },
+        skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Refused for a todo that isn't open or is on its last time" },
         assign: { type: "string", description: "Someone to assign it to, by writing a mention of them on the line: a member's id or name, or anyone else's name. Assigning gives nobody access and tells nobody." },
         unassign: { type: "string", description: "Someone to take it from: a member's id or name, or anyone else's name as the line writes it. Refused when the todo isn't assigned to them." },
         on: day(`The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in ${MEMBER_ZONE}`),
@@ -478,7 +479,7 @@ export const TOOLS: Tool[] = [
     ),
     renames: { noteId: "id" },
     op: "todo.set",
-    example: { noteId: NOTE, revision: 4, line: 2, text: "- [ ] Call the bank due:2026-10-14", done: true },
+    example: { noteId: NOTE, revision: 4, line: 2, text: "- [ ] Call the bank due:2026-10-14", state: "done" },
   },
   {
     name: "todo_history",

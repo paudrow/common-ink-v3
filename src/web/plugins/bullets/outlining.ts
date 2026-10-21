@@ -1,7 +1,7 @@
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Extension, type Range, type Text } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
-import { isReading } from "../../plugin-api.ts";
+import { BOX_PATTERN, isReading } from "../../plugin-api.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
 import { mathBlocksIn, type Formula } from "../math/syntax.ts";
 import { indent, itemAt, move, outdent, type Edit, type Item, type Lines } from "./outline.ts";
@@ -143,6 +143,8 @@ const clickingFolded = EditorState.transactionFilter.of((tr) => {
 const dot = Decoration.mark({ class: "bullet-dot" });
 /** A task's box is its mark enough: its bullet's mark keeps its room and is painted as nothing. Only where the box is drawn, which is at the start of a line. */
 const blank = Decoration.mark({ class: "bullet-blank" });
+/** A line that starts with a bullet and a task's box, whatever mark the box holds. */
+const TASK = new RegExp(`^\\s*[-*+]\\s+${BOX_PATTERN}(?=\\s|$)`);
 
 /** A dot for each bullet's mark, or nothing on a task's, except the mark the cursor is on. */
 const bullets = drawnInView((view) => {
@@ -155,7 +157,7 @@ const bullets = drawnInView((view) => {
       enter(node) {
         if (node.name !== "ListMark") return;
         const line = state.doc.lineAt(node.from);
-        if (node.node.parent?.parent?.name === "BulletList" && !touched(state, node.from, node.to)) drawn.push((node.node.nextSibling?.name === "Task" && !state.sliceDoc(line.from, node.from).trim() ? blank : dot).range(node.from, node.to));
+        if (node.node.parent?.parent?.name === "BulletList" && !touched(state, node.from, node.to)) drawn.push((TASK.test(line.text) ? blank : dot).range(node.from, node.to));
       },
     });
   }

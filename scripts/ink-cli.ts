@@ -84,11 +84,13 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   syntax [todos|uploads]              the query language of search, of todos, or of uploads
   note-syntax                         how to write a form, a board, a timer, and the rest of what a note can hold
   todo-filters [--archived true]      the tags and assignees that todos can be narrowed by
-  todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
+  todo ID --revision N --line N --text LINE [--state STATE] [--importance N] [--due DAY|none] [--words TEXT]
         [--every RULE|none] [--skip true] [--assign WHO]
         [--unassign WHO] [--on DAY]
-                                      check a todo off, change it, or skip a repeating todo to its next
-                                      due date; ID, both Ns and LINE are from todos
+                                      check a todo off, abandon it, put it in the backlog, change it, or
+                                      skip a repeating todo to its next due date; STATE is open, done,
+                                      abandoned or backlog, and --done true|false is open or done;
+                                      ID, both Ns and LINE are from todos
   todo-history ID --revision N --line N --text LINE
                                       each time a repeating todo was checked off, and by whom
   daily [--on DAY]                    your daily note for a day, made if it isn't there
@@ -203,6 +205,7 @@ members have the name. --mention-names keep leaves every mention as written. On 
 mention assigns the todo. WHO is a member's id or a name. A mention gives nobody access.
 
 A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
+Its box says its state: [ ] open, [x] done, [-] abandoned, [>] backlog.
 DAY is a calendar date, YYYY-MM-DD. --importance is the priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!).
 RULE is how a todo repeats, written every:RULE on its line:
   2w (d, w, m or y)   every N after the due date     3d-after-done      N after it was last done
@@ -731,7 +734,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           revision: integer("--revision", flags.get("revision")!),
           line: integer("--line", flags.get("line")!),
           text: flags.get("text")!,
-          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], every: ["every", (_, value) => (value === "none" ? null : value)], skip: ["skip", truth], assign: ["assign"], unassign: ["unassign"], on: ["on"], words: ["words"] }),
+          ...given({ state: ["state"], done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], every: ["every", (_, value) => (value === "none" ? null : value)], skip: ["skip", truth], assign: ["assign"], unassign: ["unassign"], on: ["on"], words: ["words"] }),
         };
         break;
       case "todo-history":

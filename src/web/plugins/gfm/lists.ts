@@ -1,14 +1,18 @@
 import { syntaxTree } from "@codemirror/language";
 import type { Extension, Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
+import { BOX_PATTERN } from "../../plugin-api.ts";
 import { drawnInView, inCode, redraw } from "../lib/live.ts";
+
+const LEAD = new RegExp(`^[ \\t]*(?:[-*+]|\\d+[.)])[ \\t]+(?:${BOX_PATTERN}[ \\t]+)?`);
+const TASK = new RegExp(`(${BOX_PATTERN})([ \\t]+)$`);
 
 /**
  * What stands before a list item's own words on its line: the indent, the mark, the space after it,
  * and a task's `[ ]`. Nothing for a line that isn't the first of an item.
  */
 export function leadIn(line: string): string {
-  return /^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/.exec(line)?.[0] ?? "";
+  return LEAD.exec(line)?.[0] ?? "";
 }
 
 /** `lead` with each tab as the spaces it takes, since a tab is as wide as the room to the next stop and not a letter of the font. */
@@ -63,7 +67,7 @@ interface Start {
 
 const hangs = (width: number) => Decoration.line({ class: "md-item", attributes: { style: `--md-hang: ${width.toFixed(3)}px` } });
 const indented = (width: number) => Decoration.mark({ class: "md-item-indent", attributes: { style: `width: ${width.toFixed(3)}px` } });
-/** A task's `[ ]`, `[x]` or `[X]` as written: as wide as the box drawn in its place, whatever its letters' widths. */
+/** A task's box as written, `[ ]` or any other mark: as wide as the box drawn in its place, whatever its letters' widths. */
 const boxed = Decoration.mark({ class: "md-task-box" });
 /** The space after a task's box, made as wide as the gap after the box asks, the same with the box drawn or written. */
 const gap = (width: number) => Decoration.mark({ class: "md-task-gap", attributes: { style: `padding-right: ${width.toFixed(3)}px` } });
@@ -119,9 +123,9 @@ const hanging = drawnInView(
           const written = widthOf(font, columns(indent));
           // A level is a step whatever the note's spaces are: three under a number are wider than a step in a monospaced face.
           const wide = depth ? depth * STEP_EM * size : written;
-          // A task's words start a box and a gap after its `[`, whether it is `[ ]`, `[x]` or `[X]`, so ticking it moves nothing. The box is
+          // A task's words start a box and a gap after its `[`, whatever mark is in it, so ticking it moves nothing. The box is
           // as wide as it is drawn, written or not, so no letter's width is in it, measured or laid out.
-          const task = /(\[[ xX]\])([ \t]+)$/.exec(lead);
+          const task = TASK.exec(lead);
           const space = task ? widthOf(font, task[2]!) : 0;
           const room = task ? Math.max(0, TASK_GAP_EM * size - space) : 0;
           const before = task ? lead.slice(0, task.index) : lead;

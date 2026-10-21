@@ -78,7 +78,7 @@ export { SIZE_WORDS, UPLOAD_EMBEDS, sizeIn, sizeWordIn, uploadIn, withSizeWord, 
 export { FILE_CLASSES, TEXT_ENDINGS, fileClass, type FileClass, type UploadKind } from "../core/filetypes.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { changeTodo, completeTodo, skipTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+export { BOX_PATTERN, TODO_STATES, changeTodo, completeTodo, skipTodo, isDay, locateTodo, markOf, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange, type TodoState } from "../core/todos.ts";
 
 /** The lines of a note that aren't in a fenced code block, which is where the core reads todos and tags. */
 export { linesOutsideCode } from "../core/lines.ts";

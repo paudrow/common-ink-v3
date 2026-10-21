@@ -113,7 +113,7 @@ export function tickedLines(history: readonly ChangeSet[]): number[] {
     const stretches = stretchesOf(change, doc, next);
     const moved = putBack(linesIn(stretches, doc, lines).filter((line) => line.revision));
     const was = lines;
-    const done = (n: number) => n < next.lines - 1 && !!parseTodo(next.line(n + 1).text)?.done;
+    const done = (n: number) => n < next.lines - 1 && parseTodo(next.line(n + 1).text)?.state === "done";
     const kept = new Map<Stretch, (n: number) => number>();
     /** The tick an edited line keeps from the line it was. Where the change wrote as many lines as it took out, that is the line in its place. Otherwise the ticked lines it took out go to the done lines it wrote, in order, when there are as many of each, and to none when there aren't. */
     const keptBy = ([aFrom, aTo, bFrom, bTo]: Stretch) => {

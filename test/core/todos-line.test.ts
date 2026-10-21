@@ -5,17 +5,17 @@ import { completeTodo, isDay, locateTodo, parseTodo, rewriteTodo, tagsIn, todoIn
 
 const read = (line: string) => {
   const todo = parseTodo(line);
-  return todo && { done: todo.done, importance: todo.importance, due: todo.due?.date ?? null, tags: todo.tags.map((t) => t.name), words: todo.words };
+  return todo && { state: todo.state, importance: todo.importance, due: todo.due?.date ?? null, tags: todo.tags.map((t) => t.name), words: todo.words };
 };
 
 describe("a todo's line", () => {
   it("is a list item with a checkbox, whatever the list mark and however deep", () => {
-    expect(["- [ ] a", "  * [x] b", "\t+ [X] c", "3. [ ] d", "4) [ ]", "- [ ]no space", "[ ] not in a list", "- [] empty", "- [y] other", "> - [ ] quoted"].map((line) => parseTodo(line)?.done ?? null)).toEqual([false, true, true, false, false, null, null, null, null, null]);
+    expect(["- [ ] a", "  * [x] b", "\t+ [X] c", "3. [ ] d", "4) [ ]", "- [ ]no space", "[ ] not in a list", "- [] empty", "- [y] other", "> - [ ] quoted"].map((line) => parseTodo(line)?.state ?? null)).toEqual(["open", "done", "done", "open", "open", null, null, null, null, null]);
   });
 
   it("reads importance, a due date, and tags from its tokens, and the words left over", () => {
     expect(read("- [ ] !! Call the bank due:2026-10-14 about #money, then follow up.")).toEqual({
-      done: false,
+      state: "open",
       importance: 2,
       due: "2026-10-14",
       tags: ["money"],
@@ -25,8 +25,8 @@ describe("a todo's line", () => {
 
   it("has no projects: a +Name is words like any other, read and left as written", () => {
     const line = "- [ ] !! Call the bank due:2026-10-14 +Home about +Follow-up.";
-    expect(read(line)).toEqual({ done: false, importance: 2, due: "2026-10-14", tags: [], words: "Call the bank +Home about +Follow-up." });
-    expect(Object.keys(parseTodo(line)!).sort()).toEqual(["assignees", "box", "done", "due", "every", "importance", "importanceAt", "lastDone", "tags", "words"]);
+    expect(read(line)).toEqual({ state: "open", importance: 2, due: "2026-10-14", tags: [], words: "Call the bank +Home about +Follow-up." });
+    expect(Object.keys(parseTodo(line)!).sort()).toEqual(["assignees", "box", "due", "every", "importance", "importanceAt", "lastDone", "state", "tags", "words"]);
     expect(completeTodo(line, "2026-10-11")).toEqual({ line: "- [x] !! Call the bank due:2026-10-14 +Home about +Follow-up.", filed: null });
     expect(rewriteTodo(line, { importance: 0, due: null })).toBe("- [ ] Call the bank +Home about +Follow-up.");
     expect(Object.keys(todoIndex(line)).sort()).toEqual(["tags", "todos"]);
@@ -56,7 +56,7 @@ describe("a todo's line", () => {
 
   it("leaves tokens in code, in a link to a note, and in an address as the text they are", () => {
     expect(read("- [ ] see `+Code due:2026-01-01 #x` and [[abc123def456|+Shown #y]] and [docs](https://e.com/a +Url #frag) #real")).toEqual({
-      done: false,
+      state: "open",
       importance: 0,
       due: null,
       tags: ["real"],
@@ -69,7 +69,7 @@ describe("rewriting a todo's line", () => {
   const line = "  - [ ] !! Call  the bank due:2026-10-14 +Home about #money  ";
   /** Each change to one token, and exactly what it writes in that token's place. */
   const ONE_TOKEN: [TodoChange, token: (todo: Todo) => { from: number; to: number }, written: string][] = [
-    [{ done: true }, (t) => t.box, "[x]"],
+    [{ state: "done" }, (t) => t.box, "[x]"],
     [{ importance: 3 }, (t) => t.importanceAt!, "!!!"],
     [{ importance: 1 }, (t) => t.importanceAt!, "!"],
     [{ due: "2027-01-02" }, (t) => t.due!, "due:2027-01-02"],
@@ -85,7 +85,7 @@ describe("rewriting a todo's line", () => {
 
   it("round trips: changing a token and changing it back gives the line that was there", () => {
     const back: [TodoChange, TodoChange][] = [
-      [{ done: true }, { done: false }],
+      [{ state: "done" }, { state: "open" }],
       [{ importance: 0 }, { importance: 2 }],
       [{ importance: 3 }, { importance: 2 }],
       [{ due: "2030-12-25" }, { due: "2026-10-14" }],
@@ -125,10 +125,10 @@ describe("rewriting a todo's line", () => {
   });
 
   it("writes nothing when the line already says it, and nothing to a line that isn't a todo", () => {
-    const same: TodoChange[] = [{ done: false }, { importance: 2 }, { due: "2026-10-14" }, {}];
+    const same: TodoChange[] = [{ state: "open" }, { importance: 2 }, { due: "2026-10-14" }, {}];
     for (const change of same) expect(rewriteTodo(line, change), JSON.stringify(change)).toBe(line);
-    expect(rewriteTodo("- [X] kept as written", { done: true })).toBe("- [X] kept as written");
-    expect(rewriteTodo("Just words +Home", { done: true, due: "2026-10-14" })).toBe("Just words +Home");
+    expect(rewriteTodo("- [X] kept as written", { state: "done" })).toBe("- [X] kept as written");
+    expect(rewriteTodo("Just words +Home", { state: "done", due: "2026-10-14" })).toBe("Just words +Home");
   });
 
   it("refuses a due date that isn't a day", () => {
@@ -156,9 +156,9 @@ describe("a note's todos and tags", () => {
   it("are indexed with the note's tags, each once ignoring case", () => {
     expect(todoIndex(note)).toEqual({
       todos: [
-        [2, 0, 0, null, "- [ ] one +A"],
-        [6, 1, 0, null, "      - [x] deep +a +A"],
-        [8, 0, 0, null, "- [ ] one +A"],
+        [2, "open", 0, null, "- [ ] one +A"],
+        [6, "done", 0, null, "      - [x] deep +a +A"],
+        [8, "open", 0, null, "- [ ] one +A"],
       ],
       tags: [
         ["q4", "q4"],

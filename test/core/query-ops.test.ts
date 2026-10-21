@@ -302,6 +302,31 @@ describe("todo.list, by each filter", () => {
     expect(await todos(ada, "no:repeat")).toEqual(["Call the bank #urgent", "Tidy the roadmap"]);
   });
 
+  it("lists abandoned and backlogged todos only when the query names them, each by the mark in its box", async () => {
+    const ada = await newMember();
+    await perform(env.DB, ada, { type: "note.create", text: "# Chores\n\n- [ ] Sweep\n- [x] Dust\n- [-] Paint the fence\n- [>] Learn the cello due:2026-12-01\n* [>] Visit Oslo" });
+    expect(await todos(ada, "")).toEqual(["Sweep"]);
+    expect(await todos(ada, "is:open")).toEqual(["Sweep"]);
+    expect(await todos(ada, "is:abandoned")).toEqual(["Paint the fence"]);
+    expect(await todos(ada, "is:backlog")).toEqual(["Learn the cello", "Visit Oslo"]);
+    expect(await todos(ada, "is:open OR is:backlog")).toEqual(["Sweep", "Learn the cello", "Visit Oslo"]);
+    expect(await todos(ada, "is:backlog has:due")).toEqual(["Learn the cello"]);
+    expect(await todos(ada, "-is:open")).toEqual(["Learn the cello", "Visit Oslo", "Dust", "Paint the fence"]);
+    expect(await todos(ada, "-is:backlog")).toEqual(["Sweep", "Dust", "Paint the fence"]);
+    // The old includeCompleted adds the done ones to the open ones, and still not the rest.
+    expect(await todos(ada, "", { includeCompleted: true })).toEqual(["Sweep", "Dust"]);
+    expect(await todos(ada, "is:backlog", { includeCompleted: true })).toEqual(["Learn the cello", "Visit Oslo"]);
+    const listed = (await perform(env.DB, ada, { type: "todo.list", query: "-is:open" })).todos.map((t) => [t.words, t.state, t.completed === null]);
+    expect(listed).toEqual([
+      ["Learn the cello", "backlog", true],
+      ["Visit Oslo", "backlog", true],
+      ["Dust", "done", false],
+      ["Paint the fence", "abandoned", true],
+    ]);
+    // A note counts only its open todos as open.
+    expect((await perform(env.DB, ada, { type: "note.list" })).notes.find((n) => n.title === "Chores")?.openTodos).toBe(1);
+  });
+
   it("looks for words in the todo's own line, or with in:title in its note's title, and narrows by what its note is", async () => {
     const w = await library();
     const { ada } = w;
@@ -358,7 +383,7 @@ describe("todo.list, by each filter", () => {
     // As the migration leaves a line it can't read the rule of: marked by the look of it, until the note is read in again.
     await env.DB.batch([env.DB.prepare("UPDATE todos SET recurs = text LIKE '% every:%' WHERE note_id = ?").bind(note.id), env.DB.prepare("UPDATE notes SET indexed = 3 WHERE id = ?").bind(note.id)]);
     expect(await todos(ada, "has:repeat")).toEqual(["Water plants"]);
-    expect((await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first<{ indexed: number }>())!.indexed).toBe(8);
+    expect((await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first<{ indexed: number }>())!.indexed).toBe(9);
     await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 4, text: "- [ ] Sweep", every: "1w" });
     expect((await todos(ada, "has:repeat")).sort()).toEqual(["Sweep", "Water plants"]);
 

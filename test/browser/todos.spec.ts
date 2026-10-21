@@ -330,7 +330,7 @@ test("the Todos page lists open todos from every note, and its builder narrows b
   await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Visibility" });
   await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "shared", "private"]);
   await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
-  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "open", "done", "archived", "trashed"]);
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "open", "done", "abandoned", "backlog", "archived", "trashed"]);
   await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption("open");
   await builder(page).getByRole("button", { name: "Add a condition" }).click();
   await condition(page, 2).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
@@ -494,7 +494,7 @@ test("the Todos page's bar and builder fit a window 380 wide, and nothing in the
   await advanced(page).click();
   await builder(page).getByRole("button", { name: "Query syntax" }).click();
   const help = page.getByRole("dialog", { name: "Query syntax" });
-  await expect(help.getByRole("table", { name: "State" }).getByRole("rowheader")).toHaveText(["is:open", "is:done", "is:archived", "is:trashed"]);
+  await expect(help.getByRole("table", { name: "State" }).getByRole("rowheader")).toHaveText(["is:open", "is:done", "is:abandoned", "is:backlog", "is:archived", "is:trashed"]);
   await expect(help.getByRole("table", { name: "Visibility" }).getByRole("rowheader")).toHaveText(["is:shared", "is:private"]);
   const box = (await help.boundingBox())!;
   expect(box.x >= 0 && box.x + box.width <= 380 && box.y >= 0 && box.y + box.height <= 800).toBe(true);
@@ -1417,7 +1417,7 @@ test("the toast is v1's: at the foot of the pane in the app's colours, Task comp
   await row(page, "Water plants").getByRole("checkbox").check();
   const ticked = Date.now();
   // The row stays, ticked and struck through, then leaves an open list.
-  await expect(row(page, "Water plants")).toHaveAttribute("data-done", "true");
+  await expect(row(page, "Water plants")).toHaveAttribute("data-state", "done");
   await expect(row(page, "Water plants").locator(".todo-words")).toHaveCSS("text-decoration-line", "line-through");
   await expect(row(page, "Water plants")).toHaveCount(0, { timeout: 5000 });
 

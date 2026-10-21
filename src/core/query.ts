@@ -1,7 +1,7 @@
 import { FILE_CLASSES, KNOWN_TYPES, TEXT_ENDINGS, typesOf, type FileClass } from "./filetypes.ts";
 import { RULE_GRAMMAR } from "./recurrence.ts";
 import { asc, desc, type Order } from "./order.ts";
-import { isDay, nameKey } from "./todos.ts";
+import { STATES_WRITTEN, TODO_STATES, isDay, markOf, nameKey, type TodoState } from "./todos.ts";
 
 /**
  * The query language notes, todos and uploads are found by: words, "phrases", `key:value` filters,
@@ -155,6 +155,14 @@ const CLASS_MEANS: Record<FileClass, string> = {
 const changedBy = (first: boolean) => (c: Compiling, given: Given) =>
   `EXISTS (SELECT 1 FROM json_each(${c.bind(JSON.stringify(given.ids ?? []))}) j JOIN changes c ON c.note_id = n.id AND c.author_kind = substr(j.value, 1, instr(j.value, ':') - 1) AND c.author_id = substr(j.value, instr(j.value, ':') + 1)${first ? " WHERE c.revision = 1" : ""})`;
 
+/** What `is:` says of a todo in each state, after the box it is written with. */
+const STATE_MEANS: Record<TodoState, string> = {
+  open: "open. A query that names no state lists only open todos",
+  done: "done. With is:open OR is:done, both",
+  abandoned: "abandoned, which won't be done",
+  backlog: "in the backlog, put off for some day",
+};
+
 export const FILTERS = {
   folder: {
     scopes: ALL,
@@ -307,8 +315,7 @@ export const FILTERS = {
       type: "words",
       words: [
         { word: "open", scopes: KEPT, means: "Not archived and not in Trash", sql: (c) => `${item(c)}.state = 'live'` },
-        { word: "open", scopes: TODOS, means: "Not done. A query that says neither is:open nor is:done lists only open todos", sql: () => "t.done = 0" },
-        { word: "done", scopes: TODOS, means: "Done. With is:open OR is:done, both", sql: () => "t.done = 1" },
+        ...TODO_STATES.map((state) => ({ word: state, scopes: TODOS, means: `A box written [${markOf(state)}]: ${STATE_MEANS[state]}`, sql: () => `t.state = '${state}'` })),
         { word: "archived", scopes: BOTH, means: "Archived. A query that doesn't say so leaves archived notes out", sql: () => "n.state = 'archived'" },
         { word: "archived", scopes: UPLOADS, means: "Archived. A query that doesn't say so leaves archived uploads out", sql: () => "u.state = 'archived'" },
         { word: "trashed", scopes: ALL, means: "In Trash. A query that doesn't say so leaves Trash out", sql: (c) => `${item(c)}.state = 'trashed'` },
@@ -327,7 +334,7 @@ export const FILTERS = {
     value: {
       type: "words",
       words: [
-        { word: "todo", aliases: ["task"], scopes: NOTES, means: "Has a todo, open or done", sql: () => "EXISTS (SELECT 1 FROM todos d WHERE d.note_id = n.id)" },
+        { word: "todo", aliases: ["task"], scopes: NOTES, means: "Has a todo, in any state", sql: () => "EXISTS (SELECT 1 FROM todos d WHERE d.note_id = n.id)" },
         { word: "open-todo", aliases: ["open-task"], scopes: NOTES, means: "Has an open todo", sql: () => "n.open_todos > 0" },
         { word: "link", scopes: BOTH, means: "Links to another note", sql: () => "EXISTS (SELECT 1 FROM links l WHERE l.source_id = n.id)" },
         { word: "backlink", scopes: BOTH, means: "Linked to from a note you can see", sql: (c) => `EXISTS (SELECT 1 FROM links l JOIN notes b ON b.id = l.source_id WHERE l.target_id = n.id AND ${c.seen("b")})` },
@@ -989,7 +996,7 @@ export const syntaxText = (scope: Scope) =>
     .join("\n");
 
 /** What a todo's line can hold, every rule of `every:` among it, for a model that is to write one unaided. */
-const TODO_TOKENS = `A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:
+const TODO_TOKENS = `A todo is a checkbox line in a note: ${STATES_WRITTEN}. A query that names no state lists only open ones. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:
 ${RULE_GRAMMAR}
 done:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.`;
 

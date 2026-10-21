@@ -61,7 +61,7 @@ export const todos: Plugin = {
         const reads = lines.flatMap((line, i) => (line === at.text ? [i] : []));
         const line = lines[at.line] === at.text ? at.line : reads.length === 1 ? reads[0]! : null;
         if (line === null) return CHANGED;
-        host.app().noteChanged(await host.perform({ type: "todo.set", id: noteId, revision, line, text: at.text, done: false }));
+        host.app().noteChanged(await host.perform({ type: "todo.set", id: noteId, revision, line, text: at.text, state: "open" }));
         return undefined;
       } catch (err) {
         return refused(err);

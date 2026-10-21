@@ -12,7 +12,7 @@ import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
 import { linksOut, type LinkOut } from "./linksOut.ts";
 import { openPage } from "../lib/opening.ts";
-import { CHIP_NAMES, PRIORITY, pickerLabel, picking, tagged, type Opened, type PickingEvent, type RowChip } from "./picking.ts";
+import { CHIP_NAMES, PRIORITY, STATE_NAMES, clicked, pickerLabel, picking, tagged, type Opened, type PickingEvent, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
 
@@ -74,11 +74,11 @@ function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
   const known = [...todo.assignees, ...(change.assign ? [change.assign] : [])];
   const assignees = new Map(read.assignees.map((a) => [mentionKey(a), known.find((person) => sameWho(person, mentionKey(a))) ?? { id: isPersonId(a.target) ? a.target : null, name: mentionName(a), member: false }]));
-  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.done ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
+  return { ...todo, text, state: read.state, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.state === "done" ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
-const comesAround = (todo: ListedTodo, on: string) => !todo.done && changeTodo(todo.text, { done: true }, on).filed !== null;
+const comesAround = (todo: ListedTodo, on: string) => todo.state !== "done" && changeTodo(todo.text, { state: "done" }, on).filed !== null;
 
 /**
  * A todo's words, and the tags written at their end, which are drawn as chips after them. A tag inside the
@@ -395,8 +395,8 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
   const due = todo.due && dueLabel(todo.due, now);
   const repeat = todo.every && (todo.recurs ?? todo.every);
   const level = todo.importance ? PRIORITY[todo.importance] : null;
-  // A todo that can't be changed shows only what is set on it, and so does one that is done.
-  const offers = !readOnly && !todo.done;
+  // A todo that can't be changed shows only what is set on it, and so does one that isn't open.
+  const offers = !readOnly && todo.state === "open";
   // The note's name and nothing after it: not the tags its title ends in, nor the one the list may be narrowed to.
   const title = splitTags(todo.noteTitle).lead || "Untitled";
   const items: MenuItem[] = [{ label: "Open note", action: () => onOpen(todo) }, ...(app.openBeside ? [{ label: "Open to the side", action: () => onOpen(todo, true) }] : [])];
@@ -405,7 +405,7 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
     <li
       className="todo-row"
       data-row={row}
-      data-done={todo.done || undefined}
+      data-state={todo.state === "open" ? undefined : todo.state}
       data-gone={gone || undefined}
       data-picking={picked ?? (menu ? "menu" : undefined)}
       onContextMenu={(e) => {
@@ -423,12 +423,14 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
       <input
         type="checkbox"
         className="todo-box"
-        checked={todo.done}
+        checked={todo.state === "done"}
+        data-state={todo.state}
         disabled={readOnly}
         // Not disabled while its completion is on its way: that would take the keyboard off it.
         aria-disabled={completing || undefined}
-        aria-label={todo.done ? "Done" : "Not done"}
-        onChange={(e) => !completing && onChange(todo, { done: e.target.checked })}
+        aria-label={STATE_NAMES[todo.state]}
+        // An open todo is checked off, and any other opened again.
+        onChange={() => !completing && onChange(todo, { state: clicked(todo.state) })}
       />
       <span className="todo-text" style={editing === null ? undefined : { minHeight: editing }}>
         {editing !== null ? (
@@ -583,8 +585,8 @@ export function TodoGlance({ todo, now, titleOf, onOpen }: { todo: ListedTodo; n
   const title = splitTags(todo.noteTitle).lead || "Untitled";
   return (
     <li className="todo-glance">
-      <button type="button" className="todo-row" data-done={todo.done || undefined} title={`Open ${title} at this todo`} onClick={() => onOpen(todo)}>
-        <span className="todo-box" data-checked={todo.done || undefined} aria-hidden="true" />
+      <button type="button" className="todo-row" data-state={todo.state === "open" ? undefined : todo.state} title={`Open ${title} at this todo`} onClick={() => onOpen(todo)}>
+        <span className="todo-box" data-state={todo.state} aria-hidden="true" />
         <span className="todo-text">
           <span className="todo-words">
             <Words words={lead || todo.words || "Nothing written"} titleOf={titleOf} />
@@ -800,7 +802,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
             queue.revisions.set(keyOf(todo), note.revision);
             // A row the list no longer has keeps the revision its line was written at, for the next change made to it there.
             // One this change ticked says so now, as the list read again will: the change is the note's latest.
-            arrange({ type: "change", key: keyOf(todo), to: (t) => ({ ...t, revision: note.revision, ...(t.done && !t.completed && { completed: { at: note.updatedAt, by: note.updatedBy } }) }) });
+            arrange({ type: "change", key: keyOf(todo), to: (t) => ({ ...t, revision: note.revision, ...(t.state === "done" && !t.completed && { completed: { at: note.updatedAt, by: note.updatedBy } }) }) });
             app.noteChanged(note);
           },
           () => arrange({ type: "refused", key: keyOf(todo) }),
@@ -817,11 +819,11 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
   const change = useCallback(
     (todo: ListedTodo, to: RowChange) => {
       setProblem(null);
-      const done = to.done === true && !todo.done;
+      const done = to.state === "done" && todo.state !== "done";
       const rolls = done && comesAround(todo, now);
       if (rolls) setCompleting((keys) => new Set(keys).add(keyOf(todo)));
       // Checking one off says Task completed instead, and opening one again says nothing; either stays where it is until the list is refreshed.
-      if (to.done === undefined) announce.current = true;
+      if (to.state === undefined) announce.current = true;
       else quiet.current = true;
       const sent = send(todo, to, done ? "done" : "changed");
       if (rolls) void sent.catch(() => {}).finally(() => setCompleting((keys) => new Set([...keys].filter((key) => key !== keyOf(todo)))));
@@ -834,10 +836,10 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
           // A recurring todo's completion moved its due date, counted it and filed a line on the daily note: Undo reverts the change that did, which takes all of it back.
           if (note.filed) return completed(host, () => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
           const left = changed(todo, to, now);
-          if (!left.done) return;
+          if (left.state !== "done") return;
           // Undo is the same change the other way, made to the line this one left, at the revision it made.
           // It is made to the todo as the page has it by then, which may have been changed again since.
-          completed(host, () => send(shown.current.find((t) => keyOf(t) === key && t.done) ?? { ...left, revision: note.revision }, { done: false }).then(() => undefined, refused));
+          completed(host, () => send(shown.current.find((t) => keyOf(t) === key && t.state === "done") ?? { ...left, revision: note.revision }, { state: todo.state }).then(() => undefined, refused));
         },
         (err: unknown) => setProblem(err instanceof Error ? err.message : "The todo couldn't be changed."),
       );

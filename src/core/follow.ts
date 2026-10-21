@@ -1,8 +1,9 @@
 import type { ChangeSet } from "@codemirror/state";
+import { BOX_PATTERN } from "./boxes.ts";
 
 const WORDS = /[\p{L}\p{N}_]+/gu;
 /** What a todo's line says of its state and its dates, which two todos share without being alike. */
-const MARKS = /^\s*(?:[-*+]|\d+[.)])\s+\[[ xX]\]|(?<=\s)(?:every|due|done):\S+/g;
+const MARKS = new RegExp(`^\\s*(?:[-*+]|\\d+[.)])\\s+${BOX_PATTERN}|(?<=\\s)(?:every|due|done):\\S+`, "g");
 /** Past this many lines on either side the lines of a stretch are not paired, and past this many words a line's rest is not read: the cost is their product. */
 const MAX_LINES = 100;
 const MAX_WORDS = 64;

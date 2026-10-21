@@ -7,7 +7,7 @@ import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Or
 import { parseRule } from "./recurrence.ts";
 import { dayIn } from "./history.ts";
 import { MAX_SEARCH_LENGTH, type SortKey } from "./query.ts";
-import { isDay, type LastDone } from "./todos.ts";
+import { TODO_STATES, isDay, type LastDone, type TodoState } from "./todos.ts";
 
 export { MAX_SEARCH_LENGTH };
 
@@ -420,9 +420,10 @@ export const Op = z.discriminatedUnion("type", [
   /**
    * The todos in the notes the asker can see that `query` finds, in the same language as search's:
    * words are looked for in the todo's own line, and `is:done`, `due:`, `priority:`, `has:due` and
-   * `has:repeat` are of the todo. With no query it is every open todo. Done ones are listed when
-   * the query says `is:done`, and both with `is:open OR is:done`. Open ones come first, then by due
-   * date with those that have none last, then the most important, unless the query's `sort:` says otherwise.
+   * `has:repeat` are of the todo. With no query it is every open todo. A query that names no state
+   * lists only open ones; `is:done`, `is:abandoned` and `is:backlog` list those, and `is:open OR
+   * is:backlog` both. Open ones come first, then by due date with those that have none last, then
+   * the most important, unless the query's `sort:` says otherwise.
    *
    * The fields beside `query` are from before it could say them, and narrow it further. `dueFrom` and
    * `dueTo` are days, both included, and leave out todos with no due date; `noDue` lists only those.
@@ -433,7 +434,8 @@ export const Op = z.discriminatedUnion("type", [
    * lists the todos of the notes in that folder and in every folder under it; one the asker can't see
    * is no folder. Pass the answer's `next` as `after` for the page after. A field it doesn't know is
    * refused, so a filter it no longer has, such as a project, is never read as no filter.
-   * `sort` orders the open ones, and the done ones after them, another way: `priority` the highest
+   * `includeCompleted` lists done ones beside the open ones, when the query names no state.
+   * `sort` orders the open ones, and the rest after them, another way: `priority` the highest
    * first, then by due date; `changed` those whose note changed last first; `note` by their note's
    * title; `text` by their words, A to Z. Ties go by note and line. A `sort:` in the query wins over it
    * (`TODO_SORT_WORDS` names the word for each).
@@ -468,6 +470,10 @@ export const Op = z.discriminatedUnion("type", [
    * nothing more. What is left out stays as written, and only `words` moves a token: the due date,
    * the rule and who it is assigned to go after them.
    *
+   * `state` writes its box: `done` checks it off, and `open`, `abandoned` and `backlog` are their
+   * marks, `[ ]`, `[-]` and `[>]`, and nothing else. `done` is the older way to say it: true is the
+   * state done, and false alone is open. With a state, done must say whether that state is done.
+   *
    * `every` sets how it recurs, or with null stops it recurring. Checking off a todo that recurs
    * leaves it open with its next due date and a mark of when it was last done and how many times,
    * and files the checked line on the daily note of whoever asks, or of the member an agent acts
@@ -477,7 +483,7 @@ export const Op = z.discriminatedUnion("type", [
    *
    * `skip` moves a recurring todo's due date to its next one with nothing checked off, recorded or
    * filed. It counts as one of a rule's times. It is refused for a todo that doesn't recur, for the
-   * last time of a rule that ends, and together with `done`.
+   * last time of a rule that ends, for one that isn't open, and together with the state done.
    *
    * `assign` assigns it to a person by writing a mention of them on the line: a member's id, or a
    * name. A name one member has is theirs, as it is for a mention note.write introduces, and a name
@@ -490,6 +496,7 @@ export const Op = z.discriminatedUnion("type", [
     revision: Revision,
     line: z.number().int().min(0),
     text: z.string().max(MAX_NOTE_LENGTH),
+    state: z.enum(TODO_STATES).optional(),
     done: z.boolean().optional(),
     importance: ImportanceLevel.optional(),
     due: Day.nullable().optional(),
@@ -1020,7 +1027,8 @@ export interface ListedTodo {
   line: number;
   /** The line as the note writes it. */
   text: string;
-  done: boolean;
+  /** What its box says: open, done, abandoned or backlog. */
+  state: TodoState;
   /** 0 for normal, and 1 to 3 for `!`, `!!` and `!!!`. */
   importance: 0 | 1 | 2 | 3;
   /** A calendar date, YYYY-MM-DD, or null. */
@@ -1031,7 +1039,7 @@ export interface ListedTodo {
   recurs: string | null;
   /** When it was last checked off and how many times, for a todo that recurs and has been. */
   lastDone: LastDone | null;
-  /** When its line was ticked and by whom: the change that last made it done. Null for an open todo. */
+  /** When its line was ticked and by whom: the change that last made it done. Null for a todo that isn't done. */
   completed: Ticking | null;
   /** The tags of the note it is in. The ones written on its own line are those `text` has. */
   tags: string[];

@@ -68,6 +68,8 @@ const READS: [typed: string, scope: Scope, query: Query, printed: string][] = [
   ["is:trashed is:shared is:private", "notes", q(and(filter("is", "trashed"), filter("is", "shared"), filter("is", "private"))), "is:trashed is:shared is:private"],
   ["is:done", "todos", q(filter("is", "done")), "is:done"],
   ["is:open OR is:done", "todos", q(or(filter("is", "open"), filter("is", "done"))), "is:open OR is:done"],
+  ["is:abandoned", "todos", q(filter("is", "abandoned")), "is:abandoned"],
+  ["is:open OR is:backlog", "todos", q(or(filter("is", "open"), filter("is", "backlog"))), "is:open OR is:backlog"],
   ["has:todo has:open-todo has:link has:backlink has:tag", "notes", q(and(filter("has", "todo"), filter("has", "open-todo"), filter("has", "link"), filter("has", "backlink"), filter("has", "tag"))), "has:todo has:open-todo has:link has:backlink has:tag"],
   ["has:task has:open-task", "notes", q(and(filter("has", "todo"), filter("has", "open-todo"))), "has:todo has:open-todo"],
   ["no:todo", "notes", q(not(filter("has", "todo"))), "no:todo"],
@@ -139,6 +141,7 @@ const REFUSED: [typed: string, scope: Scope, at: string, says: RegExp][] = [
   ["a C:\\temp", "notes", "C:", /put them in quotes/],
   ["is:opne", "notes", "opne", /Did you mean open\?/],
   ["is:done", "notes", "done", /is:done is for todos/],
+  ["is:backlog", "notes", "backlog", /is:backlog is for todos/],
   ["has:todo", "todos", "todo", /has:todo is for notes/],
   ["due:today", "notes", "due:today", /due: is for todos/],
   ["a folder:", "notes", "folder:", /folder: needs a value/],
@@ -459,7 +462,7 @@ describe("what is said of the language", () => {
     expect(fieldsOf("has", "notes")).toEqual(["has"]);
     expect([fieldName("is"), fieldName("visibility"), fieldName("has"), fieldName("updated")]).toEqual(["State", "Visibility", "Has", "Updated"]);
     expect(wordsIn("is", "notes").map((w) => w.word)).toEqual(["open", "archived", "trashed"]);
-    expect(wordsIn("is", "todos").map((w) => w.word)).toEqual(["open", "done", "archived", "trashed"]);
+    expect(wordsIn("is", "todos").map((w) => w.word)).toEqual(["open", "done", "abandoned", "backlog", "archived", "trashed"]);
     expect(wordsIn("visibility", "todos").map((w) => w.word)).toEqual(["shared", "private"]);
     expect([fieldOf("is", "private"), fieldOf("is", "archived"), fieldOf("tag", "shared")]).toEqual(["visibility", "is", "tag"]);
     const headed = (form: string) => syntax("notes").find((row) => row.form === form)?.field;

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { TodoState } from "../../src/core/todos.ts";
 import { leaving, narrowingOf, type Narrowing } from "../../src/web/plugins/todos/leaving.ts";
 
 const NOW = "2026-10-15";
 const ANY: Narrowing = { completed: false, due: "any", importance: "", tag: "", folder: null };
-const todo = (over: Partial<{ done: boolean; due: string | null; importance: 0 | 1 | 2 | 3; words: string; tagsElsewhere: string[] }> = {}) => ({ done: false, due: null, importance: 0 as const, words: "Gym #health", tagsElsewhere: [] as string[], ...over });
+const todo = (over: Partial<{ state: TodoState; due: string | null; importance: 0 | 1 | 2 | 3; words: string; tagsElsewhere: string[] }> = {}) => ({ state: "open" as TodoState, due: null, importance: 0 as const, words: "Gym #health", tagsElsewhere: [] as string[], ...over });
 const says = (row: ReturnType<typeof todo>, by: Partial<Narrowing>) => leaving(row, { ...ANY, ...by }, NOW)?.says ?? null;
 
 describe("why a changed row leaves the Todos page's list", () => {
@@ -17,7 +18,7 @@ describe("why a changed row leaves the Todos page's list", () => {
     expect(says(todo({ importance: 0 }), { importance: "2" })).toBe("Its priority was taken off, so it no longer shows under Priority: Medium. It leaves when you refresh.");
     expect(says(todo({ words: "Gym" }), { tag: "Health" })).toBe("#Health was taken off, so it no longer shows under #Health. It leaves when you refresh.");
     expect(says(todo(), { folder: { name: "Work / Plans", holds: false } })).toBe("Its note is no longer in Work / Plans, so it no longer shows there. It leaves when you refresh.");
-    expect(says(todo({ done: true }), {})).toBe("Checked off, so it no longer shows with the open todos. It leaves when you refresh.");
+    expect(says(todo({ state: "done" }), {})).toBe("Checked off, so it no longer shows with the open todos. It leaves when you refresh.");
     expect(says(todo(), { search: "bank" })).toBe("Changed, so it no longer matches “bank”. It leaves when you refresh.");
   });
 
@@ -25,7 +26,7 @@ describe("why a changed row leaves the Todos page's list", () => {
     expect(leaving(todo({ due: "2026-10-16", importance: 1 }), { ...ANY, due: "today", importance: "3" }, NOW)?.reason).toBe("date");
     expect(leaving(todo({ due: "2026-10-15", importance: 1 }), { ...ANY, due: "today", importance: "3" }, NOW)?.reason).toBe("priority");
     expect(says(todo({ due: "2026-10-15", importance: 3, words: "Gym #HEALTH" }), { due: "today", importance: "3", tag: "health", folder: { name: "Home", holds: true } })).toBeNull();
-    expect(says(todo({ done: true }), { completed: true })).toBeNull();
+    expect(says(todo({ state: "done" }), { completed: true })).toBeNull();
     expect(says(todo({ due: "2026-10-21" }), { due: "week" })).toBeNull();
     expect(says(todo({ due: "2026-10-14" }), { due: "overdue" })).toBeNull();
   });

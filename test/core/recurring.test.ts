@@ -35,7 +35,7 @@ async function dailies(of: Actor) {
 }
 
 async function indexed(noteId: string) {
-  const { results } = await env.DB.prepare("SELECT line, done, importance, due, text FROM todos WHERE note_id = ? ORDER BY line").bind(noteId).all<Record<string, unknown>>();
+  const { results } = await env.DB.prepare("SELECT line, state, importance, due, text FROM todos WHERE note_id = ? ORDER BY line").bind(noteId).all<Record<string, unknown>>();
   return results.map((r) => Object.values(r));
 }
 
@@ -147,7 +147,7 @@ describe("skipping a recurring todo", () => {
     expect(() => skipTodo("Not a todo every:1d", SUNDAY)).toThrow(RangeError);
     expect(() => skipTodo("- [ ] Pills due:2026-10-11 every:1d-times-1", SUNDAY)).toThrow(/last time/);
     expect(() => skipTodo("- [ ] Course due:2026-10-11 every:1w-until-2026-10-15", SUNDAY)).toThrow(/last time/);
-    expect(() => changeTodo(WATER, { skip: true, done: true }, SUNDAY)).toThrow(RangeError);
+    expect(() => changeTodo(WATER, { skip: true, state: "done" }, SUNDAY)).toThrow(RangeError);
     // Setting how it recurs and skipping it are one call.
     expect(changeTodo("- [ ] Plain due:2026-10-11", { every: "2w", skip: true }, SUNDAY).line).toBe("- [ ] Plain due:2026-10-25 every:2w");
   });
@@ -243,7 +243,7 @@ describe("checking off a recurring todo", () => {
     expect((await dailies(ada)).map((d) => d.text)).toEqual([`# ${SUNDAY}\n\n- [x] Bins [[${note.id}]]\n`]);
     expect((await perform(env.DB, eve, { type: "note.list" })).notes.some((n) => n.title === SUNDAY && n.private)).toBe(true);
     // A daily note is private, so the todo's words go no further than the one who checked it.
-    expect((await perform(env.DB, eve, { type: "todo.list", includeCompleted: true })).todos.filter((t) => t.done).map((t) => t.text)).toEqual([`${FILED} [[${note.id}]]`]);
+    expect((await perform(env.DB, eve, { type: "todo.list", includeCompleted: true })).todos.filter((t) => t.state === "done").map((t) => t.text)).toEqual([`${FILED} [[${note.id}]]`]);
   });
 
   it("adds to the day's daily note once it is there, and starts another the next day", async () => {
@@ -529,8 +529,8 @@ describe("skipping a recurring todo through todo.set", () => {
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM completions WHERE note_id = ?").bind(note.id).first<{ n: number }>())!.n).toBe(0);
     expect((await perform(env.DB, ada, { type: "note.history", id: note.id })).slice(1).map((c) => c.author)).toMatchObject([{ kind: "member", personId: ada.personId }, { kind: "member", personId: ada.personId }]);
     expect(await indexed(note.id)).toEqual([
-      [0, 0, 1, "2026-10-17", "- [ ] ! Water the plants due:2026-10-17 every:1w +Home"],
-      [1, 0, 0, "2026-10-12", "- [ ] Pills due:2026-10-12 every:1d-times-2"],
+      [0, "open", 1, "2026-10-17", "- [ ] ! Water the plants due:2026-10-17 every:1w +Home"],
+      [1, "open", 0, "2026-10-12", "- [ ] Pills due:2026-10-12 every:1d-times-2"],
     ]);
   });
 

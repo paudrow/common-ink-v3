@@ -80,7 +80,7 @@ import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as Ac
 import { linkHash } from "./linkSeal.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
-import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed } from "./todos.ts";
+import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
 
 /** The note an author already made with a write id, so a create sent again makes one note. Served by changes_by_author_write. */
 export const PRIOR_WRITE = `SELECT c.note_id AS id FROM changes c JOIN notes n ON n.id = c.note_id
@@ -283,7 +283,7 @@ export interface NoteRow extends SummaryRow {
 }
 
 /** What a note's `indexed` is once its title and snippet, its links, todos, tags, mentions, search text and the uploads it refers to have been made from its text as they are made now. */
-const MADE = 8;
+const MADE = 9;
 
 /** A note as it is made: live. */
 const NEW = { state: "live", state_at: null } as const;
@@ -672,6 +672,9 @@ function inParts(rows: readonly unknown[]): string[] {
   return parts.filter((part) => part.length).map((part) => `[${part.join(",")}]`);
 }
 
+/** Where a todo's state puts it in todo.list before any other order: open, then the backlog, then done and abandoned. */
+const STATE_RANK = "CASE t.state WHEN 'open' THEN 0 WHEN 'backlog' THEN 1 ELSE 2 END";
+
 /** Each order of todo.list, before its ties by note and line. */
 const TODO_ORDER: Record<TodoSort, Order> = {
   due: [asc("t.due IS NULL"), asc("t.due"), desc("t.importance"), asc("n.title COLLATE NOCASE")],
@@ -683,7 +686,7 @@ const TODO_ORDER: Record<TodoSort, Order> = {
 
 const INDEXED = {
   todos:
-    "INSERT INTO todos (note_id, line, done, importance, due, text, words, recurs) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'), json_extract(value, '$[0]') IN (SELECT value FROM json_each(?4))",
+    "INSERT INTO todos (note_id, line, state, importance, due, text, words, recurs) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'), json_extract(value, '$[0]') IN (SELECT value FROM json_each(?4))",
   tags: "INSERT INTO note_tags (note_id, tag, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]')",
   mentions: "INSERT INTO mentions (note_id, line, who, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
 } as const;
@@ -1583,7 +1586,6 @@ const any = (of: Node[]): Node => (of.length > 1 ? { kind: "or", of } : of[0]!);
 /** What the fields a listing had before there was a query language say, as the query says it. */
 export const OLD = {
   archived: (includeArchived: boolean | "only"): Node[] => (includeArchived === "only" ? [is("archived")] : includeArchived ? [either("archived")] : []),
-  completed: (includeCompleted: boolean): Node[] => (includeCompleted ? [either("done")] : []),
 };
 
 /** What a query asks of the database: a condition over the notes row `n` and, for todos, the todos row `t`, or for uploads the uploads row `u`, with what it binds after the workspace and the asker's sight. */
@@ -1618,7 +1620,7 @@ export function binder(values: (string | number | null)[]): (value: string | num
  * no file they can see, is refused in the very words a name nobody has is. `also` is ANDed with it: the old fields of the
  * operation, said as a query says them. Which states of a note it covers is read from its `is:`.
  */
-export async function finding(ctx: Context, scope: Scope, op: { query: string; today?: string; zone?: string }, also: readonly Bound[]): Promise<Finding> {
+export async function finding(ctx: Context, scope: Scope, op: { query: string; today?: string; zone?: string; includeCompleted?: boolean }, also: readonly Bound[]): Promise<Finding> {
   const parsed = parse(op.query, scope);
   if (!parsed.ok) {
     const { message, from, to } = parsed.error;
@@ -1627,8 +1629,8 @@ export async function finding(ctx: Context, scope: Scope, op: { query: string; t
   const { query } = parsed;
   const said = (word: string) => names(query.where, word) || also.some((node) => names(node as Node, word));
   const covering: Covering = said("trashed") ? "any" : said("archived") ? "kept" : "live";
-  // Todos are the open ones until a query says anything of whether one is done, a NOT of it included.
-  const open = scope === "todos" && !said("open") && !said("done");
+  // Todos are the open ones, or with the old includeCompleted the open and done ones, until a query names a state, a NOT of it included.
+  const unstated = scope === "todos" && !TODO_STATES.some(said);
 
   let folders: Promise<{ id: string; parent_id: string | null; name: string }[]> | undefined;
   const folderIds = async (named: string): Promise<string[]> => {
@@ -1711,7 +1713,7 @@ export async function finding(ctx: Context, scope: Scope, op: { query: string; t
     if (node.key === "is" && node.value === "shared") return { ...node, ids: await sharedIds() };
     return node;
   };
-  const parts = [...(query.where ? [query.where] : []), ...also, ...(open ? [is("open")] : [])];
+  const parts = [...(query.where ? [query.where] : []), ...also, ...(unstated ? [op.includeCompleted ? any([is("open"), is("done")]) : is("open")] : [])];
   const where = parts.length > 1 ? await resolved({ kind: "and", of: parts as Bound[] }) : parts.length ? await resolved(parts[0]!) : null;
 
   let zone: (day: string) => number;
@@ -1730,7 +1732,7 @@ export async function finding(ctx: Context, scope: Scope, op: { query: string; t
 const MENTION_LINE = 300;
 
 /** What starts a line of a list, a task, a heading or a quote: the marks, not the words. */
-const BLOCK_MARKS = /^\s*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?|#{1,6}\s+|>\s*)/;
+const BLOCK_MARKS = new RegExp(`^\\s*(?:(?:[-*+]|\\d+[.)])\\s+(?:${BOX_PATTERN}\\s+)?|#{1,6}\\s+|>\\s*)`);
 
 /** The line's words with each mention written as the name it shows the asker, and no more of it than a page shows. */
 function lineAsShown(line: string, members: ReadonlyMap<string, Member>, keys: ReadonlySet<string>): string {
@@ -1922,26 +1924,25 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         ...(op.noteId ? [{ kind: "note", id: op.noteId } as const] : []),
         ...(op.assignee === undefined ? [] : [{ kind: "filter", key: "assignee", cmp: "=", value: op.assignee } as const]),
         ...(op.assignedToMe ? [{ kind: "filter", key: "assignee", cmp: "=", value: "@me" } as const] : []),
-        ...OLD.completed(op.includeCompleted),
         ...OLD.archived(op.includeArchived),
       ]);
-      // The query's sort: says the order where it has one, and `sort` where it hasn't. The done ones are last either way, and a
+      // The query's sort: says the order where it has one, and `sort` where it hasn't. The open ones are first either way, then the backlog, and a
       // word the Todos page's Sort menu offers breaks its ties as the menu's order does.
       const sort = query.sort ? TODO_SORTS.find((s) => TODO_SORT_WORDS[s] === query.sort) : op.sort;
-      const pages = paging([asc("t.done"), ...(sort ? TODO_ORDER[sort] : orderOf(query.sort!)), asc("t.note_id"), asc("t.line")], op.after, bind);
+      const pages = paging([asc(STATE_RANK), ...(sort ? TODO_ORDER[sort] : orderOf(query.sort!)), asc("t.note_id"), asc("t.line")], op.after, bind);
       const { results } = await prepare(
-        `SELECT ${pages.keys}, t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
+        `SELECT ${pages.keys}, t.note_id, t.line, t.state, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
            (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
          FROM todos t JOIN notes n ON n.id = t.note_id
          WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition} AND ${pages.where}
          ORDER BY ${pages.orderBy}
          LIMIT ${bind(op.limit + 1)}`,
-      ).all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
+      ).all<{ note_id: string; line: number; state: TodoState; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
       const listed = pages.page(results, op.limit);
       const page = listed.page.map((r) => ({ r, todo: parseTodo(r.text) }));
       const members = (await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []))).byId;
       const tagged = page.filter(({ r }) => r.tags !== "[]").map(({ r }) => r.note_id);
-      const ticked = await tickedIn(ctx, new Map(page.filter(({ r }) => r.done === 1).map(({ r }) => [r.note_id, r.revision])));
+      const ticked = await tickedIn(ctx, new Map(page.filter(({ r }) => r.state === "done").map(({ r }) => [r.note_id, r.revision])));
       const texts = new Map(
         tagged.length === 0 ? [] : (await ctx.db.prepare("SELECT id, text FROM notes WHERE id IN (SELECT value FROM json_each(?1))").bind(JSON.stringify([...new Set(tagged)])).all<{ id: string; text: string }>()).results.map((n) => [n.id, n.text]),
       );
@@ -1953,13 +1954,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             revision: r.revision,
             line: r.line,
             text: r.text,
-            done: r.done === 1,
+            state: r.state,
             importance: r.importance,
             due: r.due,
             every: todo?.every?.written ?? null,
             recurs: todo?.every ? ruleLabel(todo.every.rule) : null,
             lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
-            completed: r.done === 1 ? ticked(r.note_id, r.line) : null,
+            completed: r.state === "done" ? ticked(r.note_id, r.line) : null,
             tags: JSON.parse(r.tags) as string[],
             tagsElsewhere: tagsBesides(texts.get(r.note_id) ?? "", r.line),
             assignees: mentionedIn(members, todo?.assignees ?? []),
@@ -2004,7 +2005,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     run: (ctx, op) =>
       settle(async (): Promise<Written | null> => {
         const row = await loadNote(ctx, op.id, "edit", "refused");
-        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, assign, unassign, ...rest } = op;
+        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, assign, unassign, done, ...rest } = op;
+        // done is the older way to say a state, which agents still pass.
+        if (done !== undefined && rest.state !== undefined && done !== (rest.state === "done")) throw new OpError("invalid", `done: ${done} and state: ${rest.state} say different things. Pass state alone`);
         // A member is assigned by their id with their name, whichever they were named by, as a mention a write introduces is stored.
         // Taking a todo from a name takes it from the member so named too, whom the line holds by their id.
         const meant = await membersMeant(ctx, [assign, unassign].filter((who) => who !== undefined));
@@ -2012,8 +2015,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         const taken = unassign === undefined ? undefined : memberMeant(meant, unassign);
         const from = unassign === undefined ? undefined : [unassign, ...(taken ? [taken.id] : [])];
         if (from && !parseTodo(listedAs)?.assignees.some((a) => from.map(personKey).includes(mentionKey(a)))) throw new OpError("invalid", `This todo isn't assigned to ${quoted(unassign!)}`);
-        const change = { ...rest, ...(from && { unassign: from }) };
-        const mine = change.done || change.skip ? await completing(ctx, on) : null;
+        const change: TodoChange = { ...rest, ...(done !== undefined && rest.state === undefined && { state: done ? "done" : "open" }), ...(from && { unassign: from }) };
+        const mine = change.state === "done" || change.skip ? await completing(ctx, on) : null;
         let wanted: Completed;
         try {
           // Someone who isn't told the members assigns by an id the note already holds, as the Todos page does: the name is the one the note calls them.
@@ -2044,7 +2047,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const mine = (await completionsNow(ctx, row.id)).filter(({ at }) => at === todo.from).map((f) => f.completion);
       const dailies = [...new Set(mine.flatMap((c) => (c.daily_note_id ? [c.daily_note_id] : [])))];
       const seen = new Set(dailies.length ? (await seenAmong(ctx, "any", IDS_IN, JSON.stringify(dailies))).map((r) => r.id) : []);
-      const ticked = await tickedIn(ctx, new Map(todo.done ? [[row.id, row.revision]] : []));
+      const ticked = await tickedIn(ctx, new Map(todo.state === "done" ? [[row.id, row.revision]] : []));
       return {
         completed: ticked(row.id, todo.line),
         completions: mine

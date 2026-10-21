@@ -1,6 +1,6 @@
 import { linesOutsideCode } from "./lines.ts";
 import { codeSpans } from "./spans.ts";
-import { parseTodo } from "./todos.ts";
+import { BOX_PATTERN, parseTodo } from "./todos.ts";
 
 const HEADING = /^ {0,3}#[ \t]+(.*)$/;
 /** A heading's closing `#`s and the spaces around them, cut by hand: as one pattern they tried again from every space. */
@@ -9,6 +9,8 @@ const unclosed = (words: string) => {
   const hashes = trimmed.replace(/#+$/, "");
   return hashes !== trimmed && /[ \t]$/.test(hashes) ? hashes.trimEnd() : trimmed;
 };
+/** A list item's mark and a todo's box, before the words. */
+const LIST_MARK = new RegExp(`^(?:[-*+]|\\d+[.)])\\s+(?:${BOX_PATTERN}(?:\\s+|$))?`);
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const SNIPPET_LENGTH = 160;
 
@@ -41,7 +43,7 @@ const plainText = (line: string) =>
     line
       .replace(/^\s*(?:>\s*)*/, "")
       .replace(/^#{1,6}(?:\s+|$)/, "")
-      .replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\](?:\s+|$))?/, "")
+      .replace(LIST_MARK, "")
       // An embed and an image are drawn, and a block of math's fence is no words.
       .replace(/:{2,3}[a-z][a-z0-9-]*\{[^{}]*\}/g, "")
       .replace(new RegExp(`!${TEXT}${ADDRESS_IN}`, "g"), "")
@@ -77,7 +79,7 @@ function clip(text: string, length: number): string {
  * such heading is titled by its first line of words, cut to a title's length, and a line that is
  * only a web address is passed over for one that says something. The title is "" for a note with no
  * words at all. The snippet is the prose besides the title, a todo by its words alone, and open
- * todos count the todos not yet done.
+ * todos count the todos whose box is `[ ]`.
  */
 export function summarize(text: string): { title: string; snippet: string; openTodos: number } {
   let openTodos = 0;
@@ -85,7 +87,7 @@ export function summarize(text: string): { title: string; snippet: string; openT
   const prose: string[] = [];
   for (const { line } of linesOutsideCode(text)) {
     const todo = parseTodo(line);
-    if (todo?.done === false) openTodos++;
+    if (todo?.state === "open") openTodos++;
     if (RULE.test(line)) continue;
     const head = heading < 0 ? HEADING.exec(line)?.[1] : undefined;
     const titling = head === undefined ? undefined : unclosed(head);

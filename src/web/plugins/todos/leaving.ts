@@ -32,9 +32,9 @@ const movedTo = (due: string, now: string) => {
  * the sentence said under the row: what changed, why it leaves, and when. The first of done, date,
  * priority, tag and folder that it fails, and else the search. Null when nothing says why.
  */
-export function leaving(todo: Pick<ListedTodo, "done" | "due" | "importance" | "words" | "tagsElsewhere">, by: Narrowing, now: string): { reason: Reason; says: string } | null {
+export function leaving(todo: Pick<ListedTodo, "state" | "due" | "importance" | "words" | "tagsElsewhere">, by: Narrowing, now: string): { reason: Reason; says: string } | null {
   const say = (reason: Reason, what: string) => ({ reason, says: `${what} ${REFRESH}` });
-  if (todo.done && !by.completed) return say("done", "Checked off, so it no longer shows with the open todos.");
+  if (todo.state === "done" && !by.completed) return say("done", "Checked off, so it no longer shows with the open todos.");
   const { dueFrom, dueTo, noDue } = dueRange(by.due, now);
   const inRange = noDue ? todo.due === null : todo.due !== null ? (!dueFrom || todo.due >= dueFrom) && (!dueTo || todo.due <= dueTo) : !dueFrom && !dueTo;
   if (!inRange) return say("date", `${todo.due ? movedTo(todo.due, now) : "Its date was taken off"}, so it no longer shows under ${DUE_FILTERS[by.due]}.`);

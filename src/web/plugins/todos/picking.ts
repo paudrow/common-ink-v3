@@ -1,9 +1,15 @@
-import { DAY_NAMES, nameKey, ordinal, parseRule, skippedTo, tagsOn, writeRule, type Importance, type TodoChange } from "../../plugin-api.ts";
+import { DAY_NAMES, nameKey, ordinal, parseRule, skippedTo, tagsOn, writeRule, type Importance, type TodoChange, type TodoState } from "../../plugin-api.ts";
 import { addDays, dueLabel } from "./dates.ts";
 import { shortDay } from "./recurrence.ts";
 
 /** A todo's priority in words, by its level: the note writes it `!`, `!!` or `!!!` after the checkbox, and nothing for None. */
 export const PRIORITY = ["None", "Low", "Medium", "High"] as const;
+
+/** What a todo's box says, in words: its name to a screen reader, in a note and on the Todos page. */
+export const STATE_NAMES: Record<TodoState, string> = { open: "Not done", done: "Done", abandoned: "Abandoned", backlog: "Backlog" };
+
+/** What a click on a todo's box makes it: an open todo done, and any other open again. */
+export const clicked = (state: TodoState): TodoState => (state === "open" ? "done" : "open");
 
 /** The chips of a todo that open a popover of choices, in a note and on the Todos page. */
 export type ChipKind = "due" | "importance" | "every";
@@ -32,6 +38,7 @@ export function picking(open: Picking, { type, row, chip }: PickingEvent): Picki
 
 /** What a todo's chips are set from. `every` is its rule as written after `every:`, or null. */
 export interface Picked {
+  state: TodoState;
   due: string | null;
   importance: Importance;
   every: string | null;
@@ -49,15 +56,15 @@ export interface Choice {
 
 /**
  * What the priority or the due date chip's popover offers for a todo, in the order shown, on day `now`.
- * A date of the member's own is the popover's date field. A todo that repeats can also skip to its next
- * date, with nothing checked off.
+ * A date of the member's own is the popover's date field. An open todo that repeats can also skip to its
+ * next date, with nothing checked off; one abandoned or in the backlog waits, and has no skip.
  */
 export function choicesFor(chip: Exclude<ChipKind, "every">, todo: Picked, now: string): Choice[] {
   if (chip === "importance") return ([3, 2, 1, 0] as const).map((level) => ({ label: PRIORITY[level], change: { importance: level }, current: todo.importance === level }));
   const day = (label: string, due: string, detail?: string): Choice => ({ label, ...(detail && { detail }), change: { due }, current: todo.due === due });
   const week = addDays(now, 7);
   const rule = todo.every === null ? null : parseRule(todo.every);
-  const next = rule && skippedTo(rule, { due: todo.due, on: now });
+  const next = todo.state === "open" && rule && skippedTo(rule, { due: todo.due, on: now });
   return [
     day("Today", now),
     day("Tomorrow", addDays(now, 1)),
