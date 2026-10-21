@@ -356,6 +356,38 @@ export function tagsAdded(text: string, base: string): string[] {
   return tagsIn(text).filter((name) => !had.has(nameKey(name)));
 }
 
+/**
+ * The name tag `name` is given when `from` is renamed `to`, or null when it isn't `from` or a tag
+ * under it, as `#from/sub` is: `#from/sub` becomes `#to/sub`, keeping the case it was written in
+ * below `from`. Matched ignoring case, part by part, so `#from-2` is another tag.
+ */
+export function renamedTag(name: string, from: string, to: string): string | null {
+  const parts = name.split("/");
+  const depth = from.split("/").length;
+  if (parts.length < depth || nameKey(parts.slice(0, depth).join("/")) !== nameKey(from)) return null;
+  return [to, ...parts.slice(depth)].join("/");
+}
+
+/**
+ * The text with every tag `from` names, ignoring case, and every tag under it, written as `to`
+ * renames it, and nothing else changed. Only where a tag is read: not in code, not in a link's
+ * address, and never a longer tag such as `#from-2`.
+ */
+export function renamedTags(text: string, from: string, to: string): string {
+  if (!text.includes("#")) return text;
+  let renamed = "";
+  let at = 0;
+  for (const { line, from: start } of linesOutsideCode(text)) {
+    for (const tag of tagsOn(line, start)) {
+      const name = renamedTag(tag.name, from, to);
+      if (name === null) continue;
+      renamed += `${text.slice(at, tag.from)}#${name}`;
+      at = tag.to;
+    }
+  }
+  return renamed + text.slice(at);
+}
+
 /** The tags a note has on its lines but one, each once ignoring case, outside code. */
 export function tagsBesides(text: string, line: number): string[] {
   if (!text.includes("#")) return [];

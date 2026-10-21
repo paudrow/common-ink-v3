@@ -26,7 +26,17 @@ A mention gives nobody access to the note and notifies nobody. Click a mention t
 
 ## Tags
 
-Write `#tag` anywhere outside code, with no space after the `#`. A tag tags the whole note, even on a todo's line. It needs something besides digits, so `#12` is not a tag, and matching ignores case. The sidebar lists your tags with their counts of notes, and each tag has a page of its notes, which you search as you search a folder. Click a tag in the sidebar or in a note's card to open its page, or ⌘-click (Ctrl-click) one in a note or on a todo. Rest on a tag anywhere to see its card: how many notes have it and what it is for. Tags are managed in Settings, under Tags, which the command Manage tags opens: an admin or an editor adds a description there that says when to use each tag. Agents read it to choose their tags. Anyone who can see a note with the tag can read its description. A description stays with the tag's name, so it comes back if the tag is used again after no note had it.
+Write `#tag` anywhere outside code, with no space after the `#`. A tag tags the whole note, even on a todo's line. It needs something besides digits, so `#12` is not a tag, and matching ignores case. A `/` puts one tag inside another: `#project/alpha` is inside `#project`, and `#project` counts and finds the notes of the tags inside it too. The sidebar lists your tags with their counts of notes, and each tag has a page of its notes, which you search as you search a folder. Click a tag in the sidebar or in a note's card to open its page, or ⌘-click (Ctrl-click) one in a note or on a todo. Rest on a tag anywhere to see its card: how many notes have it and what it is for.
+
+Tags are managed in Settings, under **Tags**, which the command **Manage tags** opens: every tag as a tree, each tag inside another indented under it, with its description and how many notes have it. **Manage tags** in a tag's right-click menu, in the sidebar or on the page of every tag, opens it at that tag's row, and **Rename tag** there starts renaming it. An admin or an editor works on it as on a file tree:
+
+- Click a description, or press Enter on a row, to write it. Enter or clicking away keeps it, Shift+Enter starts a new line, and Escape puts it back. Agents read it to choose their tags.
+- Double-click a tag's name, press F2, or click the pencil beside it to rename it. Renaming a tag renames the tags inside it too.
+- Drag a tag by its name onto another to move it inside that one, or onto the strip under the table to move it to the top. **Move to…** in its right-click menu does the same from the keyboard. Moving a tag renames it, as `#alpha` becomes `#project/alpha`.
+- **New tag**, or **New tag inside** in a tag's menu, makes a tag before any note has it, so you and your agents can use it.
+- **Delete tag** in the right-click menu, or Delete or Backspace on the row, deletes a tag no note has, nor a tag inside it, such as one made ahead, with the tags inside it. Undo in the notice after brings it back with its description. A tag a note has has no Delete: it goes when no note has it, or rename it into another.
+
+Before a rename changes any note you see how many will, and renaming to a tag you already have merges the two, keeping that tag's description. Notes you can't edit keep the old name. Each note's history shows the rename as your change, and Undo in the notice after puts every note back. Anyone who can see a note with the tag can read its description. A description stays with the tag's name, so the tag stays listed, with no notes, after no note has it.
 
 ## The / menu
 

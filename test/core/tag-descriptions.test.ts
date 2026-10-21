@@ -70,7 +70,8 @@ describe("a tag's description", () => {
     await perform(env.DB, ada, { type: "tag.describe", name: "Later", description: "" });
     expect((await tags(ada)).find((t) => t.name === "Later")).toEqual({ name: "Later", notes: 0 });
     expect(await perform(env.DB, ada, { type: "tag.describe", name: "later", description: null })).toEqual({ name: "later", description: null });
-    expect((await tags(ada)).map((t) => t.name)).toEqual(["Money", "project/alpha", "trip"]);
+    // The tag the agent's note has is inside #project, which is listed for it, with no notes of its own.
+    expect((await tags(ada)).map((t) => [t.name, t.notes, t.inside])).toEqual([["Money", 1, undefined], ["project", 0, 1], ["project/alpha", 1, undefined], ["trip", 1, undefined]]);
     // Emptied on a tag a note has, nothing of it is kept, so it goes with the last note that has it.
     await perform(env.DB, ada, { type: "tag.describe", name: "trip", description: "" });
     expect(await env.DB.prepare("SELECT tag FROM tag_descriptions WHERE workspace_id = ?").bind(ada.workspaceId).all()).toMatchObject({ results: [{ tag: "project/alpha" }] });

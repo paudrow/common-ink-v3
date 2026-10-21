@@ -9,6 +9,8 @@ export interface MenuItem {
   disabled?: boolean;
   /** Set apart from the items before it by a line. */
   separated?: boolean;
+  /** The key that does the same where the menu was opened, shown at the end of the row. */
+  shortcut?: string;
 }
 
 interface Props {
@@ -46,7 +48,7 @@ export function ContextMenu({ label, x, y, items, onClose }: Props) {
   useEffect(() => ref.current?.querySelector<HTMLElement>("button:enabled")?.focus(), []);
   return (
     <div ref={ref} role="menu" aria-label={label} className="menu" style={{ left: x, top: y }} onKeyDown={(e) => move(e, onClose)}>
-      {items.map(({ label, icon, action, disabled, separated }) => (
+      {items.map(({ label, icon, action, disabled, separated, shortcut }) => (
         <Fragment key={label}>
           {separated && <hr />}
           <button
@@ -60,6 +62,7 @@ export function ContextMenu({ label, x, y, items, onClose }: Props) {
           >
             {(icon || items.some((item) => item.icon)) && <span className="menu-icon">{icon && <Icon name={icon} />}</span>}
             <span className="menu-label">{label}</span>
+            {shortcut && <kbd className="menu-shortcut">{shortcut}</kbd>}
           </button>
         </Fragment>
       ))}

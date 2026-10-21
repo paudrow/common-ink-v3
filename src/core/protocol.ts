@@ -17,6 +17,12 @@ export const MAX_TAG_DESCRIPTION = 500;
 export const MAX_SETTINGS_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
+/** A tag's name, with or without its `#`. */
+const TagName = z
+  .string()
+  .max(100)
+  .transform((name) => name.replace(/^#/, ""))
+  .refine(isTagName, "not a tag's name: letters, digits, _, / and -, with something besides digits");
 const Revision = z.number().int().min(0);
 /**
  * Line endings as a note keeps them and no half of a character pair: what the database and a recorded change would each make of them differs, and the text stored must be the text its changes replay to.
@@ -336,8 +342,10 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("trash.list"), limit: Limit(100, 500), after: After }),
   /**
    * The tags of the notes the asker can see, by name, each with how many of those notes have it and
-   * its description. A member who sees the whole workspace is also given each tag that is described,
-   * or was made in Settings, and that none of those notes has, with 0 notes. `name` lists that one
+   * its description, and for a tag with tags inside it, as `name/sub`, `inside`: how many have it or
+   * one inside it. A tag that notes have only tags inside of is listed, with 0 notes. A member who
+   * sees the whole workspace is also given each tag that is described, or was made in Settings, and
+   * that none of those notes has, with 0 notes. `name` lists that one
    * tag alone, ignoring case. Pass the answer's `next` as `after` for the page after.
    */
   z.object({ type: z.literal("tag.list"), name: z.string().min(1).max(100).optional(), includeArchived: IncludeArchived, limit: Limit(200, 1000), after: After }),
@@ -346,18 +354,23 @@ export const Op = z.discriminatedUnion("type", [
    * tag. It is kept by the tag's name ignoring case, whether or not a note has the tag now, so it is
    * there again when one does, and a tag no note has yet is listed by it: making a tag ahead in
    * Settings describes it with nothing. An empty description takes it away, and keeps a tag no note
-   * has. Null forgets a tag no note has: its description goes, and it is listed no more. A tag a
-   * note has is left as it is, and it is refused while notes are still being indexed.
+   * has. Null forgets a tag no note has, nor a tag inside it: its description goes, and it is listed
+   * no more. A tag a note has is left as it is, and it is refused while notes are still being indexed.
    */
-  z.object({
-    type: z.literal("tag.describe"),
-    name: z
-      .string()
-      .max(100)
-      .transform((name) => name.replace(/^#/, ""))
-      .refine(isTagName, "not a tag's name: letters, digits, _, / and -, with something besides digits"),
-    description: z.string().trim().max(MAX_TAG_DESCRIPTION).nullable(),
-  }),
+  z.object({ type: z.literal("tag.describe"), name: TagName, description: z.string().trim().max(MAX_TAG_DESCRIPTION).nullable() }),
+  /**
+   * Renames a tag, and each tag under it, in every note the asker may change, as their own change in
+   * each note's history: each `#name`, ignoring case, is written `#to`, as `to` is typed, outside
+   * code, and `#name/sub` is written `#to/sub`, which is how a tag is moved under another or to the
+   * top. A tag `to` that notes have already merges the two. Each description goes with its name,
+   * unless the name it goes to has one, which it keeps; while notes the asker can't change still have
+   * the old name, it stays with that name too. A tag no note has, made ahead, is renamed by its
+   * description alone. Notes the asker may see and not change keep `#name`, and are counted in
+   * `skipped`. With `preview`, nothing is written: the answer is what renaming would change. Refused
+   * as `unavailable` while notes are still being indexed, which a rename then could miss, and as
+   * `invalid` for a `to` under `name`.
+   */
+  z.object({ type: z.literal("tag.rename"), name: TagName, to: TagName, preview: z.boolean().default(false) }),
   /**
    * The notes the asker can see that `query` finds, written in the query language of docs/search.md:
    * words, each matching the start of a word in the note, ignoring case and accents; "a phrase"; filters
@@ -1016,8 +1029,33 @@ export interface ListedTag {
   name: string;
   /** How many notes the asker can see have it. */
   notes: number;
+  /** For a tag with tags inside it, as `name/sub`: how many of those notes have it or any tag inside it, each counted once. */
+  inside?: number;
   /** When to use it, as tag.describe last said. Left out when nobody has. */
   description?: string;
+}
+
+/** What renaming a tag, and each tag under it, changed, or would change. */
+export interface RenamedTag {
+  name: string;
+  to: string;
+  /** Whether notes the asker sees had `to`, or a tag under it the rename makes, already, so those tags are now one. */
+  merged: boolean;
+  /** The notes written, each at the revision the rename made, which Undo reverts: or with `preview` at the revision they are at. */
+  renamed: { noteId: string; noteTitle: string; revision: number }[];
+  /** How many notes the asker sees have the tag and may not change: they keep it. */
+  skipped: number;
+  /** How many the asker may change and couldn't be, as one the new name would make too long: they keep it too. */
+  failed: number;
+  /** The tags under `name`, as `name/sub`, that went with it, by name. */
+  under: string[];
+  /**
+   * The description of the tag and of each under it that has one, or a tag made ahead with nothing
+   * said: what it was, which Undo says again, and the name it goes to. `toDescribed` is whether that
+   * one has its own, which it keeps, and `describedTo` whether the rename wrote it there, which Undo
+   * takes away.
+   */
+  descriptions: { name: string; to: string; description: string; toDescribed: boolean; describedTo: boolean }[];
 }
 
 export interface Note extends NoteSummary {
@@ -1592,6 +1630,7 @@ export interface Results {
   /** `indexing` is true while some notes are still to be read into the index, as after a deploy: the answer may lack them, and asking again reads more. */
   "tag.list": { tags: ListedTag[]; next: string | null; indexing: boolean };
   "tag.describe": { name: string; description: string | null };
+  "tag.rename": RenamedTag;
   /** `indexing` is as for tag.list. */
   search: { results: SearchResult[]; next: string | null; indexing: boolean };
   "note.label": { id: string; revision: number; label: string | null };

@@ -549,6 +549,13 @@ button.link:hover {
   color: var(--muted);
 }
 
+.menu > button .menu-shortcut {
+  margin-left: 16px;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(11.5px * var(--text-scale));
+}
+
 .menu > button:disabled .menu-icon {
   color: inherit;
 }
@@ -8326,40 +8333,6 @@ button.todo-tag[aria-pressed="true"] {
   overflow-wrap: anywhere;
 }
 
-.tag-description-form {
-  display: grid;
-  gap: 6px;
-  max-width: 40rem;
-}
-
-.tag-description-form .error {
-  margin: 0;
-}
-
-.tag-description-form label {
-  color: var(--muted);
-  font-size: calc(13px * var(--text-scale));
-}
-
-.tag-description-form textarea {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  padding: 5px 8px;
-  background: var(--bg);
-  color: var(--ink);
-  font: inherit;
-  font-size: calc(13.5px * var(--text-scale));
-  resize: vertical;
-}
-
-.tag-description-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .tags-head {
   display: flex;
   align-items: baseline;
@@ -8432,27 +8405,50 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--accent);
 }
 
-/* Settings' Tags and Folders: a table of names and what each is for, with the count and the buttons at the end of each row. */
-.manage-search {
-  width: 100%;
-  max-width: 24rem;
+/* Settings' Tags and Folders: a tree of names, indented under the row each is inside, with what each is for and its count of notes. Each column lines up down the table, nested rows too. */
+.manage-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 8px;
+}
+
+.manage-search {
+  flex: 1;
+  min-width: 0;
+  max-width: 24rem;
+  margin: 0;
+}
+
+.manage-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.manage-new svg {
+  width: 14px;
+  height: 14px;
 }
 
 .manage-table {
   width: 100%;
   margin: 0 0 8px;
   border-collapse: collapse;
+  table-layout: fixed;
+  /* A whole number of pixels, so a field grown to its text is the height of the text it stands in for. */
+  --manage-line: round(calc(19.5px * var(--text-scale)), 1px);
   font-size: calc(13px * var(--text-scale));
+  line-height: var(--manage-line);
 }
 
 .manage-table th,
 .manage-table td {
-  padding: 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
   font-weight: 400;
   text-align: left;
-  vertical-align: baseline;
+  vertical-align: top;
 }
 
 .manage-table thead th {
@@ -8461,16 +8457,119 @@ button.todo-tag[aria-pressed="true"] {
   font-weight: 600;
 }
 
-/* A name has a third of the table at most, and a longer one wraps. The count and the buttons take what they need. */
 .manage-table thead th:first-child {
-  width: 33%;
+  width: 36%;
 }
 
-.manage-name {
-  color: var(--accent);
+.manage-table thead th:last-child {
+  width: 4.5rem;
+}
+
+.manage-table thead th:last-child,
+.manage-table .manage-count {
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.manage-row {
+  outline: none;
+}
+
+.manage-row:hover,
+.manage-table:not([data-pointer]) .manage-row:focus-visible {
+  background: var(--hover);
+}
+
+/* The keyboard's row has a bar at its edge; a click leaves no mark behind. */
+.manage-table:not([data-pointer]) .manage-row:focus-visible {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.manage-row[data-dragging] {
+  opacity: 0.45;
+}
+
+.manage-row[data-drop] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.manage-name-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding-left: calc(var(--depth, 0) * 16px);
+}
+
+.manage-toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: var(--manage-line);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.manage-toggle svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.12s;
+}
+
+.manage-toggle[data-open] svg {
+  transform: rotate(90deg);
+}
+
+/* A name and a description are each a chip, edited in the very box they are shown in: the same font, padding and size, so nothing moves. */
+.manage-table .manage-name {
+  min-width: 0;
+  padding: 1px 4px;
+  margin: -1px 0;
+  border-radius: 4px;
+  color: var(--ink);
   font-weight: 550;
-  text-decoration: none;
   overflow-wrap: anywhere;
+}
+
+.manage-table .manage-name[draggable="true"] {
+  cursor: grab;
+}
+
+.manage-table .manage-name[draggable="true"]:hover,
+.manage-table .manage-description[data-editable]:hover {
+  background: var(--hover);
+}
+
+.manage-table .manage-name[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.manage-table input.manage-name-input,
+.manage-table textarea.manage-description-input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  border: 0;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  color: var(--ink);
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  outline: none;
+  appearance: none;
+}
+
+.manage-table input.manage-name-input {
+  height: calc(var(--manage-line) + 2px);
+  font-weight: 550;
 }
 
 .manage-table p {
@@ -8479,20 +8578,123 @@ button.todo-tag[aria-pressed="true"] {
   overflow-wrap: anywhere;
 }
 
-.manage-table .manage-none,
-.manage-table td.manage-count {
+.manage-table .manage-description {
+  display: block;
+  min-height: var(--manage-line);
+  padding: 1px 4px;
+  margin: -1px -4px;
+  border-radius: 4px;
+}
+
+.manage-table .manage-description[data-editable] {
+  cursor: text;
+}
+
+.manage-table textarea.manage-description-input {
+  width: calc(100% + 8px);
+  max-width: none;
+  overflow: hidden;
+  resize: none;
+}
+
+/* Said only on the row under the pointer or the keyboard, so the column isn't one of grey words. */
+.manage-placeholder,
+.manage-pencil {
+  visibility: hidden;
+}
+
+/* A little darker than muted: it is read on the row's and the chip's grey at once. */
+.manage-placeholder {
+  color: color-mix(in srgb, var(--muted), var(--ink) 35%);
+}
+
+.manage-row:hover :is(.manage-placeholder, .manage-pencil),
+.manage-table:not([data-pointer]) .manage-row:focus-visible :is(.manage-placeholder, .manage-pencil) {
+  visibility: visible;
+}
+
+/* A bare icon: no box until it is pointed at, and a ring for the keyboard. */
+.manage-table .manage-pencil {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: calc((var(--manage-line) - 22px) / 2) 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  box-shadow: none;
   color: var(--muted);
+  cursor: pointer;
+  appearance: none;
 }
 
-.manage-table :is(th, td):is(.manage-count, .manage-actions),
-.manage-table thead th:nth-child(n + 3) {
-  width: 1%;
+.manage-pencil svg {
+  width: 14px;
+  height: 14px;
+}
+
+.manage-table .manage-pencil:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.manage-table .manage-pencil:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.manage-aside td {
+  padding: 4px 8px 10px calc(var(--depth, 0) * 16px + 26px);
+}
+
+.manage-aside form {
+  display: grid;
+  gap: 8px;
+  max-width: 40rem;
+}
+
+.manage-aside .error {
+  margin: 0;
+}
+
+.manage-aside-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Under the table while a row inside another is dragged, for the top. */
+.manage-drop-top {
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  text-align: center;
+}
+
+.manage-drop-top[data-drop] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* What a drop would make of the row, beside the pointer. */
+.manage-drag-label {
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  box-shadow: var(--shadow);
+  color: var(--bg);
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
-  text-align: right;
-}
-
-.manage-actions .button + .button {
-  margin-left: 6px;
 }
 
 /* Empty until the search finds nothing, and then what it says is read out. */
@@ -8500,13 +8702,11 @@ button.todo-tag[aria-pressed="true"] {
   margin: 0;
 }
 
-/* Out of sight for the search, which a card's grid would otherwise draw. */
-.manage-table[hidden],
-.manage-table tr[hidden] {
+.manage-table[hidden] {
   display: none;
 }
 
-/* In a narrow pane each row is a card: its name with the count and the buttons at the end of that line, and what it is for under them. */
+/* In a narrow pane each row is a card: its name with the count at the end of that line, and what it is for under them. */
 @container settings-pane (max-width: 38rem) {
   .manage-table thead {
     position: absolute;
@@ -8523,10 +8723,9 @@ button.todo-tag[aria-pressed="true"] {
 
   .manage-table tr {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content max-content;
-    gap: 4px 10px;
-    align-items: baseline;
-    padding: 8px 0 8px 8px;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 2px 10px;
+    padding: 6px 8px;
     border-bottom: 1px solid var(--line);
   }
 
@@ -8535,24 +8734,17 @@ button.todo-tag[aria-pressed="true"] {
     border: 0;
   }
 
-  .manage-table :is(th, td):is(.manage-count, .manage-actions) {
-    width: auto;
-  }
-
-  .manage-table tr > .manage-name-cell {
-    grid-area: 1 / 1;
-  }
-
-  .manage-table tr > .manage-count {
-    grid-area: 1 / 2;
-  }
-
-  .manage-table tr > .manage-actions {
-    grid-area: 1 / 3;
-  }
-
   .manage-table tr > .manage-description-cell {
-    grid-area: 2 / 1 / 3 / 4;
+    grid-area: 2 / 1 / 3 / 3;
+    padding-left: calc(var(--depth, 0) * 16px + 22px);
+  }
+
+  .manage-table tr > .manage-description-cell:empty {
+    display: none;
+  }
+
+  .manage-aside td {
+    grid-column: 1 / 3;
   }
 }
 

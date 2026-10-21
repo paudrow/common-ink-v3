@@ -16,18 +16,18 @@ export interface TagStore {
   /** Whether the server said it hasn't read every note yet, so tags and their notes may be missing. They are read again until it has. */
   indexing(): boolean;
   version(): number;
-  /** Reads the tags again, as after a description was said or a tag renamed. */
-  reload(): void;
-  /** Asks Settings' Tags to open one tag's row, to say what it is for, the next time it is drawn. */
+  /** Reads the tags again, as after a description was said or a tag renamed, done once they are read. */
+  reload(): Promise<void>;
+  /** Asks Settings' Tags to bring one tag's row into view with the keyboard on it, or to rename it, the next time it is drawn. */
   ask(request: TagRequest): void;
   /** What was asked, once. */
   take(): TagRequest | null;
 }
 
-/** What a tag's menu asks of its row in Settings' Tags. */
+/** What a tag's menu or card asks of its row in Settings' Tags: the row, being renamed when `kind` is "rename". */
 export interface TagRequest {
   name: string;
-  kind: "describe";
+  kind: "rename" | null;
 }
 
 /** How many tags the sidebar lists before it leaves the rest to the page of every tag. */
@@ -50,7 +50,7 @@ export const going = (app: App, path: string) => ({
   },
 });
 
-/** What a tag's menu offers, as a folder's does: to open its page, in a split too where there are splits, and for whoever may, to describe it. */
+/** What a tag's menu offers, as a folder's does: to open its page, in a split too where there are splits, to go to its row in Settings, and for whoever may, to rename it there. */
 function tagMenu(app: App, store: TagStore, name: string): MenuItem[] {
   const tab: Opened = { kind: "page", id: TAGS_PAGE, path: tagPath(name) };
   const { openBeside } = app;
@@ -66,7 +66,8 @@ function tagMenu(app: App, store: TagStore, name: string): MenuItem[] {
           { label: "Open in a split down", icon: "splitDown" as const, action: () => openBeside(tab, "down") },
         ]
       : []),
-    ...(describes(app) ? [{ label: "Describe tag", icon: "edit" as const, action: toRow({ name, kind: "describe" }) }] : []),
+    { label: "Manage tags", icon: "settings", action: toRow({ name, kind: null }) },
+    ...(describes(app) ? [{ label: "Rename tag", icon: "edit" as const, action: toRow({ name, kind: "rename" }) }] : []),
   ];
 }
 
@@ -99,8 +100,8 @@ function TagLinks({ app, store, tags, labelledBy, described = false }: { app: Ap
             }}
           >
             <span className="tag-name">#{tag.name}</span>
-            <span className="count" aria-label={`${tag.notes} ${tag.notes === 1 ? "note" : "notes"}`}>
-              {tag.notes}
+            <span className="count" aria-label={`${tag.inside ?? tag.notes} ${(tag.inside ?? tag.notes) === 1 ? "note" : "notes"}`}>
+              {tag.inside ?? tag.notes}
             </span>
           </a>
           {described && tag.description && <p className="tag-row-description">{tag.description}</p>}

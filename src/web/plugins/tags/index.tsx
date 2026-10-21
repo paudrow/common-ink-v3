@@ -62,7 +62,7 @@ export const tags: Plugin = {
       clearTimeout(again);
       tell();
       // Read again, as many tags are read as were listed, so the ones Show more brought stay.
-      host.perform({ type: "tag.list", limit: Math.min(MOST, Math.max(PAGE, listed?.length ?? 0)) }).then(
+      return host.perform({ type: "tag.list", limit: Math.min(MOST, Math.max(PAGE, listed?.length ?? 0)) }).then(
         (answer) => take(mine, answer, []),
         () => {},
       );
@@ -108,7 +108,7 @@ export const tags: Plugin = {
     host.views.register("section", { id: "tags", label: "Tags", icon: "tag", component: ({ app }) => <TagSection app={app} store={store} /> });
     host.views.register("page", { id: TAGS_PAGE, path: TAGS_PATH, label: "Tags", component: ({ app }) => <TagsPage host={host} app={app} store={store} lists={lists} /> });
     host.views.register("settings", { id: SETTINGS_ID, label: "Tags", component: ({ app }) => <ManageTags host={host} app={app} store={store} /> });
-    host.commands.register({ id: "tags.manage", title: "Manage tags", aliases: ["describe tags"], run: () => host.app().go(MANAGE_PATH) });
+    host.commands.register({ id: "tags.manage", title: "Manage tags", aliases: ["describe tags", "rename tag"], run: () => host.app().go(MANAGE_PATH) });
     host.editorExtensions.register({ id: "tags", extension: tagDrawing((name) => host.app().go(tagPath(name)), cards) });
 
     return () => {

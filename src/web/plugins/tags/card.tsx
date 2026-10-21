@@ -28,7 +28,7 @@ const tagOf = (target: EventTarget | null) => (target instanceof Element ? targe
  * marked `data-tag` with the tag's name, as a tag in a note, a todo's chip and the sidebar's rows are.
  * One marked `data-tag-card="beside"` too, a row of a list, has it beside it rather than under it.
  * It says how many notes have the tag and what it is for. With nothing said, it asks whoever may say
- * it to, with a link to Manage tags, and shows anyone else the name and count alone. It is laid over
+ * it to, with a link to its row in Settings, and shows anyone else the name and count alone. It is laid over
  * the app at the end of the page, or of the dialog the tag is in, so it moves nothing.
  */
 export function tagCards(host: PluginHost, store: TagStore): TagCards {
@@ -198,9 +198,17 @@ function Card({ id, host, store, anchor, name, onClose, onPointer }: { id: strin
   }, [anchor, onClose]);
 
   const shownName = tag?.name ?? name;
-  const leave = (path: string) => {
+  const leave = (path: string, before?: () => void) => {
     const link = going(app, path);
-    return { ...link, onClick: (e: MouseEvent) => (link.onClick(e), onClose()) };
+    return {
+      ...link,
+      onClick(e: MouseEvent) {
+        // Only a plain click goes there here; a modified one opens a new tab, which asks nothing of this one's Settings.
+        if (!(e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0)) before?.();
+        link.onClick(e);
+        onClose();
+      },
+    };
   };
   return (
     <div ref={ref} id={id} role="tooltip" className="tag-card" onPointerEnter={() => onPointer(true)} onPointerLeave={() => onPointer(false)}>
@@ -216,7 +224,7 @@ function Card({ id, host, store, anchor, name, onClose, onPointer }: { id: strin
         tag !== undefined && describes(app) && <p className="tag-card-none">No description yet. Add one to help AI use #{shownName} right.</p>
       )}
       {tag !== undefined && describes(app) && (
-        <a className="tag-card-manage" {...leave(MANAGE_PATH)}>
+        <a className="tag-card-manage" {...leave(MANAGE_PATH, () => store.ask({ name: shownName, kind: null }))}>
           Manage tags
         </a>
       )}
