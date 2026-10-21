@@ -33,6 +33,8 @@ import { folderPath, keepsATab, pageAt, routeOf, type Navigate, type Place } fro
 import { documentOf } from "./settings.ts";
 import { ROOT as SETTINGS, Settings, type Account } from "./Settings.tsx";
 import { SETTINGS_FILE, SettingsFile } from "./SettingsFile.tsx";
+import { AGENTS_FILE, AgentsFile } from "./AgentsFile.tsx";
+import { createAgentsFileStore } from "./agentsFileStore.ts";
 import type { SettingsStore } from "./settingsStore.ts";
 import { forgetAll } from "./stash.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
@@ -315,6 +317,10 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   const [host] = useState(() => {
     let created: Host;
     const account = accountOf(me, workspaceId);
+    const agentsFile = createAgentsFileStore({
+      read: () => perform(workspaceId, { type: "agentsFile.read" }),
+      write: (text, on) => perform(workspaceId, { type: "agentsFile.write", text, ...on }),
+    });
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} adminElsewhere={me.workspaces.some((w) => w.id !== workspaceId && w.role === "admin")} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} folders={app.folders} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
@@ -356,6 +362,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
         h.views.register("page", { id: "settings", path: SETTINGS, label: "Settings", nav: "menu", command: { id: "go.settings", title: "Go to settings (UI)" }, component: ({ app }) => <SettingsMoved go={app.go} /> });
         // Its command is `settings.openJson`, so a key a member bound to that opens it.
         h.views.register("page", { id: "settings-json", path: SETTINGS_FILE, label: "Settings (JSON)", command: { id: "settings.openJson", title: "Go to settings (JSON)" }, component: () => <SettingsFile store={settings} host={created} /> });
+        h.views.register("page", { id: "agents-file", path: AGENTS_FILE, label: "Agents file", command: { id: "go.agents-file", title: "Go to agents file" }, component: () => <AgentsFile store={agentsFile} host={created} canEdit={role === "admin" || role === "editor"} /> });
         h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage });
       },
     };

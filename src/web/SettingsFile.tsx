@@ -138,9 +138,9 @@ export function SettingsFile({ store, host }: { store: SettingsStore; host: Host
 
   const broken = draft !== null && !unread;
   return (
-    <section className="settings-file" aria-label="Settings (JSON)">
+    <section className="text-file settings-file" aria-label="Settings (JSON)">
       <div className="note-scroll">
-        <div className="settings-file-head">
+        <div className="text-file-head">
           <p className="soon">Yours alone, in this workspace. Only what you change from a default is kept.</p>
           {(broken || settings.problems.length > 0) && (
             <ul aria-label="Problems" className="settings-problems">
@@ -165,7 +165,7 @@ export function SettingsFile({ store, host }: { store: SettingsStore; host: Host
             Try again
           </button>
         )}
-        <span role="status" className="settings-file-state" data-failed={broken || status.kind === "refused" || status.kind === "unread" || undefined}>
+        <span role="status" className="text-file-state" data-failed={broken || status.kind === "refused" || status.kind === "unread" || undefined}>
           {broken ? "Not saved until the JSON is fixed" : statusLabel(status)}
         </span>
       </div>

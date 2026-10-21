@@ -26,6 +26,7 @@ export interface Io {
 export const USAGE = `Usage: ink [--workspace ID] <command>
 
   workspaces                          the workspaces you can reach
+  agents-file                         the workspace's agents file: how it is organized, as its admins and editors wrote
   members                             everyone in a workspace, with their role
   plugins                             the plugins installed in a workspace, and what each is permitted
   plugin-new NAME [--out DIR]         a new plugin's manifest and code to start from, written to
@@ -591,6 +592,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "workspaces":
         tool = "list_workspaces";
+        break;
+      case "agents-file":
+        tool = "read_agents_file";
         break;
       case "members":
         tool = "list_members";

@@ -240,7 +240,8 @@ export type KeptFromPerform =
   | "plugin.uninstall"
   | "plugin.permit"
   | "plugin.request"
-  | "plugin.read";
+  | "plugin.read"
+  | "agentsFile.write";
 
 /**
  * The operations `host.perform` takes only from Common Ink's own plugins: everything of the
@@ -988,7 +989,7 @@ export interface EditorExtension {
   id: string;
   extension: object | ((editor: EditorContext) => object);
   /**
-   * Also given to an editor of text that is no note, such as the member's settings JSON. For how an editor is worked,
+   * Also given to an editor of text that is no note: the member's settings JSON and the workspace's agents file. For how an editor is worked,
    * such as vim's keys, typewriter scrolling and line numbers, and not for what a note holds. Only Common Ink's own plugins may.
    */
   anyText?: boolean;
@@ -996,7 +997,7 @@ export interface EditorExtension {
 
 /** What an editor extension given as a function is told about the editor it is being made for. */
 export interface EditorContext {
-  /** The note the editor holds, or for text that is no note, which only an `anyText` extension is made for, its address: `/settings.json`. An editor holds one for as long as it lasts. */
+  /** The note the editor holds, or for text that is no note, which only an `anyText` extension is made for, its address: `/settings.json` or `/agents-file.md`. An editor holds one for as long as it lasts. */
   noteId: string;
   /**
    * True for a drawing of the note that is only read, such as an expanded card in a folder's list.

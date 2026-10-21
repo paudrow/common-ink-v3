@@ -468,6 +468,7 @@ describe("what full trust reaches on the server is what its member reaches, and 
       { type: "plugin.request", id, capability: "full-trust" },
       { type: "settings.read" },
       { type: "settings.write", text: "{}", baseRevision: 0 },
+      { type: "agentsFile.write", text: "# Steer the agents", baseRevision: 0 },
       { type: "draft.list" },
       { type: "draft.save", id, manifest: manifest([]), code: OTHER, running: true },
       { type: "note.setPrivate", id: shared, private: true },

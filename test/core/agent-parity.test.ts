@@ -17,6 +17,7 @@ const argumentsOf = (tool: (typeof TOOLS)[number]) => Object.keys((tool.inputSch
 /** For each tool, `ink` commands that between them set every argument the tool takes. */
 const COMMANDS: Record<string, string[][]> = {
   list_workspaces: [["workspaces"]],
+  read_agents_file: [["agents-file"]],
   list_members: [["members"]],
   list_plugins: [["plugins"]],
   scaffold_plugin: [["plugin-new", "Greeter"]],

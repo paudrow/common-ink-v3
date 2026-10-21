@@ -127,6 +127,7 @@ export const WORKSPACE_COLUMNS: readonly { at: `${string}.${string}`; fate: Work
   { at: "plugin_requests.workspace_id", fate: "cut" },
   { at: "plugin_proposals.workspace_id", fate: "cut" },
   { at: "tag_descriptions.workspace_id", fate: "cut" },
+  { at: "agents_files.workspace_id", fate: "cut" },
   { at: "agents.workspace_id", fate: "agent" },
   // Made unreadable at once, as any upload being removed is, and their bytes go a chunk at a time.
   { at: "uploads.workspace_id", fate: "uploads" },

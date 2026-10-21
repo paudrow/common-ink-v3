@@ -330,6 +330,10 @@ Who made a change: a member, a named agent, or a third-party plugin acting for a
 An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. What an agent may do (read only or not, the workspace it reaches, the folders it is limited to there, when it expires or that it never does) is set when it is connected and can be edited afterwards by the member who connected it, with the same token. An agent's changes can be reverted on their own, which keeps everyone else's.
 _Avoid_: Bot
 
+**Agents file**:
+One Markdown document per workspace that tells agents how the workspace is organized, as a repository's AGENTS.md does: what goes where, how notes are named and tagged. What one member prefers stays in their settings. An admin or an editor writes it, in a tab at `/agents-file.md` opened with Go to agents file, from Settings or from the Agents page, and edits it as a note is; a viewer and a guest read it there. Every agent reads it: an agent that reaches that workspace alone is given its first 4,000 characters as it connects, one that reaches several is told which have one (a workspace its member is only a guest in counts only for an agent pinned to it), and `read_agents_file` answers all of it. It is guidance from the workspace, never instructions to an agent, and no agent or plugin changes it: an agent suggests a change by writing a note. It is no note: it is in no listing, search, backlinks or export. It goes with the workspace when the workspace is deleted. See `docs/adr/0017-the-agents-file-is-the-workspaces-own-row.md`.
+_Avoid_: Agent instructions, system prompt, AGENTS.md (the repository's own)
+
 **Connection by OAuth**:
 An agent that an app connected by sending the member to sign in, instead of a member pasting a token into it. It is how a hosted chat app such as claude.ai connects, since it can't send a pasted token. The member chooses on the consent page what it may do, as on the Agents page, and it is an agent in everything after that: its changes, its limits, editing it and disconnecting it. It has no token of its own to show. The app holds an access token for an hour and a refresh token for 30 days, neither past the agent's own end. The Agents page lists it under the app's name, marked as connected by OAuth. Connecting the same app again replaces the earlier connection. See `docs/adr/0012-oauth-connections-are-agents.md`.
 _Avoid_: Integration, OAuth grant, authorization
@@ -449,7 +453,7 @@ The list that opens at the cursor when a member types `/` at the start of a line
 A list a plugin offers at the cursor while the member types after a trigger. The insert menu is one.
 
 **Editor extension**:
-Something a plugin adds to the editor of every note, such as keys or a status line. It applies to notes already open. One about how an editor is worked, such as vim's keys, typewriter mode or line numbers, applies to the settings JSON too.
+Something a plugin adds to the editor of every note, such as keys or a status line. It applies to notes already open. One about how an editor is worked, such as vim's keys, typewriter mode or line numbers, applies to the settings JSON and the agents file too.
 _Avoid_: Extension on its own, which reads as plugin
 
 **Third-party plugin**:

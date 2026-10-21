@@ -22,6 +22,7 @@ import {
   NO_SUCH_WORKSPACE,
   MAX_NOTE_LENGTH,
   MAX_SETTINGS_LENGTH,
+  MAX_AGENTS_FILE_LENGTH,
   Op,
   OpError,
   TODO_SORTS,
@@ -3109,6 +3110,39 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .bind(ctx.workspaceId, ctx.personId, op.text, ctx.now, op.writeId ?? null, op.baseRevision, op.supersedes ?? null)
         .first<{ revision: number }>();
       if (!row) throw new OpError("conflict", "Your settings changed somewhere else since they were read here");
+      return { text: op.text, revision: row.revision, updatedAt: ctx.now };
+    },
+  },
+
+  // Whoever reaches the workspace reads it: a viewer, a guest, and an agent of any of them, limited to folders or not.
+  "agentsFile.read": {
+    needs: "view",
+    async run(ctx) {
+      const row = await ctx.db.prepare("SELECT text, revision, updated_at FROM agents_files WHERE workspace_id = ?").bind(ctx.workspaceId).first<{ text: string; revision: number; updated_at: number }>();
+      return row ? { text: row.text, revision: row.revision, updatedAt: row.updated_at } : { text: "", revision: 0, updatedAt: null };
+    },
+  },
+
+  // It steers every agent in the workspace, so only an admin or an editor writes it, signed in: see NOT_FOR_AGENTS.
+  "agentsFile.write": {
+    needs: "edit",
+    by: "member",
+    members: true,
+    async run(ctx, op) {
+      if (op.text.length > MAX_AGENTS_FILE_LENGTH) throw new OpError("invalid", `The agents file can be at most ${MAX_AGENTS_FILE_LENGTH} characters`);
+      // As settings.write: one statement, so of two writes on the same revision exactly one is taken.
+      const taken = "agents_files.revision = ?5 OR (agents_files.revision = ?5 + 1 AND agents_files.write_id = ?6)";
+      const statement =
+        op.baseRevision === 0
+          ? `INSERT INTO agents_files (workspace_id, text, updated_at, write_id, revision) VALUES (?1, ?2, ?3, ?4, 1)
+             ON CONFLICT (workspace_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at, write_id = excluded.write_id, revision = agents_files.revision + 1 WHERE ${taken}
+             RETURNING revision`
+          : `UPDATE agents_files SET text = ?2, updated_at = ?3, write_id = ?4, revision = revision + 1 WHERE workspace_id = ?1 AND (${taken}) RETURNING revision`;
+      const row = await ctx.db
+        .prepare(statement)
+        .bind(ctx.workspaceId, op.text, ctx.now, op.writeId ?? null, op.baseRevision, op.supersedes ?? null)
+        .first<{ revision: number }>();
+      if (!row) throw new OpError("conflict", "The agents file changed somewhere else since it was read here");
       return { text: op.text, revision: row.revision, updatedAt: ctx.now };
     },
   },

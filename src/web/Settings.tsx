@@ -8,6 +8,7 @@ import { SettingRow } from "./SettingRow.tsx";
 import type { Folders, Slots } from "./plugin-api.ts";
 import type { Host, MemberSettings } from "./pluginHost.ts";
 import { SETTINGS_FILE } from "./SettingsFile.tsx";
+import { AGENTS_FILE } from "./AgentsFile.tsx";
 import {
   ACCOUNT,
   KEYBOARD,
@@ -132,6 +133,9 @@ export function Settings({ host, store, mac, path, go, storage, exportPlan, onCl
           )}
           <button type="button" className="button small" onClick={() => go(SETTINGS_FILE)}>
             Open settings (JSON)
+          </button>
+          <button type="button" className="button small" onClick={() => go(AGENTS_FILE)}>
+            Open agents file
           </button>
           <button ref={close} type="button" className="icon-button" aria-label="Close settings" title="Close (Escape)" onClick={onClose}>
             <Icon name="close" />

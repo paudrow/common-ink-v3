@@ -1,5 +1,6 @@
 SELECT
   (SELECT count(*) FROM agents) AS agents,
+  (SELECT count(*) FROM agents_files) AS agents_files,
   (SELECT count(*) FROM changes) AS changes,
   (SELECT count(*) FROM clipper_grants) AS clipper_grants,
   (SELECT count(*) FROM completions) AS completions,

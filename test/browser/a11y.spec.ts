@@ -63,6 +63,16 @@ const screens: {
       return page;
     },
   },
+  {
+    name: "the agents file",
+    open: async (page) => {
+      await withNote(page);
+      await perform(page, { type: "agentsFile.write", text: "# How this workspace is organized\n\nRecipes go in Kitchen.", baseRevision: 0 });
+      await page.goto("/agents-file.md");
+      await expect(page.getByRole("textbox", { name: "Agents file text" })).toContainText("Recipes go in Kitchen.");
+      return page;
+    },
+  },
   ...(["tags", "folders", "phone"] as const).map((section) => ({
     name: section === "phone" ? "settings' tags table at a phone's width" : `settings' ${section} table`,
     open: async (page: Page) => {

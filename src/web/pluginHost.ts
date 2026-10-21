@@ -210,6 +210,7 @@ function keptFromPerform(type: string): string | null {
   if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
   if (/^plugin\.(install|uninstall|permit|request|read)$/.test(type)) return "which plugins a workspace has, and what they are permitted, is decided on the Plugins page";
   if (type.startsWith("account.") || type === "workspace.delete") return "only the person deletes an account or a workspace, in Settings";
+  if (type === "agentsFile.write") return "the agents file steers every agent in the workspace, so only an admin or an editor writes it, in the app";
   return null;
 }
 

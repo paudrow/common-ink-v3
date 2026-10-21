@@ -1978,7 +1978,7 @@ button.link:hover {
 }
 
 .note,
-.settings-file {
+.text-file {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -4479,34 +4479,34 @@ kbd {
   margin: 6px 0 0;
 }
 
-/* The settings JSON in a tab: a note's editor, with what is wrong with the JSON over it and whether it is saved at its foot. */
-.settings-file-head {
+/* Text that is no note in a tab, as the settings JSON and the agents file are: a note's editor, with a word on what it is over it and whether it is saved at its foot. */
+.text-file-head {
   box-sizing: border-box;
   max-width: var(--editor-width);
   margin: 0 auto;
   padding: 1.5rem 2rem 0;
 }
 
-.settings-file-head .soon {
+.text-file-head .soon {
   margin: 0;
 }
 
-.settings-file .editor {
+.text-file .editor {
   padding-top: 1rem;
 }
 
-.settings-file .cm-gutters {
+.text-file .cm-gutters {
   border-right: 0;
   background: none;
 }
 
-.settings-file .cm-tooltip {
+.text-file .cm-tooltip {
   border-color: var(--line-strong);
   background: var(--bg-elev);
   color: var(--ink);
 }
 
-.settings-file-state {
+.text-file-state {
   display: flex;
   flex: none;
   align-items: center;
@@ -4517,11 +4517,11 @@ kbd {
   white-space: nowrap;
 }
 
-.settings-file-state[data-failed] {
+.text-file-state[data-failed] {
   color: var(--danger);
 }
 
-.note-panels:has(.cm-panels) + .settings-file-state {
+.note-panels:has(.cm-panels) + .text-file-state {
   border-top: 1px solid var(--line);
 }
 

@@ -17,6 +17,8 @@ export const MAX_TAG_DESCRIPTION = 500;
 /** The longest a folder's description can be. */
 export const MAX_FOLDER_DESCRIPTION = 500;
 export const MAX_SETTINGS_LENGTH = 100_000;
+/** The longest a workspace's agents file can be. */
+export const MAX_AGENTS_FILE_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
 /** A tag's name, with or without its `#`. */
@@ -642,6 +644,20 @@ export const Op = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("settings.write"),
     /** At most MAX_SETTINGS_LENGTH characters, which the operation checks so that it can say so plainly. */
+    text: z.string(),
+    baseRevision: Revision,
+    writeId: z.string().min(1).max(64).optional(),
+    supersedes: z.string().min(1).max(64).optional(),
+  }),
+  /** The workspace's agents file: Markdown that tells agents how the workspace is organized. Everyone who reaches the workspace reads it. */
+  z.object({ type: z.literal("agentsFile.read") }),
+  /**
+   * Replaces the agents file, for an admin or an editor, signed in: no agent, plugin or guest writes it.
+   * `baseRevision`, `writeId` and `supersedes` are as settings.write has them.
+   */
+  z.object({
+    type: z.literal("agentsFile.write"),
+    /** At most MAX_AGENTS_FILE_LENGTH characters, which the operation checks so that it can say so plainly. */
     text: z.string(),
     baseRevision: Revision,
     writeId: z.string().min(1).max(64).optional(),
@@ -1587,6 +1603,16 @@ export interface Visit {
   now: number;
 }
 
+/** A workspace's agents file as it is stored. */
+export interface AgentsFile {
+  /** Markdown. Empty until someone writes it. */
+  text: string;
+  /** How many times it has been written. 0 until someone writes it. */
+  revision: number;
+  /** Null until someone writes it. */
+  updatedAt: number | null;
+}
+
 /** One member's settings in one workspace, as they wrote them. */
 export interface StoredSettings {
   /** A JSON object holding only what differs from the defaults. `{}` until the member changes something. */
@@ -1667,6 +1693,8 @@ export interface Results {
   "folder.delete": { id: string };
   "folder.describe": { id: string; description: string | null };
   "settings.read": StoredSettings;
+  "agentsFile.read": AgentsFile;
+  "agentsFile.write": AgentsFile;
   "settings.write": StoredSettings;
   "timeZone.record": { timeZone: string };
   "member.list": Member[];

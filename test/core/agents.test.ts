@@ -124,6 +124,7 @@ describe("MCP protocol", () => {
     const list = (await (await call(token, rpc("tools/list"))).json()) as any;
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "list_workspaces",
+      "read_agents_file",
       "list_notes",
       "read_note",
       "note_syntax",
@@ -235,7 +236,7 @@ describe("MCP protocol", () => {
     const answered = await post([rpc("initialize", { protocolVersion: "2025-06-18" }, 1), rpc("tools/list", {}, 2), rpc("ping", {}, 3), rpc("tools/call", { name: "list_folders", arguments: {} }, 4)]);
     expect(answered.status).toBe(200);
     const [init, list, ping, called] = (await answered.json()) as any[];
-    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 88, {}]);
+    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 89, {}]);
     expect(called).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: "rate_limited: Too many calls. An agent makes at most 300 a minute. Wait a minute, then call again." }], isError: true } });
     expect(keys).toEqual([agent.id]);
   });
@@ -285,7 +286,7 @@ describe("MCP 2026-07-28", () => {
   it("lists its tools for this token with how long the list keeps", async () => {
     const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
     const { status, body } = await post(token, rpc("tools/list", { _meta: META }), { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list" });
-    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 88]);
+    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 89]);
   });
 
   it("calls a tool whose name the Mcp-Name header mirrors, plain or as base64, and refuses one that differs or a missing version header", async () => {
@@ -318,7 +319,7 @@ describe("MCP 2026-07-28", () => {
       capabilities: { tools: {} },
       instructions: true,
       ttlMs: 3600000,
-      cacheScope: "public",
+      cacheScope: "private",
       _meta: SERVER_INFO,
     });
   });

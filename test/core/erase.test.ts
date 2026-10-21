@@ -276,6 +276,7 @@ async function full() {
   await perform(env.DB, ada, { type: "pin.set", id: notes[0]!, pinned: true });
   await perform(env.DB, grace, { type: "visit.mark", until: Date.now() });
   await perform(env.DB, ada, { type: "settings.write", text: "{}", baseRevision: 0 });
+  await perform(env.DB, ada, { type: "agentsFile.write", text: "# How we file", baseRevision: 0 });
   const plugin = (await perform(env.DB, ada, { type: "plugin.install", manifest: JSON.stringify({ name: "Counter", capabilities: [READ] }), code: "1" })).id;
   await perform(env.DB, grace, { type: "plugin.request", id: plugin, capability: "notes.read" });
   await perform(env.DB, ada, { type: "draft.save", id: plugin, manifest: JSON.stringify({ name: "Counter", capabilities: [READ] }), code: "2", running: false });
@@ -289,7 +290,7 @@ async function full() {
 describe("deleting a workspace", () => {
   it("cuts everyone off at once, then erases everything it held, its files' bytes too", async () => {
     const w = await full();
-    expect(await holding([w.ada.workspaceId])).toEqual(expect.arrayContaining(["agents.workspace_id", "daily_notes.workspace_id", "folders.workspace_id", "grants.workspace_id", "invites.workspace_id", "members.workspace_id", "notes.workspace_id", "pins.workspace_id", "plugin_drafts.workspace_id", "plugin_installs.workspace_id", "plugin_requests.workspace_id", "settings.workspace_id", "uploads.workspace_id", "visits.workspace_id", "workspaces.id"]));
+    expect(await holding([w.ada.workspaceId])).toEqual(expect.arrayContaining(["agents.workspace_id", "agents_files.workspace_id", "daily_notes.workspace_id", "folders.workspace_id", "grants.workspace_id", "invites.workspace_id", "members.workspace_id", "notes.workspace_id", "pins.workspace_id", "plugin_drafts.workspace_id", "plugin_installs.workspace_id", "plugin_requests.workspace_id", "settings.workspace_id", "uploads.workspace_id", "visits.workspace_id", "workspaces.id"]));
     const name = await nameOf(w.ada.workspaceId);
 
     expect(await outcome(w.ada, { type: "workspace.delete", confirm: "Not it" })).toBe(`invalid: Type the workspace's name, ${name}, to delete it`);
@@ -345,7 +346,7 @@ describe("deleting a workspace", () => {
     ];
     const rows: [string, Record<string, unknown>][] = [];
     for (const [table, sql] of reads) for (const row of (await env.DB.prepare(sql).bind(w.ada.workspaceId).all<Record<string, unknown>>()).results) rows.push([table, row]);
-    expect(new Set(rows.map(([table]) => table)), "something of it in each table the cut empties").toEqual(new Set(["members", "invites", "grants", "frame_grants", "settings", "pins", "visits", "plugin_drafts", "plugin_requests", "agents", "oauth_tokens"]));
+    expect(new Set(rows.map(([table]) => table)), "something of it in each table the cut empties").toEqual(new Set(["members", "invites", "grants", "frame_grants", "settings", "agents_files", "pins", "visits", "plugin_drafts", "plugin_requests", "agents", "oauth_tokens"]));
 
     await cutOff({ db: env.DB, workspaceId: w.ada.workspaceId, personId: w.ada.personId, now: Date.now() }, await nameOf(w.ada.workspaceId));
     await env.DB.batch(rows.map(([table, row]) => env.DB.prepare(`INSERT INTO ${table} (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map(() => "?").join(", ")})`).bind(...Object.values(row))));

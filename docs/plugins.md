@@ -378,7 +378,7 @@ The insert menu is one of these, in `plugins/embedMenu.ts`: on `/` it lists its 
 
 ## Editor extensions
 
-`host.editorExtensions.register({ id, extension })` adds a CodeMirror 6 extension to the editor of every note, including notes already open, in every editor group. Turning the plugin off takes it back out the same way. One registered with `anyText: true` is given to the settings JSON's editor too, which is drawn as a note's is: that is for how an editor is worked, as vim, typewriter mode and line numbers do, and not for what a note holds. Only Common Ink's own plugins may, since such an extension could read and change every setting. It is made for that editor with `noteId` set to `/settings.json`.
+`host.editorExtensions.register({ id, extension })` adds a CodeMirror 6 extension to the editor of every note, including notes already open, in every editor group. Turning the plugin off takes it back out the same way. One registered with `anyText: true` is given to the editors of the settings JSON and the agents file too, which are drawn as a note's is: that is for how an editor is worked, as vim, typewriter mode and line numbers do, and not for what a note holds. Only Common Ink's own plugins may, since such an extension could read and change every setting, and the agents file. It is made for those editors with `noteId` set to `/settings.json` or `/agents-file.md`.
 
 ```ts
 import { EditorView } from "@codemirror/view";

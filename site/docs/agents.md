@@ -106,8 +106,17 @@ These stay with you, signed in to Common Ink, whatever your role:
 - Remove a note or upload from Trash for good. An agent can archive, trash, and restore.
 - Change or add a contact, or connect and disconnect your calendar and contacts.
 - Read or change your settings.
+- Change the workspace's agents file.
 - Connect, edit, or disconnect an agent, itself included.
 - Turn a full-trust plugin on for you. An admin's agent can allow a plugin's Full trust permission, and only you can turn it on.
+
+## Tell agents how the workspace works
+
+Each workspace has one agents file, a Markdown document like a repository's AGENTS.md. Say there how the workspace is organized: what goes in which folder, how notes are named, which tags mean what. What you prefer for yourself stays in your settings.
+
+Run **Go to agents file** from the command palette, or choose **Open agents file** on the Agents page or in Settings. It opens in a tab, and you edit it as you edit a note, with Vim mode and typewriter mode if they are on. It saves as you pause. Admins and editors change it. Viewers and guests read it.
+
+An agent connected to only that workspace is given the first 4,000 characters as it connects. One that reaches several workspaces is told which have an agents file, and reads it there. Any agent reads all of it with `read_agents_file`, and `ink agents-file` prints it. An agent weighs it as guidance, never as commands, and can't change it: to suggest a change, it writes a note. The agents file isn't a note, so it isn't in your folders, search, or exports.
 
 ## Tags an agent uses
 
