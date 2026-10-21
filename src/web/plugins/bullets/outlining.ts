@@ -4,7 +4,7 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemir
 import { BOX_PATTERN, isReading } from "../../plugin-api.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
 import { mathBlocksIn, type Formula } from "../math/syntax.ts";
-import { indent, itemAt, move, outdent, type Edit, type Item, type Lines } from "./outline.ts";
+import { indent, itemAt, leading, move, outdent, textStart, type Edit, type Item, type Lines } from "./outline.ts";
 
 const linesIn = (doc: Text): Lines => ({ count: doc.lines, at: (n) => doc.line(n + 1).text });
 
@@ -174,50 +174,75 @@ const look = EditorView.baseTheme({
 /** A member who can only read the note folds its bullets by their key too, so its text takes the keyboard. A reading, as a folder's card is, is no place for keys. */
 const reachable = EditorView.contentAttributes.of((view) => (view.state.facet(EditorView.editable) || isReading(view.state) ? null : { tabindex: "0" }));
 
-/** The note editor that has the keyboard, if its cursor is on a bullet. */
-function onBullet(): { view: EditorView; line: number } | null {
+/**
+ * The note editor that has the keyboard, if its selection starts on a bullet, and the lines of that
+ * selection: from the line it starts on to the last line it takes anything of.
+ */
+function onBullet(): { view: EditorView; line: number; last: number } | null {
   const view = document.activeElement instanceof HTMLElement ? EditorView.findFromDOM(document.activeElement) : null;
   if (!view || view.contentDOM !== document.activeElement || !view.state.field(folds, false)) return null;
-  const line = view.state.doc.lineAt(view.state.selection.main.head).number - 1;
-  return bulletAt(view.state, line) ? { view, line } : null;
+  const { doc, selection } = view.state;
+  const { from, to, empty } = selection.main;
+  const line = doc.lineAt(from).number - 1;
+  const end = doc.lineAt(to);
+  const last = Math.max(line, end.number - 1 - (!empty && end.from === to ? 1 : 0));
+  return bulletAt(view.state, line) ? { view, line, last } : null;
 }
 
-type Make = (lines: Lines, line: number) => Edit | null;
+type Make = (lines: Lines, line: number, last: number) => Edit | null;
 
-/** The edit a bullet key would make now, and where: nothing when the cursor isn't on a bullet, the note can't be changed, or the bullet has nowhere to go. */
+/** The edit a bullet key would make now, and where: nothing when the selection doesn't start on a bullet, the note can't be changed, or the bullet has nowhere to go. */
 function ready(make: Make) {
   const at = onBullet();
-  const made = at && writable(at.view.state) ? make(linesIn(at.view.state.doc), at.line) : null;
+  const made = at && writable(at.view.state) ? make(linesIn(at.view.state.doc), at.line, at.last) : null;
   return at && made ? { ...at, made } : null;
 }
 
-/** Makes an outline edit in the editor as the member's own: the lines change, the cursor stays on its bullet, and folded bullets stay folded where they land. */
+/** Makes an outline edit in the editor as the member's own: the lines change, the selection stays on the text it was on, and folded bullets stay folded where they land. */
 function edit(make: Make) {
   const at = ready(make);
   if (!at) return;
-  const { view, line, made } = at;
+  const { view, made } = at;
   const { state } = view;
   const [from, to] = [state.doc.line(made.from + 1).from, state.doc.line(made.to).to];
   const insert = made.lines.join("\n");
-  const head = state.selection.main.head;
-  const column = Math.max(0, head - state.doc.line(line + 1).from + made.shift);
   const after = state.update({ changes: { from, to, insert } }).state.doc;
   const landed = (n: number) => after.line(made.after(n) + 1);
-  const cursor = landed(line);
+  /** The place in the edited note of the place `pos`: as far past its line's text start as it was, or as far into the space before it. */
+  const placed = (pos: number) => {
+    const [was, now] = [state.doc.lineAt(pos), landed(state.doc.lineAt(pos).number - 1)];
+    const [start, column] = [textStart(was.text), pos - was.from];
+    const along = column >= start ? textStart(now.text) + column - start : column + leading(now.text).length - leading(was.text).length;
+    return Math.min(now.from + Math.max(0, along), now.to);
+  };
+  const { anchor, head, to: end, empty } = state.selection.main;
+  /** A selection that ends at the start of a line ends just past the newline of the last line it takes, which goes with that line. */
+  const place = (pos: number) => (!empty && pos === end && pos > 0 && state.doc.lineAt(pos).from === pos ? placed(pos - 1) + 1 : placed(pos));
   const foldedLines = state.field(folds).folds.map((f) => state.doc.lineAt(f.from).number - 1);
   view.dispatch({
     changes: { from, to, insert },
-    selection: { anchor: Math.min(cursor.from + column, cursor.to) },
+    selection: { anchor: place(anchor), head: place(head) },
     effects: foldsAre.of(foldedLines.map((n) => landed(n).from)),
     scrollIntoView: true,
     userEvent: "move.bullet",
   });
 }
 
-const MAKES = { indent, outdent, moveUp: (lines, line) => move(lines, line, -1), moveDown: (lines, line) => move(lines, line, 1) } satisfies Record<string, Make>;
+const MAKES = {
+  indent,
+  outdent,
+  moveUp: (lines, line, last) => move(lines, line, -1, last),
+  moveDown: (lines, line, last) => move(lines, line, 1, last),
+  moveRight: indent,
+  moveLeft: outdent,
+} satisfies Record<string, Make>;
 
-/** A key that moves a bullet is the bullet's even when there is nowhere to move it, so the editor's own Alt+arrow doesn't move the line out from over what is under it. */
-const KEPT: readonly string[] = ["moveUp", "moveDown"];
+/**
+ * Keys that move a bullet are the bullet's even when there is nowhere to move it: the editor's own
+ * Alt+↑ would move the line out from over what is under it, and its Alt+← and Alt+→ on a Mac move
+ * the cursor a word. Off a bullet they are the editor's.
+ */
+const KEPT: readonly string[] = ["moveUp", "moveDown", "moveRight", "moveLeft"];
 
 /**
  * Each bullet key's command: what it does, and whether the key is its now. Tab and Shift+Tab with

@@ -75,6 +75,17 @@ Some markdown is drawn in place without the menu:
 - A fenced code block is drawn in its language's colours, with Copy and a wrap toggle.
 - A YouTube address, or the address of a post on X or Bluesky, alone on a line shows the video or post below it.
 
+## Lists
+
+A list works as an outline. With the cursor on a bullet, a numbered item or a todo, each of these keys takes what is under it along, and the items a selection takes in go together:
+
+- `Option+↑` and `Option+↓` move it up or down among the items beside it.
+- `Option+→` or `Tab` puts it under the item above it, one level in. The first item of a list stays where it is: it has nothing to go under.
+- `Option+←` or `Shift+Tab` brings it back out a level. An item that is under nothing stays where it is.
+- `Cmd+Shift+.` folds an item with something under it, and unfolds it.
+
+A numbered list is numbered 1, 2, 3 again after each move, from the number it starts at. A list written with the same number on every item, such as `1.` on each, keeps that number, and an item that joins it takes it too. Off a Mac, use `Alt` for `Option`, and add `Shift` to `Alt+←` and `Alt+→`, which go back and forward. Anywhere else in a note, `Option+←` and `Option+→` move the cursor by words as usual. Change any of these keys in Settings, under Keyboard shortcuts.
+
 ## Files
 
 Paste or drop a file into a note to upload it. A picture, a video, or a recording shows in the note. Any other file on a line of its own shows as a card with its name, size, and **Download**, and among words as a chip. A file can be up to 25 GB.

@@ -4,11 +4,16 @@ import { bulletCommands, bulletEditing, type Kept } from "./outlining.ts";
 const isKept = (value: unknown): value is Record<string, Kept[]> =>
   typeof value === "object" && value !== null && Object.values(value).every((list) => Array.isArray(list) && list.every((k) => typeof k?.line === "number" && typeof k?.text === "string"));
 
+/** Off a Mac, Alt+← and Alt+→ are the browser's Back and Forward, and the app's. */
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+
 /**
- * Bullets that work as an outline: Tab and Shift+Tab put a bullet under the one before it or back
- * out, Alt+↑ and Alt+↓ move it among its siblings, and each takes what is under the bullet with it.
- * A bullet with something under it folds. What is folded is how this browser shows the note, kept
- * in the plugin's storage for each note, and is never written into the note.
+ * Bullets that work as an outline: Tab and Shift+Tab, or Alt+→ and Alt+←, put a bullet under the
+ * one before it or back out, Alt+↑ and Alt+↓ move it among its siblings, and each takes what is
+ * under the bullet with it, and the bullets after it that the selection takes in. A numbered list
+ * is numbered in order again after each, or keeps the one number every item has, as in 1., 1., 1. A bullet with something under it folds. What is folded is
+ * how this browser shows the note, kept in the plugin's storage for each note, and is never written
+ * into the note.
  */
 export const bullets: Plugin = {
   id: "bullets",
@@ -30,6 +35,8 @@ export const bullets: Plugin = {
       ["outdent", "Outdent bullet", "shift+tab"],
       ["moveUp", "Move bullet up", "alt+arrowup"],
       ["moveDown", "Move bullet down", "alt+arrowdown"],
+      ["moveRight", "Move bullet right", MAC ? "alt+arrowright" : "alt+shift+arrowright"],
+      ["moveLeft", "Move bullet left", MAC ? "alt+arrowleft" : "alt+shift+arrowleft"],
       ["toggleFold", "Fold or unfold bullet", "mod+shift+."],
     ] as const;
     for (const [name, title, key] of commands) host.commands.register({ id: `bullets.${name}`, title, keys: [key], group: "Editor", ...bulletCommands[name] });

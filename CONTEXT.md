@@ -250,7 +250,7 @@ _Avoid_: Preview, rendered view, source mode
 A token in a note drawn as something that can be clicked, which changes the note only by rewriting that token: a task's checkbox, a formula, a todo's options.
 
 **Outline bullets**:
-A built-in plugin that makes a list an outline: a bullet is indented, outdented, and moved among its siblings with what is under it.
+A built-in plugin that makes a list an outline: a bullet is indented, outdented, and moved among its siblings with what is under it, and a numbered list is numbered in order again after each, unless every item has the same number, as in `1.`, `1.`, `1.`, which it keeps.
 
 **Fold**:
 A bullet shown without what is under it. A fold is how one editor in one browser shows the note. It is never in the note's text, and other members don't see it.
