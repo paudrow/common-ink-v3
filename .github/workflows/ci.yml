@@ -18,9 +18,11 @@ permissions:
 # scripts would otherwise see them: each of those steps names them in its own `env`.
 
 jobs:
-  check:
+  # Everything `npm run check` does except the Worker's unit tests, which run in parts beside it (`unit`).
+  build:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    name: typecheck and build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -29,13 +31,47 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm audit --audit-level=high
-      - run: npm run check
+      - run: npm run typecheck
+      - run: npm run test:rest
+      - run: npm run build
       - run: npm run extension:build
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: extension-dist
           path: extension/dist
           if-no-files-found: error
+
+  # The Worker's unit tests, in three parts at once. On one runner they took six and a half minutes however their files
+  # were split, as they need more than its cores. vitest.config.ts deals the files out in path order, so each part gets
+  # its share of the access matrix.
+  unit:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    name: unit (${{ matrix.shard }}/3)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run --shard=${{ matrix.shard }}/3
+
+  # The one check called `check`, which branch protection requires: it passes only when the build and every part of
+  # the unit tests passed. It runs even in a cancelled run, to fail there: a required check that is skipped passes.
+  check:
+    needs: [build, unit]
+    if: ${{ always() && github.event.action != 'closed' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: The build and every unit part passed
+        run: |
+          echo "The build finished with ${{ needs.build.result }}, the unit parts with ${{ needs.unit.result }}"
+          [ "${{ needs.build.result }}" = success ] && [ "${{ needs.unit.result }}" = success ]
 
   # Every PR gets a Preview at https://pr-<number>-common-ink-v3-previews.draftox.workers.dev with its own D1
   # database, open without a login, linked from one comment that each push updates. Previews run on their own
@@ -95,8 +131,9 @@ jobs:
 
   # The browser tests run in Chromium in six parts at once. Each part builds the app and runs its own Worker on its
   # runner, with a local D1 and R2 (scripts/built-worker.ts), so no part waits on a server the others
-  # load. They don't use the Preview, which is for people to look at. They start beside `check` rather than after
-  # it, as nothing they run is made there, and run four browsers at once, one for each of the runner's cores.
+  # load. They don't use the Preview, which is for people to look at. They start beside the build and the unit tests
+  # rather than after them, as nothing they run is made there, and run three browsers at once: with four, the one Worker each part runs
+  # fell behind, and tests timed out waiting on it.
   browser-shard:
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
@@ -132,7 +169,7 @@ jobs:
             sleep 2
           done
           cat worker.log; echo "::error::The built Worker didn't answer"; exit 1
-      - run: npx playwright test --project=chromium --shard=${{ matrix.shard }}/6 --workers=4
+      - run: npx playwright test --project=chromium --shard=${{ matrix.shard }}/6 --workers=3
         env:
           BASE_URL: http://localhost:8787
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
