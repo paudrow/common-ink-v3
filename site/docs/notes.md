@@ -56,6 +56,7 @@ Type `/` at the start of a line or after a space to open the insert menu. Each i
 | Kanban board | Columns of cards to drag from one to another |
 | Form | Questions that members answer, with the answers kept in the note |
 | HTML | A block of HTML that runs in a frame shut off from the app |
+| Drawing | Shapes, arrows and words drawn by hand in Excalidraw |
 | Upload an image, Upload a video, Upload a recording | A picture, a video or a recording you pick from your computer, shown in the note |
 | Upload a file | Any file you pick from your computer. A picture, a video or a recording shows in the note, and anything else as a card |
 | Insert an upload | A file already uploaded to the workspace |
@@ -89,6 +90,8 @@ A numbered list is numbered 1, 2, 3 again after each move, from the number it st
 ## Files
 
 Paste or drop a file into a note to upload it. A picture, a video, or a recording shows in the note. Any other file on a line of its own shows as a card with its name, size, and **Download**, and among words as a chip. A file can be up to 25 GB.
+
+A drawing is drawn in Excalidraw, over the whole window: press **Edit drawing** on it, draw, and press **Save**. The note shows it as a picture, sized with the handle on its right edge as a picture is. Each save keeps the drawing as a new file, so undo in the note brings back the drawing before. The file is an `.excalidraw` file that Excalidraw opens, and an agent can read it and draw one too.
 
 A file you upload is yours alone until you put it in a note, which moves it into the note's folder. Then whoever can see that folder sees the file. In a private note it stays yours. The **Uploads** page lists every file you can see.
 

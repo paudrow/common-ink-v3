@@ -109,6 +109,8 @@ class BoxWidget extends WidgetType {
 }
 
 interface Reading {
+  /** The note the embeds are written in. */
+  noteId: string;
   embeds: ReadonlyMap<string, Embed>;
   addresses: readonly AddressEmbed[];
   blocks: readonly Written[];
@@ -410,6 +412,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
         const handed: BelowEmbedded = {
           config: written.config,
           body: written.body,
+          noteId: view.state.field(field).reading.noteId,
           readOnly: view.state.readOnly,
           // The editor can't be changed while it is being measured, which is when this is drawn.
           update: (next) => (drawing ? queueMicrotask(() => rewrite(next)) : rewrite(next)),

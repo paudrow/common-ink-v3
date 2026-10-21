@@ -4,6 +4,9 @@ import { SHOWS, type Preview } from "./previewing.ts";
 /** The room kept for a picture or a video whose embed gives no size. */
 export const UNSIZED: BelowBox = { ratio: 16 / 9, maxWidth: 480 };
 
+/** The room a drawing not drawn yet keeps, for a button to draw it. */
+export const EMPTY_DRAWING = 120;
+
 /** As tall as a browser's own audio controls, with a little room around them. */
 export const AUDIO_HEIGHT = 56;
 

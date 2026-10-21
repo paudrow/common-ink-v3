@@ -10326,8 +10326,9 @@ button.todo-tag[aria-pressed="true"] {
   pointer-events: none;
 }
 
-/* The crop button: at the picture's top right corner, seen with the size handle. */
-.upload-crop {
+/* The crop button and a drawing's edit button: at its top right corner, seen with the size handle. */
+.upload-crop,
+.upload-edit {
   display: grid;
   position: absolute;
   top: 8px;
@@ -10346,13 +10347,13 @@ button.todo-tag[aria-pressed="true"] {
   transition: opacity 0.12s;
 }
 
-.embed-below:hover .upload-crop,
-.upload-crop:focus-visible {
+.embed-below:hover :is(.upload-crop, .upload-edit),
+:is(.upload-crop, .upload-edit):focus-visible {
   opacity: 1;
 }
 
-.upload-crop:hover,
-.upload-crop:focus-visible {
+:is(.upload-crop, .upload-edit):hover,
+:is(.upload-crop, .upload-edit):focus-visible {
   border-color: var(--accent);
   outline: none;
   background: var(--accent);
@@ -10520,6 +10521,52 @@ button.todo-tag[aria-pressed="true"] {
   display: flex;
   gap: 8px;
   margin-left: auto;
+}
+
+/* A drawing not drawn yet, with the button that draws it. */
+.upload-drawing-empty {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 1.5px dashed var(--line);
+  border-radius: 6px;
+}
+
+/* Editing a drawing: Excalidraw over the whole window, under a bar with Save and Cancel, and under Excalidraw's own dialogs and menus, which are at 1000 and above. */
+.drawing-dialog {
+  display: flex;
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.drawing-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: calc(13px * var(--text-scale));
+}
+
+.drawing-title {
+  margin-right: auto;
+  color: var(--muted);
+}
+
+.drawing-said {
+  color: var(--danger);
+}
+
+.drawing-editor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 /* In place of a file that can't be shown, in the same room. */
@@ -12780,7 +12827,7 @@ button.crumb[aria-expanded="true"] {
   background: rgb(0 0 0 / 0.7);
 }
 
-:root[data-night-shift] .upload-crop:not(:hover, :focus-visible) {
+:root[data-night-shift] :is(.upload-crop, .upload-edit):not(:hover, :focus-visible) {
   border-color: var(--ink);
   background: rgb(0 0 0 / 0.7);
   color: var(--ink);
@@ -12917,7 +12964,7 @@ button.crumb[aria-expanded="true"] {
 }
 
 .phone-failed {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: calc(12px * var(--text-scale));
 }
 

@@ -119,6 +119,14 @@ export const NOTE_SYNTAX: readonly NoteSyntax[] = [
     example: "::file{u2p9l4d8a3c7}",
   },
   {
+    name: "drawing",
+    kind: "embed",
+    called: "a drawing",
+    about:
+      'A drawing is an upload holding an Excalidraw scene, the JSON of an .excalidraw file, then the room to keep for it as WIDTHxHEIGHT, and a width as a picture has. Its bytes are that JSON: {"type":"excalidraw","version":2,"elements":[...],"appState":{"viewBackgroundColor":"#ffffff"},"files":{}}, each element as Excalidraw writes it, with "preview" holding the picture the app drew of the elements when a member last saved it. To draw one, upload_file such JSON named Drawing.excalidraw, leaving preview out, and write the embed with its id; the size is optional and without it the room is 16:9. The app draws the picture from the elements, for each reader, until a member saves it. Members draw in Excalidraw from the embed, and each save is a new upload whose id the embed then names, so the note\'s history keeps every drawing before it. ::drawing{} with no id is one not drawn yet. On a line of its own. place_upload it before writing it into a note someone else can read.',
+    example: "::drawing{u2p9l4d8a3c7 820x460}",
+  },
+  {
     name: "video",
     kind: "address",
     called: "a YouTube video",
@@ -167,7 +175,7 @@ $$`,
 ];
 
 /** What note_syntax's description names, so an agent sees each one before calling it. */
-export const syntaxDescription = () => `What a note can hold besides plain paragraphs, each with a short example in the answer: ${NOTE_SYNTAX.map((row) => row.called).join(", ")}.`;
+export const syntaxDescription = () => `What a note can hold besides plain paragraphs, each with an example in the answer: ${NOTE_SYNTAX.map((row) => row.called).join(", ")}.`;
 
 /** What note_syntax answers, and what ink note-syntax prints. */
 export const syntaxText = () => NOTE_SYNTAX.map((row) => `${row.called}\n${row.about}\n\n${row.example}`).join("\n\n");

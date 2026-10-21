@@ -978,8 +978,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       if (e.isComposing || isModifier(e.key)) return;
       // A press in a plugin frame is the frame's to give back. Handling it here as well would step back twice.
       if (e.target instanceof HTMLIFrameElement) return;
-      // A press in the keyboard shortcuts table's recorder is a key to write down, not one to run.
-      if (e.target instanceof Element && e.target.closest("[data-records-keys]")) return;
+      // A press in the keyboard shortcuts table's recorder is a key to write down, and one in a drawing's editor is Excalidraw's, not one to run.
+      if (e.target instanceof Element && e.target.closest("[data-records-keys], [data-keeps-keys]")) return;
       const { keybindings, commands } = host.contributions();
       const chord = chordOf(e, MAC);
       const begun = pending;

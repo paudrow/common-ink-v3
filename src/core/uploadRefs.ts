@@ -3,11 +3,12 @@ import { blanked, codeSpans } from "./spans.ts";
 
 /**
  * A note refers to an upload by an embed whose config starts with the upload's id: `::image{id 640x480}`,
- * `::image{id 640x480 42% crop=120,40,800,600}`, `::video{id 640x360 medium}`, `::audio{id}`, or `::file{id}`. The embed's
- * name is what says the id is an upload's, since a note's id is written the same way. Anything after
- * the id is how it is shown, and the upload's name is never in the note.
+ * `::image{id 640x480 42% crop=120,40,800,600}`, `::video{id 640x360 medium}`, `::audio{id}`, `::file{id}`, or
+ * `::drawing{id 800x600}`, whose upload is an Excalidraw scene. The embed's name is what says the id
+ * is an upload's, since a note's id is written the same way. Anything after the id is how it is
+ * shown, and the upload's name is never in the note.
  */
-export const UPLOAD_EMBEDS = ["image", "video", "audio", "file"] as const;
+export const UPLOAD_EMBEDS = ["image", "video", "audio", "file", "drawing"] as const;
 export type UploadEmbed = (typeof UPLOAD_EMBEDS)[number];
 
 /**
@@ -74,6 +75,17 @@ export function withShare(config: string, share: number): string {
   const word = SIZE_WORDS.find((w) => Math.round(SIZE_SHARE[w] * 100) === percent);
   const width = word === "full" ? null : (word ?? `${percent}%`);
   return [id, size, width, ...words.filter((w) => shareOf(w) === null)].filter(Boolean).join(" ");
+}
+
+/**
+ * An embed's config naming the upload `id` with the room `size`, in place of the upload and the size
+ * it named, or written after an empty config. Every other word stays as it was.
+ */
+export function withUpload(config: string, id: string, size: { width: number; height: number }): string {
+  const words = config.split(/[ \t]+/).filter(Boolean);
+  if (uploadIn(config)) words.shift();
+  if (words[0] && /^\d{1,5}x\d{1,5}$/.test(words[0])) words.shift();
+  return [id, `${Math.round(size.width)}x${Math.round(size.height)}`, ...words].join(" ");
 }
 
 /** A part of a picture, in its own pixels from its top left corner. */

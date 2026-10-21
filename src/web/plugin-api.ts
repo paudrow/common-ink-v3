@@ -74,7 +74,7 @@ export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../co
 export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, readableName, writtenMention, type WrittenMention } from "../core/mentions.ts";
 
 /** How a note refers to an upload, which is the same for a plugin as for an agent, and what kind of file an upload is. */
-export { SIZE_SHARE, SIZE_WORDS, UPLOAD_EMBEDS, cropIn, shareIn, sizeIn, uploadIn, withCrop, withShare, writtenUpload, type Crop, type SizeWord, type UploadEmbed } from "../core/uploadRefs.ts";
+export { SIZE_SHARE, SIZE_WORDS, UPLOAD_EMBEDS, cropIn, shareIn, sizeIn, uploadIn, withCrop, withShare, withUpload, writtenUpload, type Crop, type SizeWord, type UploadEmbed } from "../core/uploadRefs.ts";
 export { FILE_CLASSES, TEXT_ENDINGS, fileClass, type FileClass, type UploadKind } from "../core/filetypes.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
@@ -795,7 +795,7 @@ export interface Below {
   render(el: HTMLElement, embed: BelowEmbedded): void | (() => void) | BelowDrawn;
 }
 
-export type BelowEmbedded = Pick<Embedded, "config" | "body" | "readOnly" | "update"> & { resize(height: number): void; column(): number };
+export type BelowEmbedded = Pick<Embedded, "config" | "noteId" | "body" | "readOnly" | "update"> & { resize(height: number): void; column(): number };
 
 /** What `Below.render` can give back. */
 export interface BelowDrawn {

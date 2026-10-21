@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { extname, join } from "node:path";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
@@ -28,8 +29,55 @@ const clipperDownload: Plugin = {
   },
 };
 
+const EXCALIDRAW = "node_modules/@excalidraw/excalidraw";
+const EXCALIDRAW_FONTS = join(EXCALIDRAW, "dist/prod/fonts");
+const excalidrawVersion = () => (JSON.parse(readFileSync(join(EXCALIDRAW, "package.json"), "utf8")) as { version: string }).version;
+
+/** Where Excalidraw adds a CDN after the app's own address as a place to load each font from. */
+const FONT_FALLBACK = /\w+\.push\(new URL\(\w+,\s*\w+\.ASSETS_FALLBACK_URL\)\)/;
+
+/**
+ * Takes the CDN out of the places Excalidraw loads a font from, in a build and in the dev server's
+ * bundle of it alike, so each font comes from the app's own address and nowhere else. A version of
+ * Excalidraw that adds the CDN some other way fails the build here.
+ */
+const noFontCdn = {
+  name: "excalidraw-no-font-cdn",
+  transform(code: string, id: string) {
+    if (!id.includes("@excalidraw/excalidraw") || !code.includes("ASSETS_FALLBACK_URL")) return null;
+    if (!FONT_FALLBACK.test(code)) throw new Error(`Excalidraw adds a font CDN in a way vite.config.ts doesn't know, in ${id}`);
+    return { code: code.replace(FONT_FALLBACK, "void 0"), map: null };
+  },
+};
+
+/**
+ * Excalidraw's fonts, served from the app's own address at a path named for its version, which the
+ * drawing editor tells Excalidraw as `import.meta.env.EXCALIDRAW_ASSETS`: a build writes them among
+ * its assets, and the dev server answers them from node_modules.
+ */
+const excalidrawFonts = (): Plugin => {
+  const base = `/assets/excalidraw-${excalidrawVersion()}/`;
+  const fonts = (readdirSync(EXCALIDRAW_FONTS, { recursive: true }) as string[]).filter((path) => extname(path) === ".woff2");
+  return {
+    name: "excalidraw-fonts",
+    config: () => ({ define: { "import.meta.env.EXCALIDRAW_ASSETS": JSON.stringify(base) }, optimizeDeps: { rolldownOptions: { plugins: [noFontCdn] } } }),
+    transform: noFontCdn.transform,
+    configureServer(server) {
+      server.middlewares.use(`${base}fonts/`, (req, res, next) => {
+        const path = (req.url ?? "").split("?")[0]!.replace(/^\//, "");
+        if (!fonts.includes(path)) return next();
+        res.setHeader("Content-Type", "font/woff2");
+        res.end(readFileSync(join(EXCALIDRAW_FONTS, path)));
+      });
+    },
+    generateBundle() {
+      for (const path of fonts) this.emitFile({ type: "asset", fileName: `${base.slice(1)}fonts/${path}`, source: readFileSync(join(EXCALIDRAW_FONTS, path)) });
+    },
+  };
+};
+
 // Builds only the web app; wrangler bundles the Worker, so one wrangler.jsonc serves dev, deploys, and Previews.
 export default defineConfig(({ command }) => ({
-  plugins: [react(), clipperDownload, command === "serve" && cloudflare({ persistState: { path: process.env.INK_STATE ?? ".wrangler/state" }, config: { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } } })],
+  plugins: [react(), clipperDownload, excalidrawFonts(), command === "serve" && cloudflare({ persistState: { path: process.env.INK_STATE ?? ".wrangler/state" }, config: { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } } })],
   build: { outDir: "dist", emptyOutDir: true },
 }));

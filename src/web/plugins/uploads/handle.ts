@@ -1,4 +1,4 @@
-import { SIZE_SHARE, SIZE_WORDS, shareIn, withShare, type BelowEmbedded, type SizeWord } from "../../plugin-api.ts";
+import { SIZE_SHARE, SIZE_WORDS, shareIn, withShare, type BelowEmbedded, type SizeWord, type UploadEmbed } from "../../plugin-api.ts";
 import { boxFor, dragged, LEAST, reachOf, stepped } from "./sizing.ts";
 
 const SAID: Record<SizeWord, string> = { small: "Small", medium: "Medium", large: "Large", full: "Full width" };
@@ -10,7 +10,7 @@ const saidOf = (share: number) => {
 };
 
 /**
- * The one control that sets how wide a picture or a video is drawn: a bar on its right edge, seen on
+ * The one control that sets how wide a picture, a video or a drawing is drawn: a bar on its right edge, seen on
  * hover or focus. Dragged, it shows the width it will be drawn at, any width from a tenth of the
  * column to its widest, keeping its shape, and writes it on release. Near a size word's width it
  * snaps to it, unless Shift is held. From the keyboard the arrow keys step it by a twentieth of the
@@ -19,7 +19,7 @@ const saidOf = (share: number) => {
  * the member. `now` is what the note says of the embed now. `said` tells the handle the note says
  * another width now.
  */
-export function sizeHandle(into: HTMLElement, name: string, now: () => BelowEmbedded, embed: "image" | "video"): { handle: HTMLElement; said(): void } {
+export function sizeHandle(into: HTMLElement, name: string, now: () => BelowEmbedded, embed: Exclude<UploadEmbed, "file" | "audio">): { handle: HTMLElement; said(): void } {
   const handle = document.createElement("div");
   handle.className = "upload-size";
   handle.tabIndex = 0;

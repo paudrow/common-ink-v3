@@ -222,6 +222,29 @@ test("a PDF is drawn by pdf.js under the page's policy, in a note and over the a
   expect(await watch.refused()).toEqual([]);
 });
 
+test("a drawing is edited in Excalidraw and saved under the page's policy, Excalidraw and its fonts from the app's own address", async ({ page, baseURL }) => {
+  const watch = await watchRefusals(page);
+  const loaded: string[] = [];
+  page.on("request", (request) => loaded.push(request.url()));
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\n::drawing{}\n\nThe end." });
+  await page.goto(`/note/${note.id}`);
+  await page.getByRole("button", { name: "Edit drawing" }).click();
+  const editor = page.getByRole("dialog", { name: "Edit Drawing" });
+  await editor.getByTitle(/^Text /).click();
+  const canvas = (await editor.locator("canvas.interactive").boundingBox())!;
+  await page.mouse.click(canvas.x + 400, canvas.y + 250);
+  await page.keyboard.type("Hello 你好");
+  await page.keyboard.press("Escape");
+  await editor.getByRole("button", { name: "Save" }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.locator('.embed-below[data-embed="drawing"] img')).toHaveAttribute("src", /^data:image\/png;base64,/);
+  expect(loaded.some((url) => /\/fonts\/Excalifont\//.test(url)), "the words' font was loaded").toBe(true);
+  expect(loaded.some((url) => /\/fonts\/Xiaolai\//.test(url)), "and the font of the words in Chinese").toBe(true);
+  expect(loaded.filter((url) => !url.startsWith(baseURL!) && !url.startsWith("data:")), "from the app's own address").toEqual([]);
+  expect(await watch.refused()).toEqual([]);
+});
+
 test("an upload's bytes keep their own sealed policy under the page's, in place or as a download, and a refusal is no page either", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const sealed = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'";

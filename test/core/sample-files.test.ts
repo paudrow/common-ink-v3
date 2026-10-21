@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fileClass, imageSize, kindOf, typeOf } from "../../src/core/filetypes.ts";
 import { namedUploads, sampleFile, sampleSize } from "../../scripts/sample-files.ts";
+import { previewIn, sceneIn } from "../../src/web/plugins/uploads/scenes.ts";
 
 describe("the sample files a Try note names", () => {
   it("are what their names say, to the same code that types an upload", async () => {
@@ -31,6 +32,14 @@ describe("the sample files a Try note names", () => {
     ]);
     expect(await text("sample.txt")).toMatch(/^A plain text file/);
     expect(await text("sample.md")).toMatch(/^# A markdown file\n/);
+  });
+
+  it("hold a drawing as an agent writes one: an Excalidraw scene with no picture, which the note draws from its elements", async () => {
+    const scene = sceneIn(new TextDecoder().decode((await sampleFile("sample.excalidraw"))!))!;
+    expect(scene.elements.map((element) => (element as { type: string }).type)).toEqual(["rectangle", "text", "arrow", "ellipse", "text"]);
+    expect(previewIn(scene)).toBeNull();
+    expect(sampleSize("sample.excalidraw")).toEqual({ width: 512, height: 112 });
+    expect(namedUploads("::drawing{sample.excalidraw 60%}").map(({ embed, name, words }) => [embed, name, words])).toEqual([["drawing", "sample.excalidraw", "60%"]]);
   });
 
   it("are named by an embed whose config is a file's name, and not by one that holds an id or sits in code", () => {

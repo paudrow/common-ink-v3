@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cropIn, shareIn, sizeIn, uploadIds, withCrop, withShare, writtenUpload } from "../../src/core/uploadRefs.ts";
+import { cropIn, shareIn, sizeIn, uploadIds, withCrop, withShare, withUpload, writtenUpload } from "../../src/core/uploadRefs.ts";
 
 const ID = "abcdefgh1234";
 
@@ -121,5 +121,23 @@ describe("an embed drawing another part of its picture", () => {
     expect(cropIn(resized)).toEqual({ x: 120, y: 40, width: 800, height: 600 });
     expect(shareIn(withCrop(resized, { x: 0, y: 0, width: 600, height: 600 }))).toBe(0.6);
     expect(uploadIds(`::image{${resized}}`)).toEqual([ID]);
+  });
+});
+
+describe("a drawing's embed", () => {
+  it("refers to its upload as a picture's does, and an empty one to none", () => {
+    expect(uploadIds(`# Plan\n\n::drawing{${ID} 820x460 medium}\n\n::drawing{}\n`)).toEqual([ID]);
+  });
+
+  it("names a new upload and its room in place of the one it named, keeping its width and every other word", () => {
+    expect(withUpload(`${ID} 820x460 medium note=kept`, "zyxwvuts9876", { width: 640.4, height: 360.6 })).toBe("zyxwvuts9876 640x361 medium note=kept");
+    expect(withUpload(`${ID} 42%`, "zyxwvuts9876", { width: 300, height: 200 })).toBe("zyxwvuts9876 300x200 42%");
+    expect(withUpload(`${ID} medium`, "zyxwvuts9876", { width: 300, height: 200 })).toBe("zyxwvuts9876 300x200 medium");
+  });
+
+  it("names an upload in an empty one", () => {
+    expect(withUpload("", ID, { width: 300, height: 200 })).toBe(`${ID} 300x200`);
+    expect(withUpload("small", ID, { width: 300, height: 200 })).toBe(`${ID} 300x200 small`);
+    expect(withUpload("820x460 medium", ID, { width: 300, height: 200 })).toBe(`${ID} 300x200 medium`);
   });
 });

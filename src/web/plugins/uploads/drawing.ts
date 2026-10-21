@@ -1,14 +1,19 @@
-import { cropIn, sizeIn, uploadIn, withCrop, type BelowDrawn, type BelowEmbedded, type Dispose, type Embed, type PluginHost, type ReferredTo, type Upload, type UploadEmbed } from "../../plugin-api.ts";
+import { cropIn, sizeIn, themeNow, uploadIn, withCrop, withUpload, type BelowDrawn, type BelowEmbedded, type Dispose, type Embed, type PluginHost, type ReferredTo, type Upload, type UploadEmbed } from "../../plugin-api.ts";
 import { cropPicture } from "./cropper.ts";
 import { placed } from "./cropping.ts";
+import { reasonOf } from "../lib/FoundNote.tsx";
+import { sketch } from "../lib/sketch.ts";
+import { excalidraw, imageOf, sceneOf } from "./drawings.ts";
 import { sizeHandle } from "./handle.ts";
 import { filePath, openingOf, openUpload, previewUpload } from "./opening.ts";
 import { previewOf } from "./previewing.ts";
 import { drawPreview } from "./previews.ts";
-import { boxFor, cardHeight, formatBytes, KIND_LABEL } from "./sizing.ts";
+import { SCENE_BYTES, SCENE_NAME, withPreview, type Scene } from "./scenes.ts";
+import { boxFor, cardHeight, EMPTY_DRAWING, formatBytes, KIND_LABEL } from "./sizing.ts";
 
 export const UNAVAILABLE = "This file isn't available";
 export const IN_TRASH = "This file is in Trash";
+export const UNREADABLE = "This drawing can't be read";
 
 /** What a note that refers to an upload is told of it, out of all there is to say of one. */
 export const toldOf = ({ name, type, kind, size, width, height, state }: Upload): NonNullable<ReferredTo> => ({ name, type, kind, size, width, height, state });
@@ -66,12 +71,16 @@ function paperclip() {
   return svg;
 }
 
-function cropIcon() {
+/** The icon of a button on a picture: a path drawn in its colour on a square 16 pixels across. */
+function buttonIcon(path: string) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   for (const [name, value] of Object.entries({ viewBox: "0 0 16 16", width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(name, value);
-  svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path")).setAttribute("d", "M4.5 1.5v10h10M1.5 4.5h10v10");
+  svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path")).setAttribute("d", path);
   return svg;
 }
+
+const CROP_ICON = "M4.5 1.5v10h10M1.5 4.5h10v10";
+const PENCIL_ICON = "M10.5 2.5l3 3-8 8H2.5v-3zM9 4l3 3";
 
 /** Draws a picture so that what its embed crops of it fills its room, or all of it where it crops nothing. */
 function framed(img: HTMLImageElement, config: string) {
@@ -81,7 +90,12 @@ function framed(img: HTMLImageElement, config: string) {
   Object.assign(img.style, crop && size ? placed(crop, size) : { left: "", top: "", width: "", height: "" });
 }
 
-const TITLE: Record<UploadEmbed, string> = KIND_LABEL;
+/** A drawing, as the insert menu pictures it: a box and a circle drawn by hand, and an arrow from one to the other. */
+const DRAWING_PICTURE = sketch(
+  `<g fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M34 22 C60 19 78 21 90 23 C92 38 91 52 89 62 C66 64 48 63 33 61 C31 47 32 34 34 22 Z"/><path d="M150 18 C168 18 178 30 177 42 C176 56 163 66 149 65 C134 64 123 53 124 41 C125 28 136 18 150 18 Z"/><path d="M93 42 C104 40 112 41 120 42 M112 35 L121 42 L112 49"/></g>`,
+);
+
+const TITLE: Record<UploadEmbed, string> = { ...KIND_LABEL, drawing: "Drawing" };
 
 /** What a picture, a video or a recording says of itself on hover: its name, then its kind, its size if it has one, and how much it holds. */
 const detailsOf = ({ name, kind, width, height, size }: NonNullable<ReferredTo>) => `${name}\n${[KIND_LABEL[kind], width && height ? `${width} × ${height}` : null, formatBytes(size)].filter(Boolean).join(" · ")}`;
@@ -179,6 +193,14 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
     if (info === undefined) return [];
     if (info === null) return [missing(UNAVAILABLE)];
     if (info.state === "trashed") return [missing(IN_TRASH, info.name)];
+    // A drawing's upload is a scene, whatever its name says it is, and its picture is drawn once the scene is read.
+    if (embed === "drawing") {
+      const picture = el("div", "upload-picture");
+      const img = picture.appendChild(el("img", "upload-image upload-drawing"));
+      img.title = detailsOf(info);
+      img.draggable = false;
+      return [picture];
+    }
     // Written as one kind and uploaded as another: it is offered as the file it is.
     if (info.kind !== embed) {
       const box = el("div", "upload-missing");
@@ -216,7 +238,7 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
     button.type = "button";
     button.title = "Crop";
     button.setAttribute("aria-label", `Crop ${name}`);
-    button.append(cropIcon());
+    button.append(buttonIcon(CROP_ICON));
     button.addEventListener("click", () => {
       const size = sizeIn(now().config);
       if (!size) return;
@@ -237,29 +259,115 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
   };
 
   /**
-   * A picture, a video or a recording, drawn below its line, with a handle to size a picture or a
-   * video for a member who can change the note, and a button to crop a picture. A video is not cropped.
+   * Keeps a drawing as a new upload, in the note's folder and private where the note is, and puts it
+   * in the embed in place of the one it was, so undo in the note brings back the drawing before.
+   * Null once the embed names it, or words that say why it doesn't.
+   */
+  const keep = async (now: () => BelowEmbedded, json: string, picture: { image: string; width: number; height: number }): Promise<string | null> => {
+    if (now().readOnly) return "You can read this note, and not change it.";
+    const note = host.app().notes?.find((n) => n.id === now().noteId);
+    let upload: Upload;
+    try {
+      const file = new Blob([withPreview(json, picture.image)], { type: "application/json" });
+      upload = await host.uploads.send(file, { name: SCENE_NAME, folderId: note?.folderId ?? undefined, private: note?.private || undefined });
+    } catch (err) {
+      return `The drawing wasn't saved. ${reasonOf(err)}`;
+    }
+    host.uploads.learn([{ id: upload.id, upload: toldOf(upload) }]);
+    const { config, update } = now();
+    update({ config: withUpload(config, upload.id, picture) });
+    return uploadIn(now().config) === upload.id ? null : "The note changed while the drawing was saved. Save again to put it in the note.";
+  };
+
+  /**
+   * Has `button` open a drawing in Excalidraw, with what `scene` reads, null for one not drawn yet,
+   * and keep what is saved there. `closing` is given what closes the editor open from it.
+   */
+  const editing = (button: HTMLButtonElement, scene: () => Promise<Scene | null>, now: () => BelowEmbedded, closing: (close: Dispose) => void) => {
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      Promise.all([scene(), excalidraw()]).then(
+        ([was, { editScene }]) => {
+          button.disabled = false;
+          // A drawing drawn again or gone while Excalidraw loaded is no longer the one asked for.
+          if (!button.isConnected) return;
+          closing(editScene({ name: TITLE.drawing, scene: was, theme: themeNow(), back: button, save: (json, picture) => keep(now, json, picture) }));
+        },
+        (err: unknown) => {
+          button.disabled = false;
+          host.app().notify({ message: `The drawing couldn't be opened. ${reasonOf(err)}` });
+        },
+      );
+    });
+    return button;
+  };
+
+  const editButton = () => {
+    const button = el("button", "upload-edit");
+    button.type = "button";
+    button.title = "Edit drawing";
+    button.setAttribute("aria-label", "Edit drawing");
+    button.append(buttonIcon(PENCIL_ICON));
+    return button;
+  };
+
+  /** In the room of a drawing not drawn yet: words that say so, and a button to draw it for a member who can change the note. */
+  const emptyDrawing = (now: () => BelowEmbedded, closing: (close: Dispose) => void) => {
+    const box = el("div", "upload-drawing-empty");
+    if (now().readOnly) box.append(el("span", "upload-missing-words", "An empty drawing"));
+    else box.append(editing(el("button", "button", "Edit drawing"), () => Promise.resolve(null), now, closing));
+    return box;
+  };
+
+  /** Draws a drawing's picture in `picture` once its scene is read, or says in its room, in place of it and its controls, that it can't be read. */
+  const drawScene = (scene: Promise<Scene>, picture: HTMLElement): Dispose => {
+    const img = picture.querySelector("img")!;
+    let stopped = false;
+    scene.then(imageOf).then(
+      (image) => {
+        if (stopped) return;
+        img.alt = TITLE.drawing;
+        img.src = image;
+      },
+      () => void (stopped || picture.parentElement?.replaceChildren(missing(UNREADABLE))),
+    );
+    return () => void (stopped = true);
+  };
+
+  /**
+   * A picture, a video, a recording or a drawing, drawn below its line, with a handle to size a
+   * picture, a video or a drawing for a member who can change the note, a button to crop a picture,
+   * and a button to edit a drawing. A video is not cropped.
    */
   function below(embed: Exclude<UploadEmbed, "file">, into: HTMLElement, first: BelowEmbedded): BelowDrawn {
     let now = first;
     let retell = () => {};
     let stop: Dispose | undefined;
-    let uncrop: Dispose = () => {};
+    let closeDialog: Dispose = () => {};
+    let unpicture: Dispose = () => {};
     const frame = () => {
       const img = into.querySelector<HTMLImageElement>(".upload-image");
       if (img) framed(img, now.config);
     };
     const start = () => {
       const id = uploadIn(now.config);
-      if (!id) return;
+      if (!id) {
+        if (embed === "drawing") into.replaceChildren(emptyDrawing(() => now, (close) => (closeDialog = close)));
+        return;
+      }
       stop = live(id, (info, going) => {
+        unpicture();
+        unpicture = () => {};
         if (going) return void into.replaceChildren(onItsWay(going));
         const nodes = media(embed, id, info);
-        if (embed !== "audio" && !now.readOnly && info && info.state !== "trashed" && info.kind === embed) {
+        const scene = embed === "drawing" && info && info.state !== "trashed" ? (info.size <= SCENE_BYTES ? sceneOf(host, id) : Promise.reject(new Error(UNREADABLE))) : null;
+        if (scene) unpicture = drawScene(scene, nodes[0] as HTMLElement);
+        if (embed !== "audio" && !now.readOnly && info && info.state !== "trashed" && (info.kind === embed || scene)) {
           const sized = sizeHandle(into, info.name, () => now, embed);
           retell = sized.said;
           nodes.push(sized.handle);
-          if (embed === "image" && sizeIn(now.config)) nodes.push(cropButton(id, info.name, () => now, (close) => (uncrop = close)));
+          if (embed === "image" && sizeIn(now.config)) nodes.push(cropButton(id, info.name, () => now, (close) => (closeDialog = close)));
+          if (scene) nodes.push(editing(editButton(), () => scene, () => now, (close) => (closeDialog = close)));
         }
         into.replaceChildren(...nodes);
         frame();
@@ -275,13 +383,15 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
           frame();
           return retell();
         }
-        uncrop();
+        closeDialog();
+        unpicture();
         stop?.();
         into.replaceChildren();
         start();
       },
       stop: () => {
-        uncrop();
+        closeDialog();
+        unpicture();
         stop?.();
       },
     };
@@ -297,6 +407,17 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
       render: (into, handed) => below(embed, into, handed),
     },
   });
+
+  /** A drawing is written empty by a menu, where a file can be sent, among the ways into an upload, and drawn from there. */
+  const drawing: Embed = {
+    ...shown("drawing"),
+    menu: !!pick,
+    pick: pick && { title: TITLE.drawing, description: "Shapes, arrows and words drawn by hand in Excalidraw", preview: { image: DRAWING_PICTURE }, insert: () => Promise.resolve("::drawing{}") },
+    below: {
+      box: ({ config }) => (uploadIn(config) ? boxFor("drawing", config) : { height: EMPTY_DRAWING }),
+      render: (into, handed) => below("drawing", into, handed),
+    },
+  };
 
   /**
    * A file on a line of its own: a card below the line, with a head of its name, what it is and
@@ -402,5 +523,5 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
     },
   };
 
-  return { embeds: [shown("image"), shown("video"), shown("audio"), file], stop };
+  return { embeds: [shown("image"), shown("video"), shown("audio"), drawing, file], stop };
 }
