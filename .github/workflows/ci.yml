@@ -129,7 +129,7 @@ jobs:
           if [ -n "$id" ]; then gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" > /dev/null
           else gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" > /dev/null; fi
 
-  # The browser tests run in Chromium in six parts at once. Each part builds the app and runs its own Worker on its
+  # The browser tests run in Chromium in nine parts at once. Each part builds the app and runs its own Worker on its
   # runner, with a local D1 and R2 (scripts/built-worker.ts), so no part waits on a server the others
   # load. They don't use the Preview, which is for people to look at. They start beside the build and the unit tests
   # rather than after them, as nothing they run is made there, and run three browsers at once: with four, the one Worker each part runs
@@ -140,8 +140,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    name: browser (${{ matrix.shard }}/6)
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    name: browser (${{ matrix.shard }}/9)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -169,7 +169,7 @@ jobs:
             sleep 2
           done
           cat worker.log; echo "::error::The built Worker didn't answer"; exit 1
-      - run: npx playwright test --project=chromium --shard=${{ matrix.shard }}/6 --workers=3
+      - run: npx playwright test --project=chromium --shard=${{ matrix.shard }}/9 --workers=3
         env:
           BASE_URL: http://localhost:8787
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
