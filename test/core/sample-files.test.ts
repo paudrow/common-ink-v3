@@ -40,8 +40,8 @@ describe("the sample files a Try note names", () => {
     expect(named.map(({ from, to }) => text.slice(from, to))).toEqual(["::image{sample.png}", "::file{sample.pdf}"]);
   });
 
-  it("keep a size word written after the name", () => {
-    const text = "::image{sample.png medium}\n\n::image{sample.png huge}";
-    expect(namedUploads(text).map(({ name, word }) => [name, word])).toEqual([["sample.png", "medium"]]);
+  it("keep the size word or percent written after the name", () => {
+    const text = "::image{sample.png medium}\n\n::image{sample.png 42%}\n\n::video{sample.webm  small}\n\n::image{sample.png huge}\n\n::image{sample.png 42}";
+    expect(namedUploads(text).map(({ name, words }) => [name, words])).toEqual([["sample.png", "medium"], ["sample.png", "42%"], ["sample.webm", "small"]]);
   });
 });

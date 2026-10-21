@@ -203,13 +203,13 @@ test("nothing moves while a picture arrives: its room is its whole width and sha
 });
 
 for (const width of [1280, 700]) {
-  test(`at ${width} wide a picture is the column's width, or its own when that is narrower, at its own shape, and each size word is its share of the column`, async ({ page }) => {
+  test(`at ${width} wide a picture is the column's width, or its own when that is narrower, at its own shape, and each size word and percent is its share of the column`, async ({ page }) => {
     await signInAsNewPerson(page, "Ada Lovelace");
     const wide = await send(page, "wide.png", png(1200, 800));
     const narrow = await send(page, "narrow.png", png(300, 200));
     // Tall enough that every picture is on screen, and so drawn.
     await page.setViewportSize({ width, height: 4200 });
-    const words = ["", " huge", " small", " medium", " large", " full"];
+    const words = ["", " huge", " small", " medium", " large", " full", " 42%"];
     const text = words.map((w) => `::image{${wide.id} 1200x800${w}}`).concat([`::image{${narrow.id} 300x200}`, `::image{${narrow.id} 300x200 large}`]);
     await open(page, `# Sizes\n\nwords\n\n${text.join("\n\n")}\n\nend\n`, "end");
     await settled(page);
@@ -217,7 +217,7 @@ for (const width of [1280, 700]) {
     // A column at 1280 is wider than at 700, and narrower than the picture.
     expect(column.width).toBeGreaterThan(width === 1280 ? 600 : 300);
     expect(column.width).toBeLessThan(1200);
-    const expected = [1, 1, 1 / 3, 1 / 2, 3 / 4, 1].map((share) => column.width * share).concat([Math.min(300, column.width), Math.min(300, (column.width * 3) / 4)]);
+    const expected = [1, 1, 1 / 3, 1 / 2, 3 / 4, 1, 0.42].map((share) => column.width * share).concat([Math.min(300, column.width), Math.min(300, (column.width * 3) / 4)]);
     const ratios = [...words.map(() => 800 / 1200), 200 / 300, 200 / 300];
     await expect(pictures(page)).toHaveCount(expected.length);
     const boxes = (await below(page, "image").evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ left: r.left, top: r.top, width: r.width, height: r.height })))).sort((a, b) => a.top - b.top);
@@ -230,7 +230,7 @@ for (const width of [1280, 700]) {
   });
 }
 
-test("the size handle is seen on hover or focus, snaps a drag to small, medium, large or full, steps with the keys, writes the word as the member's change that undo takes back, and moves only what is under the picture", async ({ page }) => {
+test("the size handle is seen on hover or focus, steps with the keys, drags to any width at the picture's shape, snaps near a size word unless Shift is held, writes it as the member's change that undo takes back, and moves only what is under the picture", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const photo = await send(page, "harbour.png", png(1200, 800));
   await page.setViewportSize({ width: 1280, height: 1400 });
@@ -269,42 +269,64 @@ test("the size handle is seen on hover or focus, snaps a drag to small, medium, 
   await expect.poll(shown).toBe("1");
   await expect(handle).toHaveAttribute("aria-valuetext", "Full width");
   await page.keyboard.press("ArrowLeft");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" large"));
-  await expect(handle).toHaveAttribute("aria-valuetext", "Large");
-  await expect.poll(() => near(3 / 4), "only the picture and what is under it moved").toBe(true);
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 95%"));
+  await expect(handle).toHaveAttribute("aria-valuetext", "95% of the column");
+  await expect(handle).toHaveAttribute("aria-valuenow", "95");
+  await expect.poll(() => near(0.95), "only the picture and what is under it moved").toBe(true);
   await expect(handle).toBeFocused();
-  await page.keyboard.press("ArrowLeft");
-  await page.keyboard.press("ArrowLeft");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" small"));
-  await page.keyboard.press("ArrowDown");
-  await expect.poll(() => near(1 / 3)).toBe(true);
-  await expect(handle).toHaveAttribute("aria-valuetext", "Small");
+  await page.keyboard.press("Home");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 10%"));
+  await expect.poll(() => near(0.1)).toBe(true);
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 15%"));
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 16%"));
+  await expect(handle).toHaveAttribute("aria-valuetext", "16% of the column");
   await page.keyboard.press("End");
   await expect.poll(() => noteText(page, note.id)).toBe(text());
   await expect.poll(() => near(1)).toBe(true);
-  await page.keyboard.press("Home");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" small"));
-  await page.keyboard.press("ArrowUp");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
   // Presses come faster than the note redraws, as a key held down: each one is a step.
   const twice = (key: string) => handle.evaluate((el, key) => [0, 1].forEach(() => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))), key);
+  await twice("ArrowLeft");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 90%"));
   await twice("ArrowRight");
   await expect.poll(() => noteText(page, note.id)).toBe(text());
-  await twice("ArrowLeft");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
   expect(await pictures(page).evaluate((img) => (img as HTMLImageElement & { marked?: boolean }).marked), "the same picture, never drawn again").toBe(true);
 
-  // A drag shows where it will snap, and writes that on release.
-  const bar = (await handle.boundingBox())!;
-  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(column.left + column.width * 0.8, bar.y + bar.height / 2, { steps: 4 });
+  /** Drags the handle to `share` of the column from the picture's left edge, and lets go unless told not to. */
+  const drag = async (share: number, { release = true } = {}) => {
+    const bar = (await handle.boundingBox())!;
+    await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(column.left + column.width * share, bar.y + bar.height / 2, { steps: 4 });
+    if (release) await page.mouse.up();
+  };
   const ghost = page.locator(".upload-size-ghost");
-  await expect.poll(async () => Math.round((await ghost.boundingBox())!.width)).toBe(Math.round((column.width * 3) / 4));
-  expect(await noteText(page, note.id)).toBe(text(" medium"));
-  await page.mouse.move(column.left + column.width * 0.95, bar.y + bar.height / 2, { steps: 2 });
+
+  // A drag shows the width it will draw, any width at the picture's shape, and writes it on release.
+  await drag(0.8, { release: false });
+  await expect.poll(async () => Math.round((await ghost.boundingBox())!.width)).toBe(Math.round(column.width * 0.8));
+  expect(Math.abs((await ghost.boundingBox())!.height - (column.width * 0.8 * 800) / 1200)).toBeLessThan(1);
+  expect(await noteText(page, note.id)).toBe(text());
+  await page.mouse.move(column.left + column.width * 0.62, (await handle.boundingBox())!.y + 10, { steps: 2 });
   await page.mouse.up();
   await expect(ghost).toHaveCount(0);
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 62%"));
+  await expect.poll(() => near(0.62)).toBe(true);
+  const drawn = (await pictures(page).boundingBox())!;
+  expect(Math.abs(drawn.width - column.width * 0.62), "as wide as it was dragged").toBeLessThan(1);
+  expect(Math.abs(drawn.width / drawn.height - 1200 / 800), "at its own shape").toBeLessThan(0.01);
+  await expect(handle).toHaveAttribute("aria-valuetext", "62% of the column");
+
+  // Near a size word's width it is that word, and with Shift held it is where it was let go.
+  await drag(0.507);
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
+  await expect(handle).toHaveAttribute("aria-valuetext", "Medium");
+  await page.keyboard.down("Shift");
+  await drag(0.507);
+  await page.keyboard.up("Shift");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 51%"));
+  await drag(0.99);
   await expect.poll(() => noteText(page, note.id)).toBe(text());
   await expect.poll(() => near(1)).toBe(true);
 
@@ -325,8 +347,45 @@ test("the size handle is seen on hover or focus, snaps a drag to small, medium, 
   expect(new Set((await perform(page, { type: "note.history", id: note.id })).map((c) => `${c.author.kind} ${c.author.name}`))).toEqual(new Set(["member Ada Lovelace"]));
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 51%"));
+  await expect.poll(() => near(0.51)).toBe(true);
+  await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
-  await expect.poll(() => near(1 / 2)).toBe(true);
+});
+
+test("a picture dragged to any width keeps its share of the column and its shape after a reload, in a narrower window and on a phone", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const photo = await send(page, "harbour.png", png(1200, 800));
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  const text = (word = "") => `# Sizes\n\nbefore it\n\n::image{${photo.id} 1200x800${word}}\n\nafter it\n`;
+  const note = await open(page, text(), "after it");
+  await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
+  await settled(page);
+  const column = await columnOf(page, 3);
+  const bar = (await sizeOf(page, "harbour.png").boundingBox())!;
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(column.left + column.width * 0.42, bar.y + bar.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 42%"));
+  await expect(page.getByRole("status")).toHaveText("Saved");
+
+  /** The picture's width as a share of the column, and its width over its height. */
+  const drawn = async () => {
+    await settled(page);
+    const box = (await pictures(page).boundingBox())!;
+    const { width } = await columnOf(page, 3);
+    return { share: Math.round((box.width / width) * 1000) / 1000, ratio: Math.round((box.width / box.height) * 1000) / 1000 };
+  };
+  expect(await drawn()).toEqual({ share: 0.42, ratio: 1.5 });
+  await page.reload();
+  await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
+  expect(await drawn(), "after a reload").toEqual({ share: 0.42, ratio: 1.5 });
+  for (const width of [700, 390]) {
+    await page.setViewportSize({ width, height: 1400 });
+    await expect.poll(async () => (await columnOf(page, 3)).width).toBeLessThan(column.width);
+    await expect.poll(drawn, `at ${width} wide`).toEqual({ share: 0.42, ratio: 1.5 });
+  }
 });
 
 test("a member who can't change the note sees the picture and the video with no size handle", async ({ page }) => {
@@ -391,7 +450,9 @@ test("a video plays in the note from its first frame, and typing elsewhere, the 
 
   await sizeOf(page, "box.webm").focus();
   await page.keyboard.press("Home");
-  await expect.poll(() => noteText(page, note.id)).toContain(embed(" small"));
-  await expect.poll(async () => Math.round((await boxOf(page, "video")).width)).toBe(Math.round((await columnOf(page, 3)).width / 3));
+  await expect.poll(() => noteText(page, note.id)).toContain(embed(" 10%"));
+  await expect.poll(async () => Math.round((await boxOf(page, "video")).width)).toBe(Math.round((await columnOf(page, 3)).width / 10));
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => noteText(page, note.id)).toContain(embed(" 15%"));
   await goesOn("at another size");
 });

@@ -131,19 +131,20 @@ export const sampleFile = async (name: string): Promise<Bytes | null> => (await 
 /** How wide and tall a sample video is, which the server doesn't read from its bytes: a note keeps that much room for it. */
 export const sampleSize = (name: string): { width: number; height: number } | null => (name.toLowerCase() === "sample.webm" ? { width: 320, height: 180 } : null);
 
-const NAMED = new RegExp(`(?<!:)::(${UPLOAD_EMBEDS.join("|")})\\{([^{}\\n]*?\\.[A-Za-z0-9]+)(?:[ \\t]+(small|medium|large))?\\}`, "g");
+const WORD = String.raw`(?:small|medium|large|\d{1,3}%)`;
+const NAMED = new RegExp(`(?<!:)::(${UPLOAD_EMBEDS.join("|")})\\{([^{}\\n]*?\\.[A-Za-z0-9]+)((?:[ \\t]+${WORD})*)\\}`, "g");
 
 /**
  * Where a text names a file by its name and holds no upload's id, as `::image{sample.png}` does,
- * outside code, with the size word after it if it has one (`::image{sample.png medium}`). An id has no
+ * outside code, with the words after it that size it, if it has any (`::image{sample.png medium}`, `::image{sample.png 42%}`). An id has no
  * dot in it, so a name with an ending is never taken for one.
  */
-export function namedUploads(text: string): { embed: UploadEmbed; name: string; word?: string; from: number; to: number }[] {
+export function namedUploads(text: string): { embed: UploadEmbed; name: string; words?: string; from: number; to: number }[] {
   const named = [];
   for (const { line, from } of linesOutsideCode(text)) {
     for (const found of line.matchAll(NAMED)) {
       const inCode = (line.slice(0, found.index).match(/`/g) ?? []).length % 2 === 1;
-      if (!inCode) named.push({ embed: found[1] as UploadEmbed, name: found[2]!.trim(), ...(found[3] ? { word: found[3] } : {}), from: from + found.index, to: from + found.index + found[0].length });
+      if (!inCode) named.push({ embed: found[1] as UploadEmbed, name: found[2]!.trim(), ...(found[3]?.trim() ? { words: found[3].trim().split(/[ \t]+/).join(" ") } : {}), from: from + found.index, to: from + found.index + found[0].length });
     }
   }
   return named;

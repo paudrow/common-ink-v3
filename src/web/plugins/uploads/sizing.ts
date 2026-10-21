@@ -1,4 +1,4 @@
-import { sizeIn, sizeWordIn, SIZE_WORDS, type BelowBox, type SizeWord, type UploadEmbed, type UploadKind } from "../../plugin-api.ts";
+import { SIZE_SHARE, shareIn, sizeIn, type BelowBox, type UploadEmbed, type UploadKind } from "../../plugin-api.ts";
 import { SHOWS, type Preview } from "./previewing.ts";
 
 /** The room kept for a picture or a video whose embed gives no size. */
@@ -10,9 +10,6 @@ export const AUDIO_HEIGHT = 56;
 /** The size a video's embed is written with when the browser couldn't read the video's own. */
 export const DEFAULT_VIDEO = { width: 640, height: 360 };
 
-/** How much of the note's column each size word draws a picture or a video across. */
-export const SHARE: Record<SizeWord, number> = { small: 1 / 3, medium: 1 / 2, large: 3 / 4, full: 1 };
-
 /**
  * The room an embed of an upload keeps below its line, from what the note writes alone: its share
  * of the note's column, at the shape of the size after the id, and never wider than that size. Null
@@ -23,36 +20,61 @@ export function boxFor(embed: UploadEmbed, config: string): BelowBox | null {
   if (embed === "audio") return { height: AUDIO_HEIGHT };
   const size = sizeIn(config);
   const box = size ? { ratio: size.width / size.height, maxWidth: size.width } : UNSIZED;
-  const share = SHARE[sizeWordIn(config)];
+  const share = shareIn(config);
   return share === 1 ? box : { ...box, share };
 }
 
-export interface Width {
-  word: SizeWord;
-  width: number;
+/** The narrowest share of the column the size handle draws a picture or a video at, unless it is narrower itself. */
+export const LEAST = 0.1;
+
+/** How near, in pixels, a drag comes to a size word's width before it is that width. */
+export const SNAP = 12;
+
+/**
+ * How far a picture or a video can be sized: the note's column in pixels, and the share of it the
+ * picture is at its widest, which is the whole column or its own width where that is narrower.
+ */
+export interface Reach {
+  column: number;
+  most: number;
+}
+
+export const reachOf = (column: number, own: number): Reach => ({ column, most: Math.min(1, own / column) });
+
+/**
+ * The share of the column a drag to `x` pixels from the picture's left edge draws it at, between the
+ * least and its widest. Within {@link SNAP} pixels of a size word's width it is that width, unless
+ * `free`. At its widest it is the whole column, which draws it as wide.
+ */
+export function dragged({ column, most }: Reach, x: number, free: boolean): number {
+  const widest = most * column;
+  let width = Math.min(widest, Math.max(LEAST * column, x));
+  if (!free) {
+    const words = Object.values(SIZE_SHARE).map((share) => Math.min(widest, share * column));
+    const near = words.reduce((best, w) => (Math.abs(w - width) < Math.abs(best - width) ? w : best));
+    if (Math.abs(near - width) <= SNAP) width = near;
+  }
+  return width >= widest - 0.5 ? 1 : width / column;
 }
 
 /**
- * The widths a picture `most` pixels wide can be drawn at in a column `column` wide, narrowest first,
- * each by the word that draws it. Where two words draw it as wide, it is the wider word's.
+ * The share one step wider or narrower than `share`, by a twentieth of the column, or a hundredth
+ * when `fine`, stopping at a third and at the picture's widest, which is the whole column. Each stop
+ * is a share as the note writes it back, so a hundredth that is a size word's whole percent is that
+ * word's share. At either end it stays.
  */
-export function widthsIn(column: number, most: number): Width[] {
-  const widths: Width[] = [];
-  for (const word of SIZE_WORDS) {
-    const width = Math.min(most, column * SHARE[word]);
-    if (widths.length && width - widths.at(-1)!.width < 0.5) widths.pop();
-    widths.push({ word, width });
-  }
-  return widths;
-}
-
-/** The word whose width is nearest to `width`. */
-export const nearest = (widths: readonly Width[], width: number): SizeWord => widths.reduce((best, w) => (Math.abs(w.width - width) < Math.abs(best.width - width) ? w : best)).word;
-
-/** The word one width wider or narrower than the one `word` draws, or the same at either end. */
-export function stepped(widths: readonly Width[], word: SizeWord, by: 1 | -1): SizeWord {
-  const at = widths.findIndex((w) => SIZE_WORDS.indexOf(w.word) >= SIZE_WORDS.indexOf(word));
-  return widths[Math.max(0, Math.min(widths.length - 1, at + by))]!.word;
+export function stepped({ most }: Reach, share: number, by: 1 | -1, fine = false): number {
+  const step = fine ? 1 : 5;
+  const words = Object.values(SIZE_SHARE);
+  const percents = new Set([...Array.from({ length: 100 / step + 1 }, (_, i) => i * step), ...words.map((w) => Math.round(w * 100))]);
+  const stops = [...percents]
+    .sort((a, b) => a - b)
+    .map((p) => words.find((w) => Math.round(w * 100) === p) ?? p / 100)
+    .filter((s) => s >= LEAST && s < most)
+    .concat(most);
+  const at = Math.min(share, most);
+  const next = (by > 0 ? stops.find((s) => s > at + 1e-9) : stops.findLast((s) => s < at - 1e-9)) ?? at;
+  return next >= most ? 1 : next;
 }
 
 const UNITS = ["KB", "MB", "GB"] as const;

@@ -10255,7 +10255,7 @@ button.todo-tag[aria-pressed="true"] {
   height: 100%;
 }
 
-/* The size handle: a bar on the right edge, seen on hover or focus, which drags the width to small, medium, large or full. */
+/* The size handle: a bar on the right edge, seen on hover or focus, which drags the width to any share of the column. */
 .upload-size {
   display: grid;
   position: absolute;

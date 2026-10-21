@@ -94,7 +94,7 @@ export const NOTE_SYNTAX: readonly NoteSyntax[] = [
     name: "image",
     kind: "embed",
     called: "a picture",
-    about: "A picture is an upload's id, from list_uploads or from the line upload_file answered, then the room to keep for it as WIDTHxHEIGHT. small, medium or large after that sets how wide, and anything else is full. The upload's name is never in the note. The embed is on a line of its own. place_upload it before writing it into a note someone else can read.",
+    about: "A picture is an upload's id, from list_uploads or from the line upload_file answered, then the room to keep for it as WIDTHxHEIGHT. small, medium or large after that, or a whole percent such as 42%, sets how much of the note's column it takes, and anything else is the whole column. The upload's name is never in the note. The embed is on a line of its own. place_upload it before writing it into a note someone else can read.",
     example: "::image{u2p9l4d8a3c7 640x480}",
   },
   {
