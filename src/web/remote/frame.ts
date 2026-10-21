@@ -1,5 +1,5 @@
 import { sandboxed } from "../htmlFrame.ts";
-import { onTheme } from "../theme.ts";
+import { onLook, themeNow } from "../theme.ts";
 import { frameDocument } from "./document.ts";
 import type { ToPlugin } from "./protocol.ts";
 import { SDK } from "./sdk.ts";
@@ -45,11 +45,10 @@ function behind(box: HTMLElement): string {
   return "transparent";
 }
 
-/** The app's look as it is now: which scheme, and the styles a frame in `box` is drawn with. They are sent again each time the theme changes. */
+/** The app's look as it is now: which scheme, and the styles a frame in `box` is drawn with. They are sent again each time the look changes. */
 function look(box: HTMLElement, bar: boolean): { scheme: "light" | "dark"; styles: string } {
   const root = getComputedStyle(document.documentElement);
-  const chosen = document.documentElement.dataset.theme;
-  const scheme = chosen === "light" || chosen === "dark" ? chosen : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  const scheme = themeNow();
   // The values are the app's own, from its stylesheet. One that could end a rule is left out all the same.
   const colours = COLOURS.map((name) => [name, root.getPropertyValue(`--${name}`).trim()] as const).filter(([, value]) => /^[#\w\s(),./%-]+$/.test(value));
   const styles = `:root { color-scheme: ${scheme}; ${colours.map(([name, value]) => `--${name}: ${value};`).join(" ")} ${TOKENS} }
@@ -96,8 +95,8 @@ export function openFrame(box: HTMLElement, { code, title, grant, heard, bar = f
   if (bar) made.frame.tabIndex = -1;
   made.frame.style.visibility = "hidden";
   box.append(made.frame);
-  // The frame follows the app from one theme to the other, as everything else in the window does.
-  const unfollow = onTheme(() => open && channel.port1.postMessage({ v: 1, event: "look", ...look(box, bar) } satisfies ToPlugin));
+  // The frame follows the app from one look to the next, night shift's included, as everything else in the window does.
+  const unfollow = onLook(() => open && channel.port1.postMessage({ v: 1, event: "look", ...look(box, bar) } satisfies ToPlugin));
   return {
     post: (message) => open && channel.port1.postMessage(message),
     show: () => void (made.frame.style.visibility = ""),

@@ -4,9 +4,12 @@ import { App } from "./App.tsx";
 import { tellUncaught } from "./faults.ts";
 import { SharedPage, sharedToken } from "./SharedPage.tsx";
 import "./style.css";
+import { followWindowColor } from "./theme.ts";
 
 // A link's page is not the app: it is drawn before anything asks who is signed in, and never does.
 const token = sharedToken(location.pathname);
+
+followWindowColor();
 
 createRoot(document.getElementById("root")!).render(<StrictMode>{token ? <SharedPage token={token} /> : <App />}</StrictMode>);
 

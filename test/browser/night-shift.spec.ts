@@ -1,7 +1,7 @@
 import { crc32, deflateSync } from "node:zlib";
 import { expect, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
-import { perform, runCommand, signInAsNewPerson, test } from "./helpers.ts";
+import { ownPlugin, perform, runCommand, signInAsNewPerson, test } from "./helpers.ts";
 import { category } from "./settings-helpers.ts";
 
 let errors: string[];
@@ -367,6 +367,50 @@ test("off puts back the theme that was in use, light or dark, exactly, with noth
     await expect.poll(() => isOn(page)).toBe(false);
     expect(await look()).toEqual(was);
   }
+});
+
+test("the window's own color follows the page, night shift's black included", async ({ page }) => {
+  /** The colors the browser paints the window with, the root's background, and the body's, which shows the root's through it. */
+  const painted = () =>
+    page.evaluate(() => ({
+      meta: [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((m) => m.content),
+      root: getComputedStyle(document.documentElement).backgroundColor,
+      body: getComputedStyle(document.body).backgroundColor,
+    }));
+  const dark = "rgb(23, 23, 22)";
+  const black = "rgb(0, 0, 0)";
+  // The device is light and the member chose dark, which is the case the page's own tags, one per device scheme, got wrong.
+  await start(page, { "night-shift.on": false, "core.theme": "dark" });
+  await expect.poll(painted).toEqual({ meta: [dark, dark], root: dark, body: "rgba(0, 0, 0, 0)" });
+
+  await runCommand(page, "Toggle night shift");
+  await expect.poll(() => isOn(page)).toBe(true);
+  await expect.poll(painted).toEqual({ meta: [black, black], root: black, body: "rgba(0, 0, 0, 0)" });
+  // A plugin's frame is drawn in night shift's colors too, though the theme was dark before and is dark still.
+  const frameBg = () => ownPlugin(page, "Word count").locator("html").evaluate((el) => [getComputedStyle(el).getPropertyValue("--bg").trim(), getComputedStyle(el).colorScheme]);
+  await expect.poll(frameBg).toEqual(["#000000", "dark"]);
+
+  // A window shown again puts the look right at once, without waiting for the minute's clock a hidden page may have held back.
+  await root(page).evaluate((el) => {
+    delete el.dataset.nightShift;
+    el.style.removeProperty("--bg");
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(painted).toEqual({ meta: [black, black], root: black, body: "rgba(0, 0, 0, 0)" });
+
+  await runCommand(page, "Toggle night shift");
+  await expect.poll(() => isOn(page)).toBe(false);
+  await expect.poll(painted).toEqual({ meta: [dark, dark], root: dark, body: "rgba(0, 0, 0, 0)" });
+  await expect.poll(frameBg).toEqual(["#171716", "dark"]);
+
+  // Left to the device, it follows the device as that changes.
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "night-shift.enabled": true, "night-shift.on": false, "core.theme": "system" }), baseRevision: (await perform(page, { type: "settings.read" })).revision });
+  await page.reload();
+  await expect(editor(page)).toContainText("Night notes");
+  const light = "rgb(251, 250, 248)";
+  await expect.poll(painted).toEqual({ meta: [light, light], root: light, body: "rgba(0, 0, 0, 0)" });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(painted).toEqual({ meta: [dark, dark], root: dark, body: "rgba(0, 0, 0, 0)" });
 });
 
 test("moves nothing in the layout when it comes and goes", async ({ page }) => {

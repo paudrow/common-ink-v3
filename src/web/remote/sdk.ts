@@ -105,8 +105,9 @@ export const SDK = `(() => {
     } else if (data.event === "look") {
       document.getElementById("ink-look").textContent = data.styles;
       document.querySelector('meta[name="color-scheme"]').content = data.scheme;
+      const turned = data.scheme !== ink.scheme;
       ink.scheme = data.scheme;
-      for (const fn of themeHeard) fn(data.scheme);
+      if (turned) for (const fn of themeHeard) fn(data.scheme);
     }
   };
   // A chord the app binds is the app's, here too. The press is stopped so the browser doesn't take it (Print, for ⌘P) and handed back for the app to run.
