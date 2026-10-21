@@ -129,6 +129,13 @@ const IfExists = z.enum(["return", "error"]).default("error");
  * are kept.
  */
 const MentionNames = z.enum(["resolve", "keep"]).default("resolve");
+/**
+ * The tags, with or without the `#`, an agent's write may bring in though no note the agent can see has
+ * them: the new tags its member asked for, matched ignoring case. An agent's write that brings in
+ * any other tag no such note has is refused, so an agent reuses the workspace's tags. A person's
+ * write and a plugin's are never refused for a tag.
+ */
+const NewTags = z.array(z.string().min(1).max(100).transform((name) => name.replace(/^#/, ""))).max(50).optional();
 /** A member's id, or the name of anyone else as a mention writes it. */
 const Person = z
   .string()
@@ -251,6 +258,7 @@ export const Op = z.discriminatedUnion("type", [
     folderId: Id.optional(),
     linkTitles: LinkTitles,
     mentionNames: MentionNames,
+    newTags: NewTags,
     /** Chosen by the writer. A create sent again with the same id returns the note from the first time. */
     writeId: z.string().min(1).max(64).optional(),
   }),
@@ -265,6 +273,7 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
     linkTitles: LinkTitles,
     mentionNames: MentionNames,
+    newTags: NewTags,
     /**
      * The day it is for the writer, which counts when the write checks off a recurring todo: the todo
      * is completed on that day, as todo.set does it. Left out, it is today in the member's zone, as
@@ -290,6 +299,7 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
     linkTitles: LinkTitles,
     mentionNames: MentionNames,
+    newTags: NewTags,
     on: Day.optional(),
   }),
   /** The notes whose text links to this one, latest change first. */
@@ -507,6 +517,7 @@ export const Op = z.discriminatedUnion("type", [
     on: Day.optional(),
     /** What the todo says instead: its words and tags, as todo.list's `words`, on one line. */
     words: z.string().max(MAX_NOTE_LENGTH).regex(/^[^\r\n]*$/, "A todo's words are one line").optional(),
+    newTags: NewTags,
   }).strict(),
   /**
    * Each time a recurring todo was checked off: the day, and who did it, latest first. `revision`,

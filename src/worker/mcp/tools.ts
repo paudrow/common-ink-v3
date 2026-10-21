@@ -175,6 +175,8 @@ const LINKS =
   "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; one no note has the title of stays as written and is listed in the answer's unresolved. Text in code is left alone.";
 const MENTIONS =
   "A mention of a person is @[[id|Name]] for a member of the workspace, with their id from list_members, or @[[Name]] for anyone else, such as one of your member's contacts. You can write @[[Name]] for a member too and it is stored by their id, unless your token is limited to folders: it is then not told who is a member, and every mention is kept and read as written. A mention on a todo's line assigns the todo. A mention gives nobody access and tells nobody. Every reader of the note sees the name, so write only the name of a contact: never their email or anything else list_contacts told you.";
+const TAGS = "Tag only with tags list_tags lists: a tag no note you can see has is refused unless your member asked for it and newTags names it.";
+const newTags = { type: "array", items: { type: "string" }, description: "New tags your member asked for. Any other tag no note you can see has is refused" };
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
 const revisions = { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, description: "The revisions of the changes, from note_history or history" };
@@ -343,12 +345,13 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "create_note",
-    description: `${ASK_NOTE_SYNTAX} Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. Send the same writeId again after a failed call and the note is created once. ${LINKS} ${MENTIONS} ${TODOS} Needs the editor or admin role.`,
+    description: `${ASK_NOTE_SYNTAX} Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. Send the same writeId again after a failed call and the note is created once. ${LINKS} ${MENTIONS} ${TODOS} ${TAGS} Needs the editor or admin role.`,
     inputSchema: object({
       text: { type: "string", description: "The note's markdown" },
       folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"),
       linkTitles,
       mentionNames,
+      newTags,
       writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry return the note from the first call" },
     }),
     op: "note.create",
@@ -357,7 +360,7 @@ export const TOOLS: Tool[] = [
   {
     name: "write_note",
     description:
-      `${ASK_NOTE_SYNTAX} To change some lines and leave the rest, use edit_note. Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `${ASK_NOTE_SYNTAX} To change some lines and leave the rest, use edit_note. Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. Links, mentions and tags are written as create_note says. Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         noteId,
@@ -366,6 +369,7 @@ export const TOOLS: Tool[] = [
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
         mentionNames,
+        newTags,
         on: day(`The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in ${MEMBER_ZONE}`),
       },
       ["noteId", "baseRevision", "text"],
@@ -377,7 +381,7 @@ export const TOOLS: Tool[] = [
   {
     name: "edit_note",
     description:
-      `Change lines of a note and leave the rest. Give the revision you read as baseRevision. read_note with numbered shows each line's number. Each edit replaces the lines from its from up to and not including its to, counted from 0 in the note at that revision: from equal to to inserts, and an empty text deletes. A newline after the note's last line is not a line of its own. Every range is counted in that revision, so one edit is not shifted by another, and two that overlap are refused. There may be 50 edits. Edits made since baseRevision are merged in, as write_note merges them, and a line you left out is left as it was. Send the same writeId again after a failed call and the edit is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `Change lines of a note and leave the rest. Give the revision you read as baseRevision. read_note with numbered shows each line's number. Each edit replaces the lines from its from up to and not including its to, counted from 0 in the note at that revision: from equal to to inserts, and an empty text deletes. A newline after the note's last line is not a line of its own. Every range is counted in that revision, so one edit is not shifted by another, and two that overlap are refused. There may be 50 edits. Edits made since baseRevision are merged in, as write_note merges them, and a line you left out is left as it was. Send the same writeId again after a failed call and the edit is recorded once. Links, mentions and tags are written as create_note says. Checking the box of a repeating todo here completes it as write_note says. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         noteId,
@@ -401,6 +405,7 @@ export const TOOLS: Tool[] = [
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
         mentionNames,
+        newTags,
         on: day(`The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in ${MEMBER_ZONE}`),
       },
       ["noteId", "baseRevision", "edits"],
@@ -474,6 +479,7 @@ export const TOOLS: Tool[] = [
         unassign: { type: "string", description: "Someone to take it from: a member's id or name, or anyone else's name as the line writes it. Refused when the todo isn't assigned to them." },
         on: day(`The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in ${MEMBER_ZONE}`),
         words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, priority, due date, rule and done: mark, tags included, on one line. Its due date and how it repeats are written after them" },
+        newTags,
       },
       ["noteId", "revision", "line", "text"],
     ),

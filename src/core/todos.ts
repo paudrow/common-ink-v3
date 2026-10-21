@@ -347,6 +347,12 @@ export function tagsIn(text: string): string[] {
   return [...tags.values()];
 }
 
+/** The tags `text` has that `base` doesn't, each once ignoring case, as `text` first writes them. */
+export function tagsAdded(text: string, base: string): string[] {
+  const had = new Set(tagsIn(base).map(nameKey));
+  return tagsIn(text).filter((name) => !had.has(nameKey(name)));
+}
+
 /** The tags a note has on its lines but one, each once ignoring case, outside code. */
 export function tagsBesides(text: string, line: number): string[] {
   if (!text.includes("#")) return [];

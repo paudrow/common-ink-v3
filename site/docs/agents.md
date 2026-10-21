@@ -109,6 +109,10 @@ These stay with you, signed in to Common Ink, whatever your role:
 - Connect, edit, or disconnect an agent, itself included.
 - Turn a full-trust plugin on for you. An admin's agent can allow a plugin's Full trust permission, and only you can turn it on.
 
+## Tags an agent uses
+
+An agent tags notes and todos with the tags your notes already have. A write that adds a tag no note it can see has is refused, unless the call names that tag as new, and the agent is told to name one only when you asked for it. An agent limited to folders sees only the tags in those folders.
+
 ## See what an agent changed
 
 On the Agents page, **See its changes** opens History narrowed to that agent. **Revert Claude's changes…**, named for the agent, shows what reverting would do in each note. Then it takes out only that agent's changes and keeps everyone else's. In a note, the command **Toggle blame mode** marks each line with who last changed it, so an agent's lines show its name. [History and blame](/docs/history) covers both.

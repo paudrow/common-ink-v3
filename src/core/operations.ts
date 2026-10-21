@@ -80,7 +80,7 @@ import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as Ac
 import { linkHash } from "./linkSeal.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
-import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
+import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsAdded, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
 
 /** The note an author already made with a write id, so a create sent again makes one note. Served by changes_by_author_write. */
 export const PRIOR_WRITE = `SELECT c.note_id AS id FROM changes c JOIN notes n ON n.id = c.note_id
@@ -630,8 +630,34 @@ async function mentionedById(ctx: Context, text: string, base: string, how: "res
   return stored;
 }
 
-/** The text a write stores: what was written, with the links and mentions it introduces stored by id. */
-const storedAs = async (ctx: Context, text: string, base: string, op: { linkTitles: LinkTitles; mentionNames: "resolve" | "keep" }) => {
+/**
+ * Refuses an agent's write that brings in a tag no note the agent can see has, live or archived,
+ * unless `newTags` names it: an agent reuses the workspace's tags, and makes one only when its member
+ * asks. A tag in a note the agent can't see is new to it, so the refusal says nothing of that note.
+ */
+async function refuseNewTags(ctx: Context, text: string, base: string, newTags: readonly string[] = []) {
+  if (ctx.author.kind !== "agent") return;
+  const asked = new Set(newTags.map(nameKey));
+  const added = tagsAdded(text, base).filter((name) => !asked.has(nameKey(name)));
+  if (!added.length) return;
+  await mend(ctx);
+  const { results } = await ctx.db
+    .prepare(`SELECT DISTINCT g.tag FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} AND g.tag IN (SELECT value FROM json_each(?3))`)
+    .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(added.map(nameKey)))
+    .all<{ tag: string }>();
+  const known = new Set(results.map((r) => r.tag));
+  const fresh = added.filter((name) => !known.has(nameKey(name)));
+  if (!fresh.length) return;
+  const one = fresh.length === 1;
+  throw new OpError(
+    "invalid",
+    `${fresh.map((name) => `#${name}`).join(", ")} ${one ? "is a new tag" : "are new tags"}: no note you can see has ${one ? "it" : "them"}. Use a tag list_tags lists, or if your member asked for ${one ? "this one" : "these"}, pass newTags: ${JSON.stringify(fresh)}`,
+  );
+}
+
+/** The text a write stores: what was written, with the links and mentions it introduces stored by id. An agent's write that brings in a new tag is refused first. */
+const storedAs = async (ctx: Context, text: string, base: string, op: { linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; newTags?: readonly string[] }) => {
+  await refuseNewTags(ctx, text, base, op.newTags);
   const resolved = await linkedById(ctx, text, base, op.linkTitles);
   return { text: await mentionedById(ctx, resolved.text, base, op.mentionNames), unresolved: resolved.unresolved };
 };
@@ -1804,7 +1830,7 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
 export const MAX_ANSWER_LINES = 2000;
 
 /** Records `op.text` as a write of the note at `op.baseRevision`, merging edits made since. */
-async function commitNote(ctx: Context, op: { id: string; baseRevision: number; text: string; writeId?: string; linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; on?: string }) {
+async function commitNote(ctx: Context, op: { id: string; baseRevision: number; text: string; writeId?: string; linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; newTags?: readonly string[]; on?: string }) {
   let unresolved: UnresolvedLink[] = [];
   const written = await settle(async (): Promise<Written | null> => {
     // A write sent again once it was recorded is answered as recorded, though the note has gone to Trash since.
@@ -2005,7 +2031,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     run: (ctx, op) =>
       settle(async (): Promise<Written | null> => {
         const row = await loadNote(ctx, op.id, "edit", "refused");
-        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, assign, unassign, done, ...rest } = op;
+        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, assign, unassign, done, newTags, ...rest } = op;
         // done is the older way to say a state, which agents still pass.
         if (done !== undefined && rest.state !== undefined && done !== (rest.state === "done")) throw new OpError("invalid", `done: ${done} and state: ${rest.state} say different things. Pass state alone`);
         // A member is assigned by their id with their name, whichever they were named by, as a mention a write introduces is stored.
@@ -2031,6 +2057,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         if (todo && todo.text !== listedAs && todo.text === wanted.line) return toNote(ctx, row);
         if (!todo || todo.text !== listedAs) throw new OpError("conflict", "This todo was changed since it was listed. List the todos again.");
         if (wanted.line === listedAs) return toNote(ctx, row);
+        await refuseNewTags(ctx, wanted.line, row.text, newTags);
         const changes = changesBetween(row.text, row.text.slice(0, todo.from) + wanted.line + row.text.slice(todo.from + todo.text.length));
         if (wanted.filed) return recordCompleting(ctx, row, changes, row.revision, [{ line: wanted.filed, at: todo.from }], mine!);
         const next = await record(ctx, row, changes, row.revision);
