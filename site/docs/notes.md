@@ -85,6 +85,7 @@ Outside a note's text, wherever you are not typing, vim's keys move through the 
 | `enter` or `l` | Open the selected row |
 | `h` | Collapse the selected row, or go to its parent |
 | `za` | Expand or collapse the selected row |
+| `dd` | Abandon the selected todo on the Todos page, or open an abandoned one again |
 | `/`, then `escape` | Go to the search box, and back to the list |
 | `ctrl+w`, then `h`, `j`, `k`, or `l` | Go to the sidebar, editor group, or inspector on that side |
 | `gt`, `gT` | Go to the next or previous tab |

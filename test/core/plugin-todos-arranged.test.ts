@@ -12,7 +12,7 @@ const rows = (keys: string) => keys.split(" ").filter(Boolean).map((key) => row(
 const order = (list: Listing<Row>) => list.shown.map((r) => r.noteId).join(" ");
 const run = (events: ListingEvent<Row>[]) => events.reduce<Listing<Row>>(listing, EMPTY);
 const read = (keys: string, refresh = false): ListingEvent<Row> => ({ type: "read", rows: rows(keys), refresh });
-const change = (key: string, text: string, hold: "changed" | "done" = "changed"): ListingEvent<Row> => ({ type: "change", key: `${key}/0`, to: (r) => ({ ...r, text }), hold });
+const change = (key: string, text: string, hold: "changed" | "put away" = "changed"): ListingEvent<Row> => ({ type: "change", key: `${key}/0`, to: (r) => ({ ...r, text }), hold });
 
 describe("the Todos page's list while the member works on it", () => {
   it("is shown as first read, in the server's order, with nothing to refresh", () => {
@@ -69,7 +69,7 @@ describe("the Todos page's list while the member works on it", () => {
   });
 
   it("holds a row checked off for its moment without asking for a refresh, and lets it go after it", () => {
-    const list = run([read("a b c", true), change("b", "done", "done"), read("a c")]);
+    const list = run([read("a b c", true), change("b", "done", "put away"), read("a c")]);
     expect(order(list)).toBe("a b c");
     expect([...left(list)]).toEqual(["b/0"]);
     expect(pending(list)).toBe(false);
@@ -79,7 +79,7 @@ describe("the Todos page's list while the member works on it", () => {
   });
 
   it("keeps a row checked off that the list still has, as one that repeats, and a let go changes nothing for it or for a row changed", () => {
-    const list = run([read("a b", true), change("a", "next week", "done"), read("b a"), { type: "let go", key: "a/0" }]);
+    const list = run([read("a b", true), change("a", "next week", "put away"), read("b a"), { type: "let go", key: "a/0" }]);
     expect(order(list)).toBe("a b");
     expect(pending(list)).toBe(true);
     const changed = run([read("a b", true), change("a", "moved"), read("b"), { type: "let go", key: "a/0" }]);
@@ -87,7 +87,7 @@ describe("the Todos page's list while the member works on it", () => {
   });
 
   it("keeps how a row is held through a change that only text where its line is now", () => {
-    const list = run([read("a b", true), change("a", "done", "done"), change("a", "open again"), read("b"), { type: "change", key: "a/0", to: (r) => ({ ...r, text: "at revision 3" }) }]);
+    const list = run([read("a b", true), change("a", "done", "put away"), change("a", "open again"), read("b"), { type: "change", key: "a/0", to: (r) => ({ ...r, text: "at revision 3" }) }]);
     expect(list.held.get("a/0")).toBe("changed");
     expect(list.shown[0]!.text).toBe("at revision 3");
     expect(order(listing(list, { type: "let go", key: "a/0" }))).toBe("a b");

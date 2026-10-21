@@ -3,10 +3,11 @@ import type { Plugin } from "../../plugin-api.ts";
 import { editorKey, redraw } from "../lib/live.ts";
 import { todoOpener } from "../lib/openTodo.ts";
 import { tickedIn, todoChips, untick } from "./chips.ts";
-import { CHANGED, completed, refused, takeBack } from "./completed.ts";
+import { CHANGED, putAway, refused, takeBack } from "./completed.ts";
 import { dueOffers, today } from "./dates.ts";
+import { PUTTING, type PutAway } from "./picking.ts";
 import { everyOffers } from "./recurrence.ts";
-import { SORTS, TodosPage } from "./Todos.tsx";
+import { SORTS, TodosPage, putterHere } from "./Todos.tsx";
 
 const MINUTE_MS = 60_000;
 
@@ -49,6 +50,11 @@ export const todos: Plugin = {
 
     host.views.register("page", { id: "todos", path: "/todos", label: "Todos", icon: "todos", nav: "primary", order: 30, component: ({ app }) => <TodosPage host={host} app={app} onOpen={open} /> });
 
+    // Keys for the row of a list of todos the keyboard is on, whether or not vim's are on: vim's dd presses the row's Abandon.
+    for (const [to, { command, title, keys }] of Object.entries(PUTTING) as [PutAway, (typeof PUTTING)[PutAway]][]) {
+      host.commands.register({ id: command, title, keys, group: "Todos", when: () => putterHere() !== null, run: () => putterHere()?.(to) });
+    }
+
     /** Opens again the todo checked off in a note's editor: there as the member's edit, or through todo.set once that editor is gone. */
     const reopen = async (noteId: string, view: EditorView) => {
       if (alive.has(view)) return untick(view) ? undefined : CHANGED;
@@ -64,14 +70,14 @@ export const todos: Plugin = {
         host.app().noteChanged(await host.perform({ type: "todo.set", id: noteId, revision, line, text: at.text, state: "open" }));
         return undefined;
       } catch (err) {
-        return refused(err);
+        return refused(err, "done");
       }
     };
 
     host.editorExtensions.register({
       id: "todos",
       extension: (editor) => [
-        todoChips({ host, noteId: editor.noteId, onCompleted: (view) => completed(host, () => reopen(editor.noteId, view)), onRecurred: (revision) => completed(host, () => takeBack(host, editor.noteId, revision)) }),
+        todoChips({ host, noteId: editor.noteId, onCompleted: (view) => putAway(host, "done", () => reopen(editor.noteId, view)), onRecurred: (revision) => putAway(host, "done", () => takeBack(host, editor.noteId, revision)) }),
         ViewPlugin.define((view) => {
           const key = editorKey(editor);
           editors.set(key, view);

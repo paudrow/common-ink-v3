@@ -213,6 +213,19 @@ const PATHS = {
   ),
   restore: <path d="M2.75 8a5.25 5.25 0 1 1 1.6 3.8M2.5 13.5v-2.25h2.25" />,
   check: <path d="m3.75 8.25 2.75 2.75 5.75-6" />,
+  // A todo's box as each of these states draws it: struck through, and a › in a dashed box.
+  abandoned: (
+    <>
+      <rect x="3" y="3" width="10" height="10" rx="2.5" />
+      <path d="M1.75 8h12.5" />
+    </>
+  ),
+  backlog: (
+    <>
+      <rect x="3" y="3" width="10" height="10" rx="2.5" strokeDasharray="2.2 1.6" />
+      <path d="m7 5.75 2.25 2.25L7 10.25" />
+    </>
+  ),
   indent: <path d="M2.5 3.5h11M7.5 8h6M2.5 12.5h11M2.5 6l2.5 2-2.5 2" />,
   outdent: <path d="M2.5 3.5h11M7.5 8h6M2.5 12.5h11M5 6 2.5 8 5 10" />,
 } as const;

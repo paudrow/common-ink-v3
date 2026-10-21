@@ -18,6 +18,15 @@ export async function signInAs(page: Page, email: string, name: string, next = "
   await page.goto(`/auth/dev?${new URLSearchParams({ email, name, next })}`);
 }
 
+/**
+ * Whether a todo's row is selected as vim's j and k select one: the row itself has the keyboard, not
+ * its checkbox, and it is outlined.
+ */
+export async function expectRowSelected(row: Locator) {
+  await expect.poll(() => row.evaluate((li) => document.activeElement === li), "the row has the keyboard").toBe(true);
+  expect(await row.evaluate((li) => [getComputedStyle(li).outlineStyle, getComputedStyle(li).outlineWidth, getComputedStyle(li).outlineOffset]), "the row is outlined").toEqual(["solid", "2px", "-2px"]);
+}
+
 export const newEmail = () => `browser-${crypto.randomUUID()}@example.com`;
 
 /** Google sign-in, as a signed-out person is offered it: the app's sign-in page has one, and the landing page at `/` several. */

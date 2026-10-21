@@ -197,7 +197,8 @@ test("a person's open todos are the Todos page's rows: checked off there, a chip
   await expect(boiler.getByRole("button", { name: "Priority: High" })).toBeVisible();
   await expect(boiler.getByRole("button", { name: "Assigned to Sam Okafor" })).toBeVisible();
 
-  // A chip opens its popover here as on the Todos page, and its pick is written to the note.
+  // A chip opens its popover here as on the Todos page, and its pick is written to the note. Not set, it shows on a row pointed at.
+  await rows.filter({ hasText: "Bleed the radiators" }).hover();
   await rows.filter({ hasText: "Bleed the radiators" }).getByRole("button", { name: "Priority: none" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Low" }).click();
   await expect(rows.filter({ hasText: "Bleed the radiators" }).getByRole("button", { name: "Priority: Low" })).toBeVisible();

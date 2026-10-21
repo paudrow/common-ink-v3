@@ -7,8 +7,8 @@ export interface Placed {
 
 export const keyOf = (row: Placed) => `${row.noteId}/${row.line}`;
 
-/** Why a row the list no longer has is still shown: the member changed it here, or checked it off a moment ago. */
-export type Hold = "changed" | "done";
+/** Why a row the list no longer has is still shown: the member changed it here, or put it away a moment ago: checked it off, abandoned it or moved it to the backlog. */
+export type Hold = "changed" | "put away";
 
 /**
  * The Todos page's list, which keeps its order while the member works on it. A change there, a tag
@@ -21,7 +21,7 @@ export interface Listing<T extends Placed> {
   fresh: readonly T[];
   /** The rows in the order they are shown. */
   shown: readonly T[];
-  /** The rows the member changed or checked off since the list was refreshed, which stay shown when the list no longer has them. */
+  /** The rows the member changed or put away since the list was refreshed, which stay shown when the list no longer has them. */
   held: ReadonlyMap<string, Hold>;
 }
 
@@ -32,7 +32,7 @@ export type ListingEvent<T extends Placed> =
   | { type: "more"; rows: readonly T[] }
   /** The member changed a row, which reads as changed at once and is held. Without `hold` it is held as it was, if it was: a change that landed. */
   | { type: "change"; key: string; to: (row: T) => T; hold?: Hold }
-  /** A row checked off has stayed its moment, and goes once the list no longer has it. */
+  /** A row put away has stayed its moment, and goes once the list no longer has it. */
   | { type: "let go"; key: string }
   /** A change to a row was refused, so nothing of it holds the row. */
   | { type: "refused"; key: string }
@@ -104,7 +104,7 @@ export function listing<T extends Placed>(had: Listing<T>, event: ListingEvent<T
     }
     case "let go":
     case "refused": {
-      if (!had.held.has(event.key) || (event.type === "let go" && had.held.get(event.key) !== "done")) return had;
+      if (!had.held.has(event.key) || (event.type === "let go" && had.held.get(event.key) !== "put away")) return had;
       const held = new Map(had.held);
       held.delete(event.key);
       return follow(had, had.fresh, held);
@@ -122,7 +122,7 @@ export function left<T extends Placed>({ fresh, shown }: Listing<T>): Set<string
 
 /**
  * Whether refreshing would show the list another way: in another order, or without a row the member
- * changed out of it. A row checked off a moment ago is going by itself, so it doesn't count.
+ * changed out of it. A row put away a moment ago is going by itself, so it doesn't count.
  */
 export function pending<T extends Placed>(list: Listing<T>): boolean {
   const gone = left(list);

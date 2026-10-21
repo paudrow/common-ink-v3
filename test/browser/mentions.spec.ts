@@ -276,9 +276,9 @@ test("a person mentioned on a todo is its assignee, drawn as a chip, and the Tod
   await expect(rows.first().locator(".todo-assignee")).toHaveText(["@Sam Okafor", "@Ada Lovelace"]);
   await expect.poll(() => text(page, note.id)).toMatch(/- \[ \] Call the bank @\[\[Sam Okafor\]\] @\[\[[a-z0-9]{12}\|Ada Lovelace\]\]/);
 
-  // A todo with nobody has a quiet Assign chip in its place on the second line, after Priority and before the tags.
+  // A todo with nobody has a quiet Assign chip in its place on the second line, after the date and before Add tag, Repeat and Priority.
   await filter(page, "venue");
-  await expect(rows.first().locator(".todo-chips .todo-chip")).toHaveClass([/todo-due/, /todo-every/, /todo-importance/, /todo-assign\b/, /todo-add-tag/]);
+  await expect(rows.first().locator(".todo-chips .todo-chip")).toHaveClass([/todo-due/, /todo-assign\b/, /todo-add-tag/, /todo-every/, /todo-importance/]);
   await expect(rows.first().getByRole("button", { name: "Assign: nobody" })).toHaveAttribute("data-unset", "true");
   await rows.first().getByRole("button", { name: "Assign: nobody" }).click();
   await page.getByRole("dialog", { name: "Assignees of Book the venue" }).getByRole("button", { name: "Assign to Grace Hopper" }).click();

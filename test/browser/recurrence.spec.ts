@@ -120,10 +120,10 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(bins.locator(".todo-every")).toHaveText("every 2 weeks");
   await expect(bins.locator(".todo-every")).toHaveAttribute("title", "Repeats: Every 2 weeks");
   await expect(bins.locator(".todo-done")).toHaveCount(0);
-  // The repeat is a chip to press, as the due date is; the row's menu only opens the note.
+  // The repeat is a chip to press, as the due date is; the row's menu opens the note and puts the todo away.
   await expect(bins.getByRole("button", { name: "Repeat: every 2 weeks" })).toBeEnabled();
   await bins.locator(".todo-words").click({ button: "right" });
-  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open note", "Open to the side"]);
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open note", "Open to the side", "Complete", "Abandon", "Move to backlog"]);
   await page.keyboard.press("Escape");
   await bins.getByRole("button", { name: "Repeat: every 2 weeks" }).click();
   await expect(page.locator(".chip-popover")).toHaveAccessibleName("Repeat of Take out the bins");
@@ -173,6 +173,8 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(rolled.replace(" every:2w", ""));
   await expect(bins.locator(".todo-every")).toHaveText("Repeat");
   await expect(bins.locator(".todo-every")).toHaveAttribute("data-unset", "true");
+  // Not set, it is drawn while its row is pointed at.
+  await row(page, "Plain one").hover();
   await expect(row(page, "Plain one").locator(".todo-every")).toHaveAccessibleName("Repeat: none");
   // A todo that doesn't recur has a quiet Repeat chip, which opens the same popover under itself, on Doesn't repeat; with no due date the rules name no day.
   await row(page, "Plain one").locator(".todo-every").click();

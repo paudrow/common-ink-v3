@@ -3,7 +3,7 @@ import type { TodoState } from "../../src/core/todos.ts";
 import { leaving, narrowingOf, type Narrowing } from "../../src/web/plugins/todos/leaving.ts";
 
 const NOW = "2026-10-15";
-const ANY: Narrowing = { completed: false, due: "any", importance: "", tag: "", folder: null };
+const ANY: Narrowing = { states: ["open"], due: "any", importance: "", tag: "", folder: null };
 const todo = (over: Partial<{ state: TodoState; due: string | null; importance: 0 | 1 | 2 | 3; words: string; tagsElsewhere: string[] }> = {}) => ({ state: "open" as TodoState, due: null, importance: 0 as const, words: "Gym #health", tagsElsewhere: [] as string[], ...over });
 const says = (row: ReturnType<typeof todo>, by: Partial<Narrowing>) => leaving(row, { ...ANY, ...by }, NOW)?.says ?? null;
 
@@ -22,11 +22,21 @@ describe("why a changed row leaves the Todos page's list", () => {
     expect(says(todo(), { search: "bank" })).toBe("Changed, so it no longer matches “bank”. It leaves when you refresh.");
   });
 
+  it("says what was done to a row whose state the list doesn't have, and names the list by its one state", () => {
+    expect(says(todo({ state: "abandoned" }), {})).toBe("Abandoned, so it no longer shows with the open todos. It leaves when you refresh.");
+    expect(says(todo({ state: "backlog" }), {})).toBe("Moved to the backlog, so it no longer shows with the open todos. It leaves when you refresh.");
+    expect(says(todo({ state: "open" }), { states: ["backlog"] })).toBe("Opened again, so it no longer shows with the backlog. It leaves when you refresh.");
+    expect(says(todo({ state: "abandoned" }), { states: ["open", "done"] })).toBe("Abandoned, so it no longer shows in this list. It leaves when you refresh.");
+    // The state comes first: a row put away and moved off the day says why by what was done to it last.
+    expect(says(todo({ state: "backlog", due: "2026-10-16" }), { due: "today" })).toBe("Moved to the backlog, so it no longer shows with the open todos. It leaves when you refresh.");
+  });
+
   it("names the first way it fails, and nothing for a row that still matches", () => {
     expect(leaving(todo({ due: "2026-10-16", importance: 1 }), { ...ANY, due: "today", importance: "3" }, NOW)?.reason).toBe("date");
     expect(leaving(todo({ due: "2026-10-15", importance: 1 }), { ...ANY, due: "today", importance: "3" }, NOW)?.reason).toBe("priority");
     expect(says(todo({ due: "2026-10-15", importance: 3, words: "Gym #HEALTH" }), { due: "today", importance: "3", tag: "health", folder: { name: "Home", holds: true } })).toBeNull();
-    expect(says(todo({ state: "done" }), { completed: true })).toBeNull();
+    expect(says(todo({ state: "done" }), { states: ["open", "done"] })).toBeNull();
+    expect(says(todo({ state: "abandoned" }), { states: null })).toBeNull();
     expect(says(todo({ due: "2026-10-21" }), { due: "week" })).toBeNull();
     expect(says(todo({ due: "2026-10-14" }), { due: "overdue" })).toBeNull();
   });
@@ -35,7 +45,7 @@ describe("why a changed row leaves the Todos page's list", () => {
 describe("what a todos query narrows to, for those sentences", () => {
   const by = (query: string) => narrowingOf(query);
   it("reads a due date, a priority and a tag at the query's top as the filters they are, and keeps the query as the search", () => {
-    expect(by("due:today")).toEqual({ completed: true, due: "today", importance: "", tag: "", folder: null, search: "due:today" });
+    expect(by("due:today")).toEqual({ states: ["open"], due: "today", importance: "", tag: "", folder: null, search: "due:today" });
     expect(by("due:<today").due).toBe("overdue");
     expect(by("due:today..+6d").due).toBe("week");
     expect(by("no:due").due).toBe("none");
@@ -43,6 +53,19 @@ describe("what a todos query narrows to, for those sentences", () => {
     expect(by("priority:high").importance).toBe("3");
     expect(by("importance:1").importance).toBe("1");
     expect(by("call #Health tag:work").tag).toBe("health");
+  });
+
+  it("reads the states a query lists: open when it names none, as the server lists them", () => {
+    expect(by("").states).toEqual(["open"]);
+    expect(by("#work due:today").states).toEqual(["open"]);
+    expect(by("is:backlog").states).toEqual(["backlog"]);
+    expect(by("is:open OR is:done").states).toEqual(["open", "done"]);
+    expect(by("-is:done").states).toEqual(["open", "abandoned", "backlog"]);
+    expect(by("is:abandoned -is:abandoned").states).toEqual([]);
+    expect(by("is:open is:done").states).toEqual([]);
+    expect(by("is:archived #home").states).toEqual(["open"]);
+    expect(by("is:backlog OR #home").states).toBeNull();
+    expect(by("(is:done #home) OR is:open").states).toBeNull();
   });
 
   it("leaves what it can't say as a filter to the search", () => {

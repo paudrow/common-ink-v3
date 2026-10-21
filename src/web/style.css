@@ -6972,6 +6972,11 @@ button.diff-fold:hover {
   background: var(--hover);
 }
 
+/* A row the keys select is scrolled to below the order bar, which is over the top of the list. */
+.todo-card:has(.todo-order) .todo-row {
+  scroll-margin-top: 3em;
+}
+
 .todo-box {
   grid-row: 1;
   grid-column: 1;
@@ -7015,7 +7020,30 @@ button.diff-fold:hover {
 /* Backlog is put off, not finished: a › in a dashed box. */
 .todo-box[data-state="backlog"] {
   border-style: dashed;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6.5 4.5L10 8l-3.5 3.5' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* The ›, laid over the box in the theme's quiet ink: a mask, so it is whatever colour that is, in Night shift too. Only backlog's box has one. */
+.todo-box-mark {
+  display: none;
+  grid-row: 1;
+  grid-column: 1;
+  align-self: start;
+  width: 1.02em;
+  height: 1.02em;
+  margin: calc((1.4em - 1.02em) / 2) 0 0;
+  background: var(--muted);
+  /* Inset by the box's border, so the › is the size it was drawn inside the box. */
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6.5 4.5L10 8l-3.5 3.5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / calc(100% - 3px) no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6.5 4.5L10 8l-3.5 3.5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / calc(100% - 3px) no-repeat;
+  pointer-events: none;
+}
+
+.todo-box[data-state="backlog"] + .todo-box-mark {
+  display: block;
+}
+
+.todo-box:disabled + .todo-box-mark {
+  opacity: 0.7;
 }
 
 .todo-box:focus-visible {
@@ -7196,7 +7224,8 @@ button.diff-fold:hover {
   background: none;
   color: color-mix(in srgb, var(--muted) 65%, var(--faint));
   font-weight: 450;
-  /* Not shown at rest, so a row says only what is set; it keeps its place, so nothing moves when it shows. */
+  /* Not shown at rest, so a row says only what is set; it keeps its room after what is set, so nothing moves when it shows.
+     Repeat and Priority keep none, below. */
   opacity: 0;
   transition: opacity 0.12s;
 }
@@ -7216,8 +7245,78 @@ button.diff-fold:hover {
   }
 }
 
+/* Repeat and Priority not set keep no room at rest: they come last, so showing them moves nothing that was there, and they may
+   wrap then. Drawn at no size rather than not at all, so the keyboard can still be given to one, which shows it. */
+@media (hover: hover) {
+  .todo-row:not(:hover, :focus-within, [data-picking]) .todo-chip:is(.todo-every, .todo-importance)[data-unset] {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border-width: 0;
+    overflow: hidden;
+  }
+}
+
 button.todo-chip {
   cursor: pointer;
+}
+
+/* Abandon and Move to backlog, after what is set and before what isn't: an icon each, drawn as the box it makes, shown as what isn't
+   set is and named on hover. */
+.todo-states {
+  display: flex;
+  gap: 2px;
+}
+
+.todo-state {
+  display: inline-grid;
+  box-sizing: border-box;
+  place-items: center;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: 1px dashed transparent;
+  border-radius: 999px;
+  background: none;
+  color: color-mix(in srgb, var(--muted) 65%, var(--faint));
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.todo-state svg {
+  width: 13px;
+  height: 13px;
+}
+
+.todo-row:hover .todo-state,
+.todo-row:focus-within .todo-state,
+.todo-row[data-picking] .todo-state {
+  border-color: var(--faint);
+  color: var(--chip-ink);
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .todo-state {
+    opacity: 1;
+  }
+}
+
+.todo-row .todo-state:hover {
+  color: var(--ink);
+}
+
+/* The one for the state the todo is in, which opens it again. */
+.todo-row .todo-state[aria-pressed="true"] {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.todo-state:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 button.todo-chip:enabled:hover {
@@ -7403,12 +7502,14 @@ button.todo-tag[aria-pressed="true"] {
     grid-row: 4;
   }
 
+  /* Its press area reaches 4px past its words on each side, so its words may have the whole column. */
   .todo-note {
     grid-row: 3;
-    grid-column: 2 / 4;
+    grid-column: 2;
     justify-self: start;
-    max-width: 100%;
+    max-width: calc(100% + 8px);
   }
+
 }
 
 /* What a todo's chip opens: its choices, as v1's. */
@@ -8255,8 +8356,9 @@ button.todo-tag[aria-pressed="true"] {
   border-radius: 12px;
 }
 
-
-[data-vim-at] {
+/* A todo's row the keys selected is drawn so too, whether or not vim's keys are on. As specific as its most specific part, so it is
+   drawn over a row's tint under the pointer. */
+:is([data-vim-at], .todo-list > .todo-row:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   background-color: var(--accent-soft);

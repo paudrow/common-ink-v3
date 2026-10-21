@@ -68,11 +68,21 @@ To stop a todo repeating, pick **Doesn't repeat**, or remove the `every:` token.
 
 ## Assign a todo
 
-Type `@` on the todo's line and pick a member or one of your contacts. Assigning gives the person no access to the note and doesn't notify them. On the Todos page, press an assignee's chip to change who the todo is assigned to. A todo with nobody has an **Assign** chip in that place.
+Type `@` on the todo's line and pick a member or one of your contacts. Assigning gives the person no access to the note and doesn't notify them. On the Todos page, press an assignee's chip to change who the todo is assigned to. A todo with nobody has a quiet **Assign** chip after **Add date**.
 
 ## The Todos page
 
-**Todos** in the sidebar lists the open todos in every note you can see, leaving out archived notes and notes in Trash. Each row shows the todo, its chips, and its note's name. Press the note's name to open the note at that line. Press the words to edit them in place. Right-click a row for **Open note** and **Open to the side**.
+**Todos** in the sidebar lists the open todos in every note you can see, leaving out archived notes and notes in Trash. Each row shows the todo, its chips, and its note's name. Press the note's name to open the note at that line. Press the words to edit them in place. Right-click a row for **Open note**, **Open to the side**, **Complete**, **Abandon**, and **Move to backlog**.
+
+A row's second line shows only what is set on the todo. Point at a row, or give it the keyboard, and the rest shows after it: **Abandon**, **Move to backlog**, and a button for each thing not set yet, with **Repeat** and **Priority** last. With the keyboard on a row, these keys do the same:
+
+| Key | What it does |
+| --- | --- |
+| `x` | Complete the todo |
+| `-` | Abandon it |
+| `>` | Move it to the backlog |
+
+Press the key for the state a todo is in to open it again. The up and down arrows select the row above or below, and the down arrow in the query bar selects the first row. On a selected row, Space checks the todo off and Enter opens its note. With [vim mode](/docs/notes#vim-mode) on, `dd` abandons it too, and `j` and `k` move between rows as the arrows do. When a todo leaves the list, the next row is selected, so you can work down the list. A notice says what happened, with **Undo**. Press `?` to see every key, or change them in Settings.
 
 The query bar at the top narrows the list. It reads the same language as search, so `assignee:@me due:<=today` lists what is yours and due. **Advanced** builds a query by picking. **Sort** orders the list by **Due date**, **Priority**, **Recently changed**, **Note**, or the todo's words. A few queries to start from:
 

@@ -4,8 +4,8 @@ import { land, toward, type Move, type Side } from "./moving.ts";
  * What vim's keys move through outside a note's text, found by what the page says of itself and not
  * by which plugin drew it. A list is a tree, a listbox, a menu, a list with a name, or anything
  * marked `data-list`. Its rows are its tree items, options and menu items, or what is marked
- * `data-row`, or else its children. A region is the sidebar, the inspector, a side of a split, or
- * anything marked `data-region`.
+ * `data-row`, or else its children. A row's delete key presses what it marks `data-row-delete`. A
+ * region is the sidebar, the inspector, a side of a split, or anything marked `data-region`.
  *
  * A list that takes focus itself keeps its own cursor and has its own keys for it, as History's
  * does. Vim's keys go as far as that list and no further: its rows are the list's to move through.
@@ -86,6 +86,8 @@ export interface Surfaces {
     anyList(): boolean;
     /** On the selected row of a list, and not on another button of that row. */
     row(): boolean;
+    /** As `row`, on a row with something to delete it by. */
+    deletable(): boolean;
     /** Not typing, with a search box in reach. */
     search(): boolean;
     /** Typing in a field that isn't a note's, with a list in reach. */
@@ -102,6 +104,8 @@ export interface Surfaces {
   out(): void;
   /** Expands the selected row, or collapses it, where it has something that does. */
   toggle(): void;
+  /** Presses what deletes the selected row, as a todo's Abandon does. */
+  remove(): void;
   search(): void;
   /** An arrow key for the field, which a field with a list under it has its own answer to. One with none sends focus into the list. */
   arrow(key: "ArrowDown" | "ArrowUp"): void;
@@ -158,6 +162,8 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
     return listsIn(within)[0];
   };
   const rowAt = (list: Element) => rowsOf(list).find((r) => r.contains(active()));
+  /** What deletes a row: its own, and not a row's of a list inside it. */
+  const deleterOf = (row: HTMLElement | undefined) => [...(row?.querySelectorAll<HTMLElement>("[data-row-delete]") ?? [])].find((el) => el.closest(ROW) === row && !el.matches(":disabled"));
   const resting = (list: Element, rows: readonly HTMLElement[]) => {
     const was = last.get(list);
     return Math.max(0, was ? rows.indexOf(was) : rows.findIndex((r) => r.matches('[aria-selected="true"], [aria-current]:not([aria-current="false"])') || r.querySelector('[aria-current]:not([aria-current="false"])')));
@@ -179,6 +185,12 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
   /** In a field of the page's. A note's editor has fields of its own, such as vim's prompt, where these keys are vim's. */
   const inField = () => typing(active()) && !active().isContentEditable && !active().closest(".cm-editor");
   const drawn = () => !!active().closest(DRAWN);
+  /** The selected row, when focus is on it and not on another button of it. */
+  const selected = () => {
+    const list = drawn() ? null : active().closest(LIST);
+    const row = list && !typing(active()) ? rowAt(list) : undefined;
+    return row && restOf(row) === active() ? row : undefined;
+  };
 
   const enter = (region: HTMLElement | undefined) => {
     if (!region) return;
@@ -195,11 +207,8 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
     on: {
       list: () => !drawn() && !typing(active()) && !ownKeys(active().closest(LIST)) && !!listNear(),
       anyList: () => !drawn() && !typing(active()) && !!listNear(),
-      row() {
-        const list = drawn() ? null : active().closest(LIST);
-        const row = list && !typing(active()) ? rowAt(list) : undefined;
-        return !!row && restOf(row) === active();
-      },
+      row: () => !!selected(),
+      deletable: () => !!deleterOf(selected()),
       search: () => !drawn() && !typing(active()) && !!searchBox(),
       field: () => inField() && !!listNear(),
       // Over the window only a search box or a field inside a list, as Settings has: a palette's own field keeps Escape for closing.
@@ -248,6 +257,7 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       const row = list && rowAt(list);
       [...(row?.querySelectorAll<HTMLElement>("[data-row-toggle], button[aria-expanded]") ?? [])].find((t) => t.closest(LIST) === list)?.click();
     }),
+    remove: keyed(() => deleterOf(selected())?.click()),
     search: () => searchBox()?.focus(),
     arrow: keyed((key: "ArrowDown" | "ArrowUp") => {
       const left = active().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));

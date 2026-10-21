@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choicesFor, clicked, picking, repeatOf, repeats, sameRule, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
+import { choicesFor, clicked, picking, pressed, repeatOf, repeats, sameRule, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
 
 const run = (events: PickingEvent[], from: Picking = null) => events.reduce(picking, from);
 const open = (row: string, chip: Opened): PickingEvent => ({ type: "open", row, chip });
@@ -117,5 +117,12 @@ describe("adding a tag from a row", () => {
 describe("a todo's box", () => {
   it("is checked off by a click when it is open, and opened again when it is anything else", () => {
     expect((["open", "done", "abandoned", "backlog"] as const).map(clicked)).toEqual(["done", "open", "open", "open"]);
+  });
+
+  it("is put in a state by its key or button, and opened again by the one for the state it is in", () => {
+    const from = ["open", "done", "abandoned", "backlog"] as const;
+    expect(from.map((state) => pressed(state, "done"))).toEqual(["done", "open", "done", "done"]);
+    expect(from.map((state) => pressed(state, "abandoned"))).toEqual(["abandoned", "abandoned", "open", "abandoned"]);
+    expect(from.map((state) => pressed(state, "backlog"))).toEqual(["backlog", "backlog", "backlog", "open"]);
   });
 });

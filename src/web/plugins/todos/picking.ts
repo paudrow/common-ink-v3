@@ -1,4 +1,4 @@
-import { DAY_NAMES, nameKey, ordinal, parseRule, skippedTo, tagsOn, writeRule, type Importance, type TodoChange, type TodoState } from "../../plugin-api.ts";
+import { DAY_NAMES, nameKey, ordinal, parseRule, skippedTo, tagsOn, writeRule, type IconName, type Importance, type TodoChange, type TodoState } from "../../plugin-api.ts";
 import { addDays, dueLabel } from "./dates.ts";
 import { shortDay } from "./recurrence.ts";
 
@@ -10,6 +10,24 @@ export const STATE_NAMES: Record<TodoState, string> = { open: "Not done", done: 
 
 /** What a click on a todo's box makes it: an open todo done, and any other open again. */
 export const clicked = (state: TodoState): TodoState => (state === "open" ? "done" : "open");
+
+/** A state a todo is put in from the Todos page by a key, a button or its menu: put away, as each of these takes it off the open todos. */
+export type PutAway = Exclude<TodoState, "open">;
+
+/**
+ * How the Todos page puts a todo in each state: the menu item and button that do it, the icon they
+ * show, the command and the keys that do it to the row the keyboard is on, what is said once it is
+ * done, and what it was, said when Undo finds the line changed since.
+ */
+export const PUTTING: Record<PutAway, { label: string; icon: IconName; command: string; title: string; keys: readonly string[]; told: string; past: string }> = {
+  done: { label: "Complete", icon: "check", command: "todos.complete", title: "Complete the selected todo, or open it again", keys: ["x"], told: "Task completed", past: "checked off" },
+  abandoned: { label: "Abandon", icon: "abandoned", command: "todos.abandon", title: "Abandon the selected todo, or open it again", keys: ["-"], told: "Task abandoned", past: "abandoned" },
+  // Where > is typed with Shift, as on most keyboards, the press is written shift+>.
+  backlog: { label: "Move to backlog", icon: "backlog", command: "todos.backlog", title: "Move the selected todo to the backlog, or open it again", keys: ["shift+>", ">"], told: "Task moved to the backlog", past: "moved to the backlog" },
+};
+
+/** What a key, a button or a menu item for a state makes a todo: that state, or open again when it is in it already. */
+export const pressed = (state: TodoState, to: PutAway): TodoState => (state === to ? "open" : to);
 
 /** The chips of a todo that open a popover of choices, in a note and on the Todos page. */
 export type ChipKind = "due" | "importance" | "every";
