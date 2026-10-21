@@ -10,14 +10,14 @@ const ROOT = join(import.meta.dirname, "../..");
 const [node, ...args] = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts.site!.split(" ");
 
 /** The generator run on a site/ of `files`, as `npm run site` runs it: its exit code, what it said, and what it wrote. */
-function generate(files: Record<string, string>, ...flags: string[]): Promise<{ code: number | null; said: string; wrote: string | null }> {
+function generate(files: Record<string, string>): Promise<{ code: number | null; said: string; wrote: string | null }> {
   const dir = mkdtempSync(join(tmpdir(), "ink-site-"));
   mkdirSync(join(dir, "src/worker/site"), { recursive: true });
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(join(dir, "site", path, ".."), { recursive: true });
     writeFileSync(join(dir, "site", path), text);
   }
-  const child = spawn(node!, [...args.map((arg) => (arg.endsWith(".ts") ? join(ROOT, arg) : arg)), ...flags], { cwd: dir });
+  const child = spawn(node!, args.map((arg) => (arg.endsWith(".ts") ? join(ROOT, arg) : arg)), { cwd: dir });
   let said = "";
   child.stdout.on("data", (chunk) => (said += chunk));
   child.stderr.on("data", (chunk) => (said += chunk));
@@ -53,27 +53,27 @@ describe("the site's generator", { concurrency: true }, () => {
   });
 
   test("fails when nav.json names a page twice, or there is no index.md for /docs", async () => {
-    const twice = await generate({ "docs/nav.json": JSON.stringify([{ group: "A", pages: ["index", "cli"] }, { group: "B", pages: ["cli"] }]), ...PAGES }, "--check");
+    const twice = await generate({ "docs/nav.json": JSON.stringify([{ group: "A", pages: ["index", "cli"] }, { group: "B", pages: ["cli"] }]), ...PAGES });
     assert.deepEqual([twice.code, /names cli more than once/.test(twice.said)], [1, true]);
     const { "docs/index.md": _, ...noIndex } = PAGES;
-    const bare = await generate({ "docs/nav.json": JSON.stringify([{ group: "A", pages: ["cli"] }]), ...noIndex }, "--check");
+    const bare = await generate({ "docs/nav.json": JSON.stringify([{ group: "A", pages: ["cli"] }]), ...noIndex });
     assert.deepEqual([bare.code, /site\/docs\/ needs index\.md, the page at \/docs/.test(bare.said)], [1, true]);
   });
 
   test("fails, naming the file, when a page is in no group of nav.json", async () => {
-    const { code, said } = await generate({ "docs/nav.json": NAV, ...PAGES, "docs/extra.md": "# Extra\n\nMore.\n" }, "--check");
+    const { code, said } = await generate({ "docs/nav.json": NAV, ...PAGES, "docs/extra.md": "# Extra\n\nMore.\n" });
     assert.equal(code, 1);
     assert.match(said, /site\/docs\/extra\.md is in no group of site\/docs\/nav\.json/);
   });
 
   test("fails on a generated section that has no name it knows", async () => {
-    const { code, said } = await generate({ "docs/nav.json": NAV, ...PAGES, "docs/cli.md": "# The ink command\n\nRun it.\n\n<!-- generated:cli-usages -->\n" }, "--check");
+    const { code, said } = await generate({ "docs/nav.json": NAV, ...PAGES, "docs/cli.md": "# The ink command\n\nRun it.\n\n<!-- generated:cli-usages -->\n" });
     assert.equal(code, 1);
     assert.match(said, /site\/docs\/cli\.md: no generated section is named "cli-usages"\. There are cli-usage, mcp-tools, search-syntax\./);
   });
 
   test("fails on a generated section that is not on a line of its own", async () => {
-    const { code, said } = await generate({ "docs/nav.json": NAV, ...PAGES, "docs/cli.md": "# The ink command\n\nRun it. <!-- generated:cli-usage -->\n" }, "--check");
+    const { code, said } = await generate({ "docs/nav.json": NAV, ...PAGES, "docs/cli.md": "# The ink command\n\nRun it. <!-- generated:cli-usage -->\n" });
     assert.equal(code, 1);
     assert.match(said, /site\/docs\/cli\.md: a <!-- generated:NAME --> is filled in only on a line of its own\./);
   });

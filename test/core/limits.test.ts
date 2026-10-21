@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import worker from "../../src/worker/index.ts";
 import { sign } from "../../src/worker/session.ts";
@@ -18,7 +18,15 @@ const from = (address: string, init: RequestInit = {}) => ({ ...init, headers: {
 const last = (all: number[]) => all.at(-1);
 const before = (all: number[]) => all.slice(0, -1).includes(429);
 
+// The local limiter counts each key from 0 again as each minute of the clock starts, so asking 301 times across the turn
+// of a minute sees no refusal. Each test starts with at least ROOM of its minute left.
+const ROOM = 10_000;
+
 describe("how often one caller may ask", () => {
+  beforeEach(async () => {
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < ROOM) await new Promise((done) => setTimeout(done, left));
+  }, ROOM + 5_000);
   it("lets one address finish sign-in with Google 10 times a minute, and another address as many again", async () => {
     const callback = (address: string) => send("/auth/google/callback?state=x&code=y", from(address));
     const all = await statuses(11, () => callback("203.0.113.1"));

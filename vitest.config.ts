@@ -1,6 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 import { unpackedExtensionId } from "./scripts/extension-id.ts";
+
+// The Worker imports the site's pages, which are written, not committed.
+execFileSync("npm", ["run", "--silent", "site"], { stdio: ["ignore", "ignore", "inherit"] });
 
 export default defineConfig(async () => ({
   plugins: [
