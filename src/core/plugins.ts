@@ -116,7 +116,7 @@ export const nameSkeleton = (name: string): string =>
  * here is still refused when it would start.
  */
 export const OWN_NAMES = [
-  "Common Ink", "Plugins", "Settings", "Agents", "Archive and Trash", "Backlinks", "Calendar", "Code blocks", "Coin", "Command palette", "Contacts", "Daily notes", "Dashboard", "Dates", "Dice", "Embed menu", "Folders",
+  "Common Ink", "Plugins", "Settings", "Agents", "Archive and Trash", "Backlinks", "Calendar", "Code blocks", "Coin", "Command palette", "Contacts", "Daily notes", "Dashboard", "Dates", "Dice", "Embed menu", "Folders", "Insert menu",
   "GitHub-flavored markdown", "HTML embeds", "History", "Kanban", "LaTeX", "Links", "Media embeds", "Members", "Mentions", "Note clocks", "Note info", "Note list", "Outline bullets", "Quick open",
   "Quick timer", "References", "Sample calendar", "Search", "Sharing", "Sidebar", "Stopwatch", "Tables", "Tabs and splits", "Tags", "Timer", "Todos", "Trash", "Upload embeds", "Uploads", "Vim mode", "Weather", "Word count",
 ];
@@ -232,6 +232,8 @@ const shape = {
       z.strictObject({
         name: Local,
         title: Words(60),
+        /** What the insert menu says it makes, in a line of words. */
+        description: Words(120).optional(),
         height: z.number().int().min(24).max(1200).default(240),
         /** What a member sets in the embed's config from beneath it, which the app draws and writes. */
         options: z

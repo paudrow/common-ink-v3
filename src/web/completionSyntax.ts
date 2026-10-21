@@ -35,8 +35,8 @@ export interface Placing {
   /** The rest of the line on each side of that. */
   before: string;
   after: string;
-  /** Whether the line is the note's last. */
-  last: boolean;
+  /** The text of the line after, or null where the line is the note's last. */
+  below: string | null;
 }
 
 /** The edit that puts a picked item in the note in place of its trigger and what was typed, and where the cursor goes. */
@@ -45,13 +45,15 @@ export function placed(item: CompletionItem & { insert: string }, at: Placing): 
     const [a, b] = item.select ?? [item.insert.length, item.insert.length];
     return { from: at.from, to: at.to, insert: item.insert, anchor: at.from + a, head: at.from + b };
   }
-  // A block starts its line, so blank space before it goes, and anything else keeps its own line.
-  const blank = !at.before.trim();
-  const from = blank ? at.from - at.before.length : at.from;
-  const lead = blank ? "" : "\n";
-  // The cursor needs a line after the block to sit on, where it isn't in the block.
-  const own = at.after !== "" || at.last;
-  const insert = `${lead}${item.insert}${own ? "\n" : ""}`;
-  const after = from + insert.length + (own ? 0 : 1);
+  // A block starts its line, so blank space, a quote's mark or a list item's mark before it goes, and anything else keeps its own line.
+  const bare = LEAD.test(at.before);
+  const from = bare ? at.from - at.before.length : at.from;
+  const lead = bare ? "" : "\n";
+  // The cursor needs a line after the block to sit on, where it isn't in the block, unless it goes in the block.
+  const own = at.after !== "" || (at.below === null && !item.select);
+  const gap = item.apart && (at.after !== "" || !!at.below?.trim()) ? "\n" : "";
+  const insert = `${lead}${item.insert}${own ? "\n" : ""}${gap}`;
+  if (item.select) return { from, to: at.to, insert, anchor: from + lead.length + item.select[0], head: from + lead.length + item.select[1] };
+  const after = from + insert.length + (own || gap ? 0 : 1);
   return { from, to: at.to, insert, anchor: after, head: after };
 }

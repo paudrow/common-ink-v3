@@ -1,9 +1,13 @@
 import { createElement } from "react";
 import { SWATCHES, type Drawn, type EmbedOptions, type Embedded, type Plugin, type Swatch } from "../../plugin-api.ts";
 import { openPopover } from "../lib/Popover.tsx";
+import { panel, sketch, words } from "../lib/sketch.ts";
 import { addCard, cardEnd, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard, type Board } from "./board.ts";
 
 const CARD_DRAG = "application/x-common-ink-card";
+
+/** Three columns of cards, as the insert menu pictures a board. */
+const PICTURE = sketch([10, 74, 138].map((x, i) => words(x, 8, 34, 5) + [20, 40, 60].slice(0, 3 - i).map((y) => panel(x, y, 52, 16)).join("")).join(""));
 
 /** The card being dragged, and the drawing of the board it was picked up from. A board drawn again since then isn't that one, so the drop does nothing. */
 let dragging: { drawn: object; from: { column: number; card: number } } | null = null;
@@ -189,6 +193,6 @@ export const kanban: Plugin = {
   icon: "board",
   screenshots: [{ src: "/plugin-shots/kanban-light.png", dark: "/plugin-shots/kanban-dark.png", alt: "A board in a note: three columns of cards, each with a button to add a card." }],
   activate(host) {
-    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, options, render: draw });
+    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, description: "Columns of cards to drag from one to another", preview: { image: PICTURE }, options, render: draw });
   },
 };

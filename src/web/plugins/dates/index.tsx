@@ -1,5 +1,4 @@
-import { EditorView } from "@codemirror/view";
-import { today, type CompletionItem, type Plugin } from "../../plugin-api.ts";
+import { today, type CompletionItem, type InsertAt, type Plugin } from "../../plugin-api.ts";
 import { timeIn } from "../calendar/dates.ts";
 import { browserZone, toward } from "../daily/days.ts";
 import { openDay } from "../daily/opening.ts";
@@ -27,35 +26,16 @@ function itemFor(said: Said, now: string): CompletionItem {
   };
 }
 
-/** A mark at the cursor of `view` for a popover to hang from, which scrolls with the note's text. */
-function markAtCursor(view: EditorView): HTMLElement {
-  const box = view.scrollDOM.getBoundingClientRect();
-  const at = view.coordsAtPos(view.state.selection.main.head) ?? { left: box.left, top: box.top, bottom: box.top };
-  const mark = view.scrollDOM.appendChild(document.createElement("span"));
-  Object.assign(mark.style, {
-    position: "absolute",
-    width: "0",
-    left: `${at.left - box.left + view.scrollDOM.scrollLeft}px`,
-    top: `${at.top - box.top + view.scrollDOM.scrollTop}px`,
-    height: `${at.bottom - at.top}px`,
-  });
-  return mark;
-}
-
 /**
- * Pick a date…: a date field under the cursor of the editor that has the keyboard, which answers the
- * day picked, at `time` where one was typed, written as a note writes it, or null when it is closed
- * with none. It starts empty, so picking today is a change too.
+ * Pick a date…: a date field under the cursor, which answers the day picked, at `time` where one was
+ * typed, written as a note writes it, or null when it is closed with none. It starts empty, so
+ * picking today is a change too.
  */
-function pickDay(time: string | null): Promise<string | null> {
-  const editor = document.activeElement?.closest<HTMLElement>(".cm-editor");
-  const view = editor && EditorView.findFromDOM(editor);
-  if (!view) return Promise.resolve(null);
-  const mark = markAtCursor(view);
+function pickDay(time: string | null, { anchor, focus }: InsertAt): Promise<string | null> {
   return new Promise((done) => {
     let picked: string | null = null;
     openPopover(
-      mark,
+      anchor,
       "Pick a date",
       (close) => (
         <div className="chip-menu date-pick">
@@ -71,14 +51,13 @@ function pickDay(time: string | null): Promise<string | null> {
       ),
       (hadFocus) => {
         done(picked);
-        mark.remove();
-        if (hadFocus && view.dom.isConnected) view.focus();
+        if (hadFocus) focus();
       },
     );
   });
 }
 
-const pick = (time: string | null): CompletionItem => ({ kind: "date", label: "Pick a date…", description: time === null ? "Any day, from a calendar" : `Any day at ${timeWords(time)}, from a calendar`, insert: () => pickDay(time) });
+const pick = (time: string | null): CompletionItem => ({ kind: "date", label: "Pick a date…", description: time === null ? "Any day, from a calendar" : `Any day at ${timeWords(time)}, from a calendar`, insert: (at) => pickDay(time, at) });
 
 /**
  * Dates. `@` alone offers today and tomorrow, and for what is typed after it days (today, tomorrow,

@@ -30,18 +30,25 @@ Write `#tag` anywhere outside code, with no space after the `#`. A tag tags the 
 
 ## The / menu
 
-Type `/` at the start of a line or after a space to open the embed menu. Keep typing to narrow it, and pick an item to write it into the note.
+Type `/` at the start of a line or after a space to open the insert menu. Each item says what it makes, with a small picture of it beside the list. Keep typing to narrow it, and pick an item to put it in the note.
 
-| Item | What it writes |
+| Item | What it makes |
 | --- | --- |
-| Timer | `::timer{5m}`, a countdown that runs the same for everyone reading the note |
-| Stopwatch | `::stopwatch{}`, with its time kept in the note |
-| Kanban board | A block whose `##` headings are columns and whose list items are cards |
+| Heading 1, 2, 3 | A large, medium or small title |
+| Bulleted list, Numbered list, Task list | A list, with a dot, a number or a box to check before each item |
+| Table | Rows and columns, typed into cell by cell |
+| Code block | Code in a fixed-width font, drawn in its language's colours |
+| Quote, Divider | Words set apart as a quotation, or a line across the note |
+| Timer | A countdown that runs the same for everyone reading the note |
+| Stopwatch | A stopwatch whose time is kept in the note |
+| Kanban board | Columns of cards to drag from one to another |
 | Form | Questions that members answer, with the answers kept in the note |
 | HTML | A block of HTML that runs in a frame shut off from the app |
-| Event, Contact | A place for a reference to one of your events or contacts, which you paste over it. See [Calendar and contacts](/docs/calendar-contacts) |
+| Event, Contact | A place for a reference to one of your events or contacts, which you paste over it. Typing `@` and a name finds one directly. See [Calendar and contacts](/docs/calendar-contacts) |
 | Upload a file | A file you pick from your computer |
 | Insert an upload | A file already uploaded to the workspace |
+
+Typing `::` opens the same menu with the embeds alone, from the timer down, so `::kan` and Enter makes a kanban board.
 
 An embed with settings has an options button in its card, for a timer's length or a board's column colours. Dragging a card on a kanban board moves its lines in the note.
 

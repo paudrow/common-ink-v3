@@ -1,5 +1,6 @@
 import { sandboxed, type Plugin } from "../../plugin-api.ts";
 import { arriving } from "../lib/arriving.ts";
+import { lettering, outline, sketch } from "../lib/sketch.ts";
 import { HTML_OPTIONS, heightIn } from "./config.ts";
 import { runningIn } from "./running.ts";
 
@@ -63,6 +64,8 @@ export const html: Plugin = {
       title: "HTML",
       block: true,
       starts: { body: START },
+      description: "A page of your own HTML, run in a frame shut off from the app",
+      preview: { image: sketch(outline(10, 8, 180, 68, 5) + `<rect x="10" y="8" width="180" height="14" rx="5" opacity="0.18"/><circle cx="20" cy="15" r="2.5"/><circle cx="29" cy="15" r="2.5"/><circle cx="38" cy="15" r="2.5"/>` + lettering(70, 58, 26, "&lt;/&gt;", 'font-family="ui-monospace, monospace" font-weight="600"')) },
       options: HTML_OPTIONS,
       // All of it is below: the card the host draws has the name and the options, and the frame is the card's body.
       render() {},

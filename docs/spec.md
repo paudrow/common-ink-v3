@@ -150,7 +150,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 96. As an admin, I want to set and lock each plugin's permissions for the workspace, so that members can't widen them.
 97. As a non-admin, I want saying yes to a plugin's request to send it to an admin, so that I can ask for capabilities without granting them.
 98. As a member, I want plugins never to change my settings, other than the options a plugin remembers for itself (such as a calendar's hidden calendars), so that a plugin can't change my setup behind my back.
-99. As a member, I want to press `/` and search an embed menu as I type, so that I can insert widgets quickly.
+99. As a member, I want to press `/` and search an insert menu of blocks and embeds as I type, each said in words with a picture of what it makes, so that I can insert widgets quickly without knowing their syntax; `::` lists the embeds alone.
 100. As a member, I want inline widgets such as a timer or stopwatch written as `::name{config}`, so that they are visible and editable in the markdown.
 101. As a member, I want block widgets such as a kanban board to store their data in the note between `:::name{config}` and `:::`, so that the data is plain markdown.
 102. As a member, I want kanban columns to be headings and cards to be list items, so that the board reads naturally as markdown.

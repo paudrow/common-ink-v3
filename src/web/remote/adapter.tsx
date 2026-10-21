@@ -380,6 +380,7 @@ export function adapt(installed: InstalledPlugin, reach: Reach): Plugin {
           // A note writes `::x-name{}` for an installed plugin's. The frame is told the name its manifest gave.
           name: own ? embed.name : INSTALLED_EMBED + embed.name,
           title,
+          ...(embed.description && { description: embed.description }),
           render(el, written) {
             const label = el.appendChild(document.createElement("span"));
             label.className = "media-name";

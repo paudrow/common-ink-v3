@@ -442,11 +442,11 @@ A block embed (`:::html{}`) whose body is HTML, run below the block in a frame w
 **Run HTML embeds**:
 A member's setting (`html.run`): `automatically` or `ask first`, which shows a Run button in place of each HTML embed until it is pressed. It defaults to `ask first` until the server serves HTML embeds from a site of their own (`EMBED_ORIGIN`), as the server says in `/api/me`, and to `automatically` where it does; the member's own choice stands either way. A value that is neither reads as `ask first`, and a change reaches notes already open: what ran by itself stops and asks, what was asking runs. Like every setting it is the member's alone: no plugin, agent or embed can read or change it. A page opened from a share link always asks first. An embed whose HTML has changed runs again, or asks again.
 
-**Embed menu**:
-The list of embeds that opens at the cursor when a member types `/` at the start of a line or after a space. Typing filters it, and picking one writes that embed into the note.
+**Insert menu**:
+The list that opens at the cursor when a member types `/` at the start of a line or after a space: blocks of markdown, such as a heading, a list, a table or a code block, and then every embed, each said in words with a small picture of what it makes, never its syntax. Typing filters it, and picking one writes it into the note. `::` opens the same list's embeds alone, so an embed's name typed as a note writes it is completed too.
 
 **Completion**:
-A list a plugin offers at the cursor while the member types after a trigger. The embed menu is one.
+A list a plugin offers at the cursor while the member types after a trigger. The insert menu is one.
 
 **Editor extension**:
 Something a plugin adds to the editor of every note, such as keys or a status line. It applies to notes already open, and not to the settings JSON.

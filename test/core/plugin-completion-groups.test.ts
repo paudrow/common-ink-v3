@@ -16,7 +16,11 @@ describe("the groups of a list at the cursor", () => {
       { label: "Tomorrow", kind: "date" },
       { label: "Create contact “Road”", kind: "new" },
     ];
-    expect(shown(items)).toEqual(["People 0: Ada", "People 0: Grace", "Dates 1: Tomorrow", "Notes 2: Road map", "Notes 2: Roadmap draft", "Uploads 3: harbour.png", "Events 4: Standup", "New 5: Create contact “Road”"]);
+    expect(shown(items)).toEqual(["People 0: Ada", "People 0: Grace", "Dates 1: Tomorrow", "Notes 2: Road map", "Notes 2: Roadmap draft", "Uploads 3: harbour.png", "Events 4: Standup", "New 7: Create contact “Road”"]);
+  });
+
+  it("put blocks before embeds, as / lists them", () => {
+    expect(shown([{ label: "Timer", kind: "embed" }, { label: "Table", kind: "block" }, { label: "Kanban board", kind: "embed" }, { label: "Quote", kind: "block" }])).toEqual(["Blocks 5: Table", "Blocks 5: Quote", "Embeds 6: Timer", "Embeds 6: Kanban board"]);
   });
 
   it("are headed only where the list holds more than one kind", () => {

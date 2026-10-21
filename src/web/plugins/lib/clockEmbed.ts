@@ -1,5 +1,9 @@
 import type { Embed, EmbedOptions } from "../../plugin-api.ts";
 import { durationOf, durationText, elapsedOf, finished, readClock, shown, toggled, writeClock } from "./clock.ts";
+import { lettering, sketch } from "./sketch.ts";
+
+/** A clock showing `time` with its start button, as the insert menu pictures a timer or a stopwatch. */
+export const clockSketch = (time: string) => sketch(`<path d="M44 28 L62 42 L44 56 Z"/>` + lettering(74, 54, 34, time, 'font-weight="600"'));
 
 const KINDS = {
   stopwatch: { title: "Stopwatch", hint: "Start or stop the stopwatch", example: "::stopwatch{}", stop: "Stop" },

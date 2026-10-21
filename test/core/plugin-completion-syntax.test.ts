@@ -27,6 +27,10 @@ describe("what was typed after a trigger", () => {
     expect(typedAfter("[[a]] and [[b", "[[", { spaces: true })).toBe("b");
   });
 
+  it("is read after :: where a note writes an embed, and not in a block's closing :::, a name with :: inside it, or an address", () => {
+    expect(["::", "x ::kan", ":::", "std::vector", "fe80::1", "::ti::", "say ::ti me"].map((before) => typedAfter(before, "::"))).toEqual(["", "kan", ":", null, null, null, null]);
+  });
+
   it("is read after anything when the completion opens anywhere", () => {
     for (const before of ["([[Ro", "\"[[Ro", "word[[Ro", "**[[Ro"]) {
       expect([before, typedAfter(before, "[[", { spaces: true, anywhere: true })]).toEqual([before, "Ro"]);
@@ -57,20 +61,37 @@ describe("placing a picked item", () => {
   const board = { label: "Kanban board", insert: ":::kanban{}\n## To do\n:::", block: true };
 
   it("puts an inline item where the trigger was, with its selection or the cursor after it", () => {
-    expect(placed(timer, { from: 10, to: 13, before: "Tea ", after: " now", last: false })).toEqual({ from: 10, to: 13, insert: "::timer{5m}", anchor: 18, head: 20 });
-    expect(placed({ label: "Stopwatch", insert: "::stopwatch{}" }, { from: 0, to: 2, before: "", after: "", last: true })).toMatchObject({ insert: "::stopwatch{}", anchor: 13, head: 13 });
+    expect(placed(timer, { from: 10, to: 13, before: "Tea ", after: " now", below: "" })).toEqual({ from: 10, to: 13, insert: "::timer{5m}", anchor: 18, head: 20 });
+    expect(placed({ label: "Stopwatch", insert: "::stopwatch{}" }, { from: 0, to: 2, before: "", after: "", below: null })).toMatchObject({ insert: "::stopwatch{}", anchor: 13, head: 13 });
   });
 
   it("gives a block lines of its own and leaves the cursor on the line after it", () => {
     // Alone on the last line: a line is added for the cursor.
-    expect(placed(board, { from: 20, to: 24, before: "", after: "", last: true })).toEqual({ from: 20, to: 24, insert: `${board.insert}\n`, anchor: 20 + board.insert.length + 1, head: 20 + board.insert.length + 1 });
+    expect(placed(board, { from: 20, to: 24, before: "", after: "", below: null })).toEqual({ from: 20, to: 24, insert: `${board.insert}\n`, anchor: 20 + board.insert.length + 1, head: 20 + board.insert.length + 1 });
     // Alone on a line with more below: the cursor goes to the line that is there.
-    expect(placed(board, { from: 20, to: 24, before: "", after: "", last: false })).toEqual({ from: 20, to: 24, insert: board.insert, anchor: 20 + board.insert.length + 1, head: 20 + board.insert.length + 1 });
+    expect(placed(board, { from: 20, to: 24, before: "", after: "", below: "" })).toEqual({ from: 20, to: 24, insert: board.insert, anchor: 20 + board.insert.length + 1, head: 20 + board.insert.length + 1 });
     // After text: the text keeps its line.
-    expect(placed(board, { from: 20, to: 24, before: "Plan: ", after: "", last: true })).toMatchObject({ from: 20, insert: `\n${board.insert}\n` });
+    expect(placed(board, { from: 20, to: 24, before: "Plan: ", after: "", below: null })).toMatchObject({ from: 20, insert: `\n${board.insert}\n` });
     // Before text: the text goes to the line after, with the cursor.
-    expect(placed(board, { from: 20, to: 24, before: "", after: "rest", last: false })).toMatchObject({ insert: `${board.insert}\n`, anchor: 20 + board.insert.length + 1 });
+    expect(placed(board, { from: 20, to: 24, before: "", after: "rest", below: "" })).toMatchObject({ insert: `${board.insert}\n`, anchor: 20 + board.insert.length + 1 });
     // After only blank space: the blank space goes, since a block starts its line.
-    expect(placed(board, { from: 22, to: 24, before: "  ", after: "", last: true })).toMatchObject({ from: 20, to: 24, insert: `${board.insert}\n` });
+    expect(placed(board, { from: 22, to: 24, before: "  ", after: "", below: null })).toMatchObject({ from: 20, to: 24, insert: `${board.insert}\n` });
+  });
+
+  it("takes a quote's or a list item's mark that is all that comes before a block, and keeps a block that asks apart from words under it", () => {
+    const heading = { label: "Heading 2", insert: "## ", block: true, select: [3, 3] as const };
+    const table = { label: "Table", insert: "| a |\n| - |", block: true, apart: true };
+    expect(placed(heading, { from: 22, to: 25, before: "- ", after: "", below: null })).toEqual({ from: 20, to: 25, insert: "## ", anchor: 23, head: 23 });
+    expect(placed(table, { from: 20, to: 24, before: "", after: "", below: "Words" })).toEqual({ from: 20, to: 24, insert: "| a |\n| - |\n", anchor: 32, head: 32 });
+    expect(placed(table, { from: 20, to: 24, before: "", after: "rest", below: null })).toEqual({ from: 20, to: 24, insert: "| a |\n| - |\n\n", anchor: 33, head: 33 });
+    expect(placed(table, { from: 20, to: 24, before: "", after: "", below: "" })).toEqual({ from: 20, to: 24, insert: "| a |\n| - |", anchor: 32, head: 32 });
+  });
+
+  it("puts the cursor in a block that says where, adding a line after it only for the rest of its line", () => {
+    const heading = { label: "Heading 1", insert: "# ", block: true, select: [2, 2] as const };
+    const code = { label: "Code block", insert: "```\n\n```", block: true, select: [4, 4] as const };
+    expect(placed(heading, { from: 20, to: 23, before: "", after: "", below: null })).toEqual({ from: 20, to: 23, insert: "# ", anchor: 22, head: 22 });
+    expect(placed(heading, { from: 26, to: 29, before: "Plan: ", after: "", below: null })).toEqual({ from: 26, to: 29, insert: "\n# ", anchor: 29, head: 29 });
+    expect(placed(code, { from: 20, to: 23, before: "", after: "rest", below: "" })).toEqual({ from: 20, to: 23, insert: "```\n\n```\n", anchor: 24, head: 24 });
   });
 });

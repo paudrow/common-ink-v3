@@ -6,6 +6,7 @@ import { UPLOADS_PATH } from "./finding.ts";
 import { inserter } from "./inserting.tsx";
 import { FILE_PATH, PREVIEW } from "./opening.ts";
 import { uploadsAt } from "./pointing.ts";
+import { panel, sketch } from "../lib/sketch.ts";
 import { Preview } from "./Preview.tsx";
 import { sender, type Sender } from "./sending.ts";
 import { UploadsPage } from "./UploadsPage.tsx";
@@ -36,6 +37,12 @@ export const uploadDrawing: Plugin = {
   },
 };
 
+/** An arrow up out of a tray, as the insert menu pictures sending a file. */
+const UPLOAD_PICTURE = sketch(`<path d="M100 12 L82 32 H94 V52 H106 V32 H118 Z"/><path d="M66 48 V68 H134 V48" fill="none" stroke-width="4" stroke-linejoin="round"/>`);
+
+/** Pictures in a row, as the insert menu pictures uploads to choose from. */
+const INSERT_PICTURE = sketch([20, 76, 132].map((x) => panel(x, 18, 48, 48) + `<path d="M${x + 6} 60 l12 -18 l10 12 l6 -6 l8 12 Z" opacity="0.55"/><circle cx="${x + 36}" cy="30" r="4" opacity="0.55"/>`).join(""));
+
 /**
  * Uploads: files in a workspace that a note shows by `::image{id 640x480}`, `::video{id 640x360}`,
  * `::audio{id}` or `::file{id}`. A file pasted, dropped or picked into a note is sent and written
@@ -55,8 +62,8 @@ export const uploads: Plugin = {
     const { embeds, stop } = uploadEmbeds(
       host,
       [
-        { title: "Upload a file", detail: "a picture, a video, a recording, or any file", run: sending.pickIntoNote },
-        { title: "Insert an upload", detail: "a file already uploaded", run: inserting.ask },
+        { title: "Upload a file", description: "A picture, a video, a recording or any file from your computer", preview: { image: UPLOAD_PICTURE }, run: sending.pickIntoNote },
+        { title: "Insert an upload", description: "A file already uploaded to the workspace", preview: { image: INSERT_PICTURE }, run: inserting.ask },
       ],
       { of: sending.of, subscribe: sending.subscribe },
     );

@@ -84,7 +84,7 @@ async function expectOverItsRoom(page: Page, embed: string, when: string) {
     .toBeLessThanOrEqual(1);
 }
 
-test("a note that writes `::youtube{}`, `::social{}` or `::link{}` shows them as the text they are, the embed menu offers none of them, and nothing is asked of another site", async ({ page, baseURL }) => {
+test("a note that writes `::youtube{}`, `::social{}` or `::link{}` shows them as the text they are, the insert menu offers none of them, and nothing is asked of another site", async ({ page, baseURL }) => {
   const outside: string[] = [];
   page.on("request", (request) => !request.url().startsWith(new URL(baseURL!).origin) && outside.push(request.url()));
   const old = "# Old\n\nOne ::youtube{https://youtu.be/dQw4w9WgXcQ} two\n\n::social{https://x.com/jack/status/20}\n\n::link{https://example.com/docs The docs}\n\nlast";
@@ -329,7 +329,7 @@ test("each thing below a line is one box with one radius, and what is in it fill
   expect([body.x, body.width, body.y]).toEqual([head.x, head.width, head.y + head.height]);
 });
 
-test("an HTML embed is picked from the embed menu, runs by itself in its room with nothing to press, and stays running while the note is written around it", async ({ page }) => {
+test("an HTML embed is picked from the insert menu, runs by itself in its room with nothing to press, and stays running while the note is written around it", async ({ page }) => {
   await open(page, "# Scene\n\nabove\n\n");
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/html", { delay: 20 });

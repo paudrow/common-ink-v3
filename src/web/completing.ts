@@ -75,7 +75,7 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
       const start = listFrom + after;
       const write = (insert: string, from = start, to = end) => {
         const at = view.state.doc.lineAt(from);
-        const { anchor, head, ...changes } = placed({ ...item, insert }, { from, to, before: at.text.slice(0, from - at.from), after: at.text.slice(to - at.from), last: at.number === view.state.doc.lines });
+        const { anchor, head, ...changes } = placed({ ...item, insert }, { from, to, before: at.text.slice(0, from - at.from), after: at.text.slice(to - at.from), below: at.number < view.state.doc.lines ? view.state.doc.line(at.number + 1).text : null });
         // Typing carried on after it while it was made: the cursor stays where that left it.
         const still = view.state.selection.main.empty && view.state.selection.main.head === to;
         view.dispatch({ changes, ...(still && { selection: { anchor, head } }), scrollIntoView: true, userEvent: "input.complete" });
@@ -83,7 +83,8 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
       };
       if (typeof item.insert === "string") return write(item.insert);
       const typed = view.state.doc.sliceString(start, end);
-      item.insert({ noteId }).then(
+      const anchor = markAtCursor(view);
+      item.insert({ noteId, anchor, focus: () => view.dom.isConnected && view.focus() }).then(
         (insert) => {
           if (insert === null || !view.dom.isConnected) return;
           // Typing before it while it was made moved it: it is written where the trigger and what was typed now are, the nearest, or not at all.
@@ -94,7 +95,7 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
           if (at !== undefined) write(insert, at, at + typed.length);
         },
         (err: unknown) => onFail(completion, err),
-      );
+      ).finally(() => anchor.remove());
     },
   });
 
@@ -131,6 +132,21 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
     // With no list open Tab is whatever it is elsewhere in a note.
     Prec.highest(keymap.of([{ key: "Tab", run: pick }])),
   ];
+}
+
+/** An empty element at the cursor of `view` for a popover to hang from, which scrolls with the note's text. */
+function markAtCursor(view: EditorView): HTMLElement {
+  const box = view.scrollDOM.getBoundingClientRect();
+  const at = view.coordsAtPos(view.state.selection.main.head) ?? { left: box.left, top: box.top, bottom: box.top };
+  const mark = view.scrollDOM.appendChild(document.createElement("span"));
+  Object.assign(mark.style, {
+    position: "absolute",
+    width: "0",
+    left: `${at.left - box.left + view.scrollDOM.scrollLeft}px`,
+    top: `${at.top - box.top + view.scrollDOM.scrollTop}px`,
+    height: `${at.bottom - at.top}px`,
+  });
+  return mark;
 }
 
 /** A group's heading. The list is a listbox, which holds options alone, so the heading is seen and not read. */

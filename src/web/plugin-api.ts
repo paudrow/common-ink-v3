@@ -656,8 +656,12 @@ export interface Embed {
   title: string;
   /** Whether it is written as a block, with a body. One embed is written one way. */
   block?: boolean;
-  /** What a new one is written with when it is picked from the embed menu. With none, an empty config and an empty body. */
+  /** What a new one is written with when it is picked from the insert menu. With none, an empty config and an empty body. */
   starts?: { config?: string; body?: string };
+  /** What the insert menu says it makes, in a line of words: never its syntax. With none the menu shows its title alone. */
+  description?: string;
+  /** What the insert menu shows beside it while it is highlighted, such as a small picture of it drawn in a note. */
+  preview?: CompletionPreview;
   /**
    * For an embed a menu can't write, because what it holds is made by doing something: an upload's
    * is made by sending a file, or by choosing one already sent. A menu offers each under its title,
@@ -830,17 +834,21 @@ export interface Embedded {
   edit(at?: number): void;
 }
 
-export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts" | "pick">;
+export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts" | "description" | "preview" | "pick">;
 
 /** One entry of an embed in a menu that does something in place of writing it, as "Upload a file" does. */
 export interface EmbedPick {
   title: string;
+  /** What picking it does, in a line of words. */
+  description?: string;
+  /** @deprecated The same as `description`, read as one where there is no `description`. */
   detail?: string;
+  preview?: CompletionPreview;
   run: () => void;
 }
 
 /**
- * A list offered at the cursor while the member types after a trigger, such as the embed menu on
+ * A list offered at the cursor while the member types after a trigger, such as the insert menu on
  * `/`. It opens where the trigger starts a line or follows a space, and not inside code, so a `/`
  * in a path or a date opens nothing. One with `anywhere` opens wherever its trigger is typed. Completions whose triggers both fit share one list, each
  * one's items in the order of their plugins, grouped by their `kind`.
@@ -880,6 +888,8 @@ export const COMPLETION_KINDS = [
   { kind: "note", heading: "Notes" },
   { kind: "upload", heading: "Uploads" },
   { kind: "event", heading: "Events" },
+  { kind: "block", heading: "Blocks" },
+  { kind: "embed", heading: "Embeds" },
   { kind: "new", heading: "New", waits: true },
 ] as const;
 
@@ -899,6 +909,19 @@ export interface CompletionPreview {
   facts?: readonly (readonly [name: string, value: string])[];
 }
 
+/** Where a completion item picked is to be written, for an `insert` that is made when it is picked. */
+export interface InsertAt {
+  /** The note it goes in. */
+  noteId: string;
+  /**
+   * An empty element at the cursor that scrolls with the note's text, for a popover to hang from. It
+   * is there until what `insert` answers is written, or nothing is.
+   */
+  anchor: HTMLElement;
+  /** Gives the keyboard back to the note's editor, if it is still on the page, as a popover closed with Escape does. */
+  focus(): void;
+}
+
 export interface CompletionItem {
   /**
    * What the item is, such as a person or a note. The list groups items by it, the groups in the
@@ -915,15 +938,18 @@ export interface CompletionItem {
   preview?: CompletionPreview;
   /**
    * What takes the place of the trigger and what was typed after it. A function is asked only when
-   * the item is picked, for text that is made then, as a reference to an event is, and is told the
-   * note it goes in: what it answers is written once it does, where the trigger and what was typed
-   * still are. Null, a failure, or a change to them meanwhile writes nothing.
+   * the item is picked, for text that is made then, as a reference to an event is, or picked in a
+   * popover, as a day from a calendar is. It is told where: what it answers is written once it does,
+   * where the trigger and what was typed still are. Null, a failure, or a change to them meanwhile
+   * writes nothing.
    */
-  insert: string | ((at: { noteId: string }) => Promise<string | null>);
+  insert: string | ((at: InsertAt) => Promise<string | null>);
   /** The part of `insert` left selected, as offsets into it, such as a value to type over. Without it the cursor goes after. */
   select?: readonly [from: number, to: number];
-  /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after. */
+  /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after, or to `select` where it is given, as in a heading's `# `. */
   block?: boolean;
+  /** Whether a block is kept a blank line apart from words on the line under it, as a table is, which would take them in as a row. */
+  apart?: boolean;
   /** How the label is coloured: `accent` is the theme colour and `muted` is gray. Without it, as the list's text is. */
   tone?: "accent" | "muted";
   /** Called once `insert` is in the note, for an item that does something more than write, such as opening a file picker. The editor still has the keyboard. */

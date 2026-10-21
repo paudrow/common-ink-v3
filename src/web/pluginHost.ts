@@ -396,7 +396,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         list: () =>
           contributions()
             .embeds.filter((e): e is Embed => !("claims" in e) && e.menu !== false)
-            .map(({ name, title, block, starts, pick }) => ({ name, title, block, starts, ...(pick && { pick }) })),
+            .map(({ name, title, block, starts, description, preview, pick }) => ({ name, title, block, starts, ...(description && { description }), ...(preview && { preview }), ...(pick && { pick }) })),
       },
       completions: {
         register(completion) {

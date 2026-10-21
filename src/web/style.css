@@ -3431,7 +3431,7 @@ div.form-shot {
   pointer-events: none;
 }
 
-/* The list a completion offers at the cursor, such as the embed menu. */
+/* The list a completion offers at the cursor, such as the insert menu. */
 .cm-editor .cm-tooltip.cm-tooltip-autocomplete {
   border: 0;
   border-radius: 8px;

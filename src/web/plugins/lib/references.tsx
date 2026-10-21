@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Embed, Plugin, PluginHost, SourceRecord } from "../../plugin-api.ts";
 import { openPopover } from "./Popover.tsx";
+import { panel, sketch, words } from "./sketch.ts";
 
 /**
  * What a reference to an event or a contact reads as for whoever is looking. `private` is what
@@ -32,6 +33,9 @@ function readOf(host: PluginHost, ref: string) {
   reads.set(key, entry);
   return entry;
 }
+
+/** A chip among words with `glyph` at its start, as the insert menu pictures a reference. */
+export const chipSketch = (glyph: string) => sketch(words(10, 39, 28) + panel(44, 28, 112, 28, 14) + glyph + words(78, 39, 64) + words(164, 39, 26));
 
 /** What a note writes of a reference: the id `record.refer` answered, then what to call it. */
 export function writtenReference(config: string): { ref: string; label: string } | null {

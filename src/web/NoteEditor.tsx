@@ -97,7 +97,7 @@ interface Props {
   onRejected: (why: "rejected" | "inTrash") => void;
   /** What plugins have registered to draw inside a note. */
   embeds: readonly (Embed | AddressEmbed)[];
-  /** The lists plugins offer at the cursor, such as the embed menu. */
+  /** The lists plugins offer at the cursor, such as the insert menu. */
   completions: readonly Completion[];
   /** Called for a completion that threw while being asked what it offers. */
   onContributionFailed: (contribution: object, error: unknown) => void;

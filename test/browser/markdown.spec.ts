@@ -893,7 +893,7 @@ test("a note with no math and no code loads neither's drawing", async ({ page })
   await expect(line(page, "Now").locator(".katex")).toHaveCount(1);
 });
 
-test("embeds are drawn beside bullets and tasks, a board after a list still works, and / on a bullet opens the embed menu but not in code", async ({ page }) => {
+test("embeds are drawn beside bullets and tasks, a board after a list still works, and / on a bullet opens the insert menu but not in code", async ({ page }) => {
   const text = "# Mix\n\n- [ ] steep ::timer{5m} then pour\n  - cup $x^2$\n- wait\n\n:::kanban{}\n## To do\n- write\n\n## Done\n:::\n\n```\ncode\n```\n";
   const note = await open(page, text);
 
@@ -913,7 +913,7 @@ test("embeds are drawn beside bullets and tasks, a board after a list still work
   await expect(line(page, "steep").getByRole("button", { name: "Timer, 5:00 left" })).toBeVisible();
 
   await page.keyboard.type(" /");
-  await expect(page.getByRole("listbox").getByRole("option").first()).toContainText("Timer");
+  await expect(page.getByRole("listbox").getByRole("option").first()).toContainText("Heading 1");
   await page.waitForTimeout(150);
   await page.keyboard.press("Escape");
   await clickLine(page, /^code/);
