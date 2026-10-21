@@ -58,6 +58,7 @@ const SLOT_WORDS: Record<keyof Slots, string> = {
   mark: "A mark under a note's title",
   tool: "A button at a note's top right",
   notice: "A banner above a note's text",
+  settings: "A section of Settings",
 };
 
 /** What a third-party plugin adds, as its manifest lists it, which is known whether or not it is on. */

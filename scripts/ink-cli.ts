@@ -54,8 +54,10 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       folder:Plans, #tag, editor:@me, updated:>=7d, is:archived, has:link,
                                       with -, OR, NOT and ( ). "ink syntax" lists every one. --today and
                                       --zone are this machine's unless given
-  tags [--archived true] [--limit N] [--after NEXT]
-                                      the tags of the notes you can see, and how many notes have each
+  tags [--name NAME] [--archived true] [--limit N] [--after NEXT]
+                                      the tags of the notes you can see, how many notes have each, and when to use it
+  tag-describe NAME --description TEXT
+                                      say when to use a tag, as your member asked; an empty TEXT takes it away
   archive ID                          archive a note: kept, and left out of listings
   unarchive ID                        bring an archived note back
   trash ID                            move a note to Trash, where it waits 30 days
@@ -648,7 +650,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "tags":
         tool = "list_tags";
-        args = given({ includeArchived: ["archived", truth], limit: ["limit", integer], after: ["after"] });
+        args = given({ name: ["name"], includeArchived: ["archived", truth], limit: ["limit", integer], after: ["after"] });
+        break;
+      case "tag-describe":
+        tool = "describe_tag";
+        args = { name: need("the tag to describe"), description: needFlag("description") };
         break;
       case "archive":
       case "unarchive":

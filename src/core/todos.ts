@@ -95,6 +95,9 @@ export function tagsOn(line: string, offset = 0): (Span & { name: string })[] {
   return [...readable(line).matchAll(TAG)].filter((m) => /\D/.test(m[1]!)).map((m) => ({ from: offset + m.index, to: offset + m.index + m[0].length, name: m[1]! }));
 }
 
+/** Whether `name` is a tag's whole name, as `#name` would write it. */
+export const isTagName = (name: string) => tagsOn(`#${name}`)[0]?.name === name;
+
 /** The todo on one line of a note, which starts at `offset`, or null when the line isn't one. */
 export function parseTodo(line: string, offset = 0): Todo | null {
   const box = BOX.exec(line);

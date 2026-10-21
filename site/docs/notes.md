@@ -26,7 +26,7 @@ A mention gives nobody access to the note and notifies nobody. Click a mention t
 
 ## Tags
 
-Write `#tag` anywhere outside code, with no space after the `#`. A tag tags the whole note, even on a todo's line. It needs something besides digits, so `#12` is not a tag, and matching ignores case. The sidebar lists your tags with their counts of notes, and each tag has a page of its notes.
+Write `#tag` anywhere outside code, with no space after the `#`. A tag tags the whole note, even on a todo's line. It needs something besides digits, so `#12` is not a tag, and matching ignores case. The sidebar lists your tags with their counts of notes, and each tag has a page of its notes, which you search as you search a folder. Click a tag in the sidebar or in a note's card to open its page, or ⌘-click (Ctrl-click) one in a note or on a todo. Rest on a tag anywhere to see its card: how many notes have it and what it is for. Tags are managed in Settings, under Tags, which the command Manage tags opens: an admin or an editor adds a description there that says when to use each tag. Agents read it to choose their tags. Anyone who can see a note with the tag can read its description. A description stays with the tag's name, so it comes back if the tag is used again after no note had it.
 
 ## The / menu
 

@@ -8318,6 +8318,244 @@ button.todo-tag[aria-pressed="true"] {
   line-height: 26px;
 }
 
+.tag-row-description {
+  margin: 0 0 4px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: calc(12.5px * var(--text-scale));
+  overflow-wrap: anywhere;
+}
+
+.tag-description-form {
+  display: grid;
+  gap: 6px;
+  max-width: 40rem;
+}
+
+.tag-description-form .error {
+  margin: 0;
+}
+
+.tag-description-form label {
+  color: var(--muted);
+  font-size: calc(13px * var(--text-scale));
+}
+
+.tag-description-form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(13.5px * var(--text-scale));
+  resize: vertical;
+}
+
+.tag-description-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tags-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* A tag's card, laid over the app under the tag it is resting on. A press goes through it to what is under it, but on its links. */
+.tag-card {
+  pointer-events: none;
+  position: fixed;
+  z-index: 95;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  display: grid;
+  gap: 4px;
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 16px));
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.4;
+}
+
+.tag-card a {
+  pointer-events: auto;
+}
+
+.tag-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* Whole, however long: a chip may cut a tag short, and its card is where it is read in full. */
+.tag-card-name {
+  min-width: 0;
+  color: var(--accent);
+  font-weight: 550;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.tag-card-name:hover {
+  text-decoration: underline;
+}
+
+.tag-card-count {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tag-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tag-card .tag-card-none {
+  color: var(--muted);
+}
+
+.tag-card-manage {
+  justify-self: start;
+  color: var(--accent);
+}
+
+/* Settings' Tags and Folders: a table of names and what each is for, with the count and the buttons at the end of each row. */
+.manage-search {
+  width: 100%;
+  max-width: 24rem;
+  margin: 0 0 8px;
+}
+
+.manage-table {
+  width: 100%;
+  margin: 0 0 8px;
+  border-collapse: collapse;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.manage-table th,
+.manage-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.manage-table thead th {
+  color: var(--muted);
+  font-size: calc(11.5px * var(--text-scale));
+  font-weight: 600;
+}
+
+/* A name has a third of the table at most, and a longer one wraps. The count and the buttons take what they need. */
+.manage-table thead th:first-child {
+  width: 33%;
+}
+
+.manage-name {
+  color: var(--accent);
+  font-weight: 550;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.manage-table p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.manage-table .manage-none,
+.manage-table td.manage-count {
+  color: var(--muted);
+}
+
+.manage-table :is(th, td):is(.manage-count, .manage-actions),
+.manage-table thead th:nth-child(n + 3) {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.manage-actions .button + .button {
+  margin-left: 6px;
+}
+
+/* Empty until the search finds nothing, and then what it says is read out. */
+.manage-status:empty {
+  margin: 0;
+}
+
+/* Out of sight for the search, which a card's grid would otherwise draw. */
+.manage-table[hidden],
+.manage-table tr[hidden] {
+  display: none;
+}
+
+/* In a narrow pane each row is a card: its name with the count and the buttons at the end of that line, and what it is for under them. */
+@container settings-pane (max-width: 38rem) {
+  .manage-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .manage-table,
+  .manage-table tbody {
+    display: block;
+  }
+
+  .manage-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
+    gap: 4px 10px;
+    align-items: baseline;
+    padding: 8px 0 8px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .manage-table tr > :is(th, td) {
+    padding: 0;
+    border: 0;
+  }
+
+  .manage-table :is(th, td):is(.manage-count, .manage-actions) {
+    width: auto;
+  }
+
+  .manage-table tr > .manage-name-cell {
+    grid-area: 1 / 1;
+  }
+
+  .manage-table tr > .manage-count {
+    grid-area: 1 / 2;
+  }
+
+  .manage-table tr > .manage-actions {
+    grid-area: 1 / 3;
+  }
+
+  .manage-table tr > .manage-description-cell {
+    grid-area: 2 / 1 / 3 / 4;
+  }
+}
+
 /* End of search and tags */
 
 /* Archive and Trash: begin */

@@ -111,7 +111,7 @@ These stay with you, signed in to Common Ink, whatever your role:
 
 ## Tags an agent uses
 
-An agent tags notes and todos with the tags your notes already have. A write that adds a tag no note it can see has is refused, unless the call names that tag as new, and the agent is told to name one only when you asked for it. An agent limited to folders sees only the tags in those folders.
+An agent tags notes and todos with the tags your notes already have. A write that adds a tag no note it can see has is refused, unless the call names that tag as new, and the agent is told to name one only when you asked for it. An agent limited to folders sees only the tags in those folders. It chooses among them by the description each tag has in Settings, so a description that says when to use a tag steers your agents too. An agent writes a description only when you ask it to.
 
 ## See what an agent changed
 

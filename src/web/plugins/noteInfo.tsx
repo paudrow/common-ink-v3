@@ -85,6 +85,7 @@ function Info({ host, open, app, note }: ViewProps & { host: PluginHost; open: O
               <li key={name}>
                 <a
                   href={tagPath(name)}
+                  data-tag={name}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
                     e.preventDefault();

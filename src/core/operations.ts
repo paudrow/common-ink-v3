@@ -632,8 +632,8 @@ async function mentionedById(ctx: Context, text: string, base: string, how: "res
 
 /**
  * Refuses an agent's write that brings in a tag no note the agent can see has, live or archived,
- * unless `newTags` names it: an agent reuses the workspace's tags, and makes one only when its member
- * asks. A tag in a note the agent can't see is new to it, so the refusal says nothing of that note.
+ * and that isn't one made ahead in Settings, unless `newTags` names it: an agent reuses the tags
+ * list_tags lists, and makes one only when its member asks. A tag in a note the agent can't see is new to it, so the refusal says nothing of that note.
  */
 async function refuseNewTags(ctx: Context, text: string, base: string, newTags: readonly string[] = []) {
   if (ctx.author.kind !== "agent") return;
@@ -642,8 +642,11 @@ async function refuseNewTags(ctx: Context, text: string, base: string, newTags: 
   if (!added.length) return;
   await mend(ctx);
   const { results } = await ctx.db
-    .prepare(`SELECT DISTINCT g.tag FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} AND g.tag IN (SELECT value FROM json_each(?3))`)
-    .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(added.map(nameKey)))
+    .prepare(
+      `SELECT DISTINCT g.tag FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} AND g.tag IN (SELECT value FROM json_each(?3))
+       UNION SELECT tag FROM tag_descriptions WHERE ?4 AND workspace_id = ?1 AND tag IN (SELECT value FROM json_each(?3))`,
+    )
+    .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(added.map(nameKey)), seesEveryFolder(ctx.sight) ? 1 : 0)
     .all<{ tag: string }>();
   const known = new Set(results.map((r) => r.tag));
   const fresh = added.filter((name) => !known.has(nameKey(name)));
@@ -2725,14 +2728,52 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       const indexing = !(await mend(ctx));
-      const binds = [ctx.workspaceId, ctx.sight.bind];
+      // A tag no note has yet is kept by its description, which is the workspace's: listed for whoever sees all of it, and not a guest.
+      const binds = [ctx.workspaceId, ctx.sight.bind, op.name === undefined ? null : nameKey(op.name.replace(/^#/, "")), seesEveryFolder(ctx.sight) ? 1 : 0];
       const bind = binder(binds);
       const pages = paging([asc("g.tag")], op.after, bind);
-      const sql = `SELECT ${pages.keys}, MIN(g.name) AS name, COUNT(*) AS notes FROM note_tags g JOIN notes n ON n.id = g.note_id
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))} AND ${pages.where} GROUP BY g.tag ORDER BY ${pages.orderBy} LIMIT ${bind(op.limit + 1)}`;
-      const { results } = await ctx.db.prepare(sql).bind(...binds).all<{ name: string; notes: number }>();
+      const sql = `WITH seen AS (
+             SELECT g.tag, MIN(g.name) AS name, COUNT(*) AS notes FROM note_tags g JOIN notes n ON n.id = g.note_id
+             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))} AND (?3 IS NULL OR g.tag = ?3) AND ${pages.where} GROUP BY g.tag
+           ), kept AS (
+             SELECT tag, name, notes FROM seen
+             UNION ALL SELECT g.tag, COALESCE(g.name, g.tag), 0 FROM tag_descriptions g WHERE ?4 AND g.workspace_id = ?1 AND (?3 IS NULL OR g.tag = ?3) AND ${pages.where} AND g.tag NOT IN (SELECT tag FROM seen)
+           )
+           SELECT ${pages.keys}, g.name, g.notes, NULLIF(d.description, '') AS description FROM kept g LEFT JOIN tag_descriptions d ON d.workspace_id = ?1 AND d.tag = g.tag
+           ORDER BY ${pages.orderBy} LIMIT ${bind(op.limit + 1)}`;
+      const { results } = await ctx.db.prepare(sql).bind(...binds).all<{ name: string; notes: number; description: string | null }>();
       const { page, next } = pages.page(results, op.limit);
-      return { tags: page.map(({ name, notes }) => ({ name, notes })), next, indexing };
+      return { tags: page.map(({ name, notes, description }) => ({ name, notes, ...(description === null ? {} : { description }) })), next, indexing };
+    },
+  },
+
+  // A description is the workspace's, so a guest, who sees only what was given them, writes none.
+  "tag.describe": {
+    needs: "edit",
+    members: true,
+    async run(ctx, op) {
+      const tag = nameKey(op.name);
+      // Whether a note has the tag, seen by the asker or not, is only ever told as which statement runs: the answer is the same.
+      const used = "SELECT 1 FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND g.tag = ?2 AND n.state != 'trashed'";
+      // Forgotten, a tag no note has goes; one a note has stays as it is, so a Delete that crosses a note gaining the tag takes nothing from it.
+      if (op.description === null) {
+        if (!(await mend(ctx))) throw new OpError("unavailable", "Notes are still being read in, so a note with the tag could be missed. Try again in a moment");
+        await ctx.db.prepare(`DELETE FROM tag_descriptions WHERE workspace_id = ?1 AND tag = ?2 AND NOT EXISTS (${used})`).bind(ctx.workspaceId, tag).run();
+        return { name: op.name, description: null };
+      }
+      // Emptied, a tag a note has keeps nothing of it; one no note has is kept, with nothing said, so a tag made ahead stays.
+      if (!op.description && (await ctx.db.prepare(`${used} LIMIT 1`).bind(ctx.workspaceId, tag).first())) {
+        await ctx.db.prepare("DELETE FROM tag_descriptions WHERE workspace_id = ? AND tag = ?").bind(ctx.workspaceId, tag).run();
+        return { name: op.name, description: null };
+      }
+      await ctx.db
+        .prepare(
+          `INSERT INTO tag_descriptions (workspace_id, tag, name, description, updated_at, updated_by, updated_via) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+           ON CONFLICT (workspace_id, tag) DO UPDATE SET name = excluded.name, description = excluded.description, updated_at = excluded.updated_at, updated_by = excluded.updated_by, updated_via = excluded.updated_via`,
+        )
+        .bind(ctx.workspaceId, tag, op.name, op.description, ctx.now, ctx.personId, ctx.author.kind === "agent" ? ctx.author.agentId : null)
+        .run();
+      return { name: op.name, description: op.description || null };
     },
   },
 

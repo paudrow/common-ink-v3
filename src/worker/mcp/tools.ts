@@ -3,7 +3,7 @@ import { timeIn } from "../../core/history.ts";
 import { PRIOR_WRITE, agentActor, isReadOnlyOp, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
 import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
 import { CAPABILITY_NAMES } from "../../core/plugins.ts";
-import { EXPORT_PART_BYTES, EXPORT_PART_FILES, MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type ExportPlan, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
+import { EXPORT_PART_BYTES, EXPORT_PART_FILES, MAX_INLINE_UPLOAD_BYTES, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type ExportPlan, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
 import { EXPORT_INDEX, SHARED_WITH_ME } from "../../core/export.ts";
 import { noteLines } from "../../core/text.ts";
 import { STATES_WRITTEN, TODO_STATES } from "../../core/todos.ts";
@@ -175,7 +175,7 @@ const LINKS =
   "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; one no note has the title of stays as written and is listed in the answer's unresolved. Text in code is left alone.";
 const MENTIONS =
   "A mention of a person is @[[id|Name]] for a member of the workspace, with their id from list_members, or @[[Name]] for anyone else, such as one of your member's contacts. You can write @[[Name]] for a member too and it is stored by their id, unless your token is limited to folders: it is then not told who is a member, and every mention is kept and read as written. A mention on a todo's line assigns the todo. A mention gives nobody access and tells nobody. Every reader of the note sees the name, so write only the name of a contact: never their email or anything else list_contacts told you.";
-const TAGS = "Tag only with tags list_tags lists: a tag no note you can see has is refused unless your member asked for it and newTags names it.";
+const TAGS = "Tag only with tags list_tags lists, chosen by their descriptions: a tag no note you can see has is refused unless your member asked for it and newTags names it.";
 const newTags = { type: "array", items: { type: "string" }, description: "New tags your member asked for. Any other tag no note you can see has is refused" };
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
@@ -567,10 +567,17 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_tags",
-    description: `The tags of the notes you can see, by name, each with how many of those notes have it. A #tag anywhere in a note tags the note. list_notes with tag lists the notes under one. ${PAGES} While indexing is true, some notes are still being read in: ask again.`,
-    inputSchema: object({ includeArchived, ...paging("tags", 200, 1000) }),
+    description: `The tags of the notes you can see, by name, each with how many of those notes have it and its description, which says when to use it. A #tag anywhere in a note tags the note. list_notes with tag lists the notes under one. ${PAGES} While indexing is true, some notes are still being read in: ask again.`,
+    inputSchema: object({ name: { type: "string", description: "Only this tag" }, includeArchived, ...paging("tags", 200, 1000) }),
     op: "tag.list",
     example: {},
+  },
+  {
+    name: "describe_tag",
+    description: "Say when to use a tag, only as your member asks: list_tags shows it to everyone choosing tags. An empty description takes it away. Needs the editor or admin role.",
+    inputSchema: object({ name: { type: "string", description: "The tag, without the #" }, description: { type: "string", maxLength: MAX_TAG_DESCRIPTION } }, ["name", "description"]),
+    op: "tag.describe",
+    example: { name: "money", description: "Bills, budgets and anything paid" },
   },
   {
     name: "archive_note",

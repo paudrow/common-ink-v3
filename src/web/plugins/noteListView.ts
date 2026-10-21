@@ -1,4 +1,4 @@
-import { ALL_NOTES, SHARED_WITH_ME, parseQuery, printQuery, queryNames, type NoteSummary, type QueryNode, type SortKey } from "../plugin-api.ts";
+import { ALL_NOTES, SHARED_WITH_ME, nameKey, parseQuery, printQuery, queryNames, type NoteSummary, type QueryNode, type SearchMatch, type SortKey } from "../plugin-api.ts";
 
 export const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -136,6 +136,28 @@ export function todosOf(text: string): TodoChoice {
   if (asks("open-todo")) return "open";
   if (asks("todo") && refuses("open-todo")) return "done";
   return "any";
+}
+
+/**
+ * What a tag's list asks the server: the notes with the tag, narrowed by whatever else the search bar
+ * says, in its order. A query that can't be read yet narrows nothing, as a folder's list then shows
+ * the folder's own notes.
+ */
+export function taggedQuery(tag: string, text: string): string {
+  const has: QueryNode = { kind: "filter", key: "tag", cmp: "=", value: tag };
+  const read = parseQuery(text, "notes");
+  if (!read.ok) return printQuery({ where: has, in: [], sort: null });
+  const where = read.query.where;
+  return printQuery({ ...read.query, where: !where ? has : { kind: "and", of: [has, ...(where.kind === "and" ? where.of : [where])] } });
+}
+
+/** The lines a search matched in a note on a tag's list, without the marks on that tag, which every note there has. A line marked only there is left out. */
+export function withoutTagMarks(matches: readonly SearchMatch[], tag: string): SearchMatch[] {
+  const own = nameKey(`#${tag}`);
+  return matches.flatMap((match) => {
+    const marks = match.marks.filter(([from, to]) => nameKey(match.text.slice(from, to)) !== own);
+    return marks.length ? [{ ...match, marks }] : [];
+  });
 }
 
 /** What the list itself is of, for the same choice the search bar shows. */

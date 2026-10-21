@@ -22,10 +22,11 @@ import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { dismissing } from "./dismiss.ts";
+import { Drawn } from "./Drawn.tsx";
 import { Icon } from "./icons.tsx";
 import { KeyboardShortcuts } from "./KeyboardShortcuts.tsx";
 import { SettingRow } from "./SettingRow.tsx";
-import type { Folders } from "./plugin-api.ts";
+import type { Folders, Slots } from "./plugin-api.ts";
 import type { Host, MemberSettings } from "./pluginHost.ts";
 import { readOnly } from "./readOnly.ts";
 import { documentOf, type Problem } from "./settings.ts";
@@ -85,7 +86,7 @@ export const JSON_VIEW = "json";
  * and Escape closes it: it is never a tab, so it moves nothing of the window under it.
  */
 export function Settings({ host, store, mac, path, go, storage, exportPlan, onClose, children, account, folders }: Props) {
-  const { settings } = useSyncExternalStore(host.subscribe, host.contributions);
+  const { settings, views } = useSyncExternalStore(host.subscribe, host.contributions);
   const text = useSyncExternalStore(store.subscribe, store.text);
   const status = useSyncExternalStore(store.subscribe, store.status);
   const unread = status.kind === "loading" || status.kind === "unread";
@@ -181,7 +182,7 @@ export function Settings({ host, store, mac, path, go, storage, exportPlan, onCl
         {asJson ? (
           <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} locked={unread} onChange={typed} />
         ) : (
-          <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} account={account} folders={folders} />
+          <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} account={account} folders={folders} host={host} panes={views.settings} />
         )}
         {!asJson && problemList}
         <Storage storage={storage} />
@@ -266,6 +267,9 @@ interface OptionsProps {
   onSet: Host["setSetting"];
   account: Account;
   folders: Props["folders"];
+  host: Host;
+  /** The sections plugins add, which hold no setting. */
+  panes: readonly Slots["settings"][];
 }
 
 /** One entry of the list of categories: where it goes, and how much of what is searched for it holds. */
@@ -285,6 +289,8 @@ function Options({
   onSet,
   account,
   folders,
+  host,
+  panes: offered,
 }: OptionsProps) {
   const [typed, setTyped] = useState("");
   const [modified, setModified] = useState(false);
@@ -294,6 +300,8 @@ function Options({
   const filtering = needle !== "" || modified;
 
   const whole = layoutOf(settings);
+  // A plugin's section never takes the place of one of the app's own.
+  const panes = offered.filter((pane) => ![KEYBOARD.id, ACCOUNT.id, UNKNOWN.id, ...whole.categories.map((c) => c.id)].includes(pane.id));
   const found = filtering
     ? filterLayout(whole, { needle, modified }, settings.document, mac)
     : whole;
@@ -313,11 +321,11 @@ function Options({
     found.categories
       .filter((c) => (c.pluginId !== null) === plugins)
       .map(entry);
-  // Account holds no setting, so a search never finds it.
+  // Account and a plugin's section hold no setting, so a search never finds them.
   const own = [
     ...listed(false),
     ...(found.shortcuts.length > 0 ? [entry(KEYBOARD)] : []),
-    ...(filtering ? [] : [entry(ACCOUNT)]),
+    ...(filtering ? [] : [...panes.map((pane) => entry({ id: pane.id, name: pane.label })), entry(ACCOUNT)]),
   ];
   const plugins = listed(true);
   const rest = unknown.length > 0 ? [entry(UNKNOWN)] : [];
@@ -434,6 +442,17 @@ function Options({
         {current?.id === ACCOUNT.id ? (
           <div className="settings-pane">
             <AccountSection account={account} />
+          </div>
+        ) : panes.some((pane) => pane.id === current?.id) ? (
+          <div className="settings-pane">
+            {panes
+              .filter((pane) => pane.id === current?.id)
+              .map((pane) => (
+                <section key={pane.id} aria-label={pane.label} className="settings-group">
+                  <h2>{pane.label}</h2>
+                  <Drawn host={host} view={pane} />
+                </section>
+              ))}
           </div>
         ) : (
           <fieldset

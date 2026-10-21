@@ -311,6 +311,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.restore": { on: "note", needs: "E", trashed: "opens", args: (id) => ({ id }) },
   "trash.list": { on: "everything", covers: "trashed", args: () => ({}) },
   "tag.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
+  "tag.describe": { on: "workspace", who: ["admin", "editor"], args: () => ({ name: "matrix", description: "For the matrix." }) },
   search: { on: "everything", covers: "live", archived: true, only: true, args: () => ({ query: "body", limit: 50 }) },
   "note.label": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revision: 1, name: "Start" }) },
   "note.revert": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
@@ -477,7 +478,7 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer", "pin.set", "plugin.install", "plugin.uninstall", "plugin.permit", "plugin.request", "plugin.decide", "draft.save", "draft.discard"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "tag.describe", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer", "pin.set", "plugin.install", "plugin.uninstall", "plugin.permit", "plugin.request", "plugin.decide", "draft.save", "draft.discard"];
 /** What is the member's, and their agent's in their role, over the workspace's plugins: never a plugin's, whatever it is permitted, and nothing an agent limited to folders sees. */
 const PLUGIN_WORK = (type: OpType) => (type.startsWith("plugin.") && type !== "plugin.list") || type.startsWith("draft.");
 /** What answers from what is the asker's own and in no folder: their data sources, and how far they have read. */
@@ -652,7 +653,8 @@ export function accessMatrix(part: ActorName | null) {
               if (type === "member.leave" || type === "account.delete" || type === "workspace.delete") continue;
               // Who is in the workspace is told to whoever sees all of it.
               // A daily note is in a folder at the top of the workspace, or makes one there: a member's, and their agent's when it sees all of it.
-              if ((type === "member.list" || type === "plugin.list" || PLUGIN_WORK(type) || type === "daily.open" || type === "daily.find" || OWN.includes(type)) && within) allowed = false;
+              // A tag's description is the workspace's, written by a member who sees all of it, or their agent when it does.
+              if ((type === "member.list" || type === "plugin.list" || PLUGIN_WORK(type) || type === "daily.open" || type === "daily.find" || type === "tag.describe" || OWN.includes(type)) && within) allowed = false;
               await run(type, type, plan.args(w), allowed ? "done" : "forbidden", true);
             } else {
               await run(type, type, plan.args(w), "forbidden");

@@ -146,6 +146,7 @@ describe("MCP protocol", () => {
       "move_note",
       "search",
       "list_tags",
+      "describe_tag",
       "archive_note",
       "trash_note",
       "restore_note",
@@ -233,7 +234,7 @@ describe("MCP protocol", () => {
     const answered = await post([rpc("initialize", { protocolVersion: "2025-06-18" }, 1), rpc("tools/list", {}, 2), rpc("ping", {}, 3), rpc("tools/call", { name: "list_folders", arguments: {} }, 4)]);
     expect(answered.status).toBe(200);
     const [init, list, ping, called] = (await answered.json()) as any[];
-    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 86, {}]);
+    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 87, {}]);
     expect(called).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: "rate_limited: Too many calls. An agent makes at most 300 a minute. Wait a minute, then call again." }], isError: true } });
     expect(keys).toEqual([agent.id]);
   });
@@ -283,7 +284,7 @@ describe("MCP 2026-07-28", () => {
   it("lists its tools for this token with how long the list keeps", async () => {
     const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
     const { status, body } = await post(token, rpc("tools/list", { _meta: META }), { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list" });
-    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 86]);
+    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 87]);
   });
 
   it("calls a tool whose name the Mcp-Name header mirrors, plain or as base64, and refuses one that differs or a missing version header", async () => {

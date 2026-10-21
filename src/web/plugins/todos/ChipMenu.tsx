@@ -235,6 +235,8 @@ interface MoreProps extends TagProps {
   pressed: (name: string) => boolean;
   /** Narrows the list to the tag, or takes that off. */
   onTag: (name: string) => void;
+  /** Opens the tag's page, as a click with the modifier does. */
+  onOpenTag: (name: string) => void;
   /** Takes the tag off the todo's line, false when it no longer has it there. Left out when the todo can't be changed. */
   onRemove?: (tag: PlacedTag) => boolean;
 }
@@ -244,7 +246,7 @@ interface MoreProps extends TagProps {
  * a cross that takes it off the todo, as do Delete and Backspace on it, and Add tag, which opens the same
  * field as the row's own Add tag in its place.
  */
-export function MoreTags({ rest, pressed, onTag, onRemove, ...adding }: MoreProps) {
+export function MoreTags({ rest, pressed, onTag, onOpenTag, onRemove, ...adding }: MoreProps) {
   // Each keeps the key it opened with, so the line after one taken off is the same element and keeps the keyboard.
   const [left, setLeft] = useState(() => rest.map((tag, key) => ({ ...tag, key })));
   const [add, setAdd] = useState(false);
@@ -265,10 +267,10 @@ export function MoreTags({ rest, pressed, onTag, onRemove, ...adding }: MoreProp
             type="button"
             className="chip-choice"
             data-choice
+            data-tag={tag.name}
             aria-pressed={pressed(tag.name)}
-            title={`Todos tagged #${tag.name}`}
             aria-keyshortcuts={onRemove && "Delete"}
-            onClick={() => onTag(tag.name)}
+            onClick={(e) => (e.metaKey || e.ctrlKey ? onOpenTag(tag.name) : onTag(tag.name))}
             onKeyDown={(e) => {
               if (!onRemove || (e.key !== "Delete" && e.key !== "Backspace")) return;
               e.preventDefault();

@@ -18,7 +18,7 @@ import type { UploadKind } from "../core/filetypes.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
+export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
 /**
  * The query language notes and todos are found by, as the server reads it: what is typed to a query
  * and back, every filter there is with what it takes and means, and what is being typed at the
@@ -78,7 +78,7 @@ export { SIZE_WORDS, UPLOAD_EMBEDS, sizeIn, sizeWordIn, uploadIn, withSizeWord, 
 export { FILE_CLASSES, TEXT_ENDINGS, fileClass, type FileClass, type UploadKind } from "../core/filetypes.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { BOX_PATTERN, TODO_STATES, changeTodo, completeTodo, skipTodo, isDay, locateTodo, markOf, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange, type TodoState } from "../core/todos.ts";
+export { BOX_PATTERN, TODO_STATES, changeTodo, completeTodo, skipTodo, isDay, isTagName, locateTodo, markOf, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange, type TodoState } from "../core/todos.ts";
 
 /** The lines of a note that aren't in a fenced code block, which is where the core reads todos and tags. */
 export { linesOutsideCode } from "../core/lines.ts";
@@ -583,6 +583,12 @@ export interface Slots {
   notice: { id: string; component: ComponentType<ViewProps & { note: NoteSummary }> };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it, and what it hands over is `state`. */
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
+  /**
+   * A section of Settings that holds no setting, such as the Tags plugin's list of every tag to
+   * describe and rename: listed among the app's own sections under `label`, at `/settings/<id>`,
+   * and drawn under that heading. A search of the settings never finds it.
+   */
+  settings: { id: string; label: string; component: View };
 }
 
 /**

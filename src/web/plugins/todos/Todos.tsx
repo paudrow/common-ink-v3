@@ -15,6 +15,7 @@ import { openPage } from "../lib/opening.ts";
 import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, clicked, pickerLabel, picking, pressed, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
+import { tagPath } from "../tags/path.ts";
 
 /** How long typing rests before the list is asked for, so a word is one ask and not one a letter. */
 const PAUSE_MS = 200;
@@ -353,6 +354,10 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
           close();
           onTag(name);
         }}
+        onOpenTag={(name) => {
+          close();
+          app.go(tagPath(name));
+        }}
         tags={tags}
         has={trailing}
         onPick={(name) => {
@@ -608,13 +613,14 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
         ))}
         {trailing.slice(0, SHOWN_TAGS).map((name, at) => (
           <span key={`${at} ${name}`} className="todo-tag-chip">
+            {/* A click narrows the list to the tag. With the modifier it opens the tag's page, as its card's name does. */}
             <button
               type="button"
               className="todo-chip todo-tag"
+              data-tag={name}
               aria-pressed={narrowed(name)}
-              title={`Todos tagged #${name}`}
               aria-keyshortcuts={offers ? "Delete" : undefined}
-              onClick={() => onTag(name)}
+              onClick={(e) => (e.metaKey || e.ctrlKey ? app.go(tagPath(name)) : onTag(name))}
               onKeyDown={(e) => {
                 if (!offers || (e.key !== "Delete" && e.key !== "Backspace")) return;
                 e.preventDefault();
@@ -739,7 +745,7 @@ export function TodoGlance({ todo, now, titleOf, onOpen }: { todo: ListedTodo; n
             </span>
           ))}
           {trailing.map((name, i) => (
-            <span key={`${i} ${name}`} className="todo-chip todo-tag">
+            <span key={`${i} ${name}`} className="todo-chip todo-tag" data-tag={name}>
               #{name}
             </span>
           ))}
