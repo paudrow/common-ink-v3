@@ -8,7 +8,7 @@ import { addMember, newMember } from "./members.ts";
 
 /*
  * Each filter of the query language, asked of real notes through `search` and `todo.list`: what it
- * finds, in what order, and what it is refused for. Who may be told what is access-matrix.test.ts's.
+ * finds, in what order, and what it is refused for. Who may be told what is access-matrix/matrix.ts's.
  */
 
 const at = (day: string, time = "12:00") => Date.parse(`${day}T${time}:00Z`);

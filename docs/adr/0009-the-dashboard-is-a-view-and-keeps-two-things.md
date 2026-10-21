@@ -35,7 +35,7 @@ Only the member moves it. An agent reads it (`last_visit`) and is refused `visit
 
 ## Consequences
 
-- A new section of the dashboard is a new use of an existing operation. If it needs a listing that doesn't exist, that listing is an operation with `SEEN` and a row in `test/core/access-matrix.test.ts`, usable by an agent too.
+- A new section of the dashboard is a new use of an existing operation. If it needs a listing that doesn't exist, that listing is an operation with `SEEN` and a row in `test/core/access-matrix/matrix.ts`, usable by an agent too.
 - A pin on a note its member can no longer see is a row nobody reads until the note is removed or seen again. Nothing cleans those up sooner.
 - `returnsTo` on the `editor` view is called by the shell while it draws, in the page, so only a plugin that runs in the page can answer it. That holds while every editor view is a built-in. It is not something to offer a plugin that runs isolated (#16).
 - The summary's cost is `history.list`'s, which reads every change of each note on the page to say which still stand. That is why it is read at most once in thirty seconds.
