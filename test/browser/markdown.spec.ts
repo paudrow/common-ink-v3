@@ -1017,6 +1017,8 @@ test("each side of a split draws its own note, a fold and a table edit stay with
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/note\/beta-/);
   await run(page, "Split editor right");
+  // A note split off is copied, so the copy left in the first group is closed, and Alpha is drawn there.
+  await page.getByRole("tablist", { name: "Open notes" }).nth(0).getByTitle("Close Beta", { exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toHaveCount(2);
   for (const group of [0, 1]) {
     await expect(editor(page, group).getByRole("table")).toBeVisible();

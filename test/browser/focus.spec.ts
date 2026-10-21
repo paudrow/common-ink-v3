@@ -52,6 +52,8 @@ async function threeGroups(page: Page) {
   await page.getByRole("tab", { name: "Calendar" }).dblclick();
   await tabMenu(page, "Calendar", "Split right");
   await tabMenu(page, "Draft", "Split down");
+  // A note split off is copied, so the copy left with the folder's list is closed.
+  await group(page, 1).getByTitle("Close Draft", { exact: true }).click();
   await expect(page.getByRole("region", { name: /Editor group/ })).toHaveCount(3);
   await expect(group(page, 1).getByRole("tab")).toHaveText(["All notes"]);
   await expect(group(page, 2).getByRole("tab")).toHaveText(["Draft"]);

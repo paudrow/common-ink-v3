@@ -22,14 +22,16 @@ function anyAction(layout: EditorLayout, pick: (below: number) => number): Edito
   const group = layout.groups[pick(layout.groups.length)]!;
   const tab = THINGS[pick(THINGS.length)]!;
   const held = group.tabs.length ? group.tabs[pick(group.tabs.length)]! : tab;
+  // Dragged out of a group, or from outside them all, as a card is.
+  const from = () => (pick(2) ? { from: layout.groups[pick(layout.groups.length)]!.id } : {});
   const kinds: (() => EditorAction)[] = [
     () => ({ type: "open", tab, preview: true }),
-    () => ({ type: "open", tab, preview: true }),
+    () => ({ type: "open", tab, preview: true, here: true }),
     () => ({ type: "open", tab, preview: false }),
     () => ({ type: "open", tab, preview: pick(2) === 0, background: true }),
-    () => ({ type: "split", groupId: group.id, side: SIDES[pick(4)]!, tab: pick(2) ? held : tab, keep: pick(2) === 0 }),
-    () => ({ type: "add", groupId: group.id, tab: pick(2) ? held : tab }),
-    () => ({ type: "drop", groupId: group.id, index: pick(group.tabs.length + 1), tab: pick(2) ? held : tab }),
+    () => ({ type: "split", groupId: group.id, side: SIDES[pick(4)]!, tab: pick(2) ? held : tab, keep: pick(2) === 0, ...from() }),
+    () => ({ type: "add", groupId: group.id, tab: pick(2) ? held : tab, ...from() }),
+    () => ({ type: "drop", groupId: group.id, index: pick(group.tabs.length + 1), tab: pick(2) ? held : tab, ...from() }),
     () => (group.tabs.length ? { type: "activate", groupId: group.id, tab: held } : { type: "focus", groupId: group.id }),
     () => ({ type: "focus", groupId: group.id }),
     () => ({ type: "pin", groupId: group.id, tab: held }),
@@ -43,7 +45,10 @@ const keeps = (action: EditorAction) =>
   action.type === "pin" || action.type === "drop" || action.type === "add" || (action.type === "split" && action.keep === true) || (action.type === "open" && (!action.preview || action.background === true));
 const keyOf = (tab: Opened) => `${tab.kind} ${tab.id}`;
 
-const previewsIn = (layout: EditorLayout) => layout.groups.flatMap((g) => g.tabs.filter((t) => t.preview));
+const previewsIn = (layout: EditorLayout) => layout.groups.flatMap((g) => g.tabs.filter((t) => t.preview).map((tab) => ({ groupId: g.id, tab })));
+/** The tab the preview was, after an action: in its group still, or, for a folder or a page, which has one tab only, wherever it went. A note's tab in another group is another tab of it. */
+const nowOf = (layout: EditorLayout, was: { groupId: string; tab: Opened }) =>
+  layout.groups.find((g) => g.id === was.groupId)?.tabs.find((t) => keyOf(t) === keyOf(was.tab)) ?? (was.tab.kind === "note" ? undefined : layout.groups.flatMap((g) => g.tabs).find((t) => keyOf(t) === keyOf(was.tab)));
 
 describe("the window's preview tab", () => {
   it("is never more than one across every group, and is kept only by the member's saying so, whatever is opened, split, moved, dropped and closed in whatever order", () => {
@@ -61,8 +66,8 @@ describe("the window's preview tab", () => {
         if (action.type === "open" && layout.groups.map((g) => g.id).join() !== groupsBefore.join()) throw new Error(`seed ${seed}, step ${step}: a group came or went by ${JSON.stringify(action)}`);
         const previews = previewsIn(layout);
         // The preview is still one, or has gone: it is a kept tab only by the member's saying so.
-        const now = was && layout.groups.flatMap((g) => g.tabs).find((t) => keyOf(t) === keyOf(was));
-        if (now && !now.preview && !keeps(action)) throw new Error(`seed ${seed}, step ${step}: ${keyOf(was!)} was kept by ${JSON.stringify(action)}`);
+        const now = was && nowOf(layout, was);
+        if (now && !now.preview && !keeps(action)) throw new Error(`seed ${seed}, step ${step}: ${keyOf(was!.tab)} was kept by ${JSON.stringify(action)}`);
         if (now && !now.preview) converted++;
         if (previews.length > 1) throw new Error(`seed ${seed}, step ${step}: ${previews.length} previews after ${JSON.stringify(action)}`);
         most = Math.max(most, previews.length);

@@ -27,8 +27,9 @@ export interface Split {
 }
 
 /**
- * The editor groups and how they are arranged. A note, a folder or a page has a tab in at most one
- * group, so no two editors hold the same note. `groups` are in reading order. `split` says how they
+ * The editor groups and how they are arranged. A folder or a page has a tab in at most one group. A
+ * note can have one in several, split off so two places in it show at once, and its editors share
+ * one text. No group has two tabs of one thing. `groups` are in reading order. `split` says how they
  * are laid out, and is left out for the plainest way: side by side in one row, each as wide as the
  * next. So one arrangement is written one way, and a layout kept before a group could be split
  * down is still a layout.
@@ -63,13 +64,14 @@ const Stored = z
     split: StoredSplit.optional(),
   })
   .refine((l) => {
-    const keys = l.groups.flatMap((g) => g.tabs.map((t) => `${t.kind} ${t.id}`));
+    const keys = l.groups.flatMap((g) => g.tabs.flatMap((t) => (t.kind === "note" ? [] : [`${t.kind} ${t.id}`])));
     const ids = l.groups.map((g) => g.id);
     const placed = l.split ? leaves(l.split) : ids;
     return (
       l.groups.some((g) => g.id === l.focusedGroupId) &&
       l.groups.every((g) => g.active === null || has(g, g.active)) &&
       new Set(keys).size === keys.length &&
+      l.groups.every((g) => new Set(g.tabs.map((t) => `${t.kind} ${t.id}`)).size === g.tabs.length) &&
       new Set(ids).size === ids.length &&
       placed.length === ids.length &&
       ids.every((id) => placed.includes(id))
@@ -186,22 +188,28 @@ const KEEPS = {
 export type CloseScope = keyof typeof KEEPS;
 
 export type EditorAction =
-  /** `background` adds a kept tab and leaves showing what is. A tab it already has is kept where it is. */
-  | { type: "open"; tab: Opened; preview: boolean; background?: boolean }
+  /**
+   * `background` adds a kept tab and leaves showing what is. A tab it already has is kept where it is.
+   * A note open in another group is gone to there, and a preview goes where the window's preview is,
+   * unless `here`: picked in the focused group, it opens there, a preview only where the window's
+   * preview is that group's or nowhere, since the window has one; a folder or a page open in another group is still gone to.
+   */
+  | { type: "open"; tab: Opened; preview: boolean; background?: boolean; here?: boolean }
   | { type: "pin"; groupId: string; tab: Opened }
   | { type: "close"; scope: CloseScope; groupId: string; tab: Opened }
   | { type: "activate"; groupId: string; tab: Opened }
   | { type: "focus"; groupId: string }
   /**
-   * Moves the tab into a new group beside `groupId`. A tab that is moved is what it was, a preview
-   * or kept, unless `keep` says the member meant it to stay, as dragging it there does. A tab
-   * that is new is kept.
+   * Puts the tab in a new group beside `groupId`. A note split off from the menu or a command is
+   * copied, and shows in both; anything else is moved, as a note dragged there is from `from`, the
+   * group it was dragged out of. A tab that is moved is what it was, a preview or kept, unless `keep`
+   * says the member meant it to stay, as dragging it there does. A tab that is new is kept.
    */
-  | { type: "split"; groupId: string; side: Side; tab: Opened; keep?: boolean }
-  /** `index` is the gap between tabs the tab was dropped in, counting from 0 at the far left. */
-  | { type: "drop"; groupId: string; index: number; tab: Opened }
+  | { type: "split"; groupId: string; side: Side; tab: Opened; keep?: boolean; from?: string }
+  /** `index` is the gap between tabs the tab was dropped in, counting from 0 at the far left. A note's tab comes out of `from`, the group it was dragged from, and only that one. */
+  | { type: "drop"; groupId: string; index: number; tab: Opened; from?: string }
   /** Adds the tab to the end of a group's, as dropping it on the middle of the group does. */
-  | { type: "add"; groupId: string; tab: Opened }
+  | { type: "add"; groupId: string; tab: Opened; from?: string }
   /** Moves the tab from `groupId` to the group after or before it, round from the last to the first, as dropping it on the middle of that group does. */
   | { type: "send"; groupId: string; tab: Opened; to: "next" | "previous" }
   /** Gives the panes of one split new shares of it. `path` is the way to the split from the outermost one: which pane, then which pane of that. */
@@ -264,10 +272,13 @@ function dropEmpty(layout: EditorLayout): EditorLayout {
   return arranged({ groups, focusedGroupId }, without(arrangement(layout), gone));
 }
 
-/** Takes a tab out of every group but `keepIn`, ahead of placing it somewhere else. */
-const lift = (layout: EditorLayout, tab: Opened, keepIn?: string): EditorLayout => ({
+/**
+ * Takes a tab out of every group but `keepIn`, ahead of placing it somewhere else. A note, which can
+ * be in several, comes out of `from` alone, the group it is moved from, and out of none when it came from outside them.
+ */
+const lift = (layout: EditorLayout, tab: Opened, keepIn?: string, from?: string): EditorLayout => ({
   ...layout,
-  groups: layout.groups.map((g) => (g.id === keepIn || !has(g, tab) ? g : close(g, "tab", tab))),
+  groups: layout.groups.map((g) => (g.id === keepIn || !has(g, tab) || (tab.kind === "note" && g.id !== from) ? g : close(g, "tab", tab))),
 });
 
 export function editorReducer(layout: EditorLayout, action: EditorAction): EditorLayout {
@@ -276,7 +287,16 @@ export function editorReducer(layout: EditorLayout, action: EditorAction): Edito
   if ("groupId" in action && !layout.groups.some((g) => g.id === action.groupId)) return layout;
   switch (action.type) {
     case "open": {
-      const holder = layout.groups.find((g) => has(g, tab!))?.id;
+      const front = layout.groups.find((g) => g.id === layout.focusedGroupId)!;
+      // Picked in the group in front, it opens there: a note even where another group has it, and anything not open yet.
+      if (action.here && !has(front, tab!) && (tab!.kind === "note" || !layout.groups.some((g) => has(g, tab!)))) {
+        if (action.background) return withGroup(layout, front.id, (g) => openBehind(g, tab!));
+        // A preview where the window's one is in this group or nowhere; with it in another group, kept.
+        const preview = action.preview && (front.tabs.some((t) => t.preview) || !layout.groups.some((g) => g.tabs.some((t) => t.preview)));
+        return { ...withGroup(layout, front.id, (g) => open(g, tab!, preview)), focusedGroupId: front.id };
+      }
+      // A note open in several groups is gone to in the one in front.
+      const holder = [front, ...layout.groups].find((g) => has(g, tab!))?.id;
       if (action.background) return holder ? editorReducer(layout, { type: "pin", groupId: holder, tab: tab! }) : withGroup(layout, layout.focusedGroupId, (g) => openBehind(g, tab!));
       // A new preview is the window's only one, and goes where the preview is, in whichever group: closing that one to open in another would close a group that held nothing else.
       const previewed = action.preview ? layout.groups.find((g) => g.tabs.some((t) => t.preview))?.id : undefined;
@@ -296,16 +316,17 @@ export function editorReducer(layout: EditorLayout, action: EditorAction): Edito
       return layout.focusedGroupId === action.groupId ? layout : { ...layout, focusedGroupId: action.groupId };
     case "split": {
       const id = String(Math.max(...layout.groups.map((g) => Number(g.id))) + 1);
-      const preview = !action.keep && layout.groups.some((g) => g.tabs.some((t) => t.preview && same(t, tab)));
-      const groups = [...lift(layout, tab!).groups, { id, tabs: [{ ...tab!, preview }], active: tab }];
+      const copied = tab!.kind === "note" && !action.keep;
+      const preview = !action.keep && !copied && layout.groups.some((g) => g.tabs.some((t) => t.preview && same(t, tab)));
+      const groups = [...(copied ? layout : lift(layout, tab!, undefined, action.from)).groups, { id, tabs: [{ ...tab!, preview }], active: tab }];
       return dropEmpty(arranged({ groups, focusedGroupId: id }, beside(arrangement(layout), action.groupId, id, action.side)));
     }
     case "add":
-      return editorReducer(layout, { type: "drop", groupId: action.groupId, index: layout.groups.find((g) => g.id === action.groupId)?.tabs.length ?? 0, tab: tab! });
+      return editorReducer(layout, { type: "drop", groupId: action.groupId, index: layout.groups.find((g) => g.id === action.groupId)?.tabs.length ?? 0, tab: tab!, ...(action.from !== undefined && { from: action.from }) });
     case "send": {
       const count = layout.groups.length;
       const to = layout.groups[(layout.groups.findIndex((g) => g.id === action.groupId) + (action.to === "next" ? 1 : count - 1)) % count]!;
-      return count > 1 ? editorReducer(layout, { type: "add", groupId: to.id, tab: tab! }) : layout;
+      return count > 1 ? editorReducer(layout, { type: "add", groupId: to.id, tab: tab!, from: action.groupId }) : layout;
     }
     case "resize": {
       const sized = (pane: Pane, path: number[]): Pane => {
@@ -317,7 +338,7 @@ export function editorReducer(layout: EditorLayout, action: EditorAction): Edito
       return arranged(layout, sized(arrangement(layout), action.path));
     }
     case "drop": {
-      const placed = withGroup(lift(layout, tab!, action.groupId), action.groupId, (g) => {
+      const placed = withGroup(lift(layout, tab!, action.groupId, action.from), action.groupId, (g) => {
         const from = indexOf(g, tab);
         const tabs = g.tabs.filter((t) => !same(t, tab));
         tabs.splice(from >= 0 && from < action.index ? action.index - 1 : action.index, 0, { ...tab!, preview: false });

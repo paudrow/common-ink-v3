@@ -1249,6 +1249,8 @@ test("a daily note open in another editor group takes the line filed on it, and 
   await page.keyboard.press("Enter");
   const [left, right] = [page.getByRole("region", { name: "Editor group 1" }).getByRole("textbox", { name: "Note text" }), page.getByRole("region", { name: "Editor group 2" }).getByRole("textbox", { name: "Note text" })];
   await expect(right).toContainText("Morning.");
+  // A note split off is copied, so the copy left in the first group is closed, and the todo's note is in front there.
+  await page.getByRole("region", { name: "Editor group 1" }).getByTitle(`Close ${today}`, { exact: true }).click();
 
   await left.locator(".cm-line").filter({ hasText: "Sweep" }).getByRole("checkbox").click();
 
@@ -1277,6 +1279,8 @@ test("going to Today leaves the editor of a note open beside it as it was: the s
   await page.keyboard.press("Enter");
   const [left, right] = [page.getByRole("region", { name: "Editor group 1" }), page.getByRole("region", { name: "Editor group 2" })];
   await expect(right.getByRole("textbox", { name: "Note text" })).toContainText("Other words.");
+  // A note split off is copied, so the copy left in the first group is closed, and Alpha is in front there.
+  await left.getByTitle("Close Beta", { exact: true }).click();
   await expect(left.getByRole("textbox", { name: "Note text" })).toContainText("Some words.");
   const alpha = left.locator(".cm-editor");
   await alpha.evaluate((el) => ((el as HTMLElement & { wasThere?: boolean }).wasThere = true));
@@ -1307,6 +1311,8 @@ test("reverting a completion from History takes its line off the daily note open
   await page.keyboard.press("Enter");
   const [left, right] = [page.getByRole("region", { name: "Editor group 1" }).getByRole("textbox", { name: "Note text" }), page.getByRole("region", { name: "Editor group 2" }).getByRole("textbox", { name: "Note text" })];
   await expect(right).toContainText("Morning.");
+  // A note split off is copied, so the copy left in the first group is closed, and the todo's note is in front there.
+  await page.getByRole("region", { name: "Editor group 1" }).getByTitle(`Close ${today}`, { exact: true }).click();
   await left.locator(".cm-line").filter({ hasText: "Sweep" }).getByRole("checkbox").click();
   await expect(right).toContainText("Sweep");
   await expect.poll(() => read(page, daily.note.id)).toContain(`Morning.\n- [x] Sweep [[${note.id}]]`);

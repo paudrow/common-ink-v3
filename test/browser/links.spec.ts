@@ -35,6 +35,9 @@ async function openBeside(page: Page, title: string) {
   await page.keyboard.press("Enter");
   await expect(tabs(page)).toHaveCount(2);
   await run(page, "Split editor right");
+  // A note split off is copied, so the copy left on the left is closed, and the note open before it is in front there again.
+  await page.getByRole("tablist", { name: "Open notes" }).first().getByTitle(`Close ${title}`, { exact: true }).click();
+  await expect(tabs(page)).toHaveCount(1);
   await expect(editor(page, 1)).toContainText(title);
   await editor(page, 1).click();
   await page.keyboard.press("ControlOrMeta+End");

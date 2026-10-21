@@ -734,11 +734,12 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     addEventListener("focusin", elsewhere, true);
     return () => removeEventListener("focusin", elsewhere, true);
   }, [toFocus]);
-  const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean } = {}) => {
+  const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean; here?: boolean } = {}) => {
     const area = host.contributions().views.editor.at(-1);
-    if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true });
+    const here = options.here ? { here: true } : {};
+    if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true, ...here });
     setToFocus(options.focus ? noteId : null);
-    if (area?.open) area.open({ kind: "note", id: noteId }, { preview: options.preview ?? false });
+    if (area?.open) area.open({ kind: "note", id: noteId }, { preview: options.preview ?? false, ...here });
     else show({ kind: "note", id: noteId });
   };
   const openFolder = (folderId: string, options: { preview?: boolean } = {}) => {
@@ -1140,7 +1141,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   })();
 
   const summaryFor = (noteId: string) => byId.get(noteId) ?? (notes ? undefined : early.get(noteId));
-  const renderNote = (noteId: string, { onEdit, focus, onFocused }: { onEdit?: () => void; focus?: boolean; onFocused?: () => void } = {}) => {
+  const renderNote = (noteId: string, { onEdit, focus, onFocused, behind }: { onEdit?: () => void; focus?: boolean; onFocused?: () => void; behind?: boolean } = {}) => {
     const note = summaryFor(noteId);
     return (
       <NoteEditor
@@ -1155,7 +1156,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
           onEdit?.();
         }}
         notice={stuck?.noteId === noteId ? stuck.message : null}
-        focus={toFocus === noteId || !!focus}
+        focus={(toFocus === noteId && !behind) || !!focus}
         onFocused={() => {
           setToFocus(null);
           onFocused?.();

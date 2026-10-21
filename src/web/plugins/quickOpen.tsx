@@ -134,7 +134,8 @@ function QuickOpen({ host, app, close }: ViewProps & { host: PluginHost; close: 
         const upload = uploadItem(id);
         if (event) open(event);
         else if (upload) app.go(uploadPath(upload));
-        else app.openNote(id);
+        // A note found by its title opens in the pane in front; a tab listed with its pane is gone to there.
+        else app.openNote(id, { here: true });
       }}
       onClose={close}
     />

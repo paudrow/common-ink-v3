@@ -128,7 +128,13 @@ export const tabs: Plugin = {
               ? renderFolder(tab.id)
               : tab.kind === "page"
                 ? renderPage(tab.id, tab.path)
-                : renderNote(tab.id, { onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }), focus: group.id === cursorGroup, onFocused: cursorPut })
+                : renderNote(tab.id, {
+                    onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }),
+                    focus: group.id === cursorGroup,
+                    onFocused: cursorPut,
+                    // A note open in two groups takes the cursor in the one in front, or else the first that shows it.
+                    behind: group.id !== (shown.groups.find((g) => g.id === shown.focusedGroupId && same(g.active, tab)) ?? shown.groups.find((g) => same(g.active, tab)))?.id,
+                  })
           }
           empty={empty}
           cursorTo={cursorGroup}
@@ -149,7 +155,7 @@ export const tabs: Plugin = {
     host.views.register("editor", {
       id: "tabs",
       component: Editor,
-      open: (tab, { preview, background }) => dispatch({ type: "open", tab, preview, background }),
+      open: (tab, { preview, background, here }) => dispatch({ type: "open", tab, preview, background, here }),
       returnsTo: () => focused(layout),
       split: (tab, side) => dispatch({ type: "split", groupId: layout.focusedGroupId, side, tab, keep: true }),
       tabs: () => layout.groups.flatMap((g, i) => g.tabs.map(({ preview: _, ...opened }) => ({ opened, pane: i + 1 }))),

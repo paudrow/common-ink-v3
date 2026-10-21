@@ -322,7 +322,8 @@ test("a tab splits down from its menu and from the command, inside a split to th
 
   await tab(page, "Gamma").click({ button: "right" });
   await page.getByRole("menu", { name: "Gamma tab" }).getByRole("menuitem", { name: "Split down" }).click();
-  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
+  // A note split off is copied, so each note split off here stays in the first group too.
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Gamma"]);
   await expect(tabs(page, 1)).toHaveText(["Gamma"]);
   const top = await boxOf(group(page, 1));
   const bottom = await boxOf(group(page, 2));
@@ -335,7 +336,7 @@ test("a tab splits down from its menu and from the command, inside a split to th
   await tab(page, "Beta").click();
   await tab(page, "Beta").click({ button: "right" });
   await page.getByRole("menu", { name: "Beta tab" }).getByRole("menuitem", { name: "Split right" }).click();
-  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Gamma"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
   await expect(tabs(page, 2)).toHaveText(["Gamma"]);
   const [a, b, c] = [await boxOf(group(page, 1)), await boxOf(group(page, 2)), await boxOf(group(page, 3))];
@@ -354,10 +355,10 @@ test("a tab splits down from its menu and from the command, inside a split to th
   await group(page, 1).getByRole("textbox", { name: "Note text" }).click();
   await page.keyboard.press("ControlOrMeta+P");
   await page.getByRole("dialog", { name: "Go to note" }).getByRole("option", { name: /Delta/ }).click();
-  await expect(tabs(page, 0)).toHaveText(["Alpha", "Delta"]);
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Delta", "Gamma"]);
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("dialog", { name: "Commands" }).getByRole("option", { name: "Split editor down" }).click();
-  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Delta", "Gamma"]);
   await expect(tabs(page, 1)).toHaveText(["Delta"]);
   await expect(tabs(page, 2)).toHaveText(["Beta"]);
   await expect(tabs(page, 3)).toHaveText(["Gamma"]);
@@ -396,6 +397,9 @@ test("a tab held over a group shows where it would land: the middle adds it ther
   await page.getByRole("menuitem", { name: "Close", exact: true }).click();
   await tab(page, "Delta").click({ button: "right" });
   await page.getByRole("menuitem", { name: "Split right" }).click();
+  // A note split off is copied, so the copy left in the first group is closed, and each tab dragged below is in one group alone.
+  await tabBar(page, 0).getByTitle("Close Delta", { exact: true }).click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Gamma"]);
   await expect(tabs(page, 1)).toHaveText(["Delta"]);
   const body = group(page, 2).locator(".group-body");
   const whole = await boxOf(body);
@@ -782,6 +786,9 @@ test("a page that only leads somewhere else leaves the editor of a note open bes
   await page.keyboard.type("Split editor right");
   await page.keyboard.press("Enter");
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
+  // A note split off is copied, so the copy left in the first group is closed, and Alpha's editor is in front there.
+  await tabBar(page, 0).getByTitle("Close Beta", { exact: true }).click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
   const alpha = page.getByRole("region", { name: "Editor group 1" }).locator(".cm-editor");
   await expect(alpha.locator(".cm-line").first()).toContainText("Alpha");
   await alpha.evaluate((el) => ((el as HTMLElement & { wasThere?: boolean }).wasThere = true));
@@ -915,4 +922,58 @@ test("a page whose plugin is turned off while it is in front leaves the other ta
   await expect(page.getByRole("main", { name: "Editor" }).getByText("There's nothing at this address.")).toBeVisible();
   await expect(tab(page, "Alpha")).toBeVisible();
   await expect(tab(page, "Beta")).toBeVisible();
+});
+
+test("Split right on a note's only tab shows the note in both groups: what is typed in either is in the other at once and saved once, and closing one leaves the other", async ({ page }) => {
+  const [alpha] = await withNotes(page, "Alpha");
+  await keep(page, "Alpha");
+  await tab(page, "All notes").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Close", exact: true }).click();
+  await expect(tabs(page)).toHaveText(["Alpha"]);
+
+  await tab(page, "Alpha").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Split right" }).click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 1)).toHaveText(["Alpha"]);
+  const [first, second] = [group(page, 1).getByRole("textbox", { name: "Note text" }), group(page, 2).getByRole("textbox", { name: "Note text" })];
+  await expect(first).toContainText("About Alpha.");
+  await expect(second).toContainText("About Alpha.");
+  const before = (await perform(page, { type: "note.history", id: alpha!.id })).length;
+
+  await second.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" Typed in the second.");
+  await expect(first).toContainText("About Alpha. Typed in the second.");
+  await first.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" And the first.");
+  await expect(second).toContainText("Typed in the second. And the first.");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: alpha!.id })).text).toBe("# Alpha\n\nAbout Alpha. Typed in the second. And the first.");
+  // Each pause is one change, whichever editor it was typed in: nothing is written twice.
+  expect((await perform(page, { type: "note.history", id: alpha!.id })).length - before).toBeLessThanOrEqual(2);
+
+  // Changes made elsewhere reach both, and what keeps places in the note hears each once: twice, a place past the end breaks it.
+  const crashes: string[] = [];
+  page.on("console", (message) => message.type() === "error" && /plugin crashed/.test(message.text()) && crashes.push(message.text()));
+  for (const words of ["From elsewhere.", "And again."]) {
+    const now = await perform(page, { type: "note.read", id: alpha!.id });
+    // Before the cursor, which is at the end: a place there moves with each.
+    await perform(page, { type: "note.write", id: alpha!.id, baseRevision: now.revision, text: now.text.replace("About Alpha.", `${words} About Alpha.`) });
+    await expect(first).toContainText(words);
+    await expect(second).toContainText(words);
+  }
+  expect(crashes).toEqual([]);
+
+  // The two groups are kept as they are.
+  await page.reload();
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 1)).toHaveText(["Alpha"]);
+
+  await tab(page, "Alpha", 1).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(1);
+  await first.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" Still saved.");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: alpha!.id })).text).toBe("# Alpha\n\nFrom elsewhere. And again. About Alpha. Typed in the second. And the first. Still saved.");
 });

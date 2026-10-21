@@ -28,14 +28,16 @@ export function lineTouched(state: EditorState, pos: number) {
   return touched(state, line.from, line.to);
 }
 
-let readings = 0;
+let made = 0;
 
 /**
- * What a plugin keeps an editor by. The note's editor is kept by the note's id, so it is found by
- * it. A reading of the note gets a key of its own: it is drawn again with the editors, and never
- * taken for the note's editor.
+ * What a plugin keeps an editor by: a key of its own, as a note can be open in two panes at once.
+ * A reading of the note is drawn again with the editors, and never taken for one of them ({@link isEditorOf}).
  */
-export const editorKey = ({ noteId, reading }: { noteId: string; reading?: boolean }) => (reading ? `${noteId} reading ${++readings}` : noteId);
+export const editorKey = ({ noteId, reading }: { noteId: string; reading?: boolean }) => `${noteId} ${reading ? "reading " : ""}${++made}`;
+
+/** Whether a key {@link editorKey} gave is one of the note's editors, and not a reading of it. */
+export const isEditorOf = (key: string, noteId: string) => key.startsWith(`${noteId} `) && !key.startsWith(`${noteId} reading `);
 
 /** Whether `pos` is in code, where nothing is drawn. */
 export const inCode = (state: EditorState, pos: number) => /Code/.test(syntaxTree(state).resolveInner(pos, 1).name);

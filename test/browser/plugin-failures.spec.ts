@@ -123,6 +123,8 @@ test("an editor extension given as a function is made for each editor with its o
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("Split editor right");
   await page.keyboard.press("Enter");
+  // A note split off is copied, so the copy left in the first group is closed, and Alpha's editor is in front there.
+  await page.getByRole("tablist", { name: "Open notes" }).nth(0).getByTitle("Close Beta", { exact: true }).click();
 
   await expect(text(page)).toHaveCount(2);
   await expect(text(page).nth(0)).toContainText("# Alpha!");

@@ -112,13 +112,17 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
     e.dataTransfer.dropEffect = "move";
     setDrop((d) => (d?.groupId === next.groupId && d.at === next.at ? d : next));
   };
-  const dropped = (e: DragEvent, action: (tab: Opened) => EditorAction) => {
+  /** The group a tab is being dragged out of, while one is: a note dragged from a tab leaves that group, and its tabs in other groups stay. */
+  const draggedFrom = useRef<string | null>(null);
+  const dropped = (e: DragEvent, action: (tab: Opened, from: { from?: string }) => EditorAction) => {
     if (!carriesTab(e.dataTransfer)) return;
     e.preventDefault();
     e.stopPropagation();
     setDrop(null);
     const tab = carried(e.dataTransfer);
-    if (tab) dispatch(action(tab));
+    const from = draggedFrom.current;
+    draggedFrom.current = null;
+    if (tab) dispatch(action(tab, from === null ? {} : { from }));
   };
   const left = (e: DragEvent) => {
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null);
@@ -146,7 +150,7 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
                 className="tab-bar"
                 onDragOver={(e) => over(e, { groupId: group.id, at: gapAt(e.currentTarget, e.clientX) })}
                 onDragLeave={left}
-                onDrop={(e) => dropped(e, (tab) => ({ type: "drop", groupId: group.id, index: gapAt(e.currentTarget, e.clientX), tab }))}
+                onDrop={(e) => dropped(e, (tab, from) => ({ type: "drop", groupId: group.id, index: gapAt(e.currentTarget, e.clientX), tab, ...from }))}
               >
                 {group.tabs.map(({ preview, ...tab }, at) => {
                   const title = titleOf(tab);
@@ -166,7 +170,11 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
                       tabIndex={0}
                       title={title}
                       draggable
-                      onDragStart={(e) => carry(e.dataTransfer, tab)}
+                      onDragStart={(e) => {
+                        carry(e.dataTransfer, tab);
+                        draggedFrom.current = group.id;
+                      }}
+                      onDragEnd={() => (draggedFrom.current = null)}
                       onClick={activate}
                       onDoubleClick={() => dispatch({ type: "pin", groupId: group.id, tab })}
                       onKeyDown={(e) => {
@@ -229,7 +237,7 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
           onDragLeave={left}
           onDropCapture={(e) => {
             const at = zone(e);
-            dropped(e, (tab) => (at === "middle" ? { type: "add", groupId: group.id, tab } : { type: "split", groupId: group.id, side: at, tab, keep: true }));
+            dropped(e, (tab, from) => (at === "middle" ? { type: "add", groupId: group.id, tab, ...from } : { type: "split", groupId: group.id, side: at, tab, keep: true, ...from }));
           }}
         >
           {group.active ? render(group, group.active) : empty}
@@ -257,8 +265,9 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
             { label: "Close to the right", disabled: menuAt === menuGroup.tabs.length - 1, action: () => dispatch({ type: "close", scope: "right", ...menuTab }) },
             { label: "Close all", action: () => dispatch({ type: "close", scope: "all", ...menuTab }) },
             ...(menuGroup.tabs[menuAt]!.preview ? [{ label: "Keep open", icon: "pin" as const, action: () => dispatch({ type: "pin", ...menuTab }) }] : []),
-            { label: "Split right", icon: "split" as const, disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "right", ...menuTab }) },
-            { label: "Split down", icon: "splitDown" as const, disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "down", ...menuTab }) },
+            // A note is copied into the new group, so even a group's only tab splits; anything else moves, and leaves no group empty.
+            { label: "Split right", icon: "split" as const, disabled: menuGroup.tabs.length < 2 && menu.tab.kind !== "note", action: () => dispatch({ type: "split", side: "right", ...menuTab }) },
+            { label: "Split down", icon: "splitDown" as const, disabled: menuGroup.tabs.length < 2 && menu.tab.kind !== "note", action: () => dispatch({ type: "split", side: "down", ...menuTab }) },
             ...noteItems(menu.tab),
           ]}
         />
