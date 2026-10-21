@@ -2,17 +2,21 @@ import { acceptCompletion, autocompletion, currentCompletions, selectedCompletio
 import { syntaxTree } from "@codemirror/language";
 import { Prec, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
+import { grouped, waits, type Group } from "./completionGroups.ts";
 import { placed, startsLine, typedAfter } from "./completionSyntax.ts";
-import type { Completion, CompletionItem } from "./plugin-api.ts";
+import type { Completion, CompletionItem, CompletionPreview } from "./plugin-api.ts";
 
 type Items = readonly CompletionItem[];
+/** An option of CodeMirror's with the line under its label that it doesn't draw itself, and the kind of its item. */
+type Described = Option & { description?: string; kind?: string };
 
 /**
- * Opens the list at the cursor while the member types after a completion's trigger. Every
- * completion whose trigger fits is asked, and their items share the one list, in the order of the
- * completions. One that throws offers nothing, and `onFail` is told.
+ * Opens the list at the cursor while the member types after a completion's trigger, in the editor
+ * of note `noteId`. Every completion whose trigger fits is asked, and their items share the one list,
+ * grouped by kind and otherwise in the order of the completions. One that throws offers nothing, and
+ * `onFail` is told.
  */
-export function completing(given: readonly Completion[], onFail: (completion: Completion, error: unknown) => void): Extension {
+export function completing(given: readonly Completion[], noteId: string, onFail: (completion: Completion, error: unknown) => void): Extension {
   if (!given.length) return [];
   const completions = [...given].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
@@ -25,7 +29,7 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
     if (/Code/.test(syntaxTree(context.state).resolveInner(from, 1).name)) return null;
     const failed = (err: unknown): Items => (onFail(completion, err), []);
     try {
-      const items = completion.items(typed);
+      const items = completion.items(typed, { noteId });
       return { completion, from, items: items instanceof Promise ? items.catch(failed) : items };
     } catch (err) {
       return { completion, from, items: failed(err) };
@@ -42,8 +46,9 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
     if (!asked.length) return null;
     const from = Math.min(...asked.map((a) => a.from));
     const offer = (answers: Items[]): CompletionResult | null => {
-      // The completion has already chosen and ordered what fits, and unfiltered items keep the order they are given in, one completion after another.
-      const options = answers.flatMap((items, i) => items.map((item) => optionFor(asked[i]!.completion, item, asked[i]!.from - from)));
+      const offered = answers.flatMap((items, i) => items.map((item) => ({ item, completion: asked[i]!.completion, after: asked[i]!.from - from })));
+      // The completions have already chosen and ordered what fits, and unfiltered items keep the order they are given in, which grouping by kind keeps within each kind.
+      const options = grouped(offered, (o) => o.item.kind).map(({ item: o, group }) => optionFor(o.completion, o.item, o.after, group));
       return options.length ? { from, to: context.pos, filter: false, update, options } : null;
     };
     const answers = asked.map((a) => a.items);
@@ -58,23 +63,27 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
   };
 
   /** `after` is how far the item's own trigger is past where the list starts, which is the earliest trigger of those that fit. */
-  const optionFor = (completion: Completion, item: CompletionItem, after: number): Option => ({
+  const optionFor = (completion: Completion, item: CompletionItem, after: number, group: Group | undefined): Described => ({
     ...(item.tone && { type: item.tone }),
     label: item.label,
     detail: item.detail,
+    ...(item.description && { description: item.description }),
+    ...(item.kind && { kind: item.kind }),
+    ...(group && { section: { name: group.heading, rank: group.rank, header: headed } }),
+    ...(item.preview && { info: () => drawn(item.preview!) }),
     apply(view, _picked, listFrom, end) {
       const start = listFrom + after;
       const write = (insert: string, from = start, to = end) => {
         const at = view.state.doc.lineAt(from);
-        const { anchor, head, ...changes } = placed({ ...item, insert }, { from, to, before: at.text.slice(0, from - at.from), after: at.text.slice(to - at.from), last: at.number === view.state.doc.lines });
+        const { anchor, head, ...changes } = placed({ ...item, insert }, { from, to, before: at.text.slice(0, from - at.from), after: at.text.slice(to - at.from), below: at.number < view.state.doc.lines ? view.state.doc.line(at.number + 1).text : null });
         // Typing carried on after it while it was made: the cursor stays where that left it.
         const still = view.state.selection.main.empty && view.state.selection.main.head === to;
         view.dispatch({ changes, ...(still && { selection: { anchor, head } }), scrollIntoView: true, userEvent: "input.complete" });
-        item.run?.();
       };
       if (typeof item.insert === "string") return write(item.insert);
       const typed = view.state.doc.sliceString(start, end);
-      item.insert().then(
+      const anchor = markAtCursor(view);
+      item.insert({ noteId, anchor, focus: () => view.dom.isConnected && view.focus() }).then(
         (insert) => {
           if (insert === null || !view.dom.isConnected) return;
           // Typing before it while it was made moved it: it is written where the trigger and what was typed now are, the nearest, or not at all.
@@ -85,7 +94,7 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
           if (at !== undefined) write(insert, at, at + typed.length);
         },
         (err: unknown) => onFail(completion, err),
-      );
+      ).finally(() => anchor.remove());
     },
   });
 
@@ -105,12 +114,58 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
   };
   // No delays: a member who types `/timer` and Enter without a pause means the timer.
   return [
-    // A list opens with nothing highlighted, and its first item is highlighted in the same turn unless a prose trigger follows other words on its line, where Enter stays a new line.
-    autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0, selectOnOpen: false, optionClass: (option) => (option.type ? `cm-completion-${option.type}` : "") }),
+    // A list opens with nothing highlighted, and its first item is highlighted in the same turn unless a prose trigger follows other words on its line, or the item waits to be picked on purpose, where Enter stays a new line.
+    autocompletion({
+      override: [source],
+      icons: false,
+      activateOnTypingDelay: 0,
+      interactionDelay: 0,
+      selectOnOpen: false,
+      optionClass: (option) => (option.type ? `cm-completion-${option.type}` : ""),
+      addToOptions: [{ render: (option: Described) => (option.description ? Object.assign(document.createElement("span"), { className: "cm-completionDescription", textContent: option.description }) : null), position: 90 }],
+    }),
     EditorView.updateListener.of(({ view, state }) => {
-      if (currentCompletions(state).length && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
+      const first: Described | undefined = currentCompletions(state)[0];
+      if (first && !waits(first.kind) && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
     }),
     // With no list open Tab is whatever it is elsewhere in a note.
     Prec.highest(keymap.of([{ key: "Tab", run: pick }])),
   ];
+}
+
+/** An empty element at the cursor of `view` for a popover to hang from, which scrolls with the note's text. */
+function markAtCursor(view: EditorView): HTMLElement {
+  const box = view.scrollDOM.getBoundingClientRect();
+  const at = view.coordsAtPos(view.state.selection.main.head) ?? { left: box.left, top: box.top, bottom: box.top };
+  const mark = view.scrollDOM.appendChild(document.createElement("span"));
+  Object.assign(mark.style, {
+    position: "absolute",
+    width: "0",
+    left: `${at.left - box.left + view.scrollDOM.scrollLeft}px`,
+    top: `${at.top - box.top + view.scrollDOM.scrollTop}px`,
+    height: `${at.bottom - at.top}px`,
+  });
+  return mark;
+}
+
+/** A group's heading. The list is a listbox, which holds options alone, so the heading is seen and not read. */
+function headed({ name }: { name: string }): HTMLElement {
+  return Object.assign(document.createElement("completion-section"), { textContent: name, ariaHidden: "true" });
+}
+
+/** A preview as the pane beside the list draws it, or nothing where it has nothing to show. */
+function drawn({ image, text, facts }: CompletionPreview): HTMLElement | null {
+  if (!image && !text && !facts?.length) return null;
+  const pane = document.createElement("div");
+  pane.className = "completion-preview";
+  if (image) pane.appendChild(Object.assign(document.createElement("img"), { src: image, alt: "", decoding: "async", draggable: false }));
+  if (text) pane.appendChild(document.createElement("p")).textContent = text;
+  if (facts?.length) {
+    const list = pane.appendChild(document.createElement("dl"));
+    for (const [name, value] of facts) {
+      list.appendChild(document.createElement("dt")).textContent = name;
+      list.appendChild(document.createElement("dd")).textContent = value;
+    }
+  }
+  return pane;
 }

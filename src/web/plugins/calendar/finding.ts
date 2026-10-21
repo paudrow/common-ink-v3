@@ -96,6 +96,14 @@ export function finding(events: readonly CalendarEvent[], typed: string, now: nu
   return found.sort((a, b) => Math.abs(startOf(a) - now) - Math.abs(startOf(b) - now) || startOf(a) - startOf(b));
 }
 
+/** The events still to start at `now`, soonest first: a timed one from `now`, and an all-day one from the next day, before the timed ones of its day. */
+export function upcoming(events: readonly CalendarEvent[], now: number, timeZone: string): CalendarEvent[] {
+  const today = dayIn(now, timeZone);
+  const dayOf = ({ when }: CalendarEvent) => (when.allDay ? when.from : dayIn(when.from, timeZone));
+  const timeOf = ({ when }: CalendarEvent) => (when.allDay ? 0 : when.from);
+  return events.filter(({ when }) => (when.allDay ? when.from > today : when.from >= now)).toSorted((a, b) => dayOf(a).localeCompare(dayOf(b)) || timeOf(a) - timeOf(b));
+}
+
 /** What an event is listed as: its title, and its day, its time and its calendar after it. */
 export function listedAs(event: CalendarEvent, timeZone: string): { label: string; detail: string } {
   const { when } = event;
@@ -132,6 +140,9 @@ export function eventsToFind(host: PluginHost, timeZone: string): { now: readonl
   }
   return { now: kept.events ?? null, read: kept.read };
 }
+
+/** Whether the events have been read: false before the first reading lands, and after one that failed. */
+export const eventsRead = () => kept?.events !== undefined;
 
 /** Has the events read again the next time they are looked for, as after one is added or changed; what was read is answered meanwhile. */
 export const forgetEventsToFind = () => void (kept &&= { ...kept, at: 0 });

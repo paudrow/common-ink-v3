@@ -1,22 +1,23 @@
 import { completionStatus, startCompletion } from "@codemirror/autocomplete";
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import type { Member, Plugin } from "../../plugin-api.ts";
+import { writtenMention, type Contact, type Member, type Plugin, type Source } from "../../plugin-api.ts";
 import { editorKey, redraw } from "../lib/live.ts";
+import { reask } from "../lib/reasking.ts";
 import { mentionDrawing, noteMentions, type OpenPerson } from "./drawing.ts";
 import { PERSON_PATH, personPath, whoOn } from "../lib/person.ts";
 import { PersonPage } from "./PersonPage.tsx";
-import { newlyMentioned, offered, type People } from "./people.ts";
+import { addingTo, newlyMentioned, offered, type Adding, type People } from "./people.ts";
 
 /** How long the members are taken to be who they were, before `@` reads them again. */
 const MEMBERS_FRESH_MS = 60_000;
 /** The same for the member's contacts, which are read from where they are kept, every one of them, each time. */
 const CONTACTS_FRESH_MS = 10 * 60_000;
 
-/** Whether the cursor is after an `@` that the list could be open on. */
-function afterAt(view: EditorView): boolean {
+/** What is typed after an `@` that the list could be open on, before the cursor, or null where there is none. */
+function afterAt(view: EditorView): string | null {
   const { head } = view.state.selection.main;
   const line = view.state.doc.lineAt(head);
-  return /(^|\s)@[^@[\]]*$/.test(line.text.slice(0, head - line.from));
+  return /(?:^|\s)@([^@[\]]*)$/.exec(line.text.slice(0, head - line.from))?.[1] ?? null;
 }
 
 const named = (members: readonly Member[]) => new Intl.ListFormat(undefined, { type: "conjunction" }).format(members.map((m) => m.name || "Someone"));
@@ -30,7 +31,8 @@ const named = (members: readonly Member[]) => new Intl.ListFormat(undefined, { t
  *
  * The contacts are read once, when `@` is first typed, and kept in this browser's memory for the
  * list to narrow as the member types. Nothing typed after `@` is sent anywhere, and only the name
- * of a contact that is picked goes into the note.
+ * of a contact that is picked goes into the note. Where it finds nobody, `@` offers to create a
+ * contact of the name typed, in the member's contacts that take changes, and that name alone is sent.
  */
 export const mentions: Plugin = {
   id: "mentions",
@@ -48,7 +50,20 @@ export const mentions: Plugin = {
   activate(host) {
     const editors = new Map<string, EditorView>();
     let people: People = { members: new Map(), contacts: null };
+    /** Where a contact created from `@` goes: known once the contacts are read whole, so that finding nobody among them means there is nobody. */
+    let addTo: Source | null = null;
+    /** Whether the members are known, or known to be none this member is told of: until then a member's name would find nobody. */
+    let membersKnown = host.workspace.role === "guest";
+    /** The contacts created from here, kept until a read of the contacts that holds them, which one already on its way may not. */
+    let made: Contact[] = [];
     const focused = () => [...editors.values()].find((view) => view.hasFocus);
+    /** The people as they are known, with the member among the members before the list of them is read: `@` alone then offers them first. */
+    const known = (): People => {
+      const { me } = host.app();
+      if (host.workspace.role === "guest" || people.members.has(me.id)) return people;
+      const self = { personId: me.id, name: me.name, role: host.workspace.role, ...(host.workspace.role === "admin" && { email: me.email }) };
+      return { ...people, members: new Map([[me.id, self], ...people.members]) };
+    };
 
     let membersAt = 0;
     const readMembers = () => {
@@ -59,10 +74,13 @@ export const mentions: Plugin = {
         (list) => {
           const was = JSON.stringify([...people.members.values()]);
           people = { ...people, members: new Map(list.map((m) => [m.personId, m])) };
-          if (JSON.stringify(list) !== was) for (const view of editors.values()) view.dispatch({ effects: redraw.of(null) });
+          membersKnown = true;
+          if (JSON.stringify(list) === was) return;
+          for (const view of editors.values()) view.dispatch({ effects: redraw.of(null) });
+          reask();
         },
         // Whoever reads a link's page is told nothing of who is in the workspace either.
-        () => {},
+        () => void (membersKnown = true),
       );
     };
     readMembers();
@@ -71,15 +89,52 @@ export const mentions: Plugin = {
     const readContacts = () => {
       contactsAt = Date.now();
       host.perform({ type: "contact.list" }).then(
-        ({ contacts }) => {
-          people = { ...people, contacts };
-          // Where no member matched what was typed, the list isn't open, and is opened now on the contacts. An open
-          // list is left alone until the next key: asked again, it would take no Enter for a moment, and break the line.
+        ({ contacts, sources, more }) => {
+          made = made.filter((m) => !contacts.some((c) => c.sourceId === m.sourceId && c.id === m.id));
+          people = { ...people, contacts: [...contacts, ...made] };
+          addTo = more ? null : addingTo(sources);
+          // The list after an `@` is asked again for the contacts: an open one at once, and one that isn't, where nothing else
+          // matched, where it now offers something before or instead of any member: a contact, or to create one.
           const view = focused();
-          if (view && afterAt(view) && completionStatus(view.state) === null) startCompletion(view);
+          const typed = view ? afterAt(view) : null;
+          if (!view || typed === null) return;
+          if (completionStatus(view.state) === "active") return reask();
+          const first = offered(typed, known(), host.app().me.id, adding())[0];
+          if (first && (first.tone === "muted" || first.kind === "new")) startCompletion(view);
         },
         () => void (people = { ...people, contacts: people.contacts ?? [] }),
       );
+    };
+
+    /** Creating a contact makes it once: picked again while it is on its way, the same name is answered by the same creating. */
+    const creating = new Map<string, Promise<string | null>>();
+    const create = async (into: Source, name: string): Promise<string | null> => {
+      try {
+        const card = await host.perform({ type: "contact.create", sourceId: into.id, name });
+        made = [...made, card];
+        people = { ...people, contacts: [...(people.contacts ?? []), card] };
+        const app = host.app();
+        const { go } = app;
+        app.notify({ message: `Created contact ${card.name}`, icon: "check", ...(typeof go === "function" && { action: { label: "Open", run: () => go(personPath(card.name)) } }) });
+        return writtenMention({ name: card.name });
+      } catch (err) {
+        host.app().notify({ message: err instanceof Error ? err.message : "The contact couldn't be created." });
+        return null;
+      }
+    };
+    /** Where `@` creates a contact: in `addTo`, once the members and the contacts are known. Each says so with a way to its page, to put a typo right, or says why not. */
+    const adding = (): Adding | null => {
+      const into = addTo;
+      if (!into || !membersKnown) return null;
+      return {
+        into: into.name,
+        create(name) {
+          const key = `${into.id} ${name.toLowerCase()}`;
+          const pending = creating.get(key) ?? create(into, name).finally(() => creating.delete(key));
+          creating.set(key, pending);
+          return pending;
+        },
+      };
     };
 
     host.completions.register({
@@ -90,7 +145,7 @@ export const mentions: Plugin = {
         const now = Date.now();
         if (now - membersAt > MEMBERS_FRESH_MS) readMembers();
         if (now - contactsAt > CONTACTS_FRESH_MS) readContacts();
-        return offered(typed, people, host.app().me.id);
+        return offered(typed, known(), host.app().me.id, adding());
       },
     });
 

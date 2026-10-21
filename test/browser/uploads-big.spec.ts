@@ -103,6 +103,52 @@ test("a recording over 8 MB dropped in a note goes in parts: its line is written
   await expect(page.getByRole("region", { name: "Storage" })).toContainText("This workspace's files take 12 MB, 1 file from every member.");
 });
 
+/** A WAV recording of `size` bytes as `dropRecording` makes one, for a file picker. */
+function recording(size: number): Buffer {
+  const bytes = Buffer.alloc(size);
+  bytes.write("RIFF", 0, "latin1");
+  bytes.writeUInt32LE(size - 8, 4);
+  bytes.write("WAVEfmt ", 8, "latin1");
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20);
+  bytes.writeUInt16LE(1, 22);
+  bytes.writeUInt32LE(8000, 24);
+  bytes.writeUInt32LE(8000, 28);
+  bytes.writeUInt16LE(1, 32);
+  bytes.writeUInt16LE(8, 34);
+  bytes.write("data", 36, "latin1");
+  bytes.writeUInt32LE(size - 44, 40);
+  return bytes;
+}
+
+test("Upload a recording in the / menu takes out what was typed as the file picker opens, and a file over 8 MB has its line written at once, saying how far it has got", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Episode 13\n\n" });
+  await open(page, note.id, "Episode 13");
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+End");
+  let release!: () => void;
+  const held = new Promise<void>((done) => (release = done));
+  await page.route(PARTS, async (route) => {
+    await held;
+    await route.continue();
+  });
+
+  await page.keyboard.type("/rec", { delay: 20 });
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Upload a recording/]);
+  await page.evaluate(() => new Promise((done) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 50)));
+  const chooser = page.waitForEvent("filechooser");
+  await page.keyboard.press("Enter");
+  const asked = await chooser;
+  await expect.poll(() => noteText(page, note.id)).toBe("# Episode 13\n\n");
+  await asked.setFiles({ name: "episode-13.wav", mimeType: "audio/wav", buffer: recording(12 * MIB) });
+
+  await expect(below(page, "audio")).toContainText(/Uploading episode-13\.wav · \d+%/);
+  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Episode 13\n\n::audio\{[a-z0-9]{12}\}\n$/);
+  release();
+  await expect(below(page, "audio").locator("audio")).toBeVisible();
+});
+
 test("a part whose connection drops is sent again to a fresh address, and the file arrives whole", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Interview\n\n" });

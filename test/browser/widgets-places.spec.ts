@@ -172,12 +172,16 @@ test("a member who can't change the note still sees the bar's clocks and count, 
   expect(writes).toEqual([]);
 });
 
-test("every embed is in the / menu and every command-started widget is in the command palette", async ({ page }) => {
+test("every embed is in the / menu after the blocks and alone in the :: menu, and every command-started widget is in the command palette", async ({ page }) => {
+  const embeds = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Insert an upload/];
   await open(page, "# Tea\n\n");
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/");
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/]);
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Heading 1/, /^Heading 2/, /^Heading 3/, /^Bulleted list/, /^Numbered list/, /^Task list/, /^Table/, /^Code block/, /^Quote/, /^Divider/, ...embeds]);
+  await page.keyboard.press("Escape");
+  await page.keyboard.type(" ::");
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText(embeds);
   await page.keyboard.press("Escape");
 
   await page.keyboard.press("ControlOrMeta+Shift+P");

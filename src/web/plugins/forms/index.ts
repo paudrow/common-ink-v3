@@ -1,5 +1,6 @@
 import { castVote, parseForm, replaceQuestions, serializeForm, setAnswer, setOther, showsOther, type AnswerValue, type Form, type NamedForm, type Question } from "./form.ts";
 import type { Drawn, EmbedOptions, Embedded, Plugin, PluginHost } from "../../plugin-api.ts";
+import { sketch, words } from "../lib/sketch.ts";
 
 interface Props {
   className?: string;
@@ -43,6 +44,9 @@ const options: EmbedOptions = {
     return { body: serializeForm({ ...form, closed }) };
   },
 };
+
+/** A question and its choices, one chosen, as the insert menu pictures a form. */
+const PICTURE = sketch(words(14, 8, 120) + [28, 46, 64].map((y, i) => `<circle cx="20" cy="${y + 3}" r="5" ${i === 1 ? "" : 'fill="none" stroke-width="2"'}/>` + words(32, y, [70, 54, 86][i]!)).join(""));
 
 const starts = { body: serializeForm({ questions: [{ id: "q", type: "one", prompt: "Which one?", options: ["Yes", "No"] }], answers: {} }) };
 
@@ -625,6 +629,6 @@ export const forms: Plugin = {
   description: "A form in a note. An agent writes the questions. Members answer, and the answers stay in the note.",
   icon: "list",
   activate(host) {
-    host.embeds.register({ name: "form", title: "Form", block: true, starts, options, render: (el, embed) => present(host, el, embed) });
+    host.embeds.register({ name: "form", title: "Form", block: true, starts, description: "Questions for members to answer, with the answers kept in the note", preview: { image: PICTURE }, options, render: (el, embed) => present(host, el, embed) });
   },
 };

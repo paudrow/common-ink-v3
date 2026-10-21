@@ -1,6 +1,6 @@
 import { StateEffect, StateField, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import type { Dispose, PluginHost, Upload } from "../../plugin-api.ts";
+import type { Dispose, InsertAt, PluginHost, Upload } from "../../plugin-api.ts";
 import { reasonOf } from "../lib/FoundNote.tsx";
 import { writable } from "../lib/live.ts";
 import { toldOf } from "./drawing.ts";
@@ -100,6 +100,9 @@ export function sender(host: PluginHost) {
   };
   const editors = new Set<{ view: EditorView; noteId: string }>();
 
+  /** Whether `view` is still a note's editor on the page. */
+  const open = (view: EditorView) => [...editors].some((e) => e.view === view);
+
   const update = (id: number, change: Partial<Sending>) => set(sending.map((s) => (s.id === id ? { ...s, ...change } : s)));
 
   /**
@@ -156,7 +159,7 @@ export function sender(host: PluginHost) {
     const note = host.app().notes?.find((n) => n.id === noteId);
     const key = ++ids;
     view.dispatch({ effects: placing.of({ key, pos: at }) });
-    const there = () => [...editors].some((e) => e.view === view);
+    const there = () => open(view);
     /** Writes a file's line where the files are being put. False when the note has closed or can't be changed now. */
     const place = ({ upload, size }: Placed): boolean => {
       const pos = there() ? view.state.field(places, false)?.get(key) : undefined;
@@ -180,20 +183,56 @@ export function sender(host: PluginHost) {
     if (there()) view.dispatch({ effects: placing.of({ key, pos: null }) });
   }
 
-  /** Asks the member for files, as a click on a file field does. */
-  function pick(taken: (files: File[]) => void) {
+  /** Asks the member for files, as a click on a file field does: those of the types `accept` names, as a file field's `accept` does, or any. */
+  function pick(taken: (files: File[]) => void, accept?: string, cancelled?: () => void) {
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
     input.hidden = true;
+    if (accept) input.accept = accept;
     input.addEventListener("change", () => {
       taken([...(input.files ?? [])]);
       input.remove();
     });
-    input.addEventListener("cancel", () => input.remove());
+    input.addEventListener("cancel", () => {
+      cancelled?.();
+      input.remove();
+    });
     document.body.append(input);
     input.click();
   }
+
+  /**
+   * The insert of a menu item that asks for files of the types `accept` names and writes each in the
+   * note where the item was picked, as a paste would there. It answers at once with nothing to write,
+   * so the trigger goes before the file picker opens, and each file is written once the server has it,
+   * through whatever is typed meanwhile, with the bar saying how far it has got.
+   */
+  const pickInto =
+    (accept?: string) =>
+    ({ anchor }: InsertAt): Promise<string | null> => {
+      const editor = [...editors].find((e) => e.view.scrollDOM.contains(anchor));
+      if (!editor) return Promise.resolve(null);
+      const { view, noteId } = editor;
+      const key = ++ids;
+      view.dispatch({ effects: placing.of({ key, pos: view.state.selection.main.head }) });
+      /** Stops keeping the place, and answers where it has got to, or undefined once the note has closed. */
+      const release = () => {
+        const at = open(view) ? view.state.field(places, false)?.get(key) : undefined;
+        if (at !== undefined) view.dispatch({ effects: placing.of({ key, pos: null }) });
+        return at;
+      };
+      pick(
+        (files) => {
+          const at = release();
+          if (at !== undefined) void intoNote(view, noteId, files, at, "input.paste");
+          else if (files.length) host.app().notify({ message: "Nothing was uploaded: the note closed while the files were chosen." });
+        },
+        accept,
+        release,
+      );
+      return Promise.resolve("");
+    };
 
   const extension = ({ noteId }: { noteId: string }): Extension => [
     places,
@@ -230,14 +269,7 @@ export function sender(host: PluginHost) {
     extension,
     sendAll,
     pick,
-    /** Asks for files and writes them into the note whose editor has the keyboard, at its cursor. */
-    pickIntoNote() {
-      const editor = [...editors].find((e) => e.view.hasFocus);
-      if (!editor) return;
-      pick((files) => {
-        if (editors.has(editor)) void intoNote(editor.view, editor.noteId, files, editor.view.state.selection.main.head, "input.paste");
-      });
-    },
+    pickInto,
     sending: () => sending,
     /** The file on its way that will be the upload `uploadId`, if it is one. */
     of: (uploadId: string) => sending.find((s) => s.uploadId === uploadId),

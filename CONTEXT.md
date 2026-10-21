@@ -84,6 +84,10 @@ _Avoid_: Importance, normal
 The day a todo is due, written `due:2026-10-14` on its line. It is a calendar date with no time and no time zone. Overdue is a due date before today, where today is the viewing member's.
 _Avoid_: Deadline
 
+**Date**:
+A day written in a note's text on its own, `2026-10-21`, or a day and a time, `2026-10-21 15:00`. It is a calendar day and a clock's time where the member is, with no time zone, the same words wherever it is read. `@` writes one from what is typed (`@today`, `@next friday`, `@tomorrow 3pm`) or from a picked day. The editor draws it as it reads, Wed, Oct 21, and a click on it opens that day's daily note. A date that is part of something longer, such as a due date's `due:2026-10-21`, and a date in a heading are left as written.
+_Avoid_: Date chip (the chip is how a date is drawn), timestamp
+
 **Repeat**:
 How a todo comes due again, written `every:` and a rule on its line: every N days, weeks, months or years after the due date (`every:2w`); N after it was last done (`every:3d-after-done`); days of the week, every week or every Nth (`every:mon,thu`, `every:2w-mon,thu`); days of the month from its start or end (`every:3rd-day`, `every:1st-day,15th-day`, `every:last-day`); the nth weekdays of the month (`every:2nd-tue`, `every:last-fri`); a date or a weekday of a month every year (`every:mar-1`, `every:1st-mon-mar`). A rule may end, on a day or after so many more times (`-until-2026-12-31`, `-times-5`), and its last time checks the todo off for good. A member can **skip** one occurrence: the due date moves to the next with nothing checked off. `docs/todos.md` has each rule and its next due date. A todo with one is a repeating todo. In code the rule is `every` and its module `recurrence.ts`, which a person never reads.
 _Avoid_: Recurrence, recur, schedule
@@ -124,7 +128,7 @@ The calendar a member's new events go in when none is named, by them or their ag
 **Record reference**:
 What a note writes to point at an event or a contact without copying it: an embed, `::event{ref label}` or `::contact{ref label}`. The ref says nothing of the record and leads to it only for the member who made the reference, who is shown the record as it is now. The label is plain text in the note that every reader sees, in gray. Anyone else sees the label and nothing more.
 The notes about a record are the notes that hold the member's own reference to it and that they can see, each said to be Private, Shared or Workspace by who sees it.
-A member writes a reference to an event as they link a note: `[[` offers their events, nearest first, and picking one writes its reference.
+A member writes a reference to an event as they link a note: `[[` and `@` offer their events, nearest first, and picking one writes its reference.
 _Avoid_: Link (that is to a note), mention (that is `@`)
 
 **Dashboard**:
@@ -146,7 +150,7 @@ The changes made since a member's last visit by anyone but the member, their own
 A note a member has chosen to show on their own dashboard. It is theirs alone, kept for them in that workspace and the same in every browser, and is not written into the note: pinning is not a change. A pinned note that is archived or in Trash is left off the dashboard and returns with the note. A pin on a note the member can no longer see is left off too, says nothing of the note, and returns if the note does. A member's agent can pin for them.
 
 **Contact**:
-A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. Each email, phone, address and website a contact has carries a **label**: one of Google's own for that kind of line (Home email, Work email, Mobile, Work phone, Home address, Blog, and the rest), one the member wrote, or none. It is shown in plain words beside the line, and written back with it. The member edits a contact from its person page, every field as a contacts app does, and the change is written back where the contact is kept: Google's contacts through the People API, once the member has agreed to changes as well as reading ("Connect again to edit contacts"). A person who isn't one of the member's contacts can be added to them from their page. Only the member changes or adds a contact: not another member, whatever their role, and not an agent.
+A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. Each email, phone, address and website a contact has carries a **label**: one of Google's own for that kind of line (Home email, Work email, Mobile, Work phone, Home address, Blog, and the rest), one the member wrote, or none. It is shown in plain words beside the line, and written back with it. The member edits a contact from its person page, every field as a contacts app does, and the change is written back where the contact is kept: Google's contacts through the People API, once the member has agreed to changes as well as reading ("Connect again to edit contacts"). A person who isn't one of the member's contacts can be added to them from their page, and a name `@` finds nobody for can be created as one from the list. Only the member changes or adds a contact: not another member, whatever their role, and not an agent.
 _Avoid_: Member, user
 
 **Tag**:
@@ -438,11 +442,11 @@ A block embed (`:::html{}`) whose body is HTML, run below the block in a frame w
 **Run HTML embeds**:
 A member's setting (`html.run`): `automatically` or `ask first`, which shows a Run button in place of each HTML embed until it is pressed. It defaults to `ask first` until the server serves HTML embeds from a site of their own (`EMBED_ORIGIN`), as the server says in `/api/me`, and to `automatically` where it does; the member's own choice stands either way. A value that is neither reads as `ask first`, and a change reaches notes already open: what ran by itself stops and asks, what was asking runs. Like every setting it is the member's alone: no plugin, agent or embed can read or change it. A page opened from a share link always asks first. An embed whose HTML has changed runs again, or asks again.
 
-**Embed menu**:
-The list of embeds that opens at the cursor when a member types `/` at the start of a line or after a space. Typing filters it, and picking one writes that embed into the note.
+**Insert menu**:
+The list that opens at the cursor when a member types `/` at the start of a line or after a space: blocks of markdown, such as a heading, a list, a table or a code block, and then the embeds, with an entry each to upload an image, a video, a recording or any file, each said in words with a small picture of what it makes, never its syntax. An event or a contact is not in it: `@` finds them. Typing filters it, and picking one writes it into the note. `::` opens the same list's embeds alone, so an embed's name typed as a note writes it is completed too.
 
 **Completion**:
-A list a plugin offers at the cursor while the member types after a trigger. The embed menu is one.
+A list a plugin offers at the cursor while the member types after a trigger. The insert menu is one.
 
 **Editor extension**:
 Something a plugin adds to the editor of every note, such as keys or a status line. It applies to notes already open, and not to the settings JSON.

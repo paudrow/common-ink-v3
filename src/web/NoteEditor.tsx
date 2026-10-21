@@ -97,7 +97,7 @@ interface Props {
   onRejected: (why: "rejected" | "inTrash") => void;
   /** What plugins have registered to draw inside a note. */
   embeds: readonly (Embed | AddressEmbed)[];
-  /** The lists plugins offer at the cursor, such as the embed menu. */
+  /** The lists plugins offer at the cursor, such as the insert menu. */
   completions: readonly Completion[];
   /** Called for a completion that threw while being asked what it offers. */
   onContributionFailed: (contribution: object, error: unknown) => void;
@@ -138,7 +138,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const [completed] = useState(() => new Compartment());
   const failed = useRef(onContributionFailed);
   failed.current = onContributionFailed;
-  const offered = useMemo(() => completing(completions, (completion, err) => failed.current(completion, err)), [completions]);
+  const offered = useMemo(() => completing(completions, noteId, (completion, err) => failed.current(completion, err)), [completions, noteId]);
   const offeredNow = useRef(offered);
   offeredNow.current = offered;
   const [added] = useState(() => new Compartment());

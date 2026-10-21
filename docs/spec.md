@@ -67,9 +67,9 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 ### Mentions and contacts
 
-40. As a member, I want `@` to open an autocomplete that filters as I type, so that I can mention people quickly. Clicking a mention opens that person's page: what I may see of them, their todos, and the notes that mention them.
+40. As a member, I want `@` to open an autocomplete that filters as I type, so that I can mention people quickly, and point at a note, an upload, an event or a day from the same list, grouped by kind, each with a line that says what it is and a preview. `@` alone shows a few of each kind: people, me first, today and tomorrow, the notes I edited last, the latest uploads and my next events. `@today`, `@next friday`, `@oct 21`, `@3pm` or `@tomorrow 3pm` writes the date (`2026-10-21`, with `15:00` for a time), and Pick a date… picks any day; a date in a note reads in words, such as Wed, Oct 21, and opens that day's daily note. Clicking a mention opens that person's page: what I may see of them, their todos, and the notes that mention them.
 41. As a member, I want current workspace members to appear in the theme color and everyone else in gray, so that I can tell who has an account in this workspace.
-42. As a member, I want to mention a contact who has no Common Ink account, such as my plumber, so that my notes record who said what.
+42. As a member, I want to mention a contact who has no Common Ink account, such as my plumber, so that my notes record who said what, and where `@` finds nobody by the name I typed, to create them as a contact from the list, so that the person I just met is one of my contacts without leaving the note.
 43. As a member reading someone else's note, I want to see a mentioned contact's name in gray, so that I understand the note without seeing their contact list. Guests and share-link readers see every mention in gray.
 44. As a member, I want mentioning a contact never to give them access, so that recording a name is not sharing.
 
@@ -150,7 +150,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 96. As an admin, I want to set and lock each plugin's permissions for the workspace, so that members can't widen them.
 97. As a non-admin, I want saying yes to a plugin's request to send it to an admin, so that I can ask for capabilities without granting them.
 98. As a member, I want plugins never to change my settings, other than the options a plugin remembers for itself (such as a calendar's hidden calendars), so that a plugin can't change my setup behind my back.
-99. As a member, I want to press `/` and search an embed menu as I type, so that I can insert widgets quickly.
+99. As a member, I want to press `/` and search an insert menu of blocks and embeds as I type, each said in words with a picture of what it makes, so that I can insert widgets quickly without knowing their syntax; `::` lists the embeds alone.
 100. As a member, I want inline widgets such as a timer or stopwatch written as `::name{config}`, so that they are visible and editable in the markdown.
 101. As a member, I want block widgets such as a kanban board to store their data in the note between `:::name{config}` and `:::`, so that the data is plain markdown.
 102. As a member, I want kanban columns to be headings and cards to be list items, so that the board reads naturally as markdown.

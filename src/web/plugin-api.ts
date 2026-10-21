@@ -71,7 +71,7 @@ export { reline } from "../core/blame.ts";
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
-export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, writtenMention, type WrittenMention } from "../core/mentions.ts";
+export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, readableName, writtenMention, type WrittenMention } from "../core/mentions.ts";
 
 /** How a note refers to an upload, which is the same for a plugin as for an agent, and what kind of file an upload is. */
 export { SIZE_WORDS, UPLOAD_EMBEDS, sizeIn, sizeWordIn, uploadIn, withSizeWord, writtenUpload, type SizeWord, type UploadEmbed } from "../core/uploadRefs.ts";
@@ -656,16 +656,23 @@ export interface Embed {
   title: string;
   /** Whether it is written as a block, with a body. One embed is written one way. */
   block?: boolean;
-  /** What a new one is written with when it is picked from the embed menu. With none, an empty config and an empty body. */
+  /** What a new one is written with when it is picked from the insert menu. With none, an empty config and an empty body. */
   starts?: { config?: string; body?: string };
+  /** What the insert menu says it makes, in a line of words: never its syntax. With none the menu shows its title alone. */
+  description?: string;
+  /** What the insert menu shows beside it while it is highlighted, such as a small picture of it drawn in a note. */
+  preview?: CompletionPreview;
   /**
    * For an embed a menu can't write, because what it holds is made by doing something: an upload's
    * is made by sending a file, or by choosing one already sent. A menu offers each under its title,
-   * after the embeds it writes, in the order given, and picking one calls its `run` and writes
-   * nothing. The editor it was picked in still has the keyboard.
+   * after the embeds it writes, in the order given, and picking one writes what its `insert` answers.
    */
   pick?: EmbedPick | readonly EmbedPick[];
-  /** False for an embed no menu lists by itself, because another embed's `pick` is how a note comes to have it: a picture, a video and a sound are all written by "Upload a file". `host.embeds.list()` leaves it out. */
+  /**
+   * False for an embed no menu lists by itself: one another embed's `pick` writes, as "Upload an
+   * image" writes a picture, or one written another way, as `@` writes a reference to an event.
+   * `host.embeds.list()` leaves it out.
+   */
   menu?: boolean;
   /**
    * Draws into `el`, once, all of it before returning, so the embed is never seen half drawn. May
@@ -830,20 +837,25 @@ export interface Embedded {
   edit(at?: number): void;
 }
 
-export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts" | "pick">;
+export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts" | "description" | "preview" | "pick">;
 
-/** One entry of an embed in a menu that does something in place of writing it, as "Upload a file" does. */
+/** One entry of an embed in a menu that does something to make what it writes, as "Upload a file" asks for a file. */
 export interface EmbedPick {
   title: string;
+  /** What picking it does, in a line of words. */
+  description?: string;
+  /** @deprecated The same as `description`, read as one where there is no `description`. */
   detail?: string;
-  run: () => void;
+  preview?: CompletionPreview;
+  /** What is written in place of the trigger and what was typed, made once it is picked, as a completion item's function `insert` is. */
+  insert: (at: InsertAt) => Promise<string | null>;
 }
 
 /**
- * A list offered at the cursor while the member types after a trigger, such as the embed menu on
+ * A list offered at the cursor while the member types after a trigger, such as the insert menu on
  * `/`. It opens where the trigger starts a line or follows a space, and not inside code, so a `/`
  * in a path or a date opens nothing. One with `anywhere` opens wherever its trigger is typed. Completions whose triggers both fit share one list, each
- * one's items in the order of their plugins.
+ * one's items in the order of their plugins, grouped by their `kind`.
  */
 export interface Completion {
   id: string;
@@ -858,35 +870,93 @@ export interface Completion {
    * then always a new line, and Tab, the arrow keys or a click pick from the list.
    */
   prose?: boolean;
-  /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
-  items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
+  /** What to offer for what has been typed after the trigger, in the note `at` names, best first. Nothing closes the list. */
+  items(typed: string, at: { noteId: string }): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
   /**
-   * Where its items go in the list among those of the other completions that fit: lower first, 0 when
-   * not said, and in the order of their plugins where it is the same. The calendar's events come after
-   * the notes `[[` offers this way.
+   * Where its items go in the list among those of the other completions that fit and of the same
+   * kind: lower first, 0 when not said, and in the order of their plugins where it is the same.
    */
   order?: number;
 }
 
+/**
+ * The kinds of thing a list at the cursor groups what it offers by, in the order their groups are
+ * listed, each with the heading its group is shown under. A new kind of thing to offer is a row here,
+ * and its row is where its group goes. What is new is made when it is picked, such as a contact,
+ * outside the note where undo doesn't reach: it `waits`, so the list never highlights it of itself
+ * and Enter stays a new line until an arrow key or Tab picks it.
+ */
+export const COMPLETION_KINDS = [
+  { kind: "person", heading: "People" },
+  { kind: "date", heading: "Dates" },
+  { kind: "note", heading: "Notes" },
+  { kind: "upload", heading: "Uploads" },
+  { kind: "event", heading: "Events" },
+  { kind: "block", heading: "Blocks" },
+  { kind: "embed", heading: "Embeds" },
+  { kind: "new", heading: "New", waits: true },
+] as const;
+
+export type CompletionKind = (typeof COMPLETION_KINDS)[number]["kind"];
+
+/**
+ * A small look at a completion item, shown beside the list while the item is highlighted: a note's
+ * first lines, an upload's picture, an event's day and time. It is data, so whatever offers an item
+ * says what to show and the list draws it. Each part is left out where it isn't given.
+ */
+export interface CompletionPreview {
+  /** The address of a picture, drawn small. */
+  image?: string;
+  /** Words to read, as plain text, cut where the pane ends. */
+  text?: string;
+  /** What the item is, a name and a value each, such as an event's calendar. */
+  facts?: readonly (readonly [name: string, value: string])[];
+}
+
+/** Where a completion item picked is to be written, for an `insert` that is made when it is picked. */
+export interface InsertAt {
+  /** The note it goes in. */
+  noteId: string;
+  /**
+   * An empty element at the cursor that scrolls with the note's text, for a popover to hang from. It
+   * is there until what `insert` answers is written, or nothing is.
+   */
+  anchor: HTMLElement;
+  /** Gives the keyboard back to the note's editor, if it is still on the page, as a popover closed with Escape does. */
+  focus(): void;
+}
+
 export interface CompletionItem {
+  /**
+   * What the item is, such as a person or a note. The list groups items by it, the groups in the
+   * order of `COMPLETION_KINDS`, under a heading each where there is more than one. An item of no kind
+   * comes before every group.
+   */
+  kind?: CompletionKind;
   label: string;
+  /** A line under the label that says what the item is in words, such as a note's folder or an event's day. */
+  description?: string;
   /** Said after the label, more quietly. */
   detail?: string;
+  /** What is shown beside the list while the item is highlighted. */
+  preview?: CompletionPreview;
   /**
    * What takes the place of the trigger and what was typed after it. A function is asked only when
-   * the item is picked, for text that is made then, as a reference to an event is: what it answers is
-   * written once it does, where the trigger and what was typed still are. Null, a failure, or a change
-   * to them meanwhile writes nothing.
+   * the item is picked, for text that is made then, as a reference to an event is, or picked in a
+   * popover, as a day from a calendar is. It is told where: what it answers is written once it does,
+   * where the trigger and what was typed still are. Null, a failure, or a change to them meanwhile
+   * writes nothing. One that sets off something that writes in its own time, as asking for a file to
+   * upload does, answers `""` at once, so the trigger goes.
    */
-  insert: string | (() => Promise<string | null>);
+  insert: string | ((at: InsertAt) => Promise<string | null>);
   /** The part of `insert` left selected, as offsets into it, such as a value to type over. Without it the cursor goes after. */
   select?: readonly [from: number, to: number];
-  /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after. */
+  /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after, or to `select` where it is given, as in a heading's `# `. */
   block?: boolean;
+  /** Whether a block is kept a blank line apart from words on the line under it, as a table is, which would take them in as a row. */
+  apart?: boolean;
   /** How the label is coloured: `accent` is the theme colour and `muted` is gray. Without it, as the list's text is. */
   tone?: "accent" | "muted";
-  /** Called once `insert` is in the note, for an item that does something more than write, such as opening a file picker. The editor still has the keyboard. */
-  run?: () => void;
 }
 
 /**

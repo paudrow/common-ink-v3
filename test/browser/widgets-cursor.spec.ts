@@ -281,16 +281,15 @@ test("Tab picks the highlighted item of the / menu, as Enter does", async ({ pag
   await page.keyboard.press("Tab");
   await expect.poll(() => read(page, note.id)).toBe("# Menu\n\n::stopwatch{}");
   await expect(menu).toHaveCount(0);
-  await page.keyboard.type(" /");
-  await expect(menu.first()).toBeVisible();
+  await page.keyboard.type(" /t");
+  await expect(menu).toHaveText([/^Task list/, /^Table/, /^Timer/]);
   // After words on the line nothing is highlighted until a key moves to an item.
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
-  await expect(menu.nth(1)).toHaveAttribute("aria-selected", "true");
-  const second = (await menu.nth(1).locator(".cm-completionDetail").textContent())!;
-  expect(second).toMatch(/^::[a-z]+\{/);
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.nth(2)).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Tab");
-  await expect.poll(() => read(page, note.id)).toBe(`# Menu\n\n::stopwatch{} ${second}`);
+  await expect.poll(() => read(page, note.id)).toBe("# Menu\n\n::stopwatch{} ::timer{5m}");
   await expect(menu).toHaveCount(0);
   // With no menu open, Tab is not taken from the note.
   await page.keyboard.press("ControlOrMeta+End");

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { mentionsIn } from "../../src/core/mentions.ts";
-import type { Contact, Member } from "../../src/core/protocol.ts";
+import type { Contact, Member, Source } from "../../src/core/protocol.ts";
 import { changeOf, draftOf, fieldsOf, labelChoices, labelWords, typeOf } from "../../src/web/plugins/mentions/fields.ts";
-import { newlyMentioned, offered, shown, startsWords, type People } from "../../src/web/plugins/mentions/people.ts";
+import { addingTo, newlyMentioned, offered, shown, type Adding, type People } from "../../src/web/plugins/mentions/people.ts";
+import { startsWords } from "../../src/web/plugins/lib/pointing.ts";
 
 const ADA: Member = { personId: "aaaaaaaaaaaa", name: "Ada Lovelace", role: "admin", email: "ada@example.com" };
 const GRACE: Member = { personId: "gggggggggggg", name: "Grace Hopper", role: "editor" };
@@ -11,15 +12,31 @@ const PEOPLE: People = {
   members: new Map([ADA, GRACE].map((m) => [m.personId, m])),
   contacts: [contact("Ada Lovelace", { emails: [{ value: "ADA@example.com", type: null }] }), contact("Grace Hopper", { emails: [{ value: "grace@navy.example", type: null }] }), contact("Sam Okafor", { organization: "Okafor Plumbing" }), contact("Zoë Álvarez", { emails: [{ value: "zoe@example.com", type: null }] }), contact("  ")],
 };
-const labels = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId).map((item) => `${item.label} (${item.detail}, ${item.tone})`);
+const labels = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId).map((item) => `${item.label} (${item.description}, ${item.tone})`);
 
 describe("what @ offers", () => {
   it("is the members in the theme colour, then the member's contacts in gray, without a contact who is a member by their email", () => {
-    expect(labels("")).toEqual(["Ada Lovelace (You, accent)", "Grace Hopper (Member, accent)", "Grace Hopper (Contact, muted)", "Sam Okafor (Contact · Okafor Plumbing, muted)", "Zoë Álvarez (Contact, muted)"]);
+    expect(labels("grace")).toEqual(["Grace Hopper (Member, accent)", "Grace Hopper (Contact, muted)"]);
+    expect(labels("ada")).toEqual(["Ada Lovelace (You, accent)"]);
+  });
+
+  it("alone, is three people, the member first wherever the members list them", () => {
+    const graceFirst = { ...PEOPLE, members: new Map([GRACE, ADA].map((m) => [m.personId, m])) };
+    expect(labels("", graceFirst)).toEqual(["Ada Lovelace (You, accent)", "Grace Hopper (Member, accent)", "Grace Hopper (Contact, muted)"]);
+    expect(labels("", { members: new Map(), contacts: PEOPLE.contacts })).toEqual(["Ada Lovelace (Contact, muted)", "Grace Hopper (Contact, muted)", "Sam Okafor (Contact · Okafor Plumbing, muted)"]);
   });
 
   it("puts no contact's email on the page, which any plugin in it could read", () => {
-    expect(JSON.stringify(offered("", PEOPLE, ADA.personId))).not.toContain("example");
+    const shown = JSON.stringify(["ada", "grace", "zoe"].flatMap((typed) => offered(typed, PEOPLE, ADA.personId)));
+    for (const email of ["ADA@example.com", "grace@navy.example", "zoe@example.com"]) expect(shown).not.toContain(email);
+  });
+
+  it("are people, previewed for a member by their role and the email the member list told, and for a contact not at all", () => {
+    expect(offered("", PEOPLE, ADA.personId).map((item) => [item.kind, item.label, item.preview])).toEqual([
+      ["person", "Ada Lovelace", { facts: [["Role", "Admin"], ["Email", "ada@example.com"]] }],
+      ["person", "Grace Hopper", { facts: [["Role", "Editor"]] }],
+      ["person", "Grace Hopper", undefined],
+    ]);
   });
 
   it("narrows by the start of any word of a name, and for a contact of their email or organization, ignoring case and accents", () => {
@@ -36,12 +53,52 @@ describe("what @ offers", () => {
   });
 
   it("writes a member by id and name, and a contact by name alone: no email, organization, or id of theirs", () => {
-    const written = offered("", PEOPLE, ADA.personId).map((item) => item.insert);
-    expect(written).toEqual(["@[[aaaaaaaaaaaa|Ada Lovelace]]", "@[[gggggggggggg|Grace Hopper]]", "@[[Grace Hopper]]", "@[[Sam Okafor]]", "@[[Zoë Álvarez]]"]);
+    const written = ["", "sam"].flatMap((typed) => offered(typed, PEOPLE, ADA.personId)).map((item) => item.insert);
+    expect(written).toEqual(["@[[aaaaaaaaaaaa|Ada Lovelace]]", "@[[gggggggggggg|Grace Hopper]]", "@[[Grace Hopper]]", "@[[Sam Okafor]]"]);
   });
 
   it("offers the members alone until the contacts are read", () => {
     expect(labels("", { ...PEOPLE, contacts: null })).toEqual(["Ada Lovelace (You, accent)", "Grace Hopper (Member, accent)"]);
+  });
+});
+
+describe("what @ offers where it finds nobody", () => {
+  /** Adding to the sample contacts, keeping each name it is asked to create. */
+  const adding = (created: string[] = []): Adding => ({ into: "Sample contacts", create: async (name) => (created.push(name), `@[[${name}]]`) });
+  const offeredNew = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId, adding()).map((item) => `${item.label} (${item.description}, ${item.kind})`);
+
+  it("is to create a contact of the name typed, in the contacts it would be added to, as a kind of its own", () => {
+    expect(offeredNew("Zelda Fitz")).toEqual(["Create contact “Zelda Fitz” (New contact in Sample contacts, new)"]);
+    expect(offeredNew("  zelda   fitz ")).toEqual(["Create contact “zelda fitz” (New contact in Sample contacts, new)"]);
+  });
+
+  it("is nothing new where anyone is found, a member or a contact, by the start of a word", () => {
+    expect(offeredNew("Grace")).toEqual(["Grace Hopper (Member, person)", "Grace Hopper (Contact, person)"]);
+    expect(offeredNew("plumb")).toEqual(["Sam Okafor (Contact · Okafor Plumbing, person)"]);
+    expect(offeredNew("Zel")).toEqual(["Create contact “Zel” (New contact in Sample contacts, new)"]);
+  });
+
+  it("is nothing where there is nowhere to add one, nothing typed, no letter, or no name", () => {
+    expect(offered("Zelda Fitz", PEOPLE, ADA.personId, null)).toEqual([]);
+    expect(offeredNew("", { members: new Map(), contacts: [] })).toEqual([]);
+    expect(offeredNew("2026-10-21")).toEqual([]);
+    expect(offeredNew("zelda is at the office today")).toEqual([]);
+    expect(offeredNew("Zelda]] Fitz")).toEqual([]);
+  });
+
+  it("creates the contact by the name typed when picked, and writes what creating it answers", async () => {
+    const created: string[] = [];
+    const [item] = offered("Zelda  Fitz", PEOPLE, ADA.personId, adding(created));
+    const insert = item!.insert as (at: { noteId: string }) => Promise<string | null>;
+    expect(await insert({ noteId: "n" })).toBe("@[[Zelda Fitz]]");
+    expect(created).toEqual(["Zelda Fitz"]);
+  });
+
+  it("adds to the first connected contacts that take changes, and to none that are read-only, a calendar, or not connected", () => {
+    const source = (id: string, more: Partial<Source>): Source => ({ id, kind: "contacts", name: id, provider: "Google", state: "connected", writable: true, account: "ada@example.com", ...more });
+    const sources = [source("calendar", { kind: "calendar" }), source("gone", { state: "needs_reconnect" }), source("reading", { writable: false, reconnectToWrite: true }), source("work", {}), source("home", {})];
+    expect(addingTo(sources)?.id).toBe("work");
+    expect(addingTo(sources.slice(0, 3))).toBe(null);
   });
 });
 

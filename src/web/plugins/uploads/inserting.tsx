@@ -2,7 +2,7 @@ import { StateEffect, StateField, type Extension } from "@codemirror/state";
 import { EditorView, showTooltip, ViewPlugin, type Tooltip } from "@codemirror/view";
 import { useEffect, useId, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ago, useNow, type PluginHost, type Results } from "../../plugin-api.ts";
+import { ago, useNow, type InsertAt, type PluginHost, type Results } from "../../plugin-api.ts";
 import { reasonOf } from "../lib/FoundNote.tsx";
 import { writable } from "../lib/live.ts";
 import { toldOf } from "./drawing.ts";
@@ -10,7 +10,7 @@ import { writtenNow } from "./sending.ts";
 import { onItsOwnLine } from "./pasting.ts";
 import { Thumb } from "./Thumb.tsx";
 
-type Listed = Results["upload.list"]["uploads"][number];
+export type Listed = Results["upload.list"]["uploads"][number];
 
 /** As many as the popover lists: the latest, which is what a member looking for one mostly wants. More are found by typing. */
 const SHOWN = 30;
@@ -19,6 +19,23 @@ const PAUSE_MS = 150;
 
 /** Opens the popover at a place in a note, or closes it with null. */
 const asking = StateEffect.define<number | null>();
+
+/**
+ * What a note writes for an upload once it is placed in note `noteId` (`upload.place`), so whoever
+ * reads the note sees it, or null when it couldn't be placed, which is said. One the member can't
+ * change is written as it is.
+ */
+export async function placedIn(host: PluginHost, noteId: string, upload: Listed): Promise<string | null> {
+  let placed;
+  try {
+    placed = upload.access === "edit" ? await host.perform({ type: "upload.place", id: upload.id, noteId }) : upload;
+  } catch (err) {
+    host.app().notify({ message: `${upload.name} wasn't put in the note. ${reasonOf(err)}` });
+    return null;
+  }
+  host.uploads.learn([{ id: upload.id, upload: toldOf(placed) }]);
+  return writtenNow(host, placed);
+}
 
 /**
  * "Insert an upload": a popover at the cursor in a note that finds an upload the member can see, by
@@ -30,18 +47,11 @@ export function inserter(host: PluginHost) {
 
   async function insert(view: EditorView, noteId: string, upload: Listed) {
     if (!writable(view.state)) return void host.app().notify({ message: "You can read this note, and not change it." });
-    let placed;
-    try {
-      placed = upload.access === "edit" ? await host.perform({ type: "upload.place", id: upload.id, noteId }) : upload;
-    } catch (err) {
-      return void host.app().notify({ message: `${upload.name} wasn't put in the note. ${reasonOf(err)}` });
-    }
-    host.uploads.learn([{ id: upload.id, upload: toldOf(placed) }]);
-    const written = await writtenNow(host, placed);
+    const written = await placedIn(host, noteId, upload);
     const at = view.state.field(open, false);
-    if (at == null) return;
+    if (written === null || at == null) return;
     // A file is a chip among the words. A picture, a video and a recording are drawn under a line of their own, as a pasted one is.
-    if (placed.kind === "file") {
+    if (upload.kind === "file") {
       view.dispatch({ changes: { from: at, insert: written }, selection: { anchor: at + written.length }, effects: asking.of(null), userEvent: "input.paste", scrollIntoView: true });
     } else {
       const line = view.state.doc.lineAt(at);
@@ -87,10 +97,12 @@ export function inserter(host: PluginHost) {
 
   return {
     extension,
-    /** Opens the popover at the cursor of the note whose editor has the keyboard. */
-    ask() {
-      const editor = [...editors].find((e) => e.view.hasFocus);
-      if (editor) editor.view.dispatch({ effects: asking.of(editor.view.state.selection.main.head) });
+    /** The insert of a menu item that opens the popover where the item was picked. It answers at once with nothing to write, so the trigger goes, and the upload picked is written where it was. */
+    ask({ anchor }: InsertAt): Promise<string | null> {
+      const editor = [...editors].find((e) => e.view.scrollDOM.contains(anchor));
+      if (!editor) return Promise.resolve(null);
+      editor.view.dispatch({ effects: asking.of(editor.view.state.selection.main.head) });
+      return Promise.resolve("");
     },
   };
 }

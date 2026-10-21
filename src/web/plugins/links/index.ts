@@ -1,20 +1,23 @@
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import { writtenLink, type Plugin } from "../../plugin-api.ts";
+import { writtenLink, type CompletionItem, type NoteSummary, type Plugin } from "../../plugin-api.ts";
 import { listable } from "../lib/listable.ts";
 import { editorKey, isEditorOf, redraw } from "../lib/live.ts";
 import { matching } from "../lib/match.ts";
 import { openPage } from "../lib/opening.ts";
+import { AT_ALONE, pointed } from "../lib/pointing.ts";
 import { linkAt } from "./at.ts";
 import { linkDrawing } from "./drawing.ts";
 import type { Linked } from "./words.ts";
 
 const MOST_OFFERED = 50;
+/** How many notes `@` offers at most, among the other kinds of thing it lists. */
+const MOST_POINTED = 8;
 
 /**
- * Links between notes. `[[` lists the notes and picking one writes a link by its id, drawn as the
- * note's title as it is now or as the link's own display text. A click on a drawn link, or the
- * command vim's `gd` runs, follows it to its note, ⌘-click opens the note in a tab behind, and the
- * command follows a web address too.
+ * Links between notes. `[[` lists the notes, and so does `@` among everything else it lists, and
+ * picking one writes a link by its id, drawn as the note's title as it is now or as the link's own
+ * display text. A click on a drawn link, or the command vim's `gd` runs, follows it to its note,
+ * ⌘-click opens the note in a tab behind, and the command follows a web address too.
  */
 export const links: Plugin = {
   id: "links",
@@ -35,6 +38,16 @@ export const links: Plugin = {
     // A link opens its note in the pane it is in, whether or not another pane has it.
     const open = (noteId: string, how?: { background: boolean }) => host.app().openNote(noteId, how?.background ? { background: true, here: true } : { preview: true, focus: true, here: true });
 
+    /** A listing, so archived notes are left out of it. A link already written to one still opens it. */
+    const listed = () => listable(host.app().notes ?? [], false);
+    const itemFor = (note: NoteSummary, display = ""): CompletionItem => ({
+      kind: "note",
+      label: note.title || "Untitled",
+      description: host.app().folders?.pathName(note.folderId),
+      ...(note.snippet && { preview: { text: note.snippet } }),
+      insert: writtenLink(note.id, display),
+    });
+
     host.completions.register({
       id: "links",
       trigger: "[[",
@@ -44,12 +57,24 @@ export const links: Plugin = {
         if (/[[\]]/.test(typed)) return [];
         // What is typed after a `|` is the link's display text, and the list goes on narrowing by what came before it.
         const [title = "", ...rest] = typed.split("|");
-        const app = host.app();
-        // A listing, so archived notes are left out of it. A link already written to one still opens it.
-        return matching(listable(app.notes ?? [], false), title, (n) => n.title)
+        return matching(listed(), title, (n) => n.title)
           .slice(0, MOST_OFFERED)
-          .map((n) => ({ label: n.title || "Untitled", detail: app.folders?.pathName(n.folderId), insert: writtenLink(n.id, rest.join("|").trim()) }));
+          .map((n) => itemFor(n, rest.join("|").trim()));
       },
+    });
+    host.completions.register({
+      id: "links.at",
+      trigger: "@",
+      spaces: true,
+      // `@` alone offers the notes edited last, other than the one it is typed in.
+      items: (typed, { noteId }) =>
+        (typed
+          ? pointed(listed(), typed, (n) => n.title).slice(0, MOST_POINTED)
+          : listed()
+              .filter((n) => n.id !== noteId)
+              .toSorted((a, b) => b.updatedAt - a.updatedAt)
+              .slice(0, AT_ALONE.note)
+        ).map((n) => itemFor(n)),
     });
 
     const drawing = linkDrawing(noteOf, open);

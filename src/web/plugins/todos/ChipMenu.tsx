@@ -1,5 +1,6 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { Icon, describeRule, nameKey, parseRule, type IconName, type TodoChange } from "../../plugin-api.ts";
+import { DayField } from "../lib/DayField.tsx";
 import { choicesFor, repeatOf, repeats, sameRule, typedTag, type ChipKind, type Choice, type Picked, type Repeat } from "./picking.ts";
 import { everyOf, formOf, preview, type RuleForm } from "./recurrence.ts";
 import { RuleFields, RuleText } from "./RuleEditor.tsx";
@@ -52,7 +53,7 @@ export function ChipMenu({ chip, todo, now, onPick, onClose, onText }: Props) {
   const first = Math.max(0, choices.findIndex((c) => c.current));
   return (
     <div className="chip-menu" onKeyDown={move}>
-      {chip === "due" && <DayField due={todo.due} onPick={onPick} />}
+      {chip === "due" && <DayField day={todo.due} label="Due on" onDay={(due) => onPick({ due })} />}
       {choices.map((choice: Choice, i) => (
         <button
           key={choice.label}
@@ -161,34 +162,6 @@ function RepeatMenu({ todo, now, onPick, onClose, onText }: Omit<Props, "chip">)
         </button>
       </div>
     </form>
-  );
-}
-
-/**
- * Any day. One picked from the browser's calendar is saved at once. Typed, the browser has a whole date
- * after every key (0002 on the way to 2031), so a typed one is saved on Enter.
- */
-const TYPING = /^(\d|ArrowUp|ArrowDown|Backspace|Delete)$/;
-
-function DayField({ due, onPick }: { due: string | null; onPick: (change: TodoChange) => void }) {
-  const typed = useRef(false);
-  return (
-    <label className="chip-day">
-      <Icon name="calendar" />
-      <input
-        type="date"
-        aria-label="Due on"
-        defaultValue={due ?? ""}
-        onPointerDown={() => (typed.current = false)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            if (e.currentTarget.value) onPick({ due: e.currentTarget.value });
-          } else if (TYPING.test(e.key)) typed.current = true;
-        }}
-        onChange={(e) => !typed.current && e.target.value && onPick({ due: e.target.value })}
-      />
-    </label>
   );
 }
 

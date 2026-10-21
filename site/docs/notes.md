@@ -20,7 +20,7 @@ Click a link to open its note, or `mod`-click to open it in a tab behind. A link
 
 ## Mentions
 
-Type `@` to list the workspace's members and your own contacts. A member's mention is stored by their id and shows their current name in the theme colour. Anyone else's is stored by name and shows in gray.
+Type `@` to list people, days, notes, uploads and events: alone, it shows a few of each, and typing narrows them. The people are the workspace's members and your own contacts. A member's mention is stored by their id and shows their current name in the theme colour. Anyone else's is stored by name and shows in gray.
 
 A mention gives nobody access to the note and notifies nobody. Click a mention to open the person's page. A mention on a todo's line assigns the todo. See [Todos](/docs/todos).
 
@@ -30,18 +30,27 @@ Write `#tag` anywhere outside code, with no space after the `#`. A tag tags the 
 
 ## The / menu
 
-Type `/` at the start of a line or after a space to open the embed menu. Keep typing to narrow it, and pick an item to write it into the note.
+Type `/` at the start of a line or after a space to open the insert menu. Each item says what it makes, with a small picture of it beside the list. Keep typing to narrow it, and pick an item to put it in the note.
 
-| Item | What it writes |
+| Item | What it makes |
 | --- | --- |
-| Timer | `::timer{5m}`, a countdown that runs the same for everyone reading the note |
-| Stopwatch | `::stopwatch{}`, with its time kept in the note |
-| Kanban board | A block whose `##` headings are columns and whose list items are cards |
+| Heading 1, 2, 3 | A large, medium or small title |
+| Bulleted list, Numbered list, Task list | A list, with a dot, a number or a box to check before each item |
+| Table | Rows and columns, typed into cell by cell |
+| Code block | Code in a fixed-width font, drawn in its language's colours |
+| Quote, Divider | Words set apart as a quotation, or a line across the note |
+| Timer | A countdown that runs the same for everyone reading the note |
+| Stopwatch | A stopwatch whose time is kept in the note |
+| Kanban board | Columns of cards to drag from one to another |
 | Form | Questions that members answer, with the answers kept in the note |
 | HTML | A block of HTML that runs in a frame shut off from the app |
-| Event, Contact | A place for a reference to one of your events or contacts, which you paste over it. See [Calendar and contacts](/docs/calendar-contacts) |
-| Upload a file | A file you pick from your computer |
+| Upload an image, Upload a video, Upload a recording | A picture, a video or a recording you pick from your computer, shown in the note |
+| Upload a file | Any file you pick from your computer. A picture, a video or a recording shows in the note, and anything else as a card |
 | Insert an upload | A file already uploaded to the workspace |
+
+To reference an event or a contact, type `@` and its name. See [Calendar and contacts](/docs/calendar-contacts).
+
+Typing `::` opens the same menu with the embeds alone, from the timer down, so `::kan` and Enter makes a kanban board.
 
 An embed with settings has an options button in its card, for a timer's length or a board's column colours. Dragging a card on a kanban board moves its lines in the note.
 

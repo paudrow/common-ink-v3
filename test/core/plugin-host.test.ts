@@ -86,13 +86,13 @@ describe("plugin host", () => {
     const [menu] = host.contributions().completions;
 
     expect([menu!.id, menu!.trigger]).toEqual(["embeds", "/"]);
-    expect(await menu!.items("")).toEqual([
+    expect(await menu!.items("", { noteId: "n" })).toEqual([
       { label: "Timer", insert: "::timer{5m}" },
       { label: "Kanban board", insert: "::kanban{}" },
     ]);
 
     host.setEnabled("board", false);
-    expect(await menu!.items("")).toEqual([{ label: "Timer", insert: "::timer{5m}" }]);
+    expect(await menu!.items("", { noteId: "n" })).toEqual([{ label: "Timer", insert: "::timer{5m}" }]);
     host.setEnabled("notes", false);
     expect(host.contributions().completions).toEqual([]);
   });

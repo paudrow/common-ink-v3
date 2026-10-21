@@ -247,22 +247,65 @@ test("a file dropped on a private note is uploaded private, a file that is no pi
   await expect.poll(async () => (await download).suggestedFilename()).toBe("minutes.bin");
 });
 
-test("Upload a file in the / menu asks for a file and writes it where the menu was opened", async ({ page }) => {
+test("/ offers an image, a video, a recording and any file to upload, and each asks for its kind of file and writes it where the menu was opened", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Trip\n\n" });
   await open(page, note.id, "Trip");
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/upl", { delay: 20 });
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Upload a file/, /^Insert an upload/]);
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Insert an upload/]);
+  for (let i = 0; i < 4; i++) await page.keyboard.press("Backspace");
+
+  const sent = [
+    { typed: "/ima", accept: "image/*", file: { name: "map.png", mimeType: "image/png", buffer: png(200, 100) } },
+    { typed: "/vid", accept: "video/*", file: { name: "clip.mp4", mimeType: "video/mp4", buffer: MP4 } },
+    { typed: "/rec", accept: "audio/*", file: { name: "song.mp3", mimeType: "audio/mpeg", buffer: MP3 } },
+    { typed: "/fil", accept: null, file: { name: "minutes.bin", mimeType: "application/octet-stream", buffer: Buffer.from("fourteen bytes") } },
+  ];
+  for (const [i, { typed, accept, file }] of sent.entries()) {
+    await page.keyboard.type(typed, { delay: 20 });
+    await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(1);
+    await settled(page);
+    const chooser = page.waitForEvent("filechooser");
+    await page.keyboard.press("Enter");
+    const asked = await chooser;
+    expect(await asked.element().getAttribute("accept"), typed).toBe(accept);
+    await asked.setFiles(file);
+    await expect(line(page, typed)).toHaveCount(0);
+    await expect.poll(async () => (await noteText(page, note.id)).match(/::\w+\{/g)?.length ?? 0, `${file.name} written`).toBe(i + 1);
+  }
+
+  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.length).toBe(4);
+  const id = Object.fromEntries((await perform(page, { type: "upload.list", includeArchived: false })).uploads.map((u) => [u.name, u.id]));
+  await expect.poll(() => noteText(page, note.id)).toMatch(new RegExp(`^# Trip\\n\\n::image\\{${id["map.png"]} 200x100\\}\\n::video\\{${id["clip.mp4"]} \\d+x\\d+\\}\\n::audio\\{${id["song.mp3"]}\\}\\n::file\\{${id["minutes.bin"]}\\}\\n$`));
+  await expect.poll(() => drawnWidth(page)).toBe(200);
+});
+
+test("a file asked for from the / menu among words is written under their line, where it was asked for though the note was typed in meanwhile", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Trip\n\nsee later\n" });
+  await open(page, note.id, "see later");
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("End");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowLeft");
+  await page.keyboard.type("/ima", { delay: 20 });
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Upload an image/]);
   await settled(page);
   const chooser = page.waitForEvent("filechooser");
-  await page.keyboard.press("Enter");
-  await (await chooser).setFiles({ name: "map.png", mimeType: "image/png", buffer: png(200, 100) });
+  await page.keyboard.press("Tab");
+  const asked = await chooser;
+  await expect.poll(() => noteText(page, note.id)).toBe("# Trip\n\nsee later\n");
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press("End");
+  await page.keyboard.type(" to Lima");
+  await asked.setFiles({ name: "map.png", mimeType: "image/png", buffer: png(200, 100) });
+
   await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.length).toBe(1);
   const [upload] = (await perform(page, { type: "upload.list", includeArchived: false })).uploads;
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\n::image{${upload!.id} 200x100}\n`);
-  await expect.poll(() => drawnWidth(page)).toBe(200);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip to Lima\n\nsee later\n::image{${upload!.id} 200x100}\n`);
 });
 
 test("with the cursor on a picture's line its text is shown above the picture, which is lower by that line and nothing else moves, and typing elsewhere neither draws the picture again nor asks for it again", async ({ page }) => {

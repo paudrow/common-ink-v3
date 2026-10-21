@@ -56,12 +56,14 @@ interface Kind<K extends SourceRecord["kind"]> {
 /**
  * An embed that stands for one event or contact: `::event{ref label}`. It is one chip in the line,
  * drawn with the label the note holds and then, for the member whose record it is, with the record
- * as it is now. Anyone else is shown the label, which is all the note says.
+ * as it is now. Anyone else is shown the label, which is all the note says. No menu lists it: `@`
+ * finds events and people and writes their references, and one can be typed or pasted by hand.
  */
 export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, title, hint, shown, details }: Kind<K>): Embed {
   return {
     name: kind,
     title,
+    menu: false,
     render(el, first) {
       const { noteId } = first;
       let drawnFor: string | null = null;
