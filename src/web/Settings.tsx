@@ -25,6 +25,7 @@ import { dismissing } from "./dismiss.ts";
 import { Icon } from "./icons.tsx";
 import { KeyboardShortcuts } from "./KeyboardShortcuts.tsx";
 import { SettingRow } from "./SettingRow.tsx";
+import type { Folders } from "./plugin-api.ts";
 import type { Host, MemberSettings } from "./pluginHost.ts";
 import { readOnly } from "./readOnly.ts";
 import { documentOf, type Problem } from "./settings.ts";
@@ -59,6 +60,8 @@ interface Props {
   /** What is opened over the settings, such as the command palette: inside their dialog, so it is above it and takes the keys. */
   children?: ReactNode;
   account: Account;
+  /** The workspace's folders, which a folder setting is picked from, or null while they are read. */
+  folders: Folders | null;
 }
 
 /** The person signed in, ending every session they have, and deleting their account or the workspace open now. */
@@ -81,7 +84,7 @@ export const JSON_VIEW = "json";
  * app, so it is here whatever is turned off. It opens over whatever the member is doing, as a dialog,
  * and Escape closes it: it is never a tab, so it moves nothing of the window under it.
  */
-export function Settings({ host, store, mac, path, go, storage, exportPlan, onClose, children, account }: Props) {
+export function Settings({ host, store, mac, path, go, storage, exportPlan, onClose, children, account, folders }: Props) {
   const { settings } = useSyncExternalStore(host.subscribe, host.contributions);
   const text = useSyncExternalStore(store.subscribe, store.text);
   const status = useSyncExternalStore(store.subscribe, store.status);
@@ -178,7 +181,7 @@ export function Settings({ host, store, mac, path, go, storage, exportPlan, onCl
         {asJson ? (
           <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} locked={unread} onChange={typed} />
         ) : (
-          <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} account={account} />
+          <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} account={account} folders={folders} />
         )}
         {!asJson && problemList}
         <Storage storage={storage} />
@@ -262,6 +265,7 @@ interface OptionsProps {
   go: Props["go"];
   onSet: Host["setSetting"];
   account: Account;
+  folders: Props["folders"];
 }
 
 /** One entry of the list of categories: where it goes, and how much of what is searched for it holds. */
@@ -280,6 +284,7 @@ function Options({
   go,
   onSet,
   account,
+  folders,
 }: OptionsProps) {
   const [typed, setTyped] = useState("");
   const [modified, setModified] = useState(false);
@@ -482,6 +487,7 @@ function Options({
                         (p) => p.key === d.key,
                       )}
                       mac={mac}
+                      folders={folders}
                       onSet={(value) => onSet(d.key, value)}
                     />
                   ))}

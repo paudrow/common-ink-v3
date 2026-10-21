@@ -5,23 +5,31 @@ import { dayIn } from "./history.ts";
  * reads them here when it files a completion, which an agent's has no browser to say them for.
  */
 export const DAILY_SETTINGS = {
-  folder: { key: "daily.folder", default: "Daily", maxLength: 100 },
+  folder: { key: "daily.folder", default: "" },
   private: { key: "daily.private", default: true },
   timeZone: { key: "daily.timeZone", default: "" },
 } as const;
 
+/** The folder at the top of the workspace that daily notes go in when the member's settings pick none they can use. */
+export const DAILY_FOLDER = "Daily";
+
 export interface DailySettings {
-  /** The name of a folder at the top of the workspace. */
-  folder: string;
+  /**
+   * The folder picked for daily notes: a folder's id, or the name of one at the top of the workspace
+   * as the setting held before it was picked from a list. Null for the default.
+   */
+  folder: string | null;
   /** Whether a new daily note is private to its member. */
   private: boolean;
-  /** The zone whose day it is when nobody says the day, or null for UTC. */
+  /** The zone the member named to be taken in place of their browser's, or null when they named none. */
   timeZone: string | null;
 }
 
 const FOLDER_NAME = /^[^/\p{Cc}]*$/u;
+const MAX_FOLDER_NAME = 100;
 
-function zoneOf(value: unknown): string | null {
+/** `value` when it is a time zone's name this runtime knows, or null. */
+export function zoneOf(value: unknown): string | null {
   if (typeof value !== "string" || !value) return null;
   try {
     dayIn(value);
@@ -41,16 +49,19 @@ export function dailySettings(text: string | null | undefined): DailySettings {
     // Settings that can't be read are the defaults, as they are in the app.
   }
   const { folder, private: isPrivate, timeZone } = DAILY_SETTINGS;
-  const name = typeof written[folder.key] === "string" ? (written[folder.key] as string).trim() : "";
+  const picked = typeof written[folder.key] === "string" ? (written[folder.key] as string).trim() : "";
   return {
-    folder: name && name.length <= folder.maxLength && FOLDER_NAME.test(name) ? name : folder.default,
+    folder: picked && picked.length <= MAX_FOLDER_NAME && FOLDER_NAME.test(picked) ? picked : null,
     private: typeof written[isPrivate.key] === "boolean" ? (written[isPrivate.key] as boolean) : isPrivate.default,
     timeZone: zoneOf(written[timeZone.key]),
   };
 }
 
-/** The day it is at `now` for someone with these settings: in their zone, or in UTC when they named none. */
-export const dayFor = (settings: DailySettings, now: number): string => dayIn(settings.timeZone ?? "UTC")(now);
+/**
+ * The zone the server takes a member's day and times in when nobody says them: the one their settings
+ * name, or else the one of the browser they last used Common Ink in (`stored`), or else UTC.
+ */
+export const memberZone = (settings: DailySettings, stored: string | null): string => settings.timeZone ?? zoneOf(stored) ?? "UTC";
 
 /** A daily note is headed by its date as a due date is written, so it sorts and reads the same everywhere. */
 export const dailyHeading = (day: string) => `# ${day}`;

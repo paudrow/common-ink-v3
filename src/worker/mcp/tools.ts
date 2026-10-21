@@ -78,6 +78,7 @@ const APPROVAL = " Your request waits for an admin to approve it in the app: the
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
   "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
+  "timeZone.record": "A member's time zone is the one their own browser keeps, which the app records as they use it. An agent runs somewhere else, whose clock says nothing of where the member is. It passes the day it means as on, and is told times in the member's zone.",
   "member.invite": MEMBERS,
   "member.setRole": MEMBERS,
   "member.remove": MEMBERS,
@@ -161,10 +162,12 @@ const linkTitles = {
     'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id, and leaves one no note or more than one has that title as written: the answer lists those in unresolved, with the ids of the notes that have the title when several do. "resolve-strict" refuses the whole write for one instead. "keep" leaves every link as written.',
 };
 const mentionNames = { type: "string", enum: ["resolve", "keep"], description: 'What to do with mentions you add, @[[Name]] or @[[id]]. "resolve", the default, stores a mention of the one member with that name by their id, as @[[id|Name]], and refuses the write when several members have the name. A name no member has stays a name. "keep" leaves every mention as you wrote it.' };
+const MEMBER_ZONE =
+  "your member's time zone: the one their daily.timeZone setting names, or else the one of the browser they last used Common Ink in, or else UTC";
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
 const queryDays = {
   today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
-  zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is the zone your member's settings name, or UTC" },
+  zone: { type: "string", description: `Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is ${MEMBER_ZONE}` },
 };
 const TODOS =
   'A todo is a checkbox line in a note: - [ ] open, - [x] done, with tokens on the line such as !! for its priority, due:2026-10-14, @[[Name]] to assign it, and every:2w or every:mon,thu to make it repeat. query_syntax {"scope":"todos"} lists every token and every rule of every:.';
@@ -363,7 +366,7 @@ export const TOOLS: Tool[] = [
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
         mentionNames,
-        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+        on: day(`The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in ${MEMBER_ZONE}`),
       },
       ["noteId", "baseRevision", "text"],
     ),
@@ -398,7 +401,7 @@ export const TOOLS: Tool[] = [
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
         mentionNames,
-        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+        on: day(`The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in ${MEMBER_ZONE}`),
       },
       ["noteId", "baseRevision", "edits"],
     ),
@@ -468,7 +471,7 @@ export const TOOLS: Tool[] = [
         skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Not together with done" },
         assign: { type: "string", description: "Someone to assign it to, by writing a mention of them on the line: a member's id or name, or anyone else's name. Assigning gives nobody access and tells nobody." },
         unassign: { type: "string", description: "Someone to take it from: a member's id or name, or anyone else's name as the line writes it. Refused when the todo isn't assigned to them." },
-        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+        on: day(`The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in ${MEMBER_ZONE}`),
         words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, priority, due date, rule and done: mark, tags included, on one line. Its due date and how it repeats are written after them" },
       },
       ["noteId", "revision", "line", "text"],
@@ -487,15 +490,15 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "daily_note",
-    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings name. A member has one for each day, and it is where a repeating todo they or you check off is filed. Needs the editor or admin role.",
-    inputSchema: object({ on: day("The day. Left out, it is today in the time zone your member's settings name, or in UTC") }),
+    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings pick, or else in Daily at the top of the workspace. A member has one for each day, and it is where a repeating todo they or you check off is filed. Needs the editor or admin role.",
+    inputSchema: object({ on: day(`The day. Left out, it is today in ${MEMBER_ZONE}`) }),
     op: "daily.open",
     example: { on: "2026-10-15" },
   },
   {
     name: "find_daily_note",
     description: "Your member's daily note for a day, as list_notes gives it, when there is one: nothing is made. The answer's note is null when they have none for that day.",
-    inputSchema: object({ on: day("The day. Left out, it is today in the time zone your member's settings name, or in UTC") }),
+    inputSchema: object({ on: day(`The day. Left out, it is today in ${MEMBER_ZONE}`) }),
     op: "daily.find",
     example: { on: "2026-10-15" },
   },
@@ -1278,7 +1281,7 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       workspaceId = workspace;
     }
     const actor: Actor = agent.clipper ? { kind: "member", personId: agent.personId, workspaceId } : agentActor(agent, workspaceId);
-    const written = async (answer: unknown) => text(withTimes(answer, timeIn((await timeZoneOf(db, workspaceId, agent.personId)) ?? "UTC"), tool.times ? new Set([...TIME_KEYS, ...tool.times]) : TIME_KEYS));
+    const written = async (answer: unknown) => text(withTimes(answer, timeIn(await timeZoneOf(db, workspaceId, agent.personId)), tool.times ? new Set([...TIME_KEYS, ...tool.times]) : TIME_KEYS));
     if (name === "upload_file") {
       const { name: fileName, base64, folderId, writeId } = fields;
       const bytes = fromBase64(base64);

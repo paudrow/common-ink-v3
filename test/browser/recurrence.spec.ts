@@ -1209,7 +1209,7 @@ test("changing the daily folder leaves a daily note already made where it is, an
   await page.goto("/settings/plugins/daily");
   await expect(page.getByText("Daily notes folder")).toBeVisible();
   await expect(page.getByText("Private daily notes")).toBeVisible();
-  await expect(page.getByText("Time zone for agents")).toBeVisible();
+  await expect(page.getByText("Time zone override")).toBeVisible();
   await perform(page, { type: "settings.write", text: JSON.stringify({ "daily.folder": "Journal", "daily.private": false }), baseRevision: 0 });
 
   // Today's note is found where it was made, and a completion is filed on it there.

@@ -114,8 +114,9 @@ async function createFirstWorkspace(db: D1Database, adminId: string, name: strin
 
 /** `dev` is the Worker's to say: whether this is a place where dev sign-in is on. */
 export async function whoAmI(db: D1Database, personId: string, dev = false): Promise<Me> {
-  const person = await db.prepare("SELECT id, email, name FROM people WHERE id = ?").bind(personId).first<Me["person"]>();
-  if (!person) throw new Error(`no person ${personId}`);
+  const row = await db.prepare("SELECT id, email, name, time_zone FROM people WHERE id = ?").bind(personId).first<Me["person"] & { time_zone: string | null }>();
+  if (!row) throw new Error(`no person ${personId}`);
+  const { time_zone: timeZone, ...person } = row;
   // The workspaces they are a member of, in the order they came to them, then those they are a guest in.
   const { results } = await db
     .prepare(
@@ -126,7 +127,7 @@ export async function whoAmI(db: D1Database, personId: string, dev = false): Pro
     )
     .bind(personId)
     .all<{ id: string; name: string; role: Standing }>();
-  return { person, workspaces: results, dev };
+  return { person, timeZone, workspaces: results, dev };
 }
 
 /**

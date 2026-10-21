@@ -3,7 +3,7 @@ import { z } from "zod";
 import { blame, runsOfLines } from "./blame.ts";
 import type { ConnectedAgent } from "./agents.ts";
 import { SEEN, SEEN_FOLDER, allows, canShare, folderLevel, itemAsked, itemLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
-import { dailySettings, dailyText, dayFor, filedOn, type DailySettings } from "./daily.ts";
+import { DAILY_FOLDER, dailySettings, dailyText, filedOn, memberZone, type DailySettings } from "./daily.ts";
 import { lineDiff, textDiff } from "./diff.ts";
 import { spliceLines } from "./text.ts";
 import { atPath, nameKey as folderKey, pathsOf } from "./folder-names.ts";
@@ -17,6 +17,7 @@ import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, mentions
 import { accountDeletion, deleteAccount, deleteWorkspace } from "./erase.ts";
 import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, signOut, type Asking } from "./membership.ts";
 import {
+  Id,
   NO_SUCH_WORKSPACE,
   MAX_NOTE_LENGTH,
   MAX_SETTINGS_LENGTH,
@@ -946,17 +947,24 @@ interface Completing {
   day: string;
 }
 
-const memberSettings = async (db: D1Database, workspaceId: string, personId: string | null) =>
-  dailySettings((await db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(workspaceId, personId).first<{ text: string }>())?.text);
-
-/** `on` is the day as the one asking said it. With none, it is today where their settings say they are. */
-async function completing(ctx: Context, on: string | undefined): Promise<Completing> {
-  const settings = await memberSettings(ctx.db, ctx.workspaceId, ctx.personId);
-  return { settings, day: on ?? dayFor(settings, ctx.now) };
+/** A member's settings for daily notes in a workspace, and the zone the server takes their day and times in. */
+async function memberDaily(db: D1Database, workspaceId: string, personId: string | null): Promise<{ settings: DailySettings; zone: string }> {
+  const row = await db
+    .prepare("SELECT p.time_zone, s.text FROM people p LEFT JOIN settings s ON s.workspace_id = ?1 AND s.person_id = p.id WHERE p.id = ?2")
+    .bind(workspaceId, personId)
+    .first<{ time_zone: string | null; text: string | null }>();
+  const settings = dailySettings(row?.text);
+  return { settings, zone: memberZone(settings, row?.time_zone ?? null) };
 }
 
-/** The time zone a member's settings name in a workspace, which their agent is told times in, or null for UTC. */
-export const timeZoneOf = async (db: D1Database, workspaceId: string, personId: string) => (await memberSettings(db, workspaceId, personId)).timeZone;
+/** `on` is the day as the one asking said it. With none, it is today in their zone. */
+async function completing(ctx: Context, on: string | undefined): Promise<Completing> {
+  const { settings, zone } = await memberDaily(ctx.db, ctx.workspaceId, ctx.personId);
+  return { settings, day: on ?? dayIn(zone)(ctx.now) };
+}
+
+/** The time zone a member's agent is told times in. */
+export const timeZoneOf = async (db: D1Database, workspaceId: string, personId: string) => (await memberDaily(db, workspaceId, personId)).zone;
 
 const NOTE_BY_ID = `SELECT n.text, n.created_by, n.indexed, ${SUMMARY_COLUMNS} WHERE n.id = ?`;
 
@@ -974,8 +982,31 @@ async function usableDaily(ctx: Context, day: string): Promise<{ note: NoteRow |
   return note && note.state !== "trashed" ? { note, stale: null } : { note: null, stale: kept.note_id };
 }
 
-/** The folder at the top of the workspace that the member's settings name for daily notes, ignoring case, when there is one. */
-const dailyFolder = async (ctx: Context, settings: DailySettings) => (await siblings(ctx, null)).find((f) => folderKey(f.name) === folderKey(settings.folder)) ?? null;
+/** Where a new daily note goes: a folder that is there, or one by `name` at the top of the workspace, made with the note (`id` null). */
+interface DailyFolder {
+  id: string | null;
+  name: string;
+}
+
+/**
+ * The folder a new daily note goes in, as the member's settings pick it: a folder picked by its id
+ * while they can edit it, or else the one at the top of the workspace by the name the setting held,
+ * ignoring case, made with the note when it isn't there. A value shaped like an id that names neither
+ * is a folder gone or no longer theirs to edit, not a name to make, so like none picked it is the one
+ * at the top named Daily.
+ */
+async function dailyFolder(ctx: Context, settings: DailySettings): Promise<DailyFolder> {
+  const picked = settings.folder;
+  const isId = Id.safeParse(picked).success;
+  if (isId) {
+    const row = await ctx.db.prepare("SELECT id, name FROM folders WHERE workspace_id = ? AND id = ?").bind(ctx.workspaceId, picked).first<{ id: string; name: string }>();
+    if (row && allows(folderLevel(ctx.sight, row.id), "edit")) return row;
+  }
+  const top = await siblings(ctx, null);
+  const named = (name: string) => top.find((f) => folderKey(f.name) === folderKey(name));
+  const name = picked && !isId ? picked : DAILY_FOLDER;
+  return (picked && named(picked)) || named(name) || { id: null, name };
+}
 
 /**
  * A new daily note for `day` holding `text`, and the statements that make it, in `folder` or in a
@@ -983,16 +1014,16 @@ const dailyFolder = async (ctx: Context, settings: DailySettings) => (await sibl
  * `daily_notes` is what makes it theirs for that day, and what refuses a second one. It takes the
  * place of `stale`, a daily note of that day that can no longer be used.
  */
-function newDaily(ctx: Context, { settings, day }: Completing, text: string, folder: { id: string } | null, stale: string | null): { row: NoteRow; statements: D1PreparedStatement[] } | null {
+function newDaily(ctx: Context, { settings, day }: Completing, text: string, folder: DailyFolder, stale: string | null): { row: NoteRow; statements: D1PreparedStatement[] } | null {
   // With no folder yet, one is made at the top of the workspace, which only someone who sees all of it may do: not an agent limited to folders.
-  if (folder ? !allows(folderLevel(ctx.sight, folder.id), "edit") : !ctx.role || ctx.role === "viewer" || !seesEveryFolder(ctx.sight)) return null;
-  const folderId = folder?.id ?? newId();
+  if (folder.id ? !allows(folderLevel(ctx.sight, folder.id), "edit") : !ctx.role || ctx.role === "viewer" || !seesEveryFolder(ctx.sight)) return null;
+  const folderId = folder.id ?? newId();
   const id = newId();
   const row: NoteRow = { id, folder_id: folderId, revision: 1, created_at: ctx.now, created_by: ctx.personId, private_owner: settings.private ? ctx.personId : null, indexed: MADE, ...NEW, ...written(ctx, text) };
   return {
     row,
     statements: [
-      ...(folder ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, NULL, ?, ?)").bind(folderId, ctx.workspaceId, settings.folder, folderKey(settings.folder))]),
+      ...(folder.id ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, NULL, ?, ?)").bind(folderId, ctx.workspaceId, folder.name, folderKey(folder.name))]),
       ctx.db
         .prepare(
           `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, private_owner, indexed)
@@ -1057,7 +1088,7 @@ async function recordCompleting(ctx: Context, row: NoteRow, changes: ChangeSet, 
       statements.push(...recording(ctx, daily.note, changesBetween(daily.note.text, text), daily.note.revision).statements);
       on = { id: daily.note.id, revision: daily.note.revision + 1, at: text.length - filedOn("", lines).length };
     }
-  } else if (daily) {
+  } else if (daily && folder) {
     const made = newDaily(ctx, mine, dailyText(mine.day, lines), folder, daily.stale);
     if (made) {
       statements.push(...made.statements);
@@ -1664,13 +1695,9 @@ export async function finding(ctx: Context, scope: Scope, op: { query: string; t
   const where = parts.length > 1 ? await resolved({ kind: "and", of: parts as Bound[] }) : parts.length ? await resolved(parts[0]!) : null;
 
   let zone: (day: string) => number;
-  let settingsZone: string | null | undefined;
   const timed = [...walk(where as Node | null)].some(({ node }) => node.kind === "filter" && (node.key === "updated" || node.key === "created" || node.key === "uploaded"));
-  if (timed && !op.zone) {
-    const row = await ctx.db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(ctx.workspaceId, ctx.personId).first<{ text: string }>();
-    settingsZone = dailySettings(row?.text).timeZone;
-  }
-  const start = () => (zone ??= dayStartIn(op.zone ?? settingsZone ?? "UTC"));
+  const asked = op.zone ?? (timed ? (await memberDaily(ctx.db, ctx.workspaceId, ctx.personId)).zone : "UTC");
+  const start = () => (zone ??= dayStartIn(asked));
 
   const binds: (string | number)[] = [ctx.workspaceId, ctx.sight.bind];
   const bind = binder(binds);
@@ -2014,8 +2041,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           if (itemLevel(ctx.sight, daily.note) === "none") throw new OpError("not_found", NO_SUCH_NOTE);
           return toNote(ctx, daily.note);
         }
-        const made = newDaily(ctx, mine, dailyText(mine.day), await dailyFolder(ctx, mine.settings), daily.stale);
-        if (!made) throw new OpError("forbidden", `You can't make notes in "${mine.settings.folder}", the folder your settings name for daily notes`);
+        const folder = await dailyFolder(ctx, mine.settings);
+        const made = newDaily(ctx, mine, dailyText(mine.day), folder, daily.stale);
+        if (!made) throw new OpError("forbidden", `You can't make notes in "${folder.name}", the folder your daily notes go in`);
         return (await landed(ctx, made.statements)) ? toNote(ctx, made.row) : null;
       }),
   },
@@ -2878,6 +2906,17 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .first<{ revision: number }>();
       if (!row) throw new OpError("conflict", "Your settings changed somewhere else since they were read here");
       return { text: op.text, revision: row.revision, updatedAt: ctx.now };
+    },
+  },
+
+  // Only the member's own browser says where they are: see NOT_FOR_AGENTS.
+  "timeZone.record": {
+    needs: "view",
+    by: "member",
+    changes: true,
+    async run(ctx, op) {
+      await ctx.db.prepare("UPDATE people SET time_zone = ?1 WHERE id = ?2 AND time_zone IS NOT ?1").bind(op.timeZone, ctx.personId).run();
+      return { timeZone: op.timeZone };
     },
   },
 

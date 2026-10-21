@@ -347,6 +347,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "folder.delete": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },
   "settings.read": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "settings.write": { on: "workspace", who: EVERYONE, args: () => ({ text: "{}", baseRevision: 99 }) },
+  "timeZone.record": { on: "workspace", who: EVERYONE, args: () => ({ timeZone: "America/Chicago" }) },
   "member.list": { on: "workspace", who: MEMBERS, args: () => ({}) },
   "member.invite": { on: "workspace", who: ADMINS, args: () => ({ email: address(), as: "viewer" }) },
   "member.setRole": { on: "workspace", who: ADMINS, args: () => ({ memberId: "aaaaaaaaaaaa", as: "viewer" }) },

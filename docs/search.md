@@ -23,7 +23,7 @@ A query that can't be read is refused, never answered with nothing: the error sa
 
 A day is `YYYY-MM-DD`, or counted from today: `today`, `yesterday`, `tomorrow`, `7d` for seven days ago, `+7d` for seven days ahead. The server never works out today. The asker says it, as `today`, and a query with a counted day and no `today` is refused. The app and `ink` always say it, from the machine's own clock.
 
-`updated:`, `created:` and `uploaded:` are times, and a day begins and ends where the asker is: `zone` says where, as a time zone's name. Left out, it is the zone the member's setting `daily.timeZone` names, or UTC. `due:` is a calendar date with no time, so no zone bears on it.
+`updated:`, `created:` and `uploaded:` are times, and a day begins and ends where the asker is: `zone` says where, as a time zone's name. Left out, it is the member's zone: the one their setting `daily.timeZone` names, or else the one of the browser they last used Common Ink in, or else UTC. `due:` is a calendar date with no time, so no zone bears on it.
 
 ## What a query covers
 

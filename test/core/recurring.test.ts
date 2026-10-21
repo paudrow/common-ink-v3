@@ -190,14 +190,15 @@ describe("which todos a write checked off", () => {
 });
 
 describe("what a member's settings say of daily notes", () => {
-  it("defaults to the folder Daily, private, and no time zone, for settings that say nothing or can't be read", () => {
-    for (const text of [null, "{}", "not json", "[]", JSON.stringify({ "daily.folder": 3, "daily.private": "yes", "daily.timeZone": "Mars/Olympus" }), JSON.stringify({ "daily.folder": "a/b" }), JSON.stringify({ "daily.folder": "   " })]) {
-      expect(dailySettings(text), String(text)).toEqual({ folder: "Daily", private: true, timeZone: null });
+  it("defaults to no folder picked, private, and no time zone, for settings that say nothing or can't be read", () => {
+    for (const text of [null, "{}", "not json", "[]", JSON.stringify({ "daily.folder": 3, "daily.private": "yes", "daily.timeZone": "Mars/Olympus" }), JSON.stringify({ "daily.folder": "a/b" }), JSON.stringify({ "daily.folder": "   " }), JSON.stringify({ "daily.folder": "" })]) {
+      expect(dailySettings(text), String(text)).toEqual({ folder: null, private: true, timeZone: null });
     }
   });
 
-  it("takes a folder name, whether new daily notes are private, and a time zone", () => {
+  it("takes a folder by id or, as the setting once held, by name, whether new daily notes are private, and a time zone", () => {
     expect(dailySettings(JSON.stringify({ "daily.folder": " Journal ", "daily.private": false, "daily.timeZone": "America/Chicago" }))).toEqual({ folder: "Journal", private: false, timeZone: "America/Chicago" });
+    expect(dailySettings(JSON.stringify({ "daily.folder": "k3f9q2m8x1ab" })).folder).toBe("k3f9q2m8x1ab");
   });
 });
 
@@ -590,7 +591,7 @@ describe("skipping a recurring todo through todo.set", () => {
 });
 
 describe("the day a todo is completed on", () => {
-  it("is the day the completer says, and without one today in the zone their settings name, or in UTC", async () => {
+  it("is the day the completer says, and without one today in the zone their settings name, or in UTC when nothing names one", async () => {
     const ada = await newMember();
     const claude = await agentOf(ada);
     const note = await create(ada, "- [ ] A every:1d-after-done\n- [ ] B every:1d-after-done\n- [ ] C every:1d-after-done");

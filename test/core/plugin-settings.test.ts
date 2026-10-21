@@ -28,6 +28,14 @@ describe("a setting's value", () => {
     expect(reasonFor(folder, "Journal")).toBe("Expected at most 5 characters");
   });
 
+  it("is text for a folder: a folder's id, or empty for the default", () => {
+    const folder: Setting = { type: "folder", default: "", defaultFolder: "Daily", title: "Folder" };
+
+    expect(readSetting(folder, "k3f9q2m8x1ab")).toEqual({ value: "k3f9q2m8x1ab" });
+    expect(readSetting(folder, "")).toEqual({ value: "" });
+    expect(reasonFor(folder, 3)).toBe("Expected a folder's id in quotes, not 3");
+  });
+
   it("is a number within its bounds, and whole for an integer", () => {
     const scale: Setting = { type: "number", default: 1, minimum: 0.5, maximum: 2, title: "Scale" };
     const size: Setting = { type: "integer", default: 100, minimum: 75, title: "Size" };
