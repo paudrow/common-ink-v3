@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { redo, undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import type { DraftSummary, PluginRecord } from "../core/plugins.ts";
 import { allPages } from "../core/allPages.ts";
@@ -30,7 +31,8 @@ import { referredUploads } from "./referredUploads.ts";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, keepsATab, routeOf, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
-import { JSON_VIEW, ROOT as SETTINGS, Settings, type Account } from "./Settings.tsx";
+import { ROOT as SETTINGS, Settings, type Account } from "./Settings.tsx";
+import { SETTINGS_FILE, SettingsFile } from "./SettingsFile.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
 import { forgetAll } from "./stash.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
@@ -343,7 +345,6 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
         h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], group: "Navigation", run: () => inner.current.toggleFocus() });
         h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], group: "Navigation", run: () => inner.current.toggleSidebar() });
         h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", group: "Navigation", run: () => inner.current.toggleInspector() });
-        h.commands.register({ id: "settings.openJson", title: "Open settings JSON", group: "Navigation", run: () => h.app().go(`${SETTINGS}/${JSON_VIEW}`) });
       },
     };
     /** Kept apart from the rest so their links and commands come after the plugins', where the others come before. */
@@ -352,7 +353,9 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       name: "Plugins",
       activate(h) {
         // At an address under /settings they are drawn over the window, and this page is never: see `under`. A tab kept on it from before is told so.
-        h.views.register("page", { id: "settings", path: SETTINGS, label: "Settings", nav: "menu", component: ({ app }) => <SettingsMoved go={app.go} /> });
+        h.views.register("page", { id: "settings", path: SETTINGS, label: "Settings", nav: "menu", command: { id: "go.settings", title: "Go to settings (UI)" }, component: ({ app }) => <SettingsMoved go={app.go} /> });
+        // Its command is `settings.openJson`, so a key a member bound to that opens it.
+        h.views.register("page", { id: "settings-json", path: SETTINGS_FILE, label: "Settings (JSON)", command: { id: "settings.openJson", title: "Go to settings (JSON)" }, component: () => <SettingsFile store={settings} host={created} /> });
         h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage });
       },
     };
@@ -855,7 +858,12 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   );
 
   const step = (type: "note.undo" | "note.redo") => {
-    if (!routeNoteId) return;
+    if (!routeNoteId) {
+      // Text that is no note, such as the settings JSON, has its editor's own history and no other.
+      const editor = document.activeElement instanceof HTMLElement ? EditorView.findFromDOM(document.activeElement) : null;
+      if (editor) (type === "note.undo" ? undo : redo)(editor);
+      return;
+    }
     undoOrRedo(workspaceId, { type, id: routeNoteId }).then(
       (note) => {
         setStuck(null);

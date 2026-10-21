@@ -1977,7 +1977,8 @@ button.link:hover {
   top: 50%;
 }
 
-.note {
+.note,
+.settings-file {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -4195,10 +4196,17 @@ kbd {
   margin-top: 0;
 }
 
-/* What the workspace's files take, under the settings: not a setting, so outside their panes. */
+/* What the workspace's files take, and an export of it, in Account: no setting, and drawn as Account's rows are. */
 .settings-storage {
-  margin-top: 28px;
+  padding: 10px 0 10px 12px;
   color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.settings-storage h3 {
+  margin: 0 0 2px;
+  color: var(--ink);
+  font-size: calc(13px * var(--text-scale));
 }
 
 .settings-storage p {
@@ -4471,37 +4479,50 @@ kbd {
   margin: 6px 0 0;
 }
 
-.settings-json {
-  margin-top: 14px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: var(--bg-elev);
-  overflow: hidden;
+/* The settings JSON in a tab: a note's editor, with what is wrong with the JSON over it and whether it is saved at its foot. */
+.settings-file-head {
+  box-sizing: border-box;
+  max-width: var(--editor-width);
+  margin: 0 auto;
+  padding: 1.5rem 2rem 0;
 }
 
-.settings-json .cm-editor {
-  min-height: 16rem;
-  font-size: calc(13px * var(--text-scale));
+.settings-file-head .soon {
+  margin: 0;
 }
 
-.settings-json .cm-editor.cm-focused {
-  outline: none;
+.settings-file .editor {
+  padding-top: 1rem;
 }
 
-.settings-json .cm-content,
-.settings-json .cm-gutters {
-  font-family: var(--mono);
-}
-
-.settings-json .cm-gutters {
+.settings-file .cm-gutters {
   border-right: 0;
   background: none;
 }
 
-.settings-json .cm-tooltip {
+.settings-file .cm-tooltip {
   border-color: var(--line-strong);
   background: var(--bg-elev);
   color: var(--ink);
+}
+
+.settings-file-state {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: calc(1.75rem * var(--text-scale));
+  padding: 0 16px 0 8px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+}
+
+.settings-file-state[data-failed] {
+  color: var(--danger);
+}
+
+.note-panels:has(.cm-panels) + .settings-file-state {
+  border-top: 1px solid var(--line);
 }
 
 /* Inspector */

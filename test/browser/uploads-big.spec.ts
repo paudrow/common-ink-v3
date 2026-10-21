@@ -98,8 +98,8 @@ test("a recording over 8 MB dropped in a note goes in parts: its line is written
   }, `/api/workspaces/${workspace}/uploads/${id}`);
   expect(part).toEqual({ status: 206, bytes: expectedAt(5_000_000, 10) });
 
-  // Settings say how much the workspace's files take.
-  await page.goto("/settings");
+  // Settings say how much the workspace's files take, under Account.
+  await page.goto("/settings/account");
   await expect(page.getByRole("region", { name: "Storage" })).toContainText("This workspace's files take 12 MB, 1 file from every member.");
 });
 

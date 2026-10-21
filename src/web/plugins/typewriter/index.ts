@@ -51,7 +51,7 @@ export const typewriterMode: Plugin = {
       if (JSON.stringify(now) === held) return;
       held = JSON.stringify(now);
       registered?.();
-      registered = host.editorExtensions.register({ id: "typewriter", extension: (editor) => (editor.reading ? [] : typewriter(now, writing, keep)) });
+      registered = host.editorExtensions.register({ id: "typewriter", anyText: true, extension: (editor) => (editor.reading ? [] : typewriter(now, writing, keep)) });
     };
     // Told once, and not again for every key pressed until a setting has been written.
     let told = false;

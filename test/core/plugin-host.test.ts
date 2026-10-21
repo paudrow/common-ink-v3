@@ -870,6 +870,36 @@ describe("what is the host's and the required plugins' to have", () => {
     expect(ids()).not.toContain("usurper.fine");
     expect(ids()).not.toContain("go.mine");
   });
+
+  it("lets only the app name a page's command, which keeps the id and title it names, and leaves out a plugin that tries", () => {
+    const settingsPages: Plugin = {
+      id: "pages",
+      name: "Pages",
+      activate(h) {
+        h.views.register("page", { id: "settings", path: "/settings", label: "Settings", command: { id: "go.settings", title: "Go to settings (UI)" }, component: View });
+        h.views.register("page", { id: "settings-json", path: "/settings.json", label: "Settings (JSON)", command: { id: "settings.openJson", title: "Go to settings (JSON)" }, component: View });
+      },
+    };
+    const usurper: Plugin = { id: "usurper", name: "Usurper", activate: (h) => void h.views.register("page", { id: "mine", path: "/mine", label: "Mine", command: { id: "settings.mine", title: "Mine" }, component: View }) };
+    const { host, ids, went } = hostWith([usurper, settingsPages], { required: ["pages"], trusted: [settingsPages] });
+
+    const titled = (id: string) => host.contributions().commands.find((c) => c.id === id)?.title;
+    expect([titled("go.settings"), titled("settings.openJson")]).toEqual(["Go to settings (UI)", "Go to settings (JSON)"]);
+    expect(ids()).not.toContain("go.settings-json");
+    host.contributions().commands.find((c) => c.id === "settings.openJson")!.run();
+    expect(went).toEqual(["/settings.json"]);
+    expect(errorOf(host, "usurper")).toBe("Only the app names a page's command, and Usurper named settings.mine");
+    expect(ids()).not.toContain("settings.mine");
+  });
+
+  it("gives the settings JSON's editor only Common Ink's own extensions, and leaves out a plugin that asks to add one", () => {
+    const vim: Plugin = { id: "vim", name: "Vim mode", activate: (h) => void h.editorExtensions.register({ id: "vim", anyText: true, extension: [] }) };
+    const reader: Plugin = { id: "reader", name: "Reader", activate: (h) => void h.editorExtensions.register({ id: "reader", anyText: true, extension: [] }) };
+    const { host } = hostWith([vim, reader], { trusted: [vim] });
+
+    expect(host.contributions().editorExtensions.map((e) => e.id)).toEqual(["vim"]);
+    expect(errorOf(host, "reader")).toBe("Only Common Ink's own plugins add to the settings JSON's editor, and Reader asked to with reader");
+  });
 });
 
 describe("keybindings, as settings", () => {

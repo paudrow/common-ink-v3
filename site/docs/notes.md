@@ -124,7 +124,7 @@ Outside a note's text, wherever you are not typing, vim's keys move through the 
 
 ## Settings
 
-Open **Settings** from the workspace menu at the top of the sidebar. Settings are JSON, and **Open settings (JSON)** shows the JSON itself. Only the values you change from a default are written, and they follow you to every browser.
+Open **Settings** from the workspace menu at the top of the sidebar, or run **Go to settings (UI)** from the command palette. Settings are JSON. **Go to settings (JSON)**, or **Open settings (JSON)** in Settings, opens the JSON in a tab, where you edit it as you edit a note, with Vim mode and typewriter mode if they are on. It isn't a note: it isn't in your folders, search, or exports, and only you see it. Only the values you change from a default are written, and they follow you to every browser. How much the workspace's files take, and its export, are in Settings under **Account**.
 
 ```json
 {

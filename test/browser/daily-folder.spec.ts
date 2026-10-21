@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { perform, signInAsNewPerson } from "./helpers.ts";
-import { closeSettings, json, openJson, settingsDialog } from "./settings-helpers.ts";
+import { json, openJson, settingsDialog } from "./settings-helpers.ts";
 
 const localDay = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
@@ -23,7 +23,6 @@ test("a nested folder picked for daily notes in Settings is where Today makes th
 
   await openJson(page);
   await expect(json(page)).toContainText(`"daily.folder": "${journal.id}"`);
-  await closeSettings(page);
 
   await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Today" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toContainText(today);

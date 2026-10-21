@@ -17,6 +17,6 @@ export const lineNumbers: Plugin = {
   enabledByDefault: false,
   needs: "keyboard",
   activate(host) {
-    host.editorExtensions.register({ id: "lineNumbers", extension: (editor) => (editor.reading ? [] : [numbered(), look]) });
+    host.editorExtensions.register({ id: "lineNumbers", anyText: true, extension: (editor) => (editor.reading ? [] : [numbered(), look]) });
   },
 };

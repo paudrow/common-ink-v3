@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { runCommand } from "./helpers.ts";
 
 /** Settings, drawn as a dialog over whatever the window shows. Everything of Settings is found inside it. */
 export const settingsDialog = (page: Page) => page.getByRole("dialog", { name: "Settings", exact: true });
@@ -23,17 +24,21 @@ export async function category(page: Page, name: string): Promise<Locator> {
   return group(page, name);
 }
 
-export const json = (page: Page) => settingsDialog(page).getByRole("textbox", { name: "Settings JSON" });
+/** The settings JSON, open in a tab of its own. */
+export const jsonFile = (page: Page) => page.getByRole("region", { name: "Settings (JSON)" });
+export const json = (page: Page) => jsonFile(page).getByRole("textbox", { name: "Settings JSON" });
+/** What the settings JSON says of saving, at its foot. */
+export const jsonState = (page: Page) => jsonFile(page).getByRole("status");
 
-/** Shows the settings as JSON, from the options. */
+/** Opens the settings JSON in a tab, from Settings. Settings closes. */
 export const openJson = (page: Page) => settingsDialog(page).getByRole("button", { name: "Open settings (JSON)" }).click();
 
-/** Shows the settings as options again, from the JSON. */
-export const openOptions = (page: Page) => settingsDialog(page).getByRole("button", { name: "Open settings (UI)" }).click();
+/** Opens Settings over the window again, with the command palette. */
+export const openOptions = (page: Page) => runCommand(page, "Go to settings (UI)");
 
-/** Replaces the whole of the JSON, as a member who selects all and types would. */
+/** Replaces the whole of the JSON, as a member who selects all and types would, opening it in a tab first if it isn't in front. */
 export async function typeJson(page: Page, text: string) {
-  if (!(await json(page).isVisible())) await openJson(page);
+  if (!(await json(page).isVisible())) await runCommand(page, "Go to settings (JSON)");
   await json(page).click();
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.insertText(text);

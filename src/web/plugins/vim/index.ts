@@ -55,7 +55,7 @@ export const vim: Plugin = {
         if (stopped) return;
         const editing = vimEditing(host.commands.run);
         // A reading of a note is not an editor: it has no cursor for vim to move, and no mode to show.
-        host.editorExtensions.register({ id: "vim", extension: (editor) => (editor.reading ? [] : editing.extension) });
+        host.editorExtensions.register({ id: "vim", anyText: true, extension: (editor) => (editor.reading ? [] : editing.extension) });
         const byRows = () => editing.moveByRows(host.settings.get<boolean>("screenLines"));
         byRows();
         host.settings.subscribe(byRows);

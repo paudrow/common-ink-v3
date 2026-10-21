@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { noteIdFromPath } from "../core/slug.ts";
+import { movedTo } from "./moved.ts";
 
 /** A page is whatever a plugin registered at that path, if any did. */
 export type Route = { kind: "home" } | { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "page"; path: string };
@@ -35,12 +36,22 @@ export function routeOf(pathname: string): Route {
   return id ? { kind: "note", id } : { kind: "page", path: pathname };
 }
 
+/** Writes the browser's address where it is now, in place of an address that moved. */
+function arrive() {
+  const now = movedTo(location.pathname + location.search + location.hash);
+  if (now !== location.pathname + location.search + location.hash) history.replaceState(history.state, "", now);
+}
+
 export function useRoute(): [Place, Navigate] {
-  const [at, setAt] = useState({ path: location.pathname, query: location.search, state: history.state as unknown });
+  const [at, setAt] = useState(() => {
+    arrive();
+    return { path: location.pathname, query: location.search, state: history.state as unknown };
+  });
   /** Whether the entry the browser is at was written by a move. Back and Forward come to an entry that may not be. */
   const moved = useRef(false);
   useEffect(() => {
     const onPop = () => {
+      arrive();
       moved.current = false;
       setAt({ path: location.pathname, query: location.search, state: history.state });
     };
@@ -51,7 +62,8 @@ export function useRoute(): [Place, Navigate] {
   useEffect(() => {
     if (history.state !== null) history.replaceState(null, "", location.href);
   }, [at]);
-  const navigate = useCallback<Navigate>((to, { replace, move, state = null } = {}) => {
+  const navigate = useCallback<Navigate>((address, { replace, move, state = null } = {}) => {
+    const to = movedTo(address);
     if (to === location.pathname + location.search) return;
     if (replace || (move && moved.current)) history.replaceState(state, "", to);
     else history.pushState(state, "", to);

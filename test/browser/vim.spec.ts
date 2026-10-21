@@ -79,14 +79,14 @@ test("vim mode is off until it is turned on on the Plugins page, and turning it 
   await run(page, "Go to Plugins");
   await vim.check();
   await expect.poll(() => stored(page)).toEqual({ "vim.enabled": true });
-  await run(page, "Go to Settings");
+  await run(page, "Go to settings (UI)");
   await page.getByRole("button", { name: "Open settings (JSON)" }).click();
   await expect(page.getByRole("textbox", { name: "Settings JSON" })).toContainText('"vim.enabled": true');
-  // Settings is over the window, where the Plugins page took the place of one editor, and the editor still showing in the other group has vim at once.
+  // The JSON's tab is where the Plugins page took the place of one editor, and both it and the editor still showing in the other group have vim at once.
   await expect(editors(page)).toHaveCount(1);
-  await expect(statusLine(page)).toHaveText(["--NORMAL--"]);
+  await expect(page.locator(".cm-vim-panel")).toHaveText(["--NORMAL--", "--NORMAL--"]);
 
-  // Back from the JSON, from Settings, and from the Plugins page, to the notes.
+  // Back from the JSON's tab, from Settings, and from the Plugins page, to the notes.
   for (const address of [/\/settings$/, /\/plugins$/, /\/note\//]) {
     await page.goBack();
     await expect(page).toHaveURL(address);
@@ -504,7 +504,7 @@ test("when vim's editing can't be loaded the Plugins page says so, notes are edi
   const vim = page.getByRole("list", { name: "Plugins" }).getByRole("listitem").filter({ hasText: "Vim mode" });
   await expect(vim.getByRole("checkbox")).toBeChecked();
   await expect(vim.getByRole("alert")).toHaveText("Failed: Vim's editing couldn't be loaded, so notes are edited without it. Reload the page to try again.");
-  await run(page, "Go to Settings");
+  await run(page, "Go to settings (UI)");
   await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Keyboard shortcuts" }).click();
   await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByText("note.save", { exact: true })).toBeVisible();
   await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByText("vim.back", { exact: true })).toHaveCount(0);

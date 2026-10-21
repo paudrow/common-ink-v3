@@ -209,7 +209,8 @@ const PAGES: Record<string, ((made: { uploadId: string; tag: string }) => { addr
   Agents: () => ({ address: "/agents" }),
   Plugins: () => ({ address: "/plugins" }),
   Dice: () => ({ address: "/dice" }),
-  Settings: "not in the history",
+  "settings (JSON)": () => ({ address: "/settings.json" }),
+  "settings (UI)": "not in the history",
 };
 
 test("every kind of page is a stop in the history, at its own address, and back and forward walk them all", async ({ page }) => {

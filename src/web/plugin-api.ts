@@ -537,7 +537,8 @@ export interface Slots {
    * `pageState` are its own, so two pages open side by side each read their own address, and
    * `app.go` to an address under its path moves that page and no other. `nav` says where its link goes:
    * with the main links of the sidebar, under More, or in the workspace menu. Each page gets a
-   * `go.<id>` command. `order` places its link among the others: lower first, and those with none
+   * `go.<id>` command titled Go to its label.
+   * A page of the app's own may name its `command` instead, to keep an id a member's keys may be bound to. `order` places its link among the others: lower first, and those with none
    * after them, in the order of their plugins. A page is also shown at every address under its
    * path, such as `/plugins/tabs` for the page at `/plugins`, unless another page is at exactly that address:
    * it reads the rest from `app.path`. One that is `transient` only leads somewhere else, as Today
@@ -545,7 +546,7 @@ export interface Slots {
    * area for the moment it takes to find where to go, with the editor area kept as it is underneath.
    * One with `home` is where the app goes from `/` when the editor area has nothing to return to: it is opened as any page is, a tab where there are tabs.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; home?: boolean; component: View };
+  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; home?: boolean; command?: { id: string; title: string }; component: View };
   /**
    * A panel on the Dashboard. It is listed in Add panel and drawn in a card once the member adds it.
    * The member's arrangement still decides whether it is shown, as it does for the Dashboard's own panels.
@@ -976,11 +977,16 @@ export interface CompletionItem {
 export interface EditorExtension {
   id: string;
   extension: object | ((editor: EditorContext) => object);
+  /**
+   * Also given to an editor of text that is no note, such as the member's settings JSON. For how an editor is worked,
+   * such as vim's keys, typewriter scrolling and line numbers, and not for what a note holds. Only Common Ink's own plugins may.
+   */
+  anyText?: boolean;
 }
 
 /** What an editor extension given as a function is told about the editor it is being made for. */
 export interface EditorContext {
-  /** The note the editor holds. An editor holds one note for as long as it lasts. */
+  /** The note the editor holds, or for text that is no note, which only an `anyText` extension is made for, its address: `/settings.json`. An editor holds one for as long as it lasts. */
   noteId: string;
   /**
    * True for a drawing of the note that is only read, such as an expanded card in a folder's list.
