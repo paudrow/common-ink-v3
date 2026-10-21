@@ -5,6 +5,7 @@ import type { Filed, Note, OpInput, Results, RevertedNotes, Written } from "../c
 import { IN_TRASH } from "../core/lifecycle.ts";
 import { applyChanges, changesBetween } from "../core/text.ts";
 import { ApiError, getMe, perform, session } from "./api.ts";
+import { seen, tellFault } from "./faults.ts";
 import { mirrored } from "./openNotes.ts";
 import { forget, keep, kept, type Kept, type NoteWrite } from "./stash.ts";
 import { today } from "./time.ts";
@@ -399,20 +400,9 @@ export class NoteSync {
     let landed: Written | undefined;
     this.onState("saving");
     this.inFlight = (async () => {
+      let saved: Written;
       try {
-        const saved = await perform(this.workspaceId, write);
-        this.apply(changesBetween(write.text, saved.text).map(this.typedSinceWrite!));
-        this.unacknowledged = null;
-        this.typedSinceWrite = null;
-        this.failing = false;
-        this.revision = saved.revision;
-        this.savedText = saved.text;
-        this.onSaved(saved);
-        landed = saved;
-        void settle(saved);
-        if (this.dirty) this.schedule(PAUSE_MS);
-        else this.settled();
-        this.onState(this.dirty ? "unsaved" : "saved");
+        saved = await perform(this.workspaceId, write);
       } catch (err) {
         // A conflict is asked again, but not one for Trash: the server takes nothing more until the note is restored.
         this.failing = !refusedForTrash(err) && (worthRetrying(err) || signedOut(err));
@@ -429,12 +419,49 @@ export class NoteSync {
           this.onState(why);
           if (this.closedDoc) this.giveUp(why);
         }
-      } finally {
-        this.inFlight = null;
+        return;
       }
-    })();
+      // The server has the write, so it is never sent again: a fault of the page's own after this is told, not asked again.
+      const typed = this.typedSinceWrite;
+      this.unacknowledged = null;
+      this.typedSinceWrite = null;
+      this.failing = false;
+      this.revision = saved.revision;
+      this.savedText = saved.text;
+      for (const step of [
+        () => saved.text !== write.text && this.apply(changesBetween(write.text, saved.text).map(this.fitted(write.text, typed))),
+        () => this.onSaved(saved),
+        () => {
+          landed = saved;
+          void settle(saved);
+          if (this.dirty) this.schedule(PAUSE_MS);
+          else this.settled();
+          this.onState(this.dirty ? "unsaved" : "saved");
+        },
+      ]) {
+        // Each goes on whatever the one before did, and none fails the save: whoever waits on it hears it landed.
+        try {
+          step();
+        } catch (err) {
+          tellFault({ ...seen(err), op: "note.write" });
+        }
+      }
+    })().finally(() => {
+      this.inFlight = null;
+    });
     await this.inFlight;
     return landed;
+  }
+
+  /**
+   * What was typed since a write of `text`, as changes to it: as it was followed, or, when that doesn't fit or an undo let go
+   * of it, found again by comparing the text with the editor's. Not fitting is a fault of the page's own, and is told.
+   */
+  private fitted(text: string, typed: ChangeSet | null): ChangeSet {
+    const now = this.doc()?.toString() ?? text;
+    if (typed && typed.length === text.length && typed.newLength === now.length) return typed;
+    if (typed) tellFault({ name: "SyncError", message: `What was typed since a write doesn't fit it: ${typed.length} to ${typed.newLength} characters, where the write has ${text.length} and the editor ${now.length}`, op: "note.write" });
+    return changesBetween(text, now);
   }
 
   private write(text: string): NoteWrite {
@@ -482,11 +509,23 @@ export class NoteSync {
 
   private apply(changes: ChangeSet) {
     if (changes.empty) return;
-    if (this.closedDoc) this.closedDoc = changes.apply(this.closedDoc);
+    if (this.closedDoc) {
+      this.closedDoc = changes.apply(this.closedDoc);
+      return;
+    }
     // Kept out of the editor's undo stack, so the member's undo never takes back someone else's change.
     // Not filtered, so it reaches the editor of a member who can't change the note themselves.
     // Each of the note's editors takes it; past the first it is a copy, so what follows the note's changes hears it once.
-    else this.views.forEach((view, i) => view.dispatch({ changes, filter: false, annotations: [fromServer.of(true), Transaction.addToHistory.of(false), ...(i ? [mirrored.of(true)] : [])] }));
+    // An editor the cursor has just left can notice it as it takes a change from elsewhere, and save: it saves the text with the change.
+    const first = this.views[0];
+    if (!first) return;
+    const outer = this.copying;
+    this.copying = changes.apply(first.state.doc);
+    try {
+      this.views.forEach((view, i) => view.dispatch({ changes, filter: false, annotations: [fromServer.of(true), Transaction.addToHistory.of(false), ...(i ? [mirrored.of(true)] : [])] }));
+    } finally {
+      this.copying = outer;
+    }
   }
 
   /** Stops sending while `held`, and sends what was typed meanwhile when it is let go. */
@@ -522,9 +561,11 @@ export class NoteSync {
     // A write still waiting on the server merges with what's there when it lands.
     if (note.revision <= this.revision || this.unacknowledged) return;
     const doc = this.doc();
-    if (doc) this.apply(changesBetween(this.savedText, note.text).map(changesBetween(this.savedText, doc.toString())));
+    const changes = doc && changesBetween(this.savedText, note.text).map(changesBetween(this.savedText, doc.toString()));
+    // Taken first, so a save started as the editors take the change is a write on this revision.
     this.revision = note.revision;
     this.savedText = note.text;
+    if (changes) this.apply(changes);
     if (this.dirty) this.schedule(PAUSE_MS);
   }
 

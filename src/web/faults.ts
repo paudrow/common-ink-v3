@@ -50,4 +50,4 @@ export function tellUncaught(): void {
 }
 
 /** A value thrown that isn't an Error says nothing of where it came from, and may be anything at all, so only its kind is told. */
-const seen = (err: unknown): SeenFault => (err instanceof Error ? { name: err.name, message: err.message, stack: err.stack ?? null } : { name: "NotAnError", message: `A ${typeof err} was thrown` });
+export const seen = (err: unknown): SeenFault => (err instanceof Error ? { name: err.name, message: err.message, stack: err.stack ?? null } : { name: "NotAnError", message: `A ${typeof err} was thrown` });

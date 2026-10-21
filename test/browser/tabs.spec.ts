@@ -924,7 +924,8 @@ test("a page whose plugin is turned off while it is in front leaves the other ta
   await expect(tab(page, "Beta")).toBeVisible();
 });
 
-test("Split right on a note's only tab shows the note in both groups: what is typed in either is in the other at once and saved once, and closing one leaves the other", async ({ page }) => {
+/** The note Alpha, alone in its tab, split right: open in two groups, an editor in each. */
+async function splitAlpha(page: Page) {
   const [alpha] = await withNotes(page, "Alpha");
   await keep(page, "Alpha");
   await tab(page, "All notes").click({ button: "right" });
@@ -938,7 +939,12 @@ test("Split right on a note's only tab shows the note in both groups: what is ty
   const [first, second] = [group(page, 1).getByRole("textbox", { name: "Note text" }), group(page, 2).getByRole("textbox", { name: "Note text" })];
   await expect(first).toContainText("About Alpha.");
   await expect(second).toContainText("About Alpha.");
-  const before = (await perform(page, { type: "note.history", id: alpha!.id })).length;
+  return { alpha: alpha!, first, second };
+}
+
+test("Split right on a note's only tab shows the note in both groups: what is typed in either is in the other at once and saved once, and closing one leaves the other", async ({ page }) => {
+  const { alpha, first, second } = await splitAlpha(page);
+  const before = (await perform(page, { type: "note.history", id: alpha.id })).length;
 
   await second.click();
   await page.keyboard.press("ControlOrMeta+End");
@@ -948,17 +954,17 @@ test("Split right on a note's only tab shows the note in both groups: what is ty
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" And the first.");
   await expect(second).toContainText("Typed in the second. And the first.");
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: alpha!.id })).text).toBe("# Alpha\n\nAbout Alpha. Typed in the second. And the first.");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: alpha.id })).text).toBe("# Alpha\n\nAbout Alpha. Typed in the second. And the first.");
   // Each pause is one change, whichever editor it was typed in: nothing is written twice.
-  expect((await perform(page, { type: "note.history", id: alpha!.id })).length - before).toBeLessThanOrEqual(2);
+  expect((await perform(page, { type: "note.history", id: alpha.id })).length - before).toBeLessThanOrEqual(2);
 
   // Changes made elsewhere reach both, and what keeps places in the note hears each once: twice, a place past the end breaks it.
   const crashes: string[] = [];
   page.on("console", (message) => message.type() === "error" && /plugin crashed/.test(message.text()) && crashes.push(message.text()));
   for (const words of ["From elsewhere.", "And again."]) {
-    const now = await perform(page, { type: "note.read", id: alpha!.id });
+    const now = await perform(page, { type: "note.read", id: alpha.id });
     // Before the cursor, which is at the end: a place there moves with each.
-    await perform(page, { type: "note.write", id: alpha!.id, baseRevision: now.revision, text: now.text.replace("About Alpha.", `${words} About Alpha.`) });
+    await perform(page, { type: "note.write", id: alpha.id, baseRevision: now.revision, text: now.text.replace("About Alpha.", `${words} About Alpha.`) });
     await expect(first).toContainText(words);
     await expect(second).toContainText(words);
   }
@@ -975,5 +981,35 @@ test("Split right on a note's only tab shows the note in both groups: what is ty
   await first.click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" Still saved.");
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: alpha!.id })).text).toBe("# Alpha\n\nFrom elsewhere. And again. About Alpha. Typed in the second. And the first. Still saved.");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: alpha.id })).text).toBe("# Alpha\n\nFrom elsewhere. And again. About Alpha. Typed in the second. And the first. Still saved.");
+});
+
+// The editor the cursor left saves as soon as it notices, which can be as the other's typing is copied into it, before
+// it holds that typing: a save of its own text then would leave the typing out, and what was typed after would never fit
+// the server's answer. Which of the two editors the note was opened in first decides whose text a save reads, so both ways.
+test("typing into the other of a note's two editors the moment the cursor goes there is saved whole, either way", async ({ page }) => {
+  const { alpha, first, second } = await splitAlpha(page);
+  const faults: string[] = [];
+  page.on("request", (request) => void (request.url().endsWith("/api/faults") && faults.push(request.postData() ?? "")));
+
+  let expected = (await perform(page, { type: "note.read", id: alpha.id })).text;
+  for (const [from, to, words] of [[second, first, "One"], [first, second, "Two"]] as const) {
+    await from.click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type(` ${words} typed.`);
+    await expect(to).toContainText(`${words} typed.`);
+    // Into the other in the moment it takes the cursor, before the one left has heard it lost it, and on while the save that starts is on its way.
+    await to.evaluate((content, words) => {
+      const view = (content as unknown as { cmTile?: { root?: { view?: { state: { doc: { length: number } }; dispatch(spec: object): void } } } }).cmTile?.root?.view;
+      if (!view) throw new Error("No editor view on the editor's content: CodeMirror keeps it somewhere else now.");
+      const put = (text: string) => view.dispatch({ changes: { from: view.state.doc.length, insert: text }, userEvent: "input.type" });
+      (content as HTMLElement).focus();
+      put(` ${words} then`);
+      put(" and on.");
+    }, words);
+    expected += ` ${words} typed. ${words} then and on.`;
+    await expect.poll(async () => (await perform(page, { type: "note.read", id: alpha.id })).text).toBe(expected);
+  }
+  await expect(page.getByText("Couldn't save. Retrying…")).toHaveCount(0);
+  expect(faults).toEqual([]);
 });
