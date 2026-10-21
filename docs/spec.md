@@ -67,7 +67,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 ### Mentions and contacts
 
-40. As a member, I want `@` to open an autocomplete that filters as I type, so that I can mention people quickly. Clicking a mention opens that person's page: what I may see of them, their todos, and the notes that mention them.
+40. As a member, I want `@` to open an autocomplete that filters as I type, so that I can mention people quickly, and point at a note, an upload or an event from the same list, grouped by kind, each with a line that says what it is and a preview. `@` alone shows a few of each kind: people, me first, the notes I edited last, the latest uploads and my next events. Clicking a mention opens that person's page: what I may see of them, their todos, and the notes that mention them.
 41. As a member, I want current workspace members to appear in the theme color and everyone else in gray, so that I can tell who has an account in this workspace.
 42. As a member, I want to mention a contact who has no Common Ink account, such as my plumber, so that my notes record who said what.
 43. As a member reading someone else's note, I want to see a mentioned contact's name in gray, so that I understand the note without seeing their contact list. Guests and share-link readers see every mention in gray.

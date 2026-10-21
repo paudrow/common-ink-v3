@@ -9,7 +9,8 @@ test.beforeEach(({ page }) => {
 test.afterEach(() => expect(errors).toEqual([]));
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
-const options = (page: Page) => page.getByRole("listbox").getByRole("option");
+/** The people `@` offers, members in the theme colour and everyone else in gray, which come before the notes and events it offers too. */
+const options = (page: Page) => page.getByRole("listbox").locator('[role="option"]:is(.cm-completion-accent, .cm-completion-muted)');
 const mentions = (page: Page) => editor(page).locator(".md-chip-mention");
 const notice = (page: Page) => page.getByRole("group", { name: "Notice" });
 const shareDialog = (page: Page) => page.getByRole("dialog", { name: /^Share / });
@@ -64,18 +65,19 @@ test("@ lists the members in the theme colour and my contacts in gray, narrows a
   const contactLists = asked(page, "contact.list");
   await open(page, note.id, "Plan");
 
-  // The members are offered at once. The contacts are read then, and are in the list from the next key.
+  // `@` alone offers three people, me first, the members at once and the contacts as they arrive.
   const read = page.waitForResponse((response) => response.request().postDataJSON()?.type === "contact.list");
   await page.keyboard.type("Ask @");
-  await expect(options(page)).toHaveText(["Ada LovelaceYou", "Grace HopperMember"]);
+  await expect(options(page).first()).toHaveText("Ada LovelaceYou");
   await read;
+  await expect(options(page)).toHaveText(["Ada LovelaceYou", "Grace HopperMember", "Ada LovelaceContact · Analytical Engines"]);
   await page.keyboard.type("a");
   await expect(options(page)).toHaveText(["Ada LovelaceYou", "Ada LovelaceContact · Analytical Engines", "Zoë ÁlvarezContact"]);
   await page.keyboard.press("Backspace");
-  await expect(options(page)).toHaveText(["Ada LovelaceYou", "Grace HopperMember", "Ada LovelaceContact · Analytical Engines", "Grace HopperContact · Navy", "Lin WeiContact · Harbor Books", "Sam OkaforContact · Okafor Plumbing", "Zoë ÁlvarezContact"]);
+  await expect(options(page)).toHaveText(["Ada LovelaceYou", "Grace HopperMember", "Ada LovelaceContact · Analytical Engines"]);
   const [accent, muted] = [await colorOf(page, "--accent"), await colorOf(page, "--muted")];
   await expect(options(page).nth(1).locator(".cm-completionLabel")).toHaveCSS("color", accent);
-  await expect(options(page).nth(5).locator(".cm-completionLabel")).toHaveCSS("color", muted);
+  await expect(options(page).nth(2).locator(".cm-completionLabel")).toHaveCSS("color", muted);
 
   await page.keyboard.type("gr");
   await expect(options(page)).toHaveText(["Grace HopperMember", "Grace HopperContact · Navy"]);
@@ -127,7 +129,7 @@ test("another reader sees a mentioned contact's name in gray, and nothing else o
   await editor(grace).click();
   await grace.keyboard.press("ControlOrMeta+End");
   await grace.keyboard.type(" @");
-  await expect(options(grace)).toHaveText(["Ada LovelaceMember", "Grace HopperYou"]);
+  await expect(options(grace)).toHaveText(["Grace HopperYou", "Ada LovelaceMember"]);
 
   const heard = said.join("\n");
   expect(heard).toContain("Zoë Álvarez");

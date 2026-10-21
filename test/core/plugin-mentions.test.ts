@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { mentionsIn } from "../../src/core/mentions.ts";
 import type { Contact, Member } from "../../src/core/protocol.ts";
 import { changeOf, draftOf, fieldsOf, labelChoices, labelWords, typeOf } from "../../src/web/plugins/mentions/fields.ts";
-import { newlyMentioned, offered, shown, startsWords, type People } from "../../src/web/plugins/mentions/people.ts";
+import { newlyMentioned, offered, shown, type People } from "../../src/web/plugins/mentions/people.ts";
+import { startsWords } from "../../src/web/plugins/lib/pointing.ts";
 
 const ADA: Member = { personId: "aaaaaaaaaaaa", name: "Ada Lovelace", role: "admin", email: "ada@example.com" };
 const GRACE: Member = { personId: "gggggggggggg", name: "Grace Hopper", role: "editor" };
@@ -11,15 +12,31 @@ const PEOPLE: People = {
   members: new Map([ADA, GRACE].map((m) => [m.personId, m])),
   contacts: [contact("Ada Lovelace", { emails: [{ value: "ADA@example.com", type: null }] }), contact("Grace Hopper", { emails: [{ value: "grace@navy.example", type: null }] }), contact("Sam Okafor", { organization: "Okafor Plumbing" }), contact("Zoë Álvarez", { emails: [{ value: "zoe@example.com", type: null }] }), contact("  ")],
 };
-const labels = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId).map((item) => `${item.label} (${item.detail}, ${item.tone})`);
+const labels = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId).map((item) => `${item.label} (${item.description}, ${item.tone})`);
 
 describe("what @ offers", () => {
   it("is the members in the theme colour, then the member's contacts in gray, without a contact who is a member by their email", () => {
-    expect(labels("")).toEqual(["Ada Lovelace (You, accent)", "Grace Hopper (Member, accent)", "Grace Hopper (Contact, muted)", "Sam Okafor (Contact · Okafor Plumbing, muted)", "Zoë Álvarez (Contact, muted)"]);
+    expect(labels("grace")).toEqual(["Grace Hopper (Member, accent)", "Grace Hopper (Contact, muted)"]);
+    expect(labels("ada")).toEqual(["Ada Lovelace (You, accent)"]);
+  });
+
+  it("alone, is three people, the member first wherever the members list them", () => {
+    const graceFirst = { ...PEOPLE, members: new Map([GRACE, ADA].map((m) => [m.personId, m])) };
+    expect(labels("", graceFirst)).toEqual(["Ada Lovelace (You, accent)", "Grace Hopper (Member, accent)", "Grace Hopper (Contact, muted)"]);
+    expect(labels("", { members: new Map(), contacts: PEOPLE.contacts })).toEqual(["Ada Lovelace (Contact, muted)", "Grace Hopper (Contact, muted)", "Sam Okafor (Contact · Okafor Plumbing, muted)"]);
   });
 
   it("puts no contact's email on the page, which any plugin in it could read", () => {
-    expect(JSON.stringify(offered("", PEOPLE, ADA.personId))).not.toContain("example");
+    const shown = JSON.stringify(["ada", "grace", "zoe"].flatMap((typed) => offered(typed, PEOPLE, ADA.personId)));
+    for (const email of ["ADA@example.com", "grace@navy.example", "zoe@example.com"]) expect(shown).not.toContain(email);
+  });
+
+  it("are people, previewed for a member by their role and the email the member list told, and for a contact not at all", () => {
+    expect(offered("", PEOPLE, ADA.personId).map((item) => [item.kind, item.label, item.preview])).toEqual([
+      ["person", "Ada Lovelace", { facts: [["Role", "Admin"], ["Email", "ada@example.com"]] }],
+      ["person", "Grace Hopper", { facts: [["Role", "Editor"]] }],
+      ["person", "Grace Hopper", undefined],
+    ]);
   });
 
   it("narrows by the start of any word of a name, and for a contact of their email or organization, ignoring case and accents", () => {
@@ -36,8 +53,8 @@ describe("what @ offers", () => {
   });
 
   it("writes a member by id and name, and a contact by name alone: no email, organization, or id of theirs", () => {
-    const written = offered("", PEOPLE, ADA.personId).map((item) => item.insert);
-    expect(written).toEqual(["@[[aaaaaaaaaaaa|Ada Lovelace]]", "@[[gggggggggggg|Grace Hopper]]", "@[[Grace Hopper]]", "@[[Sam Okafor]]", "@[[Zoë Álvarez]]"]);
+    const written = ["", "sam"].flatMap((typed) => offered(typed, PEOPLE, ADA.personId)).map((item) => item.insert);
+    expect(written).toEqual(["@[[aaaaaaaaaaaa|Ada Lovelace]]", "@[[gggggggggggg|Grace Hopper]]", "@[[Grace Hopper]]", "@[[Sam Okafor]]"]);
   });
 
   it("offers the members alone until the contacts are read", () => {

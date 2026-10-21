@@ -138,7 +138,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const [completed] = useState(() => new Compartment());
   const failed = useRef(onContributionFailed);
   failed.current = onContributionFailed;
-  const offered = useMemo(() => completing(completions, (completion, err) => failed.current(completion, err)), [completions]);
+  const offered = useMemo(() => completing(completions, noteId, (completion, err) => failed.current(completion, err)), [completions, noteId]);
   const offeredNow = useRef(offered);
   offeredNow.current = offered;
   const [added] = useState(() => new Compartment());

@@ -843,7 +843,7 @@ export interface EmbedPick {
  * A list offered at the cursor while the member types after a trigger, such as the embed menu on
  * `/`. It opens where the trigger starts a line or follows a space, and not inside code, so a `/`
  * in a path or a date opens nothing. One with `anywhere` opens wherever its trigger is typed. Completions whose triggers both fit share one list, each
- * one's items in the order of their plugins.
+ * one's items in the order of their plugins, grouped by their `kind`.
  */
 export interface Completion {
   id: string;
@@ -858,27 +858,64 @@ export interface Completion {
    * then always a new line, and Tab, the arrow keys or a click pick from the list.
    */
   prose?: boolean;
-  /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
-  items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
+  /** What to offer for what has been typed after the trigger, in the note `at` names, best first. Nothing closes the list. */
+  items(typed: string, at: { noteId: string }): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
   /**
-   * Where its items go in the list among those of the other completions that fit: lower first, 0 when
-   * not said, and in the order of their plugins where it is the same. The calendar's events come after
-   * the notes `[[` offers this way.
+   * Where its items go in the list among those of the other completions that fit and of the same
+   * kind: lower first, 0 when not said, and in the order of their plugins where it is the same.
    */
   order?: number;
 }
 
+/**
+ * The kinds of thing a list at the cursor groups what it offers by, in the order their groups are
+ * listed, each with the heading its group is shown under. A new kind of thing to offer is a row here,
+ * and its row is where its group goes.
+ */
+export const COMPLETION_KINDS = [
+  { kind: "person", heading: "People" },
+  { kind: "note", heading: "Notes" },
+  { kind: "upload", heading: "Uploads" },
+  { kind: "event", heading: "Events" },
+] as const;
+
+export type CompletionKind = (typeof COMPLETION_KINDS)[number]["kind"];
+
+/**
+ * A small look at a completion item, shown beside the list while the item is highlighted: a note's
+ * first lines, an upload's picture, an event's day and time. It is data, so whatever offers an item
+ * says what to show and the list draws it. Each part is left out where it isn't given.
+ */
+export interface CompletionPreview {
+  /** The address of a picture, drawn small. */
+  image?: string;
+  /** Words to read, as plain text, cut where the pane ends. */
+  text?: string;
+  /** What the item is, a name and a value each, such as an event's calendar. */
+  facts?: readonly (readonly [name: string, value: string])[];
+}
+
 export interface CompletionItem {
+  /**
+   * What the item is, such as a person or a note. The list groups items by it, the groups in the
+   * order of `COMPLETION_KINDS`, under a heading each where there is more than one. An item of no kind
+   * comes before every group.
+   */
+  kind?: CompletionKind;
   label: string;
+  /** A line under the label that says what the item is in words, such as a note's folder or an event's day. */
+  description?: string;
   /** Said after the label, more quietly. */
   detail?: string;
+  /** What is shown beside the list while the item is highlighted. */
+  preview?: CompletionPreview;
   /**
    * What takes the place of the trigger and what was typed after it. A function is asked only when
-   * the item is picked, for text that is made then, as a reference to an event is: what it answers is
-   * written once it does, where the trigger and what was typed still are. Null, a failure, or a change
-   * to them meanwhile writes nothing.
+   * the item is picked, for text that is made then, as a reference to an event is, and is told the
+   * note it goes in: what it answers is written once it does, where the trigger and what was typed
+   * still are. Null, a failure, or a change to them meanwhile writes nothing.
    */
-  insert: string | (() => Promise<string | null>);
+  insert: string | ((at: { noteId: string }) => Promise<string | null>);
   /** The part of `insert` left selected, as offsets into it, such as a value to type over. Without it the cursor goes after. */
   select?: readonly [from: number, to: number];
   /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after. */

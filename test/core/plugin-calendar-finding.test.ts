@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CalendarEvent } from "../../src/core/protocol.ts";
-import { finding, listedAs, sought } from "../../src/web/plugins/calendar/finding.ts";
+import { finding, listedAs, sought, upcoming } from "../../src/web/plugins/calendar/finding.ts";
 
 const ZONE = "America/New_York";
 const TODAY = "2026-10-15";
@@ -79,5 +79,14 @@ describe("finding events to link or go to", () => {
   it("lists an event with its day, its time and its calendar", () => {
     expect(listedAs(SYNCS[3]!, ZONE)).toEqual({ label: "Team sync", detail: "Thu, Oct 15, 2026 · 10:00 AM · Work" });
     expect(listedAs(OTHERS[2]!, ZONE)).toEqual({ label: "Offsite", detail: "Wed, Oct 21, 2026 · All day · Personal" });
+  });
+});
+
+describe("the next events, which @ alone offers", () => {
+  it("are those still to start, soonest first, an all-day one from the next day and before the timed ones of its day", () => {
+    const allDay = (id: string, day: string) => ({ ...event(id, id, `${day}T00:00:00Z`), when: { allDay: true as const, from: day, to: day } });
+    const ongoing = event("ongoing", "Ongoing", "2026-10-15T17:30:00Z");
+    const ids = upcoming([...ALL, ongoing, allDay("today", TODAY), allDay("tomorrow", "2026-10-16")], NOW, ZONE).map((e) => e.id);
+    expect(ids).toEqual(["tomorrow", "sync.2026-10-16", "sync.2026-10-19", "plan", "late", "sync.2026-10-20", "off", "may"]);
   });
 });
