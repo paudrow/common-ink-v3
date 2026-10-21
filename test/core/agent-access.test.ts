@@ -81,6 +81,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "folder.find": { path: "plans" },
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
+  "folder.describe": { id: folderId, description: "For plans." },
   "folder.move": { id: folderId, parentId: null },
   "folder.delete": { id: "aaaaaaaaaaaa" },
   "member.list": {},
@@ -172,6 +173,7 @@ describe("an agent's access is its member's", () => {
       "history.revert",
       "folder.create",
       "folder.rename",
+      "folder.describe",
       "folder.move",
       "folder.delete",
       "plugin.install",
@@ -232,7 +234,7 @@ describe("an agent's access is its member's", () => {
     const herFolder = await perform(env.DB, grace, { type: "folder.create", name: "Hers" });
     const ops = everyOp(hers.id, herFolder.id);
 
-    for (const type of ["note.read", "note.write", "note.history", "note.move", "note.label", "note.revert", "note.revertChanges", "note.diff", "note.undo", "note.redo", "folder.rename", "pin.set"] as const) {
+    for (const type of ["note.read", "note.write", "note.history", "note.move", "note.label", "note.revert", "note.revertChanges", "note.diff", "note.undo", "note.redo", "folder.rename", "folder.describe", "pin.set"] as const) {
       const name = TOOLS.find((t) => t.op === type)!.name;
       expect((await tool(token, name, { workspace, ...ops[type] })).text, name).toMatch(/^not_found: No such (note|folder)$/);
       expect((await tool(token, name, { workspace: grace.workspaceId, ...ops[type] })).text, name).toBe("not_found: No such workspace");

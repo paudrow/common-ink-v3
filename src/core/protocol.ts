@@ -14,6 +14,8 @@ export { MAX_SEARCH_LENGTH };
 export const MAX_NOTE_LENGTH = 500_000;
 /** The longest a tag's description can be. */
 export const MAX_TAG_DESCRIPTION = 500;
+/** The longest a folder's description can be. */
+export const MAX_FOLDER_DESCRIPTION = 500;
 export const MAX_SETTINGS_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
@@ -624,6 +626,11 @@ export const Op = z.discriminatedUnion("type", [
   /** Puts a folder inside another, or at the top with a null `parentId`. What is in it goes with it. */
   z.object({ type: z.literal("folder.move"), id: Id, parentId: Id.nullable() }),
   z.object({ type: z.literal("folder.delete"), id: Id }),
+  /**
+   * Says what a folder is for, for everyone who files a note to choose by: folder.list and
+   * folder.find answer it beside the folder. An empty description takes it away.
+   */
+  z.object({ type: z.literal("folder.describe"), id: Id, description: z.string().trim().max(MAX_FOLDER_DESCRIPTION) }),
   /** The settings of whoever asks, in this workspace. Nobody reads another member's. */
   z.object({ type: z.literal("settings.read") }),
   /**
@@ -1338,6 +1345,8 @@ export interface ListedFolder extends Folder {
   access: GrantAccess;
   /** Its name after those of the folders it is in, as far up as the one asking can see: `Projects/Skills`. */
   path: string;
+  /** What it is for, as folder.describe last said. Left out when nobody has. */
+  description?: string;
 }
 
 /** A link written by title that a write left as written: no note the writer can see has the title, or several do (`matches`). */
@@ -1656,6 +1665,7 @@ export interface Results {
   "folder.rename": Folder;
   "folder.move": Folder;
   "folder.delete": { id: string };
+  "folder.describe": { id: string; description: string | null };
   "settings.read": StoredSettings;
   "settings.write": StoredSettings;
   "timeZone.record": { timeZone: string };

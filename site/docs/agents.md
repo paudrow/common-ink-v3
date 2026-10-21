@@ -113,6 +113,10 @@ These stay with you, signed in to Common Ink, whatever your role:
 
 An agent tags notes and todos with the tags your notes already have, and the ones you made ahead in Settings. A write that adds a tag no note it can see has is refused, unless the call names that tag as new, and the agent is told to name one only when you asked for it. An agent limited to folders sees only the tags in those folders. It chooses among them by the description each tag has in Settings, so a description that says when to use a tag steers your agents too. An agent writes a description only when you ask it to.
 
+## Folders an agent files into
+
+An agent files a note in the folder whose description fits it, so a description in Settings, under Folders, that says what goes in a folder steers your agents. An agent describes a folder only when you ask it to.
+
 ## See what an agent changed
 
 On the Agents page, **See its changes** opens History narrowed to that agent. **Revert Claude's changes…**, named for the agent, shows what reverting would do in each note. Then it takes out only that agent's changes and keeps everyone else's. In a note, the command **Toggle blame mode** marks each line with who last changed it, so an agent's lines show its name. [History and blame](/docs/history) covers both.

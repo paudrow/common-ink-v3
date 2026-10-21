@@ -140,6 +140,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       a new folder; with one of that name there already, ignoring case,
                                       prints that one with "created": false, or refuses with --if-exists error
   folder-rename ID --name NAME        give a folder another name
+  folder-describe ID --description TEXT
+                                      say what goes in a folder, as your member asked; an empty TEXT takes it away
   folder-move ID [--parent ID]        put a folder inside another, or at the top level without --parent
   folder-delete ID                    delete an empty folder
   history ID                          a note's changes and who made them
@@ -840,6 +842,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "folder-rename":
         tool = "rename_folder";
         args = { folderId: need("a folder id"), name: needFlag("name") };
+        break;
+      case "folder-describe":
+        tool = "describe_folder";
+        args = { folderId: need("a folder id"), description: needFlag("description") };
         break;
       case "folder-move":
         tool = "move_folder";

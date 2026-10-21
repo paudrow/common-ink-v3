@@ -453,16 +453,16 @@ async function listFolders(ctx: Context): Promise<{ unsortedId: string | null; f
   const { results } = await ctx.db
     .prepare(
       `SELECT (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND ${SEEN("n", "?2", "live")}) AS note_count,
-         (SELECT COUNT(*) FROM uploads u WHERE u.folder_id = f.id AND ${SEEN("u", "?2", "live")}) AS upload_count, ${FOLDER_COLUMNS}
+         (SELECT COUNT(*) FROM uploads u WHERE u.folder_id = f.id AND ${SEEN("u", "?2", "live")}) AS upload_count, f.description, ${FOLDER_COLUMNS}
        WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`,
     )
     .bind(ctx.workspaceId, ctx.sight.bind)
-    .all<FolderRow & { note_count: number; upload_count: number }>();
+    .all<FolderRow & { note_count: number; upload_count: number; description: string | null }>();
   const folders = results.map((row) => toFolder(ctx, row));
   const paths = pathsOf(folders);
   return {
     unsortedId: results.find((row) => row.unsorted)?.id ?? null,
-    folders: results.map((row, i) => ({ ...folders[i]!, noteCount: row.note_count, uploadCount: ctx.shutOff ? 0 : row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view", path: paths.get(row.id)! })),
+    folders: results.map((row, i) => ({ ...folders[i]!, noteCount: row.note_count, uploadCount: ctx.shutOff ? 0 : row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view", path: paths.get(row.id)!, ...(row.description === null ? {} : { description: row.description }) })),
   };
 }
 
@@ -3015,6 +3015,18 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         throw new OpError("invalid", inside ? "A folder can't go inside itself, or inside a folder in it" : TOO_DEEP);
       }
       return toFolder(ctx, { ...folder, parent_id: op.parentId });
+    },
+  },
+
+  // As a tag's, a folder's description steers how the whole workspace is filed, so a guest, or an agent limited to folders, writes none.
+  "folder.describe": {
+    needs: "edit",
+    members: true,
+    async run(ctx, op) {
+      const folder = await loadFolder(ctx, op.id, "edit");
+      const description = op.description || null;
+      await ctx.db.prepare("UPDATE folders SET description = ? WHERE id = ?").bind(description, folder.id).run();
+      return { id: folder.id, description };
     },
   },
 

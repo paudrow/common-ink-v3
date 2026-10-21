@@ -346,6 +346,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
   "folder.move": { on: "folder", needs: "E", args: (id, w) => ({ id, parentId: id === w.folders.Deep ? w.folders.Team : null }) },
+  "folder.describe": { on: "folder", needs: "E", args: (id) => ({ id, description: "For the matrix." }) },
   "folder.delete": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },
   "settings.read": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "settings.write": { on: "workspace", who: EVERYONE, args: () => ({ text: "{}", baseRevision: 99 }) },
@@ -633,6 +634,8 @@ export function accessMatrix(part: ActorName | null) {
                 if (type === "folder.rename" && within && expectation === "done" && folder === within[0]) expectation = "forbidden";
                 // A folder is moved to where it is, and the same holds: Open and Team are at the top, among folders a guest or a limited agent can't see.
                 if (type === "folder.move" && (role === "guest" || within) && expectation === "done" && folder !== "Deep") expectation = "forbidden";
+                // A folder's description steers how the whole workspace is filed: a guest or an agent limited to folders is refused before the folder is looked for.
+                if (type === "folder.describe" && (role === "guest" || within)) expectation = "forbidden";
                 await run(`${type} ${folder}`, type, plan.args(w.folders[folder], w), expectation);
               }
             } else if (plan.on === "everything") {

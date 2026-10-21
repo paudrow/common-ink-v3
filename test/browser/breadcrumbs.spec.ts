@@ -156,3 +156,19 @@ test("a note picked from a crumb's list opens in that pane, though another pane 
   await expect(group(2).getByRole("tab", { selected: true })).toHaveText("Mill");
   await expect(group(1).getByRole("textbox", { name: "Note text" })).toContainText("The mill.");
 });
+
+test.describe("on a touch screen", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("a folder's crumb names the folder whole in its title, as no card shows there", async ({ page }) => {
+    await withTree(page);
+    await expect(crumb(page, "Projects")).toHaveAttribute("title", "Projects");
+    await expect(crumb(page, "Analytical")).toHaveAttribute("title", "Analytical");
+  });
+});
+
+test("where a pointer rests, a folder's crumb leaves its name to the folder's card and has no title", async ({ page }) => {
+  await withTree(page);
+  await expect(crumb(page, "Projects")).toBeVisible();
+  await expect(crumb(page, "Projects")).not.toHaveAttribute("title");
+});

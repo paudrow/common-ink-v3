@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carriesTab, carry, type App, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
+import { MANAGE_PATH, ManageFolders, SETTINGS_ID, asking, folderCards } from "./folderDescriptions.tsx";
 import { canMove, canRename, movable, placesFor, type Place } from "./lib/folderMoves.ts";
 import { useKept } from "./lib/kept.ts";
 import { listable } from "./lib/listable.ts";
@@ -38,9 +39,11 @@ interface Props {
   onPickPlace: (id: string) => void;
   /** Opens the Share dialog for a folder. Left out when there is none to open. */
   onShare?: (folderId: string) => void;
+  /** Opens Settings' Folders with the keyboard on the folder's row, where it is described. */
+  onManage: (folderId: string) => void;
 }
 
-function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSplit, onChanged, onMoveNote, onMoveFolder, onPickPlace, onShare }: Props) {
+function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSplit, onChanged, onMoveNote, onMoveFolder, onPickPlace, onShare, onManage }: Props) {
   const ids = useId();
   const [expandedList, setExpanded] = useKept(host.storage, "expanded", isStrings, []);
   const expanded = new Set(expandedList);
@@ -174,6 +177,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             key={folder.id}
             role="treeitem"
             className="folder-row"
+            data-folder={folder.id}
+            data-folder-card="beside"
             data-drop={dropTarget === folder.id || undefined}
             style={indent(depth)}
             aria-level={depth}
@@ -351,6 +356,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             ...(menu.folder?.access === "edit" ? [{ label: "New folder inside", icon: "plus" as const, action: () => startCreate(menu.id) }] : []),
             ...(menu.folder && placesFor(tree, menu.id, member).length ? [{ label: "Move to…", icon: "folders" as const, action: () => onPickPlace(menu.id) }] : []),
             ...(onShare && menu.folder && shareable === menu.id ? [{ label: "Share", icon: "share" as const, action: () => onShare(menu.id) }] : []),
+            ...(menu.folder ? [{ label: "Manage folders", icon: "settings" as const, action: () => onManage(menu.id) }] : []),
             ...(menu.folder && canRename(tree, menu.id, member)
               ? [
                   {
@@ -510,8 +516,12 @@ export const folders: Plugin = {
   icon: "folders" as const,
   activate(host) {
     const moves = mover(host);
+    const ask = asking();
+    const cards = folderCards(host, ask);
     const pickPlace = (folderId: string | null) => host.app().toggleOverlay(MOVE_OVERLAY, { folderId });
     host.commands.register({ id: "folders.move", title: "Move folder to…", run: () => pickPlace(host.app().folderId) });
+    host.commands.register({ id: "folders.manage", title: "Manage folders", aliases: ["describe folders", "folder descriptions"], run: () => host.app().go(MANAGE_PATH) });
+    host.views.register("settings", { id: SETTINGS_ID, label: "Folders", component: ({ app }) => <ManageFolders host={host} app={app} ask={ask} /> });
     host.views.register("overlay", { id: MOVE_OVERLAY, component: ({ app, state, close }) => <MovePicker app={app} state={state} close={close} moves={moves} /> });
     host.views.register("section", {
       id: "folders",
@@ -535,10 +545,15 @@ export const folders: Plugin = {
             onMoveFolder={moves.move}
             onPickPlace={pickPlace}
             onShare={host.commands.list().some((c) => c.id === SHARE_COMMAND) ? (folderId) => app.toggleOverlay(SHARE_OVERLAY, { folderId }) : undefined}
+            onManage={(folderId) => {
+              ask.ask({ id: folderId, describe: false });
+              app.go(MANAGE_PATH);
+            }}
           />
           )
         );
       },
     });
+    return () => cards.dispose();
   },
 };

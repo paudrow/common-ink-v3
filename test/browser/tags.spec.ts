@@ -880,6 +880,26 @@ test("renaming or moving a tag takes the tags inside it along: dragged by its na
   expect(await textOf()).toBe("# Kickoff\n\n#project/alpha and #project/alpha/minutes\n");
 });
 
+test("a hover card stays while the pointer rests anywhere on it, its description and its padding too, and goes once the pointer leaves it", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const seeds = await create(page, "# Seeds\n\nPay #money\n");
+  await perform(page, { type: "tag.describe", name: "money", description: "Bills and budgets" });
+  await page.goto(`/note/${seeds.id}`);
+  await expect(editor(page)).toContainText("Pay");
+  await listed(page).filter({ hasText: "#money" }).hover();
+  await expect(card(page)).toContainText("Bills and budgets");
+  const description = (await card(page).getByText("Bills and budgets").boundingBox())!;
+  await page.mouse.move(description.x + description.width / 2, description.y + description.height / 2, { steps: 10 });
+  await page.waitForTimeout(1500);
+  await expect(card(page)).toContainText("Bills and budgets");
+  const box = (await card(page).boundingBox())!;
+  await page.mouse.move(box.x + 4, box.y + box.height / 2, { steps: 5 });
+  await page.waitForTimeout(1500);
+  await expect(card(page)).toContainText("Bills and budgets");
+  await page.mouse.move(700, 300, { steps: 5 });
+  await expect(card(page)).toHaveCount(0);
+});
+
 test("a hover card stays while the pointer crosses to it, over other tags on the way, and goes once the pointer has left both", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const seeds = await create(page, "# Seeds\n\n#alpha #beta #gamma #garden #money\n");

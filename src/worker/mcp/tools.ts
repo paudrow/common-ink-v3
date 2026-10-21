@@ -3,7 +3,7 @@ import { timeIn } from "../../core/history.ts";
 import { PRIOR_WRITE, agentActor, isReadOnlyOp, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
 import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
 import { CAPABILITY_NAMES } from "../../core/plugins.ts";
-import { EXPORT_PART_BYTES, EXPORT_PART_FILES, MAX_INLINE_UPLOAD_BYTES, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type ExportPlan, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
+import { EXPORT_PART_BYTES, EXPORT_PART_FILES, MAX_FOLDER_DESCRIPTION, MAX_INLINE_UPLOAD_BYTES, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type ExportPlan, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
 import { EXPORT_INDEX, SHARED_WITH_ME } from "../../core/export.ts";
 import { noteLines } from "../../core/text.ts";
 import { STATES_WRITTEN, TODO_STATES } from "../../core/todos.ts";
@@ -27,7 +27,7 @@ const text = (value: unknown, isError = false): ToolResult => ({
 
 const workspaceId = {
   type: "string",
-  description: "The workspace id. Optional when you belong to only one; list_workspaces shows yours.",
+  description: "The workspace id, from list_workspaces. Optional when you are in only one.",
 } as const;
 
 interface Tool {
@@ -143,7 +143,7 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
 
 /** What an agent may do with plugins: what its member may, as their role allows. */
 const ROLE =
-  "You act in your member's role: an admin's agent installs, updates, uninstalls and permits plugins, as an admin does; any member's agent makes and checks plugins, keeps that member's own drafts and asks an admin for a permission. A read-only token or one limited to folders does none of what changes anything here, and one limited to folders reads none of it. Turning full trust on is each member's own click in the app: no agent can.";
+  "You act in your member's role: an admin's agent installs, updates, uninstalls and permits plugins, as an admin does; any member's agent makes and checks plugins, keeps that member's own drafts and asks an admin for a permission. A token limited to folders reads none of it, and a read-only one changes none of it. No agent turns full trust on.";
 const PLUGIN_DOCS = "A manifest is JSON: name, version, description, capabilities (each { name, reason }), commands, views, embeds and settings, as docs/plugins.md says. The code is JavaScript that runs in a frame of its own and reaches the workspace only through ink.perform, with what an admin permitted.";
 const DRAFT_WORDS = "A draft is its author's alone, kept beside their settings: no other member, admin or agent reads it, and it runs for nobody else.";
 const manifest = { type: "string", description: "The manifest, as JSON text" };
@@ -753,7 +753,7 @@ export const TOOLS: Tool[] = [
   {
     name: "list_folders",
     description:
-      "The folders in a workspace: id, name, path (its name after those of the folders it is in, such as Projects/Skills), the folder each is inside (parentId), and how many notes and uploads are directly in it. unsortedId is the folder a note goes to when none is named.",
+      "The folders in a workspace: id, name, path (its name after those of the folders it is in, such as Projects/Skills), the folder each is inside (parentId), how many notes and uploads are directly in it, and its description, which says what goes in it. unsortedId is the folder a note goes to when none is named.",
     inputSchema: object({}),
     op: "folder.list",
     example: { workspaceId: WORKSPACE },
@@ -789,6 +789,14 @@ export const TOOLS: Tool[] = [
     renames: { folderId: "id" },
     op: "folder.rename",
     example: { folderId: FOLDER, name: "Plans" },
+  },
+  {
+    name: "describe_folder",
+    description: "Say what goes in a folder, only as your member asks: list_folders shows it to everyone filing notes. An empty description takes it away. Needs the editor or admin role.",
+    inputSchema: object({ folderId: folderId("The folder id"), description: { type: "string", maxLength: MAX_FOLDER_DESCRIPTION } }, ["folderId", "description"]),
+    renames: { folderId: "id" },
+    op: "folder.describe",
+    example: { folderId: FOLDER, description: "Plans for the house and garden" },
   },
   {
     name: "move_folder",

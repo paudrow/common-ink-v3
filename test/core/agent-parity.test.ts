@@ -75,6 +75,7 @@ const COMMANDS: Record<string, string[][]> = {
   find_folder: [["folder-find", "Projects/Skills"]],
   create_folder: [["folder-create", "Plans", "--parent", ID, "--if-exists", "error"]],
   rename_folder: [["folder-rename", ID, "--name", "Plans"]],
+  describe_folder: [["folder-describe", ID, "--description", "Plans for the house"]],
   move_folder: [["folder-move", ID, "--parent", ID]],
   delete_folder: [["folder-delete", ID]],
   note_history: [["history", ID]],
@@ -374,7 +375,7 @@ describe("what each argument is called", () => {
         expect(opArguments(tool, { [name]: ID }).fields, `${tool.name} ${name}`).toEqual({ ...tool.defaults, [field]: ID });
       }
     }
-    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(40);
+    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(41);
   });
 
   it("ends every description with an example call the tool takes as it stands", () => {

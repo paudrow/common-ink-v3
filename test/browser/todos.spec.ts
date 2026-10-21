@@ -2082,7 +2082,7 @@ for (const width of [1280, 700]) {
     await expect(tag).toHaveAccessibleName(`#${long}`);
     // Its card names it whole.
     await tag.hover();
-    await expect(page.getByRole("tooltip").locator(".tag-card-name")).toHaveText(`#${long}`);
+    await expect(page.getByRole("tooltip").locator(".hover-card-name")).toHaveText(`#${long}`);
     await page.mouse.move(0, 0);
     await expect(page.getByRole("tooltip")).toHaveCount(0);
     const seen = await chipsBeside(gate);

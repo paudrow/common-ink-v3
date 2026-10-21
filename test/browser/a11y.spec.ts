@@ -63,6 +63,26 @@ const screens: {
       return page;
     },
   },
+  ...(["tags", "folders", "phone"] as const).map((section) => ({
+    name: section === "phone" ? "settings' tags table at a phone's width" : `settings' ${section} table`,
+    open: async (page: Page) => {
+      if (section === "phone") await page.setViewportSize({ width: 420, height: 800 });
+      await withNote(page);
+      await perform(page, { type: "tag.describe", name: "home", description: "Errands about the house" });
+      await perform(page, { type: "folder.create", name: "Garden" });
+      await page.goto(`/settings/${section === "folders" ? "folders" : "tags"}`);
+      const first = settingsDialog(page)
+        .getByRole("treegrid", { name: section === "folders" ? "Folders" : "Tags" })
+        .locator("tbody")
+        .getByRole("row")
+        .first();
+      // Under the pointer, so its pencil and the description's prompt are checked too.
+      await first.hover();
+      return page;
+    },
+    // At a phone's width the Dashboard under Settings has empty cards that scroll, which is the Dashboard's to answer for and not the table's.
+    ...(section === "phone" && { known: ["scrollable-region-focusable"] }),
+  })),
   {
     name: "plugins",
     open: async (page) => {

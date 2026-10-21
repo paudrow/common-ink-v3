@@ -582,9 +582,9 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     return () => clearTimeout(timer);
   }, [unlisted.notes, notes]);
 
-  const refresh = useCallback(() => {
-    void loadFolders();
+  const refresh = useCallback(async () => {
     setListVersion((v) => v + 1);
+    await loadFolders();
   }, [loadFolders]);
 
   // A recurring todo checked off anywhere in the app is filed on a daily note, which may be new, in a folder that may be new.

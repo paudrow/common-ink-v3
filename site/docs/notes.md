@@ -10,6 +10,8 @@ To make a note, press **New note** in the sidebar, or run **New note** from the 
 
 Every note is in one folder. A new note with no folder in front goes to **Unsorted**. **All notes**, the first row of the folder tree, lists every note you can see. An editor can create, rename, and move folders. An admin can delete a folder once it is empty.
 
+Folders are described in Settings, under **Folders**, which the command **Manage folders** opens: every folder as a tree, Unsorted first as in the sidebar and the rest in name order, each folder inside another indented under it, with how many notes are in it and the folders inside it, and a description that says what goes in it. **Manage folders** in a folder's right-click menu in the sidebar opens it at that folder's row. Whoever can edit a folder writes the description there by clicking it, and renames, moves and makes folders there as Settings' Tags does tags: double-click a name, press F2 or click its pencil to rename it; drag a folder by its name onto another, or use **Move to…** in its right-click menu, to move it; and **New folder**, or **New folder inside** in a folder's menu, makes one. Agents read the description to choose where to file a note. Rest on a folder in the sidebar, or on one in the breadcrumbs above a note, to see its card: how many notes are in it and what it is for.
+
 ## Links between notes
 
 Type `[[` to list your notes by title, then pick one. The app stores the link by the note's id, as `[[k3j5h8d9f0a1]]`, and shows the note's current title. Renaming or moving the target changes nothing in the notes that link to it.

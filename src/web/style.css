@@ -8340,8 +8340,8 @@ button.todo-tag[aria-pressed="true"] {
   gap: 12px;
 }
 
-/* A tag's card, laid over the app under the tag it is resting on. A press goes through it to what is under it, but on its links. */
-.tag-card {
+/* A tag's or a folder's card, laid over the app under what it is resting on. Shown by the keyboard or the cursor in a note, a press goes through it to what is under it, but on its links. */
+.hover-card {
   pointer-events: none;
   position: fixed;
   z-index: 95;
@@ -8362,18 +8362,20 @@ button.todo-tag[aria-pressed="true"] {
   line-height: 1.4;
 }
 
-.tag-card a {
+/* Shown by the pointer, all of it holds the pointer, so resting anywhere on it, its text or its padding, keeps it. */
+[data-showing="pointer"] > .hover-card,
+.hover-card a {
   pointer-events: auto;
 }
 
-.tag-card-head {
+.hover-card-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
 
 /* Whole, however long: a chip may cut a tag short, and its card is where it is read in full. */
-.tag-card-name {
+.hover-card-name {
   min-width: 0;
   color: var(--accent);
   font-weight: 550;
@@ -8381,26 +8383,26 @@ button.todo-tag[aria-pressed="true"] {
   overflow-wrap: anywhere;
 }
 
-.tag-card-name:hover {
+.hover-card-name:hover {
   text-decoration: underline;
 }
 
-.tag-card-count {
+.hover-card-count {
   color: var(--muted);
   white-space: nowrap;
 }
 
-.tag-card p {
+.hover-card p {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.tag-card .tag-card-none {
+.hover-card .hover-card-none {
   color: var(--muted);
 }
 
-.tag-card-manage {
+.hover-card-manage {
   justify-self: start;
   color: var(--accent);
 }

@@ -18,7 +18,7 @@ import type { UploadKind } from "../core/filetypes.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
+export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_FOLDER_DESCRIPTION, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
 /**
  * The query language notes and todos are found by, as the server reads it: what is typed to a query
  * and back, every filter there is with what it takes and means, and what is being typed at the
@@ -1150,8 +1150,8 @@ export interface App {
   moveNote(noteId: string, folderId: string): Promise<void>;
   /** Tells the app a note changed, with the note as it is now: its text, its folder, or its state. */
   noteChanged(note: Note): void;
-  /** Reads the folders and notes again, after a change the app wasn't told about. */
-  refresh(): void;
+  /** Reads the folders and notes again, after a change the app wasn't told about: done once the folders are read. */
+  refresh(): Promise<void>;
   /**
    * For the editor area: says a note is open in none of its tabs now. A note the member made that
    * never had anything in it but spaces or a lone `#` is then removed outright, not put in Trash, once
