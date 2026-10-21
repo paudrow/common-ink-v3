@@ -84,6 +84,10 @@ _Avoid_: Importance, normal
 The day a todo is due, written `due:2026-10-14` on its line. It is a calendar date with no time and no time zone. Overdue is a due date before today, where today is the viewing member's.
 _Avoid_: Deadline
 
+**Date**:
+A day written in a note's text on its own, `2026-10-21`, or a day and a time, `2026-10-21 15:00`. It is a calendar day and a clock's time where the member is, with no time zone, the same words wherever it is read. `@` writes one from what is typed (`@today`, `@next friday`, `@tomorrow 3pm`) or from a picked day. The editor draws it as it reads, Wed, Oct 21, and a click on it opens that day's daily note. A date that is part of something longer, such as a due date's `due:2026-10-21`, and a date in a heading are left as written.
+_Avoid_: Date chip (the chip is how a date is drawn), timestamp
+
 **Repeat**:
 How a todo comes due again, written `every:` and a rule on its line: every N days, weeks, months or years after the due date (`every:2w`); N after it was last done (`every:3d-after-done`); days of the week, every week or every Nth (`every:mon,thu`, `every:2w-mon,thu`); days of the month from its start or end (`every:3rd-day`, `every:1st-day,15th-day`, `every:last-day`); the nth weekdays of the month (`every:2nd-tue`, `every:last-fri`); a date or a weekday of a month every year (`every:mar-1`, `every:1st-mon-mar`). A rule may end, on a day or after so many more times (`-until-2026-12-31`, `-times-5`), and its last time checks the todo off for good. A member can **skip** one occurrence: the due date moves to the next with nothing checked off. `docs/todos.md` has each rule and its next due date. A todo with one is a repeating todo. In code the rule is `every` and its module `recurrence.ts`, which a person never reads.
 _Avoid_: Recurrence, recur, schedule

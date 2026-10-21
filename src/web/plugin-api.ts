@@ -874,6 +874,7 @@ export interface Completion {
  */
 export const COMPLETION_KINDS = [
   { kind: "person", heading: "People" },
+  { kind: "date", heading: "Dates" },
   { kind: "note", heading: "Notes" },
   { kind: "upload", heading: "Uploads" },
   { kind: "event", heading: "Events" },

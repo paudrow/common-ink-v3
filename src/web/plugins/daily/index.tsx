@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DAILY_FOLDER, DAILY_SETTINGS, today, type App, type Plugin, type PluginHost } from "../../plugin-api.ts";
-import { browserZone, dayTitled, todayIn, toward, type Asked } from "./days.ts";
+import { browserZone, dayTitled, todayIn, toward } from "./days.ts";
+import { openDay } from "./opening.ts";
 import { dayStepper } from "./steps.ts";
 
 const PATH = "/today";
@@ -47,24 +48,6 @@ const isDaily = (host: PluginHost, noteId: string, day: string): Promise<boolean
     ({ note }) => note?.id === noteId,
     () => false,
   );
-
-/** Opens the member's daily note for the day asked, made as Today makes it when it may be, or says there is none. */
-async function openDay(host: PluginHost, { day, make }: Asked) {
-  try {
-    if (make) {
-      const note = await host.perform({ type: "daily.open", on: day });
-      host.app().noteChanged(note);
-      host.app().refresh();
-      host.app().openNote(note.id, { focus: true });
-      return;
-    }
-    const { note } = await host.perform({ type: "daily.find", on: day });
-    if (note) host.app().openNote(note.id, { focus: true });
-    else host.app().notify({ message: `No note for ${day}` });
-  } catch (err) {
-    host.app().notify({ message: err instanceof Error ? err.message : "Common Ink can't be reached." });
-  }
-}
 
 const todayHere = () => todayIn(Date.now(), browserZone());
 

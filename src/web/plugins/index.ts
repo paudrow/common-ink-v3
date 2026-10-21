@@ -9,6 +9,7 @@ import { commandPalette } from "./commandPalette.tsx";
 import { contacts } from "./contacts/index.tsx";
 import { daily } from "./daily/index.tsx";
 import { dashboard } from "./dashboard/index.tsx";
+import { dates } from "./dates/index.tsx";
 import { embedMenu } from "./embedMenu.ts";
 import { gfm } from "./gfm/index.ts";
 import { html } from "./html/index.ts";
@@ -77,6 +78,7 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [gfm, "gfm/index.ts"],
   [todos, "todos/index.tsx"],
   [daily, "daily/index.tsx"],
+  [dates, "dates/index.tsx"],
   [links, "links/index.ts"],
   [mentions, "mentions/index.tsx"],
   [tables, "tables/index.ts"],

@@ -124,23 +124,24 @@ test("@ lists people, notes, uploads and events under a heading each, every one 
   await expect(preview(page).locator("dl")).toHaveText(/^RoleAdmin/);
 });
 
-test("@ alone lists three people with me first, the three notes edited last, the two latest uploads and the next two events, a heading each", async ({ page }) => {
+test("@ alone lists three people with me first, today and tomorrow, the three notes edited last, the two latest uploads and the next two events, a heading each", async ({ page }) => {
   await withThings(page);
   const read = ["contact.list", "upload.list", "event.list"].map((type) => page.waitForResponse((response) => response.request().postDataJSON()?.type === type));
   await page.keyboard.type("Ask @");
   await Promise.all(read);
   await expect.poll(() => groups(page)).toEqual([
     ["People", 3],
+    ["Dates", 2],
     ["Notes", 3],
     ["Uploads", 2],
     ["Events", 2],
   ]);
   const event = /^.+\w{3}, \w{3} \d{1,2}, \d{4} · (All day|\d{1,2}:\d{2}\s[AP]M) · \w+/;
-  await expect(options(page)).toHaveText(["Ada LovelaceYou", "Ada LovelaceContact · Analytical Engines", "Grace HopperContact · Navy", "HiringUnsorted", "GardenUnsorted", "BudgetUnsorted", /^minutes\.txtFile · /, /^sam-portrait\.pngImage · /, event, event]);
+  await expect(options(page)).toHaveText(["Ada LovelaceYou", "Ada LovelaceContact · Analytical Engines", "Grace HopperContact · Navy", /^Today/, /^Tomorrow/, "HiringUnsorted", "GardenUnsorted", "BudgetUnsorted", /^minutes\.txtFile · /, /^sam-portrait\.pngImage · /, event, event]);
   await expect(options(page).first()).toHaveAttribute("aria-selected", "true");
 
   // Each has its preview beside the list, as when something is typed.
-  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowDown");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowDown");
   await expect(preview(page)).toHaveText("About hiring.");
   for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowDown");
   await expect(preview(page).locator("dt").first()).toHaveText("When");
@@ -162,13 +163,15 @@ test("@ alone and Enter writes my mention before anything has been read, and wha
   await page.keyboard.type(" about @");
   await expect.poll(() => groups(page)).toEqual([
     ["People", 1],
+    ["Dates", 2],
     ["Notes", 3],
   ]);
-  await page.keyboard.press("ArrowDown");
-  await expect(options(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowDown");
+  await expect(options(page).nth(3)).toHaveAttribute("aria-selected", "true");
   release();
   await expect.poll(() => groups(page)).toEqual([
     ["People", 3],
+    ["Dates", 2],
     ["Notes", 3],
     ["Uploads", 2],
     ["Events", 2],

@@ -116,7 +116,7 @@ export const nameSkeleton = (name: string): string =>
  * here is still refused when it would start.
  */
 export const OWN_NAMES = [
-  "Common Ink", "Plugins", "Settings", "Agents", "Archive and Trash", "Backlinks", "Calendar", "Code blocks", "Coin", "Command palette", "Contacts", "Daily notes", "Dashboard", "Dice", "Embed menu", "Folders",
+  "Common Ink", "Plugins", "Settings", "Agents", "Archive and Trash", "Backlinks", "Calendar", "Code blocks", "Coin", "Command palette", "Contacts", "Daily notes", "Dashboard", "Dates", "Dice", "Embed menu", "Folders",
   "GitHub-flavored markdown", "HTML embeds", "History", "Kanban", "LaTeX", "Links", "Media embeds", "Members", "Mentions", "Note clocks", "Note info", "Note list", "Outline bullets", "Quick open",
   "Quick timer", "References", "Sample calendar", "Search", "Sharing", "Sidebar", "Stopwatch", "Tables", "Tabs and splits", "Tags", "Timer", "Todos", "Trash", "Upload embeds", "Uploads", "Vim mode", "Weather", "Word count",
 ];

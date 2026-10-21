@@ -7757,6 +7757,12 @@ button.todo-tag[aria-pressed="true"] {
   font-size: calc(14px * var(--text-scale));
 }
 
+/* `@`'s Pick a date…: the date field alone. */
+.date-pick .chip-day {
+  margin: -6px;
+  border-bottom: 0;
+}
+
 .todo-none {
   color: var(--muted);
   font-size: calc(14px * var(--text-scale));
