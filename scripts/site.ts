@@ -3,12 +3,11 @@
 // site/docs/nav.json. The legal drafts are read where they are kept, so the site never shows a copy that has fallen
 // behind. A page's first `# ` heading is its title, and its first paragraph is its description.
 // A line `<!-- generated:NAME -->` is written from the code it is about, so a reference can't fall behind it.
-// The Worker gets the pages as data and never sees marked.
+// The Worker gets the pages as data and never sees marked. The file is not committed: dev, build, typecheck, the
+// unit tests and a Preview each write it first.
 //
-//   npm run site               write the pages
-//   npm run site -- --check    fail when the written pages are not what site/ makes
+//   npm run site    write the pages
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { parseArgs } from "node:util";
 import { Marked, Renderer, type Token, type Tokens } from "marked";
 import { syntaxDocs } from "../src/core/query.ts";
 import { USAGE } from "./ink-cli.ts";
@@ -198,18 +197,12 @@ function generated(): string {
   return `// Written by scripts/site.ts from site/ and docs/legal/. Edit those and run \`npm run site\`.\n\nexport const PROSE = ${JSON.stringify(pages, null, 2)} as const;\n\nexport const DOCS = ${JSON.stringify(docs(), null, 2)};\n`;
 }
 
-const { values } = parseArgs({ options: { check: { type: "boolean", default: false } } });
 const want = generated();
 let have: string | null = null;
 try {
   have = readFileSync(OUT, "utf8");
 } catch {}
-if (values.check) {
-  if (have !== want) {
-    console.error(`${OUT} is not what site/ and the code it documents make. Run \`npm run site\` and commit what it writes.`);
-    process.exit(1);
-  }
-} else if (have !== want) {
+if (have !== want) {
   // Written only when it changes, so the dev server reloads the Worker only for a change.
   writeFileSync(OUT, want);
   console.log(`Wrote ${OUT}.`);

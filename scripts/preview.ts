@@ -130,6 +130,7 @@ const secrets = path.join(tmpdir(), `ink-preview-${process.pid}.json`);
 writeFileSync(secrets, JSON.stringify({ SESSION_SECRET: randomBytes(32).toString("hex") }), { mode: 0o600 });
 try {
   process.stdout.write(migrate());
+  execFileSync("npm", ["run", "--silent", "site"], { stdio: "inherit" });
   execFileSync("npx", ["vite", "build"], { stdio: "inherit" });
   const out = wrangler(["preview", "-c", GENERATED, "--name", name, "--secrets-file", secrets, "--json", ...(values.message ? ["--message", values.message] : [])]);
   const result = JSON.parse(out.slice(out.indexOf("{"))) as { preview: { urls: Record<string, string> }; deployment: { urls: Record<string, string> } };
