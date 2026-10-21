@@ -291,7 +291,7 @@ export const setUploadPrivate = async (ctx: Context, id: string, to: boolean): P
  * `canShare` as one condition on a row of `grants`: true while whoever made that grant may still
  * share what it is on. A grant that waited for its email to sign in takes effect in a statement that
  * carries this, so it can't take effect in the moment after its maker lost the right, as an invite
- * can't. test/core/access-matrix.test.ts holds it to the same table as `resolve`.
+ * can't. test/core/access-matrix/matrix.ts holds it to the same table as `resolve`.
  *
  * Here the item is the note or the upload the grant is on, and both are read as one thing, `items`.
  * The maker owns the private note it is on, or else is an admin or an editor, the item is not someone
