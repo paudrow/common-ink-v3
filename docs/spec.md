@@ -69,7 +69,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 40. As a member, I want `@` to open an autocomplete that filters as I type, so that I can mention people quickly, and point at a note, an upload, an event or a day from the same list, grouped by kind, each with a line that says what it is and a preview. `@` alone shows a few of each kind: people, me first, today and tomorrow, the notes I edited last, the latest uploads and my next events. `@today`, `@next friday`, `@oct 21`, `@3pm` or `@tomorrow 3pm` writes the date (`2026-10-21`, with `15:00` for a time), and Pick a date… picks any day; a date in a note reads in words, such as Wed, Oct 21, and opens that day's daily note. Clicking a mention opens that person's page: what I may see of them, their todos, and the notes that mention them.
 41. As a member, I want current workspace members to appear in the theme color and everyone else in gray, so that I can tell who has an account in this workspace.
-42. As a member, I want to mention a contact who has no Common Ink account, such as my plumber, so that my notes record who said what.
+42. As a member, I want to mention a contact who has no Common Ink account, such as my plumber, so that my notes record who said what, and where `@` finds nobody by the name I typed, to create them as a contact from the list, so that the person I just met is one of my contacts without leaving the note.
 43. As a member reading someone else's note, I want to see a mentioned contact's name in gray, so that I understand the note without seeing their contact list. Guests and share-link readers see every mention in gray.
 44. As a member, I want mentioning a contact never to give them access, so that recording a name is not sharing.
 

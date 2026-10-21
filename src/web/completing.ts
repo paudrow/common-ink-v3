@@ -2,13 +2,13 @@ import { acceptCompletion, autocompletion, currentCompletions, selectedCompletio
 import { syntaxTree } from "@codemirror/language";
 import { Prec, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { grouped, type Group } from "./completionGroups.ts";
+import { grouped, waits, type Group } from "./completionGroups.ts";
 import { placed, startsLine, typedAfter } from "./completionSyntax.ts";
 import type { Completion, CompletionItem, CompletionPreview } from "./plugin-api.ts";
 
 type Items = readonly CompletionItem[];
-/** An option of CodeMirror's with the line under its label that it doesn't draw itself. */
-type Described = Option & { description?: string };
+/** An option of CodeMirror's with the line under its label that it doesn't draw itself, and the kind of its item. */
+type Described = Option & { description?: string; kind?: string };
 
 /**
  * Opens the list at the cursor while the member types after a completion's trigger, in the editor
@@ -68,6 +68,7 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
     label: item.label,
     detail: item.detail,
     ...(item.description && { description: item.description }),
+    ...(item.kind && { kind: item.kind }),
     ...(group && { section: { name: group.heading, rank: group.rank, header: headed } }),
     ...(item.preview && { info: () => drawn(item.preview!) }),
     apply(view, _picked, listFrom, end) {
@@ -113,7 +114,7 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
   };
   // No delays: a member who types `/timer` and Enter without a pause means the timer.
   return [
-    // A list opens with nothing highlighted, and its first item is highlighted in the same turn unless a prose trigger follows other words on its line, where Enter stays a new line.
+    // A list opens with nothing highlighted, and its first item is highlighted in the same turn unless a prose trigger follows other words on its line, or the item waits to be picked on purpose, where Enter stays a new line.
     autocompletion({
       override: [source],
       icons: false,
@@ -124,7 +125,8 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
       addToOptions: [{ render: (option: Described) => (option.description ? Object.assign(document.createElement("span"), { className: "cm-completionDescription", textContent: option.description }) : null), position: 90 }],
     }),
     EditorView.updateListener.of(({ view, state }) => {
-      if (currentCompletions(state).length && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
+      const first: Described | undefined = currentCompletions(state)[0];
+      if (first && !waits(first.kind) && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
     }),
     // With no list open Tab is whatever it is elsewhere in a note.
     Prec.highest(keymap.of([{ key: "Tab", run: pick }])),

@@ -6,6 +6,9 @@ export interface Group {
   rank: number;
 }
 
+/** Whether an item of `kind` is left for the member to pick on purpose, never highlighted by the list of itself. */
+export const waits = (kind: string | undefined) => COMPLETION_KINDS.some((k) => k.kind === kind && "waits" in k && k.waits);
+
 /**
  * Items in the order a list shows them: those of no kind first, then each kind's in the order of
  * {@link COMPLETION_KINDS}, and within each as they were given. An item of a kind is told its group

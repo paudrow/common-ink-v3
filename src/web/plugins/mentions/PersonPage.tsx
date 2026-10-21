@@ -5,6 +5,7 @@ import { QueryBar } from "../lib/QueryBar.tsx";
 import { TodoList } from "../todos/Todos.tsx";
 import { ContactSection } from "./ContactEditor.tsx";
 import { initialsOf } from "./fields.ts";
+import { addingTo } from "./people.ts";
 
 /** How long typing rests before the search is asked for. */
 const PAUSE_MS = 200;
@@ -141,7 +142,7 @@ export function PersonPage({ host, app, who, openAt }: Props) {
   const canWrite = host.workspace.role === "admin" || host.workspace.role === "editor";
   // Where to add them to the member's own contacts, when they aren't there: the first contacts data source that takes changes, or one that would once connected again.
   const contactSources = sources.filter((s) => s.kind === "contacts" && s.state === "connected");
-  const addTo = contactSources.find((s) => s.writable);
+  const addTo = addingTo(sources);
   const couldAddTo = contactSources.find((s) => s.reconnectToWrite);
 
   return (

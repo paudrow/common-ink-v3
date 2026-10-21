@@ -71,7 +71,7 @@ export { reline } from "../core/blame.ts";
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
-export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, writtenMention, type WrittenMention } from "../core/mentions.ts";
+export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, readableName, writtenMention, type WrittenMention } from "../core/mentions.ts";
 
 /** How a note refers to an upload, which is the same for a plugin as for an agent, and what kind of file an upload is. */
 export { SIZE_WORDS, UPLOAD_EMBEDS, sizeIn, sizeWordIn, uploadIn, withSizeWord, writtenUpload, type SizeWord, type UploadEmbed } from "../core/uploadRefs.ts";
@@ -870,7 +870,9 @@ export interface Completion {
 /**
  * The kinds of thing a list at the cursor groups what it offers by, in the order their groups are
  * listed, each with the heading its group is shown under. A new kind of thing to offer is a row here,
- * and its row is where its group goes.
+ * and its row is where its group goes. What is new is made when it is picked, such as a contact,
+ * outside the note where undo doesn't reach: it `waits`, so the list never highlights it of itself
+ * and Enter stays a new line until an arrow key or Tab picks it.
  */
 export const COMPLETION_KINDS = [
   { kind: "person", heading: "People" },
@@ -878,6 +880,7 @@ export const COMPLETION_KINDS = [
   { kind: "note", heading: "Notes" },
   { kind: "upload", heading: "Uploads" },
   { kind: "event", heading: "Events" },
+  { kind: "new", heading: "New", waits: true },
 ] as const;
 
 export type CompletionKind = (typeof COMPLETION_KINDS)[number]["kind"];
