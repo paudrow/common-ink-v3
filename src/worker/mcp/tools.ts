@@ -426,7 +426,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see that query finds: with no query, every open one. Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. Due days are calendar dates. ${PAGES} A query is filters and words, such as: due:<today priority:>=medium -tag:someday, assignee:@me, is:done, or: call folder:"Common Ink". query_syntax {"scope":"todos"} lists every form, and every token a todo's line can hold. The arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The todos in the notes you can see that query finds: with no query, every open one. Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. A done one's completed says when its line was ticked and who ticked it, the change that last made it done, and is null for an open one. Due days are calendar dates. ${PAGES} A query is filters and words, such as: due:<today priority:>=medium -tag:someday, assignee:@me, is:done, or: call folder:"Common Ink". query_syntax {"scope":"todos"} lists every form, and every token a todo's line can hold. The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
       query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
       ...queryDays,
@@ -482,7 +482,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_history",
-    description: "Each time a repeating todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. Pass id, revision, line and text as list_todos gave them.",
+    description: "Each time a repeating todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. completed is as list_todos gives it. Pass id, revision, line and text as list_todos gave them.",
     inputSchema: object({ noteId, revision: { type: "integer", minimum: 0, description: "The revision of the note, from list_todos" }, line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" }, text: { type: "string", description: "The todo's line as written, from list_todos" } }, ["noteId", "revision", "line", "text"]),
     renames: { noteId: "id" },
     op: "todo.history",

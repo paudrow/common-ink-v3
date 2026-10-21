@@ -502,22 +502,28 @@ describe("undo and redo", () => {
     return { undo: undoTarget(steps, reverted), redo: redoTarget(steps, reverted) };
   };
 
-  it("undo takes back the latest change, then the one before it", () => {
+  it("undo takes back the latest change, then the one before it, and stops at the note's first save", () => {
     expect(targets(step(1), step(2), step(3))).toEqual({ undo: 3, redo: null });
     expect(targets(step(1), step(2), step(3), step(4, "undo", 3))).toEqual({ undo: 2, redo: 4 });
-    expect(targets(step(1), step(2), step(3), step(4, "undo", 3), step(5, "undo", 2))).toEqual({ undo: 1, redo: 5 });
+    expect(targets(step(1), step(2), step(3), step(4, "undo", 3), step(5, "undo", 2))).toEqual({ undo: null, redo: 5 });
+    expect(targets(step(1))).toEqual({ undo: null, redo: null });
   });
 
   it("redo puts back the latest undo, then the one before it, and undo can take a redo back", () => {
     const steps = [step(1), step(2), step(3), step(4, "undo", 3), step(5, "undo", 2), step(6, "redo", 5)];
     expect(targets(...steps)).toEqual({ undo: 6, redo: 4 });
     expect(targets(...steps, step(7, "redo", 4))).toEqual({ undo: 7, redo: null });
-    expect(targets(...steps, step(7, "undo", 6))).toEqual({ undo: 1, redo: 7 });
+    expect(targets(...steps, step(7, "undo", 6))).toEqual({ undo: null, redo: 7 });
   });
 
   it("has nothing to redo once the author has edited after undoing", () => {
     expect(targets(step(1), step(2, "undo", 1), step(3))).toEqual({ undo: 3, redo: null });
     expect(targets(step(1), step(2, "undo", 1), step(3), step(4, "undo", 3), step(5, "redo", 4))).toEqual({ undo: 5, redo: null });
+  });
+
+  it("never undoes a redo that put back a note's first save, which an undo made before undo stopped there had taken back", () => {
+    expect(targets(step(1), step(2, "undo", 1), step(3, "redo", 2))).toEqual({ undo: null, redo: null });
+    expect(targets(step(1), step(2, "undo", 1), step(3, "redo", 2), step(4))).toEqual({ undo: 4, redo: null });
   });
 
   it("has nothing to undo when every change was taken back", () => {

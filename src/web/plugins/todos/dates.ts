@@ -30,11 +30,19 @@ export function dueLabel(day: string, now: string): string {
   if (away === 0) return "Today";
   if (away === 1) return "Tomorrow";
   if (away === -1) return "Yesterday";
+  if (away > 1 && away < 7) return WEEKDAYS[utc(day).getUTCDay()]!;
+  return dateLabel(day, now);
+}
+
+/** A day as its date, such as Oct 15, with its year when that isn't the year of `now`. */
+export function dateLabel(day: string, now: string): string {
   const date = utc(day);
-  if (away > 1 && away < 7) return WEEKDAYS[date.getUTCDay()]!;
   const short = `${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}`;
   return day.slice(0, 4) === now.slice(0, 4) ? short : `${short}, ${day.slice(0, 4)}`;
 }
+
+/** When a todo's line was ticked, as a date where the member is: never Today or a weekday, so it reads the same tomorrow. */
+export const tickedLabel = (at: number, now: string) => `Done ${dateLabel(dayOf(new Date(at)), now)}`;
 
 export type DueState = "overdue" | "today" | "later";
 

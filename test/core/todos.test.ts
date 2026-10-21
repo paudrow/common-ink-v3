@@ -156,6 +156,7 @@ describe("listing todos", () => {
       every: null,
       recurs: null,
       lastDone: null,
+      completed: null,
       tags: ["work", "garden"],
       tagsElsewhere: ["work"],
       assignees: [],
@@ -487,5 +488,50 @@ describe("changing a todo from a listing", () => {
     const note = await create(ada, `- [ ] a\n${"x".repeat(499_990)}`);
 
     expect(await codeOf(perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 0, text: "- [ ] a", due: "2026-01-01" }))).toMatch(/^invalid: With the other changes merged in, the note would be over/);
+  });
+});
+
+describe("when a todo was checked off", () => {
+  it("is the change that ticked its line, kept through an edit of its words, lines written around it and a move, gone when it is opened again, and new when it is ticked again", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const { agent } = await connectAgent(env.DB, ada.personId, "Claude");
+    const claude: Actor = { kind: "agent", agentId: agent.id, personId: ada.personId, workspaceId: ada.workspaceId };
+    const asAda = { kind: "member", personId: ada.personId, name: "Ada Lovelace" };
+    const asClaude = { kind: "agent", agentId: agent.id, name: "Claude", onBehalfOf: ada.personId };
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# Day\n\n- [ ] Call the bank\n- [ ] Book flights" }, 1_000);
+    const write = (as: Actor, baseRevision: number, text: string, at: number) => perform(env.DB, as, { type: "note.write", id: note.id, baseRevision, text }, at);
+    const listed = async () => (await list(ada, { includeCompleted: true })).map((t) => [t.words, t.completed]);
+    const history = async (line: number) => {
+      const todo = (await list(ada, { includeCompleted: true })).find((t) => t.line === line)!;
+      return (await perform(env.DB, ada, { type: "todo.history", id: note.id, revision: todo.revision, line, text: todo.text })).completed;
+    };
+
+    await write(ada, 1, "# Day\n\n- [x] Call the bank\n- [ ] Book flights", 2_000);
+    expect(await listed()).toEqual([
+      ["Book flights", null],
+      ["Call the bank", { at: 2_000, by: asAda }],
+    ]);
+
+    await write(claude, 2, "# Day\n\n- [x] Call the bank about the loan\n- [ ] Book flights", 3_000);
+    await write(ada, 3, "# Day\n\nMorning\n\n- [ ] Book flights\n- [x] Call the bank about the loan", 4_000);
+    expect(await listed()).toEqual([
+      ["Book flights", null],
+      ["Call the bank about the loan", { at: 2_000, by: asAda }],
+    ]);
+    expect(await history(5)).toEqual({ at: 2_000, by: asAda });
+    expect(await history(4)).toBe(null);
+
+    await write(ada, 4, "# Day\n\nMorning\n\n- [ ] Book flights\n- [ ] Call the bank about the loan", 5_000);
+    expect(await listed()).toEqual([
+      ["Book flights", null],
+      ["Call the bank about the loan", null],
+    ]);
+
+    await write(claude, 5, "# Day\n\nMorning\n\n- [ ] Book flights\n- [x] Call the bank about the loan", 6_000);
+    expect(await listed()).toEqual([
+      ["Book flights", null],
+      ["Call the bank about the loan", { at: 6_000, by: asClaude }],
+    ]);
+    expect(await history(5)).toEqual({ at: 6_000, by: asClaude });
   });
 });

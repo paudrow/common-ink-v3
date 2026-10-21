@@ -1,16 +1,17 @@
 import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { createElement, type ReactNode } from "react";
-import { changeTodo, parseTodo, rewriteTodo, type Importance, type LastDone, type PluginHost } from "../../plugin-api.ts";
+import { changeTodo, parseTodo, rewriteTodo, type Importance, type LastDone, type PluginHost, type Ticking } from "../../plugin-api.ts";
 import { BOX_EM } from "../gfm/lists.ts";
 import { chips, type Chip, type Source, type Token } from "../lib/chips.ts";
+import { clock } from "../lib/historyView.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
 import { openPopover } from "../lib/Popover.tsx";
 import { replacing } from "../lib/rewrite.ts";
 import { onTodo, todoLines } from "../lib/todoLines.ts";
 import { ChipMenu } from "./ChipMenu.tsx";
 import { Completions } from "./Completions.tsx";
-import { dueLabel, dueState, today } from "./dates.ts";
+import { dueLabel, dueState, tickedLabel, today } from "./dates.ts";
 import { CHIP_NAMES, PRIORITY, pickerLabel, type ChipKind } from "./picking.ts";
 import { doneLabel, doneName, everyLabel, everyName } from "./recurrence.ts";
 
@@ -84,7 +85,7 @@ export function untick(view: EditorView): boolean {
  * completes a recurring todo whose box a write checked, and the editor takes the line it answers with.
  * Only the server can file the line on the daily note, so nothing is rolled forward here.
  */
-const checkbox = ({ host, noteId, onCompleted, onRecurred }: TodoChipsContext): Chip<Checkbox> => ({
+const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
   ...onTodoLine,
   id: "task",
   find(line, offset) {
@@ -92,6 +93,7 @@ const checkbox = ({ host, noteId, onCompleted, onRecurred }: TodoChipsContext): 
     return todo ? [{ ...todo.box, checked: todo.done }] : [];
   },
   draw(el, token, source) {
+    const { host, noteId, onCompleted, onRecurred } = context;
     const box = document.createElement("input");
     box.type = "checkbox";
     box.checked = token.checked;
@@ -131,8 +133,58 @@ const checkbox = ({ host, noteId, onCompleted, onRecurred }: TodoChipsContext): 
     });
     // The tick is an element of its own, so it is painted in the theme's ink.
     el.append(box, document.createElement("i"));
+    if (token.checked) tickedCard(el, box, () => historyOf(context, source).then((history) => history.completed));
   },
 });
+
+let cards = 0;
+
+/**
+ * A ticked box's card, shown while the pointer is on the box or it has the keyboard: when its line was
+ * ticked and who ticked it. It is read from the server the first time it is shown, and shows nothing
+ * when the server can't say.
+ */
+function tickedCard(el: HTMLElement, box: HTMLInputElement, ask: () => Promise<Ticking | null>) {
+  const card = document.createElement("div");
+  card.className = "md-ticked-card";
+  card.id = `md-ticked-card-${++cards}`;
+  card.setAttribute("role", "tooltip");
+  let read: Promise<Ticking | null> | null = null;
+  const wanted = () => el.isConnected && (el.matches(":hover") || document.activeElement === box);
+  const show = () => {
+    // One that couldn't be read is asked again the next time.
+    read ??= ask().catch(() => (read = null));
+    void read.then((ticked) => {
+      if (!ticked || !wanted()) return;
+      const by = document.createElement("span");
+      by.className = "md-ticked-by";
+      by.append(`by ${ticked.by.name}${ticked.by.kind === "agent" ? " (agent)" : ""}`);
+      card.replaceChildren(`${tickedLabel(ticked.at, today())}, ${clock(ticked.at)}`, by);
+      const at = el.getBoundingClientRect();
+      card.style.left = `${at.left}px`;
+      card.style.top = `${at.bottom + 6}px`;
+      document.body.append(card);
+      box.setAttribute("aria-describedby", card.id);
+      // The box can be drawn away under the pointer, as when the cursor comes to it, and is then told of no leaving.
+      addEventListener("pointermove", stray, true);
+      addEventListener("keydown", hide, true);
+      addEventListener("scroll", hide, true);
+    });
+  };
+  const hide = () => {
+    card.remove();
+    box.removeAttribute("aria-describedby");
+    removeEventListener("pointermove", stray, true);
+    removeEventListener("keydown", hide, true);
+    removeEventListener("scroll", hide, true);
+  };
+  const stray = () => wanted() || hide();
+  el.addEventListener("mouseenter", show);
+  el.addEventListener("mouseleave", hide);
+  box.addEventListener("focus", show);
+  box.addEventListener("blur", hide);
+  box.addEventListener("change", hide);
+}
 
 /**
  * Draws what a chip says, as a button that opens a panel under it. The press doesn't move the cursor, so
@@ -242,15 +294,15 @@ const every: Chip<Every> = {
 const notFoundYet = (err: unknown) => typeof err === "object" && err !== null && ["conflict", "invalid"].includes((err as { code?: string }).code ?? "");
 
 /**
- * A todo's completions, asked for by its line as the editor has it. The host saves what is typed
+ * A todo's history, asked for by its line as the editor has it. The host saves what is typed
  * before it asks, so the revision the app knows may be one behind, where the line isn't what it is
  * now: the server then refuses, and it is asked once more, at the revision the save made.
  */
-async function completions({ host, noteId }: TodoChipsContext, source: Source) {
+async function historyOf({ host, noteId }: TodoChipsContext, source: Source) {
   const ask = async (revision: number) => {
     const line = source.line();
     if (!line) throw new Error("This todo was changed. Open its completions again.");
-    return (await host.perform({ type: "todo.history", id: noteId, revision, line: line.index, text: line.text })).completions;
+    return host.perform({ type: "todo.history", id: noteId, revision, line: line.index, text: line.text });
   };
   const known = host.app().notes?.find((note) => note.id === noteId)?.revision;
   if (known !== undefined) {
@@ -278,7 +330,7 @@ function lastDone(context: TodoChipsContext): Chip<Done> {
       // Listing them changes nothing, so someone who can only read may look.
       panel(el, doneLabel(token, now), doneName(token, now), "Completions", false, (close) =>
         createElement(Completions, {
-          ask: () => completions(context, source),
+          ask: () => historyOf(context, source).then((history) => history.completions),
           done: token,
           now,
           onOpen(noteId) {

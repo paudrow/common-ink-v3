@@ -350,6 +350,70 @@ for (const width of [1600, 820]) {
   });
 }
 
+/** Where each row of the line that says `word` starts: the left edge of its first letter after the quote's `>`s, which are there but not painted. */
+const rowStarts = (page: Page, word: string) =>
+  page.evaluate((w) => {
+    const line = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes(w))!;
+    const rows = new Map<number, number>();
+    let skip = /^[ \t]*(?:>[ \t]?)*/.exec(line.textContent!)![0].length;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (let i = 0; i < node.textContent!.length; i++) {
+        if (skip-- > 0) continue;
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        const { x, top, width } = range.getBoundingClientRect();
+        if (!width) continue;
+        const row = Math.round(top);
+        rows.set(row, Math.min(rows.get(row) ?? Infinity, Math.round(x)));
+      }
+    }
+    return [...rows.entries()].sort(([a], [b]) => a - b).map(([, x]) => x);
+  }, word);
+
+test("a quote that wraps starts every row at one place, written or drawn, and a quote in a quote one step further in", async ({ page }) => {
+  const long = "words that go on and on until the line wraps onto the next row of the column ".repeat(3);
+  await open(page, ["# Quotes", "", `> Goal ${long}`, "> Short line", "", `> > Inner ${long}`, "", "- Item words", "  > Listed quote"].join("\n"), undefined, 820);
+  await page.evaluate(() => document.fonts.ready);
+
+  const goal = await rowStarts(page, "Goal");
+  expect(goal.length).toBeGreaterThan(2);
+  expect(new Set(goal).size, `rows start at ${goal}`).toBe(1);
+  expect((await rowStarts(page, "Short line"))).toEqual([goal[0]]);
+  const inner = await rowStarts(page, "Inner");
+  expect(inner.length).toBeGreaterThan(2);
+  expect(new Set(inner).size, `rows start at ${inner}`).toBe(1);
+  expect(inner[0]! - goal[0]!).toBeGreaterThan(8);
+  // A quote under a list item is hung by the item's words, and its own words start after its mark, which is there whether it is painted or not.
+  const listed = await places(page, ["Item words", "Listed quote"]);
+  expect(listed["Listed quote"]!.x - listed["Item words"]!.x).toBeGreaterThan(4);
+  const markEnd = await page.locator(".cm-line").filter({ hasText: "Listed quote" }).evaluate((el) => {
+    // The right edge of the space after the `>`, which can be a text node of its own.
+    let space = el.textContent!.indexOf(">") + 1;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (space >= node.textContent!.length) {
+        space -= node.textContent!.length;
+        continue;
+      }
+      const range = document.createRange();
+      range.setStart(node, space);
+      range.setEnd(node, space + 1);
+      return range.getBoundingClientRect().right;
+    }
+    return Infinity;
+  });
+  expect((await places(page, ["Listed quote"]))["Listed quote"]!.x).toBeGreaterThanOrEqual(markEnd - 0.5);
+  expect(listed["Listed quote"]!.x - listed["Item words"]!.x).toBeGreaterThan(4);
+
+  await page.locator(".cm-line").filter({ hasText: "Short line" }).click();
+  await page.keyboard.press("Home");
+  await expectShown(page.locator(".cm-line").filter({ hasText: "Short line" }), "> Short line");
+  expect(await rowStarts(page, "Goal")).toEqual(goal);
+  expect(await rowStarts(page, "Short line")).toEqual([goal[0]]);
+});
+
 test("lines after a block of math never move up when the drawing arrives, and don't move at all for a formula seen before", async ({ page }) => {
   let release!: () => void;
   const held = new Promise<void>((done) => (release = done));

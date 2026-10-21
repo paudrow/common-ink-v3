@@ -606,9 +606,14 @@ export function settledRevert({ changes, conflicts }: Reverting, text: string, c
   return edit.empty ? { changes, resolution: null } : { changes: changes.compose(edit), resolution: { reverted: changes, edit } };
 }
 
-/** The author's latest change that still stands and isn't itself an undo: what undo takes back. */
+/**
+ * The author's latest change that still stands and isn't itself an undo: what undo takes back. Never
+ * revision 1, the note's first save, which holds the text the note began with, and never a redo of an
+ * undo of it, made before undo stopped there, since taking that back would take the first save back.
+ */
 export function undoTarget(mine: readonly Step[], reverted: ReadonlyMap<number, number>): number | null {
-  return mine.findLast((s) => !reverted.has(s.revision) && s.reverts?.how !== "undo")?.revision ?? null;
+  const firstSave = (s: Step) => s.revision === 1 || (s.reverts?.how === "redo" && mine.some((u) => s.reverts!.revisions.includes(u.revision) && u.reverts?.revisions.includes(1)));
+  return mine.findLast((s) => !firstSave(s) && !reverted.has(s.revision) && s.reverts?.how !== "undo")?.revision ?? null;
 }
 
 /** The author's latest undo that still stands, unless they have edited since: what redo takes back. */

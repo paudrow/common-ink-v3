@@ -2305,3 +2305,64 @@ test("what isn't set on a todo shows only while its row is pointed at or has the
   await expect(popover(page)).toHaveAccessibleName("Due date of Sweep");
   expect(await boxes()).toEqual(resting);
 });
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** A day, YYYY-MM-DD, as a ticked todo says it: Oct 15. */
+const monthDay = (day: string) => `${MONTHS[Number(day.slice(5, 7)) - 1]} ${Number(day.slice(8))}`;
+
+test("a ticked todo's row says quietly the day it was ticked, which goes when it is opened again and comes back when it is ticked again, and an agent is told when and by whom", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Day\n\n- [ ] Call the bank\n- [ ] Book flights" });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: "# Day\n\n- [x] Call the bank\n- [ ] Book flights" });
+  const today = await localDay(page);
+  await page.goto("/todos");
+  await bar(page).fill("is:open OR is:done");
+  await expect(words(page)).toHaveText(["Book flights", "Call the bank"]);
+
+  await expect(row(page, "Call the bank").locator(".todo-ticked")).toHaveText(`Done ${monthDay(today)}`);
+  await expect(row(page, "Book flights").locator(".todo-ticked")).toHaveCount(0);
+
+  const agent = await connectAgent(page, "Claude");
+  const listed = await agent.tool<{ todos: { words: string; completed: { at: string; by: { kind: string; name: string } } | null }[] }>("list_todos", { query: "is:open OR is:done" });
+  expect(listed.todos.map((t) => [t.words, t.completed && t.completed.by.name])).toEqual([
+    ["Book flights", null],
+    ["Call the bank", "Ada Lovelace"],
+  ]);
+  expect(listed.todos[1]!.completed!.at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+
+  await row(page, "Call the bank").getByRole("checkbox").uncheck();
+  await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe("- [ ] Call the bank");
+  await expect(row(page, "Call the bank").locator(".todo-ticked")).toHaveCount(0);
+  await row(page, "Call the bank").getByRole("checkbox").check();
+  await expect(row(page, "Call the bank").locator(".todo-ticked")).toHaveText(`Done ${monthDay(today)}`);
+});
+
+test("in a note, a ticked box shows a card while it is pointed at or has the keyboard: the day and time it was ticked and who ticked it; an open box shows none", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Day\n\n- [ ] Call the bank\n- [ ] Book flights" });
+  const agent = await connectAgent(page, "Claude");
+  await agent.tool("set_todo", { noteId: note.id, revision: 1, line: 3, text: "- [ ] Book flights", done: true });
+  const today = await localDay(page);
+  await page.goto(`/note/${note.id}`);
+  await expect(line(page, "Book flights").getByRole("checkbox")).toBeChecked();
+  const card = page.getByRole("tooltip");
+
+  await line(page, "Call the bank").getByRole("checkbox").hover();
+  await page.waitForTimeout(300);
+  await expect(card).toHaveCount(0);
+
+  await line(page, "Book flights").getByRole("checkbox").hover();
+  await expect(card).toHaveText(new RegExp(`^Done ${monthDay(today)}, \\d{1,2}:\\d{2}\\s[AP]Mby Claude \\(agent\\)$`));
+  await expect(line(page, "Book flights").getByRole("checkbox")).toHaveAttribute("aria-describedby", (await card.getAttribute("id"))!);
+  await page.mouse.move(0, 0);
+  await expect(card).toHaveCount(0);
+  await line(page, "Book flights").getByRole("checkbox").hover();
+  await expect(card).toHaveCount(1);
+  await page.keyboard.press("ArrowDown");
+  await expect(card).toHaveCount(0);
+
+  await line(page, "Book flights").getByRole("checkbox").focus();
+  await expect(card).toHaveText(/^Done .+by Claude \(agent\)$/);
+  await editor(page).focus();
+  await expect(card).toHaveCount(0);
+});

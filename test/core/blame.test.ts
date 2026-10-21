@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blame, reline, runsOfLines } from "../../src/core/blame.ts";
+import { blame, reline, runsOfLines, tickedLines } from "../../src/core/blame.ts";
 import { reverting, settledRevert, type Choice, type Recorded } from "../../src/core/history.ts";
 import type { Reverts } from "../../src/core/protocol.ts";
 import { applyChanges, changesBetween, toDoc } from "../../src/core/text.ts";
@@ -174,5 +174,22 @@ describe("moving who wrote each line over an edit", () => {
       const final = texts.at(-1)!;
       expect(whole).toHaveLength(final ? final.split("\n").length : 0);
     }
+  });
+});
+
+describe("when each done todo was ticked", () => {
+  /** The revision that ticked each line of the note the texts make, one change after another from an empty note. */
+  const ticked = (...texts: string[]) => tickedLines(texts.map((text, i) => changesBetween(i ? texts[i - 1]! : "", text)));
+
+  it("is the change that ticked it, kept through an edit of its words in the same save as a line written above it", () => {
+    expect(ticked("x\n- [ ] b", "x\n- [x] b", "x\nnew line\n- [x] b edited")).toEqual([0, 0, 2]);
+  });
+
+  it("is never another todo's: a save that takes out one ticked line and edits the next gives the edited one that save's date", () => {
+    expect(ticked("- [ ] a\n- [ ] b", "- [x] a\n- [ ] b", "- [x] a\n- [x] b", "- [x] b edited")).toEqual([4]);
+  });
+
+  it("is new when a todo is ticked again, and none for an open one", () => {
+    expect(ticked("- [ ] a\n- [ ] b", "- [x] a\n- [ ] b", "- [ ] a\n- [ ] b", "- [x] a\n- [ ] b")).toEqual([4, 0]);
   });
 });

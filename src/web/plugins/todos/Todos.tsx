@@ -8,7 +8,7 @@ import { Assignees, sameWho, whoOf } from "./Assignees.tsx";
 import { ChipMenu, MoreTags, TagMenu, type PlacedTag } from "./ChipMenu.tsx";
 import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
-import { dayOf, dueLabel, dueState, savedQuery } from "./dates.ts";
+import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
 import { CHIP_NAMES, PRIORITY, pickerLabel, picking, tagged, type Opened, type PickingEvent, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
@@ -72,7 +72,7 @@ function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
   const known = [...todo.assignees, ...(change.assign ? [change.assign] : [])];
   const assignees = new Map(read.assignees.map((a) => [mentionKey(a), known.find((person) => sameWho(person, mentionKey(a))) ?? { id: isPersonId(a.target) ? a.target : null, name: mentionName(a), member: false }]));
-  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
+  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.done ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
@@ -518,6 +518,7 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
             <span className="todo-chip-word">Add tag</span>
           </button>
         )}
+        {todo.completed && <span className="todo-ticked">{tickedLabel(todo.completed.at, now)}</span>}
       </span>
       <button type="button" className="todo-note" title={`Open ${title}`} data-row-open onClick={() => onOpen(todo)}>
         <span className="todo-note-title">{title}</span>
@@ -757,7 +758,8 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
           (note) => {
             queue.revisions.set(keyOf(todo), note.revision);
             // A row the list no longer has keeps the revision its line was written at, for the next change made to it there.
-            arrange({ type: "change", key: keyOf(todo), to: (t) => ({ ...t, revision: note.revision }) });
+            // One this change ticked says so now, as the list read again will: the change is the note's latest.
+            arrange({ type: "change", key: keyOf(todo), to: (t) => ({ ...t, revision: note.revision, ...(t.done && !t.completed && { completed: { at: note.updatedAt, by: note.updatedBy } }) }) });
             app.noteChanged(note);
           },
           () => arrange({ type: "refused", key: keyOf(todo) }),

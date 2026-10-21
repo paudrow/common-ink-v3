@@ -714,11 +714,12 @@ describe("a change taken out next to another author's line", () => {
   it("undo leaves the todo an agent added above whole", async () => {
     const ada = await newMember();
     const claude = await agentOf(ada);
-    const note = await perform(env.DB, ada, { type: "note.create", text: "- [ ] buy milk" });
-    await write(claude.actor, note.id, "- [ ] call bank\n- [ ] buy milk");
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# List" });
+    await write(ada, note.id, "# List\n- [ ] buy milk");
+    await write(claude.actor, note.id, "# List\n- [ ] call bank\n- [ ] buy milk");
 
-    expect((await perform(env.DB, ada, { type: "note.undo", id: note.id })).text).toBe("- [ ] call bank");
-    expect((await perform(env.DB, ada, { type: "note.redo", id: note.id })).text).toBe("- [ ] call bank\n- [ ] buy milk");
+    expect((await perform(env.DB, ada, { type: "note.undo", id: note.id })).text).toBe("# List\n- [ ] call bank");
+    expect((await perform(env.DB, ada, { type: "note.redo", id: note.id })).text).toBe("# List\n- [ ] call bank\n- [ ] buy milk");
   });
 
   it("reverting an agent's changes leaves the member's lines around them whole", async () => {
@@ -783,6 +784,7 @@ describe("undo and redo", () => {
     const ada = await newMember();
     const grace = await addMember(ada, "editor");
     const note = await perform(env.DB, ada, { type: "note.create", text: "one" });
+    await write(ada, note.id, "one two");
     await perform(env.DB, ada, { type: "note.undo", id: note.id });
     await write(ada, note.id, "two");
 
@@ -796,9 +798,28 @@ describe("undo and redo", () => {
     const grace = await addMember(ada, "editor");
     const note = await perform(env.DB, ada, { type: "note.create", text: "one" });
     await write(ada, note.id, "one two");
-    await perform(env.DB, grace, { type: "note.revertChanges", id: note.id, revisions: [2] });
+    await write(ada, note.id, "one two three");
+    await perform(env.DB, grace, { type: "note.revertChanges", id: note.id, revisions: [3] });
 
-    expect(await perform(env.DB, ada, { type: "note.undo", id: note.id })).toMatchObject({ revision: 4, text: "" });
+    expect(await perform(env.DB, ada, { type: "note.undo", id: note.id })).toMatchObject({ revision: 5, text: "one" });
+  });
+
+  it("stop at the note's first save, and never take back the text it was made with", async () => {
+    const ada = await newMember();
+    const claude = await agentOf(ada);
+    const made = await perform(env.DB, ada, { type: "note.create", text: "# Made with text" });
+    const typed = await perform(env.DB, ada, { type: "note.create" });
+    await write(ada, typed.id, "# Typed");
+    await write(ada, typed.id, "# Typed\n\nmore");
+    await write(claude.actor, typed.id, "# Typed\n\nmore\n\nClaude's line");
+    const nothing = { code: "invalid", message: "There's nothing of yours to undo in this note" };
+
+    await expect(perform(env.DB, ada, { type: "note.undo", id: made.id })).rejects.toMatchObject(nothing);
+    expect(await read(ada, made.id)).toBe("# Made with text");
+    expect((await perform(env.DB, ada, { type: "note.undo", id: typed.id })).text).toBe("# Typed\n\nClaude's line");
+    await expect(perform(env.DB, ada, { type: "note.undo", id: typed.id })).rejects.toMatchObject(nothing);
+    expect(await read(ada, typed.id)).toBe("# Typed\n\nClaude's line");
+    expect((await history(ada, typed.id)).map((c) => c.revision)).toEqual([1, 2, 3, 4]);
   });
 });
 
