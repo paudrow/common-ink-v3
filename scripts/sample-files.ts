@@ -131,12 +131,12 @@ export const sampleFile = async (name: string): Promise<Bytes | null> => (await 
 /** How wide and tall a sample video is, which the server doesn't read from its bytes: a note keeps that much room for it. */
 export const sampleSize = (name: string): { width: number; height: number } | null => (name.toLowerCase() === "sample.webm" ? { width: 320, height: 180 } : null);
 
-const WORD = String.raw`(?:small|medium|large|\d{1,3}%)`;
+const WORD = String.raw`(?:small|medium|large|\d{1,3}%|crop=\d+,\d+,\d+,\d+)`;
 const NAMED = new RegExp(`(?<!:)::(${UPLOAD_EMBEDS.join("|")})\\{([^{}\\n]*?\\.[A-Za-z0-9]+)((?:[ \\t]+${WORD})*)\\}`, "g");
 
 /**
  * Where a text names a file by its name and holds no upload's id, as `::image{sample.png}` does,
- * outside code, with the words after it that size it, if it has any (`::image{sample.png medium}`, `::image{sample.png 42%}`). An id has no
+ * outside code, with the words after it that size or crop it, if it has any (`::image{sample.png medium}`, `::image{sample.png 42% crop=0,220,640,140}`). An id has no
  * dot in it, so a name with an ending is never taken for one.
  */
 export function namedUploads(text: string): { embed: UploadEmbed; name: string; words?: string; from: number; to: number }[] {

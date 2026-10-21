@@ -1,4 +1,4 @@
-import { SIZE_SHARE, shareIn, sizeIn, type BelowBox, type UploadEmbed, type UploadKind } from "../../plugin-api.ts";
+import { cropIn, SIZE_SHARE, shareIn, sizeIn, type BelowBox, type UploadEmbed, type UploadKind } from "../../plugin-api.ts";
 import { SHOWS, type Preview } from "./previewing.ts";
 
 /** The room kept for a picture or a video whose embed gives no size. */
@@ -12,14 +12,15 @@ export const DEFAULT_VIDEO = { width: 640, height: 360 };
 
 /**
  * The room an embed of an upload keeps below its line, from what the note writes alone: its share
- * of the note's column, at the shape of the size after the id, and never wider than that size. Null
- * for a file, which is a chip in its line.
+ * of the note's column, at the shape of the size after the id, and never wider than that size. A
+ * cropped picture's room is the crop's shape and no wider than the crop. Null for a file, which is
+ * a chip in its line.
  */
 export function boxFor(embed: UploadEmbed, config: string): BelowBox | null {
   if (embed === "file") return null;
   if (embed === "audio") return { height: AUDIO_HEIGHT };
-  const size = sizeIn(config);
-  const box = size ? { ratio: size.width / size.height, maxWidth: size.width } : UNSIZED;
+  const shown = (embed === "image" && cropIn(config)) || sizeIn(config);
+  const box = shown ? { ratio: shown.width / shown.height, maxWidth: shown.width } : UNSIZED;
   const share = shareIn(config);
   return share === 1 ? box : { ...box, share };
 }

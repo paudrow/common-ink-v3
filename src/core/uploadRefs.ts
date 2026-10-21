@@ -3,7 +3,7 @@ import { blanked, codeSpans } from "./spans.ts";
 
 /**
  * A note refers to an upload by an embed whose config starts with the upload's id: `::image{id 640x480}`,
- * `::image{id 640x480 42%}`, `::video{id 640x360 medium}`, `::audio{id}`, or `::file{id}`. The embed's
+ * `::image{id 640x480 42% crop=120,40,800,600}`, `::video{id 640x360 medium}`, `::audio{id}`, or `::file{id}`. The embed's
  * name is what says the id is an upload's, since a note's id is written the same way. Anything after
  * the id is how it is shown, and the upload's name is never in the note.
  */
@@ -74,6 +74,51 @@ export function withShare(config: string, share: number): string {
   const word = SIZE_WORDS.find((w) => Math.round(SIZE_SHARE[w] * 100) === percent);
   const width = word === "full" ? null : (word ?? `${percent}%`);
   return [id, size, width, ...words.filter((w) => shareOf(w) === null)].filter(Boolean).join(" ");
+}
+
+/** A part of a picture, in its own pixels from its top left corner. */
+export interface Crop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const CROP = /^crop=(\d{1,5}),(\d{1,5}),(\d{1,5}),(\d{1,5})$/;
+
+/**
+ * The part of its picture an embed's config draws: the first word after the id written
+ * `crop=X,Y,WIDTH,HEIGHT`, in the pixels of the size after the id, and only as much of it as is in
+ * the picture. Null where there is no such word, no size, nothing of the picture in it, or all of it.
+ */
+export function cropIn(config: string): Crop | null {
+  const size = sizeIn(config);
+  const word = config.split(/[ \t]+/).slice(1).find((w) => CROP.test(w));
+  if (!size || !word) return null;
+  const [x, y, width, height] = CROP.exec(word)!.slice(1).map(Number) as [number, number, number, number];
+  const [left, top] = [Math.min(x, size.width), Math.min(y, size.height)];
+  const crop = { x: left, y: top, width: Math.min(x + width, size.width) - left, height: Math.min(y + height, size.height) - top };
+  if (crop.width <= 0 || crop.height <= 0) return null;
+  return crop.width === size.width && crop.height === size.height ? null : crop;
+}
+
+/**
+ * An embed's config drawing `crop` of its picture, in whole pixels within the size after the id,
+ * written after its size, and after its width where that follows the size. Null, or all of the
+ * picture, writes none. Its id, its size, its width and every other word stay as they were. A
+ * config naming no upload, or with no size, is left as it is.
+ */
+export function withCrop(config: string, crop: Crop | null): string {
+  const size = sizeIn(config);
+  if (!size) return config;
+  const [id, ...words] = config.split(/[ \t]+/).filter((w) => !CROP.test(w));
+  const lead = words[1] !== undefined && shareOf(words[1]) !== null ? 2 : 1;
+  const clamp = (n: number, most: number) => Math.max(0, Math.min(most, Math.round(n)));
+  const [x, y] = [clamp(crop?.x ?? 0, size.width - 1), clamp(crop?.y ?? 0, size.height - 1)];
+  const [right, bottom] = [clamp((crop?.x ?? 0) + (crop?.width ?? size.width), size.width), clamp((crop?.y ?? 0) + (crop?.height ?? size.height), size.height)];
+  const whole = !crop || (x === 0 && y === 0 && right === size.width && bottom === size.height);
+  const word = whole ? [] : [`crop=${x},${y},${Math.max(1, right - x)},${Math.max(1, bottom - y)}`];
+  return [id, ...words.slice(0, lead), ...word, ...words.slice(lead)].join(" ");
 }
 
 /** The ids of the uploads a note's text refers to outside code, each once, in the order they first appear. */

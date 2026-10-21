@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shareIn, sizeIn, uploadIds, withShare, writtenUpload } from "../../src/core/uploadRefs.ts";
+import { cropIn, shareIn, sizeIn, uploadIds, withCrop, withShare, writtenUpload } from "../../src/core/uploadRefs.ts";
 
 const ID = "abcdefgh1234";
 
@@ -64,5 +64,62 @@ describe("an embed drawn another width", () => {
   it("is still the same upload to the note", () => {
     for (const share of [1 / 3, 0.42, 1]) expect(uploadIds(`::image{${withShare(`${ID} 4x3`, share)}}`)).toEqual([ID]);
     expect(writtenUpload("image", ID, { width: 4, height: 3 })).toBe(`::image{${ID} 4x3}`);
+  });
+});
+
+describe("the part of its picture a note says is drawn", () => {
+  it("is the crop word after the id, in the pixels of the size", () => {
+    expect(cropIn(`${ID} 1200x800 crop=120,40,800,600`)).toEqual({ x: 120, y: 40, width: 800, height: 600 });
+    expect(cropIn(`${ID} 1200x800 42% crop=0,0,600,800`)).toEqual({ x: 0, y: 0, width: 600, height: 800 });
+    expect(cropIn(`${ID} 1200x800 crop=1,2,3,4 large`)).toEqual({ x: 1, y: 2, width: 3, height: 4 });
+    expect(cropIn(`${ID} 1200x800 huge crop=1,2,3,4 crop=5,6,7,8`)).toEqual({ x: 1, y: 2, width: 3, height: 4 });
+  });
+
+  it("is only as much of it as is in the picture", () => {
+    expect(cropIn(`${ID} 1200x800 crop=1000,700,800,600`)).toEqual({ x: 1000, y: 700, width: 200, height: 100 });
+    expect(cropIn(`${ID} 1200x800 crop=1200,0,10,10`)).toBeNull();
+  });
+
+  it("is none for all of the picture, for no size, and for a word written any other way", () => {
+    expect(cropIn(`${ID} 1200x800 crop=0,0,1200,800`)).toBeNull();
+    expect(cropIn(`${ID} 1200x800 crop=0,0,5000,5000`)).toBeNull();
+    expect(cropIn(`${ID} crop=1,2,3,4`)).toBeNull();
+    expect(cropIn(`${ID} 1200x800 crop=1,2,0,4`)).toBeNull();
+    for (const word of ["crop=1,2,3", "crop=1,2,3,4,5", "crop=-1,2,3,4", "crop=1.5,2,3,4", "Crop=1,2,3,4", "crop", "crop=1, 2,3,4"]) expect(cropIn(`${ID} 1200x800 ${word}`), word).toBeNull();
+    expect(cropIn("crop=1,2,3,4")).toBeNull();
+  });
+});
+
+describe("an embed drawing another part of its picture", () => {
+  it("writes the crop in whole pixels after the size and the width", () => {
+    expect(withCrop(`${ID} 1200x800`, { x: 120, y: 40, width: 800, height: 600 })).toBe(`${ID} 1200x800 crop=120,40,800,600`);
+    expect(withCrop(`${ID} 1200x800 42%`, { x: 120.4, y: 39.6, width: 800.2, height: 600.5 })).toBe(`${ID} 1200x800 42% crop=120,40,801,600`);
+    expect(withCrop(`${ID} 1200x800 medium huge`, { x: 0, y: 0, width: 600, height: 800 })).toBe(`${ID} 1200x800 medium crop=0,0,600,800 huge`);
+  });
+
+  it("puts a new crop after the size, and after the width where that follows the size, and keeps every other word", () => {
+    expect(withCrop(`${ID} 1200x800 small crop=1,2,3,4 huge`, { x: 10, y: 20, width: 30, height: 40 })).toBe(`${ID} 1200x800 small crop=10,20,30,40 huge`);
+    expect(withCrop(`${ID} 1200x800 huge small crop=1,2,3,4`, { x: 10, y: 20, width: 30, height: 40 })).toBe(`${ID} 1200x800 crop=10,20,30,40 huge small`);
+  });
+
+  it("writes none for null or for all of the picture, and keeps it within the picture", () => {
+    expect(withCrop(`${ID} 1200x800 42% crop=120,40,800,600`, null)).toBe(`${ID} 1200x800 42%`);
+    expect(withCrop(`${ID} 1200x800 crop=120,40,800,600`, { x: 0, y: 0, width: 1200, height: 800 })).toBe(`${ID} 1200x800`);
+    expect(withCrop(`${ID} 1200x800`, { x: -0.3, y: 0.2, width: 1200.4, height: 799.9 })).toBe(`${ID} 1200x800`);
+    expect(withCrop(`${ID} 1200x800`, { x: 1000, y: 700, width: 800, height: 600 })).toBe(`${ID} 1200x800 crop=1000,700,200,100`);
+  });
+
+  it("leaves a config with no size, or naming no upload, as it is", () => {
+    expect(withCrop(`${ID} medium`, { x: 1, y: 2, width: 3, height: 4 })).toBe(`${ID} medium`);
+    expect(withCrop("not an id", { x: 1, y: 2, width: 3, height: 4 })).toBe("not an id");
+  });
+
+  it("survives a new width, and a new width survives it", () => {
+    const cropped = withCrop(`${ID} 1200x800 42%`, { x: 120, y: 40, width: 800, height: 600 });
+    const resized = withShare(cropped, 0.6);
+    expect(resized).toBe(`${ID} 1200x800 60% crop=120,40,800,600`);
+    expect(cropIn(resized)).toEqual({ x: 120, y: 40, width: 800, height: 600 });
+    expect(shareIn(withCrop(resized, { x: 0, y: 0, width: 600, height: 600 }))).toBe(0.6);
+    expect(uploadIds(`::image{${resized}}`)).toEqual([ID]);
   });
 });

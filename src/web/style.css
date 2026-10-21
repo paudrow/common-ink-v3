@@ -10229,7 +10229,7 @@ button.todo-tag[aria-pressed="true"] {
  * around it. It fills the room the note keeps for it, and the room never follows it. Its size handle
  * and the width a drag will snap to are drawn past its edges.
  */
-.embed-below:has(> .embed-below-drawn > :is(.upload-image, .upload-video, .upload-audio)) {
+.embed-below:has(> .embed-below-drawn > :is(.upload-picture, .upload-video, .upload-audio)) {
   overflow: visible;
   border: 0;
   border-radius: 0;
@@ -10247,6 +10247,22 @@ button.todo-tag[aria-pressed="true"] {
 
 .upload-video {
   background: #000;
+}
+
+/* A picture is drawn in a frame of its room, so a crop of it is the part of it that is in the frame. */
+.upload-picture {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.upload-image.cropped {
+  position: absolute;
+  max-width: none;
+  border-radius: 0;
+  object-fit: fill;
 }
 
 .upload-audio {
@@ -10308,6 +10324,202 @@ button.todo-tag[aria-pressed="true"] {
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   pointer-events: none;
+}
+
+/* The crop button: at the picture's top right corner, seen with the size handle. */
+.upload-crop {
+  display: grid;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1.5px solid rgb(255 255 255 / 0.9);
+  border-radius: 6px;
+  background: rgb(30 30 36 / 0.7);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  color: #fff;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.embed-below:hover .upload-crop,
+.upload-crop:focus-visible {
+  opacity: 1;
+}
+
+.upload-crop:hover,
+.upload-crop:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  background: var(--accent);
+}
+
+/* Cropping a picture: the whole of it over the app, with the part kept clear and the rest dimmed. */
+.crop-dialog {
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  padding: 20px 20px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.crop-dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.crop-frame {
+  position: relative;
+  width: fit-content;
+  margin: 0 auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.crop-stage {
+  position: relative;
+  overflow: hidden;
+}
+
+/* As large as fits, a small picture made larger, at its own shape. */
+.crop-picture {
+  display: block;
+  width: min(960px, calc(100vw - 72px), calc((100dvh - 150px) * var(--ratio)));
+  height: auto;
+  aspect-ratio: var(--ratio);
+}
+
+.crop-shade,
+.crop-box {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.crop-shade {
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.55);
+  pointer-events: none;
+}
+
+.crop-box {
+  border: 1px solid rgb(255 255 255 / 0.9);
+  outline: 1px solid rgb(0 0 0 / 0.4);
+  cursor: move;
+}
+
+.crop-box:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+}
+
+.crop-corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 0 solid #fff;
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 0.6));
+}
+
+.crop-corner-nw {
+  top: -3px;
+  left: -3px;
+  border-width: 4px 0 0 4px;
+  cursor: nwse-resize;
+}
+
+.crop-corner-ne {
+  top: -3px;
+  right: -3px;
+  border-width: 4px 4px 0 0;
+  cursor: nesw-resize;
+}
+
+.crop-corner-se {
+  right: -3px;
+  bottom: -3px;
+  border-width: 0 4px 4px 0;
+  cursor: nwse-resize;
+}
+
+.crop-corner-sw {
+  bottom: -3px;
+  left: -3px;
+  border-width: 0 0 4px 4px;
+  cursor: nesw-resize;
+}
+
+/* Each edge is pressed a little either side of its line, between the corners. */
+.crop-edge {
+  position: absolute;
+}
+
+.crop-edge-w,
+.crop-edge-e {
+  top: min(18px, 25%);
+  bottom: min(18px, 25%);
+  width: 14px;
+  cursor: ew-resize;
+}
+
+.crop-edge-w {
+  left: -7px;
+}
+
+.crop-edge-e {
+  right: -7px;
+}
+
+.crop-edge-n,
+.crop-edge-s {
+  right: min(18px, 25%);
+  left: min(18px, 25%);
+  height: 14px;
+  cursor: ns-resize;
+}
+
+.crop-edge-n {
+  top: -7px;
+}
+
+.crop-edge-s {
+  bottom: -7px;
+}
+
+.crop-edge:focus-visible {
+  outline: none;
+}
+
+.crop-edge:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.crop-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 14px;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.crop-said {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.crop-buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 /* In place of a file that can't be shown, in the same room. */
@@ -12566,6 +12778,12 @@ button.crumb[aria-expanded="true"] {
 :root[data-night-shift] .upload-size::before {
   border-color: var(--ink);
   background: rgb(0 0 0 / 0.7);
+}
+
+:root[data-night-shift] .upload-crop:not(:hover, :focus-visible) {
+  border-color: var(--ink);
+  background: rgb(0 0 0 / 0.7);
+  color: var(--ink);
 }
 
 /* The app's own pictures: its mark, and the plugins' screenshots of the app. They are tinted whether or not pictures in notes are. */

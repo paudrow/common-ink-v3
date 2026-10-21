@@ -43,6 +43,17 @@ describe("the room an upload's embed keeps", () => {
     expect(boxFor("image", `${ID} small`)).toEqual({ ratio: 16 / 9, maxWidth: 480, share: 1 / 3 });
   });
 
+  it("is a cropped picture's crop: its shape, no wider than it, at its share of the column", () => {
+    expect(boxFor("image", `${ID} 1200x800 crop=120,40,800,600`)).toEqual({ ratio: 800 / 600, maxWidth: 800 });
+    expect(boxFor("image", `${ID} 1200x800 42% crop=0,0,400,800`)).toEqual({ ratio: 0.5, maxWidth: 400, share: 0.42 });
+    expect(boxFor("image", `${ID} 1200x800 crop=1000,0,800,800`)).toEqual({ ratio: 200 / 800, maxWidth: 200 });
+    expect(boxFor("image", `${ID} 1200x800 crop=0,0,1200,800`)).toEqual({ ratio: 1.5, maxWidth: 1200 });
+  });
+
+  it("is a video's whole size, which is never cropped", () => {
+    expect(boxFor("video", `${ID} 640x360 crop=0,0,100,100`)).toEqual({ ratio: 16 / 9, maxWidth: 640 });
+  });
+
   it("is a fixed height for a recording, whatever else its embed says, and nothing for a file", () => {
     expect(boxFor("audio", ID)).toEqual({ height: 56 });
     expect(boxFor("audio", `${ID} 640x480 small`)).toEqual({ height: 56 });

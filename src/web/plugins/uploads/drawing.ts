@@ -1,4 +1,6 @@
-import { uploadIn, type BelowDrawn, type BelowEmbedded, type Dispose, type Embed, type PluginHost, type ReferredTo, type Upload, type UploadEmbed } from "../../plugin-api.ts";
+import { cropIn, sizeIn, uploadIn, withCrop, type BelowDrawn, type BelowEmbedded, type Dispose, type Embed, type PluginHost, type ReferredTo, type Upload, type UploadEmbed } from "../../plugin-api.ts";
+import { cropPicture } from "./cropper.ts";
+import { placed } from "./cropping.ts";
 import { sizeHandle } from "./handle.ts";
 import { filePath, openingOf, openUpload, previewUpload } from "./opening.ts";
 import { previewOf } from "./previewing.ts";
@@ -62,6 +64,21 @@ function paperclip() {
   for (const [name, value] of Object.entries({ viewBox: "0 0 16 16", width: "1em", height: "1em", fill: "none", stroke: "currentColor", "stroke-width": "1.4", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(name, value);
   svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path")).setAttribute("d", "M9 2.5H4.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V6zM9 2.5V6h3.5");
   return svg;
+}
+
+function cropIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [name, value] of Object.entries({ viewBox: "0 0 16 16", width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(name, value);
+  svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path")).setAttribute("d", "M4.5 1.5v10h10M1.5 4.5h10v10");
+  return svg;
+}
+
+/** Draws a picture so that what its embed crops of it fills its room, or all of it where it crops nothing. */
+function framed(img: HTMLImageElement, config: string) {
+  const crop = cropIn(config);
+  const size = sizeIn(config);
+  img.classList.toggle("cropped", !!crop);
+  Object.assign(img.style, crop && size ? placed(crop, size) : { left: "", top: "", width: "", height: "" });
 }
 
 const TITLE: Record<UploadEmbed, string> = KIND_LABEL;
@@ -170,15 +187,16 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
     }
     const address = host.uploads.address(id);
     if (embed === "image") {
-      const img = el("img", "upload-image");
+      const picture = el("div", "upload-picture");
+      const img = picture.appendChild(el("img", "upload-image"));
       img.alt = info.name;
       img.title = detailsOf(info);
       img.draggable = false;
       img.decoding = "async";
       // Hidden from the member since the note was read, or gone: the same words either way.
-      img.addEventListener("error", () => img.parentElement?.replaceChildren(missing(UNAVAILABLE)));
+      img.addEventListener("error", () => picture.parentElement?.replaceChildren(missing(UNAVAILABLE)));
       img.src = address;
-      return [img];
+      return [picture];
     }
     const player = el(embed, `upload-${embed}`);
     player.controls = true;
@@ -189,11 +207,48 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
     return [player];
   }
 
-  /** A picture, a video or a recording, drawn below its line, with a handle to size a picture or a video for a member who can change the note. */
+  /**
+   * What crops a picture: a button seen with its size handle, which opens the picture to crop it, and
+   * writes the crop into its embed. `closing` is given what closes the crop open from it.
+   */
+  const cropButton = (id: string, name: string, now: () => BelowEmbedded, closing: (close: Dispose) => void) => {
+    const button = el("button", "upload-crop");
+    button.type = "button";
+    button.title = "Crop";
+    button.setAttribute("aria-label", `Crop ${name}`);
+    button.append(cropIcon());
+    button.addEventListener("click", () => {
+      const size = sizeIn(now().config);
+      if (!size) return;
+      closing(cropPicture({
+        name,
+        address: host.uploads.address(id),
+        size,
+        crop: cropIn(now().config),
+        back: button,
+        done: (crop) => {
+          const { config, update } = now();
+          const next = withCrop(config, crop);
+          if (next !== config) update({ config: next });
+        },
+      }));
+    });
+    return button;
+  };
+
+  /**
+   * A picture, a video or a recording, drawn below its line, with a handle to size a picture or a
+   * video for a member who can change the note, and a button to crop a picture. A video is not cropped.
+   */
   function below(embed: Exclude<UploadEmbed, "file">, into: HTMLElement, first: BelowEmbedded): BelowDrawn {
     let now = first;
     let retell = () => {};
     let stop: Dispose | undefined;
+    let uncrop: Dispose = () => {};
+    const frame = () => {
+      const img = into.querySelector<HTMLImageElement>(".upload-image");
+      if (img) framed(img, now.config);
+    };
     const start = () => {
       const id = uploadIn(now.config);
       if (!id) return;
@@ -204,22 +259,31 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
           const sized = sizeHandle(into, info.name, () => now, embed);
           retell = sized.said;
           nodes.push(sized.handle);
+          if (embed === "image" && sizeIn(now.config)) nodes.push(cropButton(id, info.name, () => now, (close) => (uncrop = close)));
         }
         into.replaceChildren(...nodes);
+        frame();
       });
     };
     start();
     return {
-      // A change of width leaves what is drawn as it is, so a video playing goes on playing at its new size, and the handle keeps the keyboard.
+      // A change of width or crop leaves what is drawn as it is, so a video playing goes on playing at its new size, and the handle keeps the keyboard.
       update(next) {
         const was = uploadIn(now.config);
         now = next;
-        if (uploadIn(next.config) === was) return retell();
+        if (uploadIn(next.config) === was) {
+          frame();
+          return retell();
+        }
+        uncrop();
         stop?.();
         into.replaceChildren();
         start();
       },
-      stop: () => stop?.(),
+      stop: () => {
+        uncrop();
+        stop?.();
+      },
     };
   }
 
