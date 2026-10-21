@@ -221,6 +221,19 @@ describe("notes", () => {
     expect(await perform(env.DB, ada, { type: "note.history", id: note.id })).toHaveLength(3);
   });
 
+  it("answers a write sent again as recorded once it was, though the note has gone to Trash since", async () => {
+    const ada = await newMember();
+    const note = await perform(env.DB, ada, { type: "note.create", text: "hello" });
+    const write = { type: "note.write", id: note.id, baseRevision: 1, text: "hello!", writeId: "w1" } as const;
+    await perform(env.DB, ada, write);
+    await perform(env.DB, ada, { type: "note.trash", id: note.id });
+
+    const retried = await perform(env.DB, ada, write);
+
+    expect(retried.text).toBe("hello!");
+    await expect(perform(env.DB, ada, { ...write, text: "hello?", writeId: "w2" })).rejects.toThrow("This note is in Trash. Restore it to change it.");
+  });
+
   it("keeps both writes when two saves from the same revision race", async () => {
     const ada = await newMember();
     const note = await perform(env.DB, ada, { type: "note.create", text: "middle" });

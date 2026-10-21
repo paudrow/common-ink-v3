@@ -1805,11 +1805,11 @@ export const MAX_ANSWER_LINES = 2000;
 async function commitNote(ctx: Context, op: { id: string; baseRevision: number; text: string; writeId?: string; linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; on?: string }) {
   let unresolved: UnresolvedLink[] = [];
   const written = await settle(async (): Promise<Written | null> => {
-    const row = await loadNote(ctx, op.id, "edit", "refused");
-    if (op.writeId) {
-      const recorded = await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(row.id, op.writeId).first();
-      if (recorded) return toNote(ctx, row);
+    // A write sent again once it was recorded is answered as recorded, though the note has gone to Trash since.
+    if (op.writeId && (await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(op.id, op.writeId).first())) {
+      return toNote(ctx, await loadNote(ctx, op.id, "view", "opens"));
     }
+    const row = await loadNote(ctx, op.id, "edit", "refused");
     if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
     const base = op.baseRevision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, op.baseRevision, row.revision);
     const resolved = await storedAs(ctx, op.text, base.text, op);

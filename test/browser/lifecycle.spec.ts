@@ -401,6 +401,32 @@ test("typing in a note that turns out to be in Trash is kept and said to be unsa
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Draft\n\nfirst and second");
 });
 
+test("typing kept in a note in Trash is offered back in a card when its tab closes", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await create(page, "# Draft\n\nfirst");
+  await openNote(page, note);
+  await expect(lines(page).first()).toHaveText("# Draft");
+  const saves = await holdingSaves(page);
+
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" and second");
+  await saves.waiting;
+  await perform(page, { type: "note.trash", id: note.id });
+  saves.release();
+  await expect(saveBar(page).getByRole("status")).toHaveText(UNSAVED_IN_TRASH);
+
+  await page.getByTitle("Close Draft", { exact: true }).click();
+
+  const card = notice(page).filter({ hasText: "Draft" });
+  await expect(card).toHaveText(/Draft is in Trash, so it wasn't saved as you left it/);
+  await card.getByRole("button", { name: "Copy" }).click();
+  await expect(card).toHaveText(/Copied Draft as you left it/);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("# Draft\n\nfirst and second");
+  expect((await perform(page, { type: "note.read", id: note.id })).text).toBe("# Draft\n\nfirst");
+});
+
 test("a note someone else archives, trashes, and restores shows each state in a browser that is only left open", async ({ page }) => {
   // Five changes, each seen only when the next relist comes round.
   test.slow();

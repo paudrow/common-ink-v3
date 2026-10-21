@@ -197,3 +197,40 @@ test("an empty note open in another tab of the browser is not discarded when one
   await other.keyboard.type("Typed in the other tab");
   await expect.poll(async () => (await read(page, id)).text).toBe("Typed in the other tab");
 });
+
+test("an empty note that loads while a folder's name is typed leaves the cursor in the name", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const empty = await perform(page, { type: "note.create" });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/workspaces/*/ops", async (route) => {
+    if (route.request().postData()?.includes(`"note.read","id":"${empty.id}"`)) await held;
+    await route.continue();
+  });
+  await page.goto(`/note/${empty.id}`);
+  await page.getByRole("button", { name: "New folder" }).click();
+  const name = page.getByRole("textbox", { name: "Folder name" });
+  await page.keyboard.type("Pro");
+  release();
+  await expect(editor(page)).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.keyboard.type("jects");
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue("Projects");
+  expect((await read(page, empty.id)).text).toBe("");
+});
+
+test("a new note made from the commands while typing in another note takes the cursor", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Kept" });
+  await page.goto(`/note/${note.id}`);
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Commands" }).fill("New note");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/note\/untitled-/);
+  await expect(editor(page)).toBeFocused();
+  await page.keyboard.type("# Fresh");
+  await expect(page).toHaveURL(/\/note\/fresh-/);
+  expect((await read(page, note.id)).text).toBe("# Kept");
+});

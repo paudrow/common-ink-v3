@@ -14,9 +14,12 @@ export const MOST_SHOWN = 3;
 /**
  * The stack with `next` added at its foot. One saying what a card shown says takes that card's place,
  * so a second "Task completed" is not stacked over the first, and past `MOST_SHOWN` the oldest goes.
+ * A card that `keeps` is never replaced, never sent away, and isn't counted.
  */
 export function stacked(shown: readonly Told[], next: Told): Told[] {
-  const same = shown.findIndex((t) => t.notice.message === next.notice.message);
+  const same = next.notice.keeps ? -1 : shown.findIndex((t) => !t.notice.keeps && t.notice.message === next.notice.message);
   if (same >= 0) return shown.map((t, i) => (i === same ? next : t));
-  return [...shown, next].slice(-MOST_SHOWN);
+  const all = [...shown, next];
+  let over = all.filter((t) => !t.notice.keeps).length - MOST_SHOWN;
+  return all.filter((t) => t.notice.keeps || over-- <= 0);
 }

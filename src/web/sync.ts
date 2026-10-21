@@ -3,12 +3,15 @@ import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { Filed, Note, OpInput, Results, RevertedNotes, Written } from "../core/protocol.ts";
 import { IN_TRASH } from "../core/lifecycle.ts";
-import { changesBetween } from "../core/text.ts";
-import { ApiError, perform, session } from "./api.ts";
+import { applyChanges, changesBetween } from "../core/text.ts";
+import { ApiError, getMe, perform, session } from "./api.ts";
+import { forget, keep, kept, type Kept, type NoteWrite } from "./stash.ts";
 import { today } from "./time.ts";
 
 export const PAUSE_MS = 1000;
 const RETRY_MS = 3000;
+/** Typing kept in the browser longer than this is dropped rather than sent over a week of other changes. */
+const KEPT_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** `rejected`: the server won't take what was typed. `inTrash`: it won't because the note is in Trash, and will once the note is restored. */
 export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "signedOut" | "rejected" | "inTrash";
@@ -24,8 +27,18 @@ const refusedForTrash = (err: unknown) => err instanceof ApiError && err.code ==
 
 /** Every sync with typing the server may not have, including those whose editor has closed. */
 const unsaved = new Set<NoteSync>();
-addEventListener("pagehide", () => {
-  for (const sync of unsaved) void sync.commit();
+const keepAll = () => {
+  for (const sync of unsaved) {
+    void sync.commit();
+    sync.keepForNextLoad();
+  }
+};
+addEventListener("pagehide", keepAll);
+// A tab the browser discards in the background, and a page Safari unloads, may never see pagehide. Kept twice, the typing is still sent once: each write keeps its id.
+document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && keepAll());
+// Back from the browser's cache, the page sends its own typing again.
+addEventListener("pageshow", (e) => {
+  if (e.persisted) for (const sync of unsaved) sync.cameBack();
 });
 addEventListener("beforeunload", (e) => {
   if (unsaved.size) e.preventDefault();
@@ -35,8 +48,100 @@ session.subscribe(() => {
   if (!session.signedOut()) for (const sync of unsaved) void sync.commit();
 });
 
-/** Settles once typing in this note from editors that have closed has been sent, so a read after it includes that typing. */
-export const committed = (noteId: string) => Promise.all([...unsaved].filter((sync) => sync.noteId === noteId).map((sync) => sync.commit()));
+/** Typing the server refused that no editor holds any longer, so the member is the only one left who can keep it. */
+export interface Lost {
+  noteId: string;
+  text: string;
+  why: "rejected" | "inTrash";
+  /** The member is done with it: the browser stops keeping it. Until then a reload offers it again. */
+  dismiss: () => void;
+}
+
+/** Who is told of lost typing in each workspace: the workspace open in this page. */
+const losing = new Map<string, (lost: Lost) => void>();
+
+export function onLost(workspaceId: string, listener: (lost: Lost) => void): () => void {
+  losing.set(workspaceId, listener);
+  return () => void (losing.get(workspaceId) === listener && losing.delete(workspaceId));
+}
+
+/** Whether the member was told. Nobody is told while their workspace isn't open, and the typing is kept to tell them later. */
+const lose = (workspaceId: string, lost: Lost) => {
+  losing.get(workspaceId)?.(lost);
+  return losing.has(workspaceId);
+};
+
+/** Who typing is kept in the browser for, in each workspace whose kept typing this page has sent. */
+const members = new Map<string, string>();
+/** What each note's kept typing has come to on its first try to reach the server. */
+let recovered: Promise<Map<string, Promise<unknown>>> = Promise.resolve(new Map());
+/** Each page keeps its own typing, so that one page never forgets another's. */
+const PAGE = crypto.randomUUID();
+/**
+ * Held for as long as this page lives, so that another page leaves the typing this one keeps to it:
+ * sent from elsewhere, it would take the id of this page's next write, which the server would then
+ * answer with the note as it was, without what was typed here since.
+ */
+const LIVE = (page: string) => `ink-page:${page}`;
+void navigator.locks?.request(LIVE(PAGE), () => new Promise(() => {}));
+const livePages = async () => new Set(((await navigator.locks?.query())?.held ?? []).map((lock) => lock.name));
+
+/**
+ * Sends the typing the browser kept for this member in this workspace as earlier pages went, once a
+ * page. One kept longer than `KEPT_MS` is dropped.
+ */
+export function recover(workspaceId: string, personId: string) {
+  if (members.get(workspaceId) === personId) return;
+  members.set(workspaceId, personId);
+  recovered = Promise.all([kept(), livePages().catch(() => new Set<string>())]).then(([all, live]) => {
+    const sending = new Map<string, Promise<unknown>>();
+    for (const typing of all) {
+      // Anyone's, so that a member who never signed out on a shared browser doesn't leave typing in it for good.
+      if (Date.now() - typing.at > KEPT_MS) forget(typing.key);
+      else if (typing.workspaceId === workspaceId && typing.personId === personId && !live.has(LIVE(typing.key.split(":")[0]!))) sending.set(typing.op.id, Promise.all([sending.get(typing.op.id), resend(typing)]));
+    }
+    return sending;
+  });
+}
+
+/**
+ * Sends kept typing as its page would have: its write on the way first, with the id it was first sent
+ * with so that the server records it only once, and then what was typed after it, merged over the
+ * server's answer. Settles after the first try. One that can't reach the server is tried again while
+ * this page is open, one refused is offered back to the member, and one refused for a session that
+ * ended is kept for the next load.
+ */
+async function resend(typing: Kept): Promise<void> {
+  try {
+    const saved = await perform(typing.workspaceId, typing.op);
+    if (typing.text !== typing.op.text) {
+      const text = applyChanges(changesBetween(typing.op.text, saved.text).map(changesBetween(typing.op.text, typing.text)), typing.text);
+      typing = { ...typing, op: { ...typing.op, text, baseRevision: saved.revision, writeId: typing.nextWriteId }, text, nextWriteId: crypto.randomUUID() };
+      keep(typing);
+      await perform(typing.workspaceId, typing.op);
+    }
+    // A retry lands after the note's editor read it, which then takes it in.
+    void open.get(typing.op.id)?.pull();
+  } catch (err) {
+    if (signedOut(err)) return;
+    if (!refusedForTrash(err) && worthRetrying(err)) return void setTimeout(() => void retry(typing), RETRY_MS);
+    // Kept until the member dismisses it, or for the next load to offer while nobody here can be told.
+    lose(typing.workspaceId, { noteId: typing.op.id, text: typing.text, why: refusedForTrash(err) ? "inTrash" : "rejected", dismiss: () => forget(typing.key) });
+    return;
+  }
+  forget(typing.key);
+}
+
+/** Sends kept typing again, only while the browser is still signed in as the member it was kept for, as another tab may have changed. */
+async function retry(typing: Kept) {
+  const me = await getMe().catch(() => null);
+  if (!me) return void setTimeout(() => void retry(typing), RETRY_MS);
+  if (me.person.id === typing.personId) await resend(typing);
+}
+
+/** Settles once typing in this note from editors that have closed, and from earlier pages, has been sent, so a read after it includes that typing. */
+export const committed = (noteId: string) =>
+  recovered.then((sending) => sending.get(noteId)).then(() => Promise.all([...unsaved].filter((sync) => sync.noteId === noteId).map((sync) => sync.commit())));
 
 /** The sync of each note open in an editor. A note has at most one tab, so at most one sync. */
 const open = new Map<string, NoteSync>();
@@ -144,14 +249,6 @@ export async function undoOrRedo(workspaceId: string, op: Step): Promise<Note | 
 
 const fromServer = Annotation.define<boolean>();
 
-interface Write {
-  text: string;
-  baseRevision: number;
-  writeId: string;
-  /** The member's day when it was typed, which a recurring todo checked off in it is completed on. */
-  on: string;
-}
-
 /**
  * Commits a note's typing as one change on a pause or when the editor loses focus. A write that
  * fails is sent again unchanged, with the same id, until the server acknowledges it; typing in the
@@ -159,12 +256,16 @@ interface Write {
  */
 export class NoteSync {
   readonly noteId: string;
+  /** What this page keeps the note's typing under in the browser as it goes. */
+  readonly key: string;
   private revision: number;
   private savedText: string;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private inFlight: Promise<void> | null = null;
-  private unacknowledged: Write | null = null;
+  private unacknowledged: NoteWrite | null = null;
   private typedSinceWrite: ChangeSet | null = null;
+  /** The id of the next write, chosen ahead so that typing kept as the page goes names the write that will send it. */
+  private nextWriteId = crypto.randomUUID();
   /** Whether the last write didn't reach the server and is waiting to be sent again. */
   private failing = false;
   /** Whether the member's last step was an undo in the editor, which is what a redo then puts back. */
@@ -182,6 +283,7 @@ export class NoteSync {
     private readonly onState: (state: SaveState) => void,
   ) {
     this.noteId = note.id;
+    this.key = `${PAGE}:${note.id}`;
     this.revision = note.revision;
     this.savedText = note.text;
   }
@@ -230,11 +332,12 @@ export class NoteSync {
     if (!this.unacknowledged) {
       const text = doc.toString();
       if (text === this.savedText) {
-        unsaved.delete(this);
+        this.settled();
         this.onState("saved");
         return;
       }
-      this.unacknowledged = { text, baseRevision: this.revision, writeId: crypto.randomUUID(), on: today() };
+      this.unacknowledged = this.write(text);
+      this.nextWriteId = crypto.randomUUID();
       this.typedSinceWrite = ChangeSet.empty(text.length);
     }
     const write = this.unacknowledged;
@@ -242,8 +345,7 @@ export class NoteSync {
     this.onState("saving");
     this.inFlight = (async () => {
       try {
-        // What is typed is what is stored: a link is by id once it is picked from the list, and typing is never refused for a title.
-        const saved = await perform(this.workspaceId, { type: "note.write", id: this.noteId, ...write, linkTitles: "keep" });
+        const saved = await perform(this.workspaceId, write);
         this.apply(changesBetween(write.text, saved.text).map(this.typedSinceWrite!));
         this.unacknowledged = null;
         this.typedSinceWrite = null;
@@ -254,7 +356,7 @@ export class NoteSync {
         landed = saved;
         void settle(saved);
         if (this.dirty) this.schedule(PAUSE_MS);
-        else unsaved.delete(this);
+        else this.settled();
         this.onState(this.dirty ? "unsaved" : "saved");
       } catch (err) {
         // A conflict is asked again, but not one for Trash: the server takes nothing more until the note is restored.
@@ -268,7 +370,9 @@ export class NoteSync {
         } else {
           this.unacknowledged = null;
           this.typedSinceWrite = null;
-          this.onState(refusedForTrash(err) ? "inTrash" : "rejected");
+          const why = refusedForTrash(err) ? "inTrash" : "rejected";
+          this.onState(why);
+          if (this.closedDoc) this.giveUp(why);
         }
       } finally {
         this.inFlight = null;
@@ -276,6 +380,49 @@ export class NoteSync {
     })();
     await this.inFlight;
     return landed;
+  }
+
+  private write(text: string): NoteWrite {
+    // What is typed is what is stored: a link is by id once it is picked from the list, and typing is never refused for a title.
+    // `on` is the member's day as it was typed, which a recurring todo checked off in it is completed on.
+    return { type: "note.write", id: this.noteId, text, baseRevision: this.revision, writeId: this.nextWriteId, on: today(), linkTitles: "keep" };
+  }
+
+  /** The server has all the typing, or none of it is to be sent. */
+  private settled() {
+    unsaved.delete(this);
+    forget(this.key);
+  }
+
+  /**
+   * Hands typing that no editor holds any longer, and that the server won't take, to the member. It
+   * isn't sent again. While nobody can be told, it stays unsaved, and is kept as the page goes.
+   */
+  private giveUp(why: Lost["why"]) {
+    this.held = true;
+    if (!lose(this.workspaceId, { noteId: this.noteId, text: this.closedDoc!.toString(), why, dismiss: () => forget(this.key) })) return;
+    // The card is the member's only copy until they dismiss it, so the browser keeps one through a reload.
+    this.keepForNextLoad();
+    unsaved.delete(this);
+  }
+
+  /** Back from the browser's cache: a later load may have sent this page's kept typing with the next write's id, which the page then mustn't reuse. */
+  cameBack() {
+    forget(this.key);
+    this.nextWriteId = crypto.randomUUID();
+  }
+
+  /**
+   * Keeps the typing in the browser for a later load to send, in case no write that is on its way
+   * outlasts the page. The page's own write and a later load's carry the same ids, so the server
+   * records each once.
+   */
+  keepForNextLoad() {
+    const personId = members.get(this.workspaceId);
+    const text = this.doc()?.toString();
+    if (!personId || text === undefined || !this.dirty) return;
+    const op = this.unacknowledged ?? this.write(text);
+    keep({ key: this.key, workspaceId: this.workspaceId, personId, op, text, nextWriteId: this.nextWriteId, at: Date.now() });
   }
 
   private apply(changes: ChangeSet) {
@@ -305,7 +452,7 @@ export class NoteSync {
       clearTimeout(this.timer);
       this.unacknowledged = this.typedSinceWrite = null;
       this.failing = false;
-      unsaved.delete(this);
+      this.settled();
       this.onState("saved");
     }
     return this.undidHere;
@@ -334,6 +481,11 @@ export class NoteSync {
   async close(): Promise<void> {
     if (open.get(this.noteId) === this) open.delete(this.noteId);
     this.closedDoc = this.view?.state.doc ?? null;
+    // A write on its way decides whether there is anything left to send, and gives up on typing the server refused.
+    while (this.inFlight) await this.inFlight;
+    if (!unsaved.has(this)) return;
+    // Held for Trash, it would wait for a restore that no editor is left to see.
+    if (this.held && this.dirty) return this.giveUp("inTrash");
     await this.commit();
   }
 }
