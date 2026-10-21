@@ -286,6 +286,8 @@ export class NoteSync {
   private listeners = new Map<EditorView, Listener>();
   /** The document once the last editor has closed; later merges apply here instead of to the views. */
   private closedDoc: Text | null = null;
+  /** The text of the editor a change was made in, while that change is copied into the others, which don't have it yet. A save started meanwhile takes this text. */
+  private copying: Text | null = null;
   /** Whether nothing is to be sent, because the server would refuse it: the note is in Trash. What is typed is kept, and counts as unsaved. */
   private held = false;
 
@@ -343,7 +345,7 @@ export class NoteSync {
   private lastIn: EditorView | null = null;
 
   private doc(): Text | null {
-    return this.closedDoc ?? this.views[0]?.state.doc ?? null;
+    return this.closedDoc ?? this.copying ?? this.views[0]?.state.doc ?? null;
   }
 
   get dirty(): boolean {
@@ -360,7 +362,15 @@ export class NoteSync {
     this.schedule(PAUSE_MS);
     // The note's other editors take the change, kept out of their undo: each editor undoes what was typed in it.
     // One whose text isn't what this change was made to, as while a merge is being put in each in turn, takes it from the server's answer instead.
-    for (const other of this.views) if (other !== update.view && other.state.doc.eq(update.startState.doc)) other.dispatch({ changes: update.changes, filter: false, annotations: [mirrored.of(true), Transaction.addToHistory.of(false)] });
+    // An editor the cursor has just left notices it as it takes the copy, and saves. It saves this editor's text, which has the change
+    // already counted in `typedSinceWrite` above: its own text doesn't have the change yet, and the next save would leave it out.
+    const outer = this.copying;
+    this.copying = update.state.doc;
+    try {
+      for (const other of this.views) if (other !== update.view && other.state.doc.eq(update.startState.doc)) other.dispatch({ changes: update.changes, filter: false, annotations: [mirrored.of(true), Transaction.addToHistory.of(false)] });
+    } finally {
+      this.copying = outer;
+    }
   }
 
   private schedule(ms: number) {
