@@ -2,7 +2,7 @@ import { StateEffect, StateField, type Extension } from "@codemirror/state";
 import { EditorView, showTooltip, ViewPlugin, type Tooltip } from "@codemirror/view";
 import { useEffect, useId, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ago, useNow, type PluginHost, type Results } from "../../plugin-api.ts";
+import { ago, useNow, type InsertAt, type PluginHost, type Results } from "../../plugin-api.ts";
 import { reasonOf } from "../lib/FoundNote.tsx";
 import { writable } from "../lib/live.ts";
 import { toldOf } from "./drawing.ts";
@@ -97,10 +97,12 @@ export function inserter(host: PluginHost) {
 
   return {
     extension,
-    /** Opens the popover at the cursor of the note whose editor has the keyboard. */
-    ask() {
-      const editor = [...editors].find((e) => e.view.hasFocus);
-      if (editor) editor.view.dispatch({ effects: asking.of(editor.view.state.selection.main.head) });
+    /** The insert of a menu item that opens the popover where the item was picked. It answers at once with nothing to write, so the trigger goes, and the upload picked is written where it was. */
+    ask({ anchor }: InsertAt): Promise<string | null> {
+      const editor = [...editors].find((e) => e.view.scrollDOM.contains(anchor));
+      if (!editor) return Promise.resolve(null);
+      editor.view.dispatch({ effects: asking.of(editor.view.state.selection.main.head) });
+      return Promise.resolve("");
     },
   };
 }

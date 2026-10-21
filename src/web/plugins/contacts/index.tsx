@@ -1,6 +1,6 @@
 import type { Plugin } from "../../plugin-api.ts";
 import { Fragment } from "react";
-import { chipSketch, referenceEmbed } from "../lib/references.tsx";
+import { referenceEmbed } from "../lib/references.tsx";
 import { labelled } from "../mentions/fields.ts";
 import { ContactsPage } from "./Contacts.tsx";
 
@@ -15,12 +15,10 @@ export const contacts: Plugin = {
   description: "Shows the people in the contacts you connect, which nobody else in the workspace sees, and lets a note reference one.",
   icon: "contacts",
   activate(host) {
-    host.views.register("page", { id: "contacts", path: "/contacts", label: "Contacts", // First under More, wherever this plugin is among the others: its place there sets where Contact is in the / menu.
+    host.views.register("page", { id: "contacts", path: "/contacts", label: "Contacts", // First under More, wherever this plugin is among the others.
       icon: "contacts", nav: "more", order: 10, component: (props) => <ContactsPage host={host} {...props} /> });
-    host.embeds.register({
-      description: "A contact, by a reference copied on the Contacts page",
-      preview: { image: chipSketch(`<circle cx="63" cy="37" r="4"/><path d="M55 50 a8 7 0 0 1 16 0 Z"/>`) },
-      ...referenceEmbed({
+    host.embeds.register(
+      referenceEmbed({
         host,
         kind: "contact",
         title: "Contact",
@@ -47,6 +45,6 @@ export const contacts: Plugin = {
           </dl>
         ),
       }),
-    });
+    );
   },
 };

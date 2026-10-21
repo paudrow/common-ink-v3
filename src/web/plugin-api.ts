@@ -665,11 +665,14 @@ export interface Embed {
   /**
    * For an embed a menu can't write, because what it holds is made by doing something: an upload's
    * is made by sending a file, or by choosing one already sent. A menu offers each under its title,
-   * after the embeds it writes, in the order given, and picking one calls its `run` and writes
-   * nothing. The editor it was picked in still has the keyboard.
+   * after the embeds it writes, in the order given, and picking one writes what its `insert` answers.
    */
   pick?: EmbedPick | readonly EmbedPick[];
-  /** False for an embed no menu lists by itself, because another embed's `pick` is how a note comes to have it: a picture, a video and a sound are all written by "Upload a file". `host.embeds.list()` leaves it out. */
+  /**
+   * False for an embed no menu lists by itself: one another embed's `pick` writes, as "Upload an
+   * image" writes a picture, or one written another way, as `@` writes a reference to an event.
+   * `host.embeds.list()` leaves it out.
+   */
   menu?: boolean;
   /**
    * Draws into `el`, once, all of it before returning, so the embed is never seen half drawn. May
@@ -836,7 +839,7 @@ export interface Embedded {
 
 export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts" | "description" | "preview" | "pick">;
 
-/** One entry of an embed in a menu that does something in place of writing it, as "Upload a file" does. */
+/** One entry of an embed in a menu that does something to make what it writes, as "Upload a file" asks for a file. */
 export interface EmbedPick {
   title: string;
   /** What picking it does, in a line of words. */
@@ -844,7 +847,8 @@ export interface EmbedPick {
   /** @deprecated The same as `description`, read as one where there is no `description`. */
   detail?: string;
   preview?: CompletionPreview;
-  run: () => void;
+  /** What is written in place of the trigger and what was typed, made once it is picked, as a completion item's function `insert` is. */
+  insert: (at: InsertAt) => Promise<string | null>;
 }
 
 /**
@@ -941,7 +945,8 @@ export interface CompletionItem {
    * the item is picked, for text that is made then, as a reference to an event is, or picked in a
    * popover, as a day from a calendar is. It is told where: what it answers is written once it does,
    * where the trigger and what was typed still are. Null, a failure, or a change to them meanwhile
-   * writes nothing.
+   * writes nothing. One that sets off something that writes in its own time, as asking for a file to
+   * upload does, answers `""` at once, so the trigger goes.
    */
   insert: string | ((at: InsertAt) => Promise<string | null>);
   /** The part of `insert` left selected, as offsets into it, such as a value to type over. Without it the cursor goes after. */
@@ -952,8 +957,6 @@ export interface CompletionItem {
   apart?: boolean;
   /** How the label is coloured: `accent` is the theme colour and `muted` is gray. Without it, as the list's text is. */
   tone?: "accent" | "muted";
-  /** Called once `insert` is in the note, for an item that does something more than write, such as opening a file picker. The editor still has the keyboard. */
-  run?: () => void;
 }
 
 /**

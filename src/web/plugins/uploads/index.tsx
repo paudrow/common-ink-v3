@@ -6,7 +6,7 @@ import { UPLOADS_PATH } from "./finding.ts";
 import { inserter } from "./inserting.tsx";
 import { FILE_PATH, PREVIEW } from "./opening.ts";
 import { uploadsAt } from "./pointing.ts";
-import { panel, sketch } from "../lib/sketch.ts";
+import { outline, panel, sketch, words } from "../lib/sketch.ts";
 import { Preview } from "./Preview.tsx";
 import { sender, type Sender } from "./sending.ts";
 import { UploadsPage } from "./UploadsPage.tsx";
@@ -37,11 +37,24 @@ export const uploadDrawing: Plugin = {
   },
 };
 
-/** An arrow up out of a tray, as the insert menu pictures sending a file. */
-const UPLOAD_PICTURE = sketch(`<path d="M100 12 L82 32 H94 V52 H106 V32 H118 Z"/><path d="M66 48 V68 H134 V48" fill="none" stroke-width="4" stroke-linejoin="round"/>`);
+/** A picture in a frame: hills and a sun. */
+const framed = (x: number, y: number, width: number, height: number) =>
+  panel(x, y, width, height) + `<path d="M${x + 8} ${y + height - 8} l${width * 0.3} ${-height * 0.45} l${width * 0.2} ${height * 0.25} l${width * 0.12} ${-height * 0.12} l${width * 0.26} ${height * 0.32} Z" opacity="0.55"/><circle cx="${x + width * 0.75}" cy="${y + height * 0.28}" r="${height * 0.1}" opacity="0.55"/>`;
+
+/**
+ * What the insert menu offers to send a file of each kind into a note, with the file picker's
+ * `accept` for it: a picture, a video, a recording, or any file, each written as its own kind is
+ * whichever entry sent it. A recording and not "audio", so `N /A` stays words and opens no menu.
+ */
+const SENDS: readonly { title: string; accept?: string; description: string; picture: string }[] = [
+  { title: "Upload an image", accept: "image/*", description: "A picture from your computer, shown in the note", picture: sketch(framed(50, 8, 100, 68)) },
+  { title: "Upload a video", accept: "video/*", description: "A video from your computer, played in the note", picture: sketch(panel(40, 8, 120, 68) + `<path d="M92 30 v24 l20 -12 Z"/>` + words(48, 66, 104, 3)) },
+  { title: "Upload a recording", accept: "audio/*", description: "Sound from your computer, played in the note", picture: sketch(panel(16, 26, 168, 32, 16) + `<path d="M32 34 v16 l13 -8 Z"/>` + words(56, 39, 96) + `<circle cx="164" cy="42" r="5"/>`) },
+  { title: "Upload a file", description: "Any file from your computer, shown as what it is", picture: sketch(outline(30, 10, 140, 64, 6) + panel(30, 10, 140, 22, 6) + words(40, 18, 70) + words(124, 18, 36) + words(40, 44, 120) + words(40, 56, 90)) },
+];
 
 /** Pictures in a row, as the insert menu pictures uploads to choose from. */
-const INSERT_PICTURE = sketch([20, 76, 132].map((x) => panel(x, 18, 48, 48) + `<path d="M${x + 6} 60 l12 -18 l10 12 l6 -6 l8 12 Z" opacity="0.55"/><circle cx="${x + 36}" cy="30" r="4" opacity="0.55"/>`).join(""));
+const INSERT_PICTURE = sketch([20, 76, 132].map((x) => framed(x, 18, 48, 48)).join(""));
 
 /**
  * Uploads: files in a workspace that a note shows by `::image{id 640x480}`, `::video{id 640x360}`,
@@ -62,8 +75,8 @@ export const uploads: Plugin = {
     const { embeds, stop } = uploadEmbeds(
       host,
       [
-        { title: "Upload a file", description: "A picture, a video, a recording or any file from your computer", preview: { image: UPLOAD_PICTURE }, run: sending.pickIntoNote },
-        { title: "Insert an upload", description: "A file already uploaded to the workspace", preview: { image: INSERT_PICTURE }, run: inserting.ask },
+        ...SENDS.map(({ title, accept, description, picture }) => ({ title, description, preview: { image: picture }, insert: sending.pickInto(accept) })),
+        { title: "Insert an upload", description: "A file already uploaded to the workspace", preview: { image: INSERT_PICTURE }, insert: inserting.ask },
       ],
       { of: sending.of, subscribe: sending.subscribe },
     );

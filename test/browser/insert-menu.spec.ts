@@ -28,7 +28,7 @@ async function open(page: Page, body: string) {
   return note;
 }
 
-const EMBEDS = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/];
+const EMBEDS = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Insert an upload/];
 
 test("/ says what each item makes in words, with a picture of it, under Blocks and Embeds, and never shows syntax", async ({ page }) => {
   await open(page, "# Insert\n\n");
@@ -38,7 +38,12 @@ test("/ says what each item makes in words, with a picture of it, under Blocks a
   await expect(options(page).nth(0)).toHaveText("Heading 1A large title for a part of the note");
   await expect(options(page).filter({ hasText: /^Table/ })).toHaveText("TableRows and columns, typed into cell by cell");
   await expect(options(page).filter({ hasText: /^Timer/ })).toHaveText("TimerA countdown that runs the same for everyone reading the note");
-  await expect(options(page).filter({ hasText: /^Upload a file/ })).toHaveText("Upload a fileA picture, a video, a recording or any file from your computer");
+  await expect(options(page).filter({ hasText: /^Upload/ })).toHaveText([
+    "Upload an imageA picture from your computer, shown in the note",
+    "Upload a videoA video from your computer, played in the note",
+    "Upload a recordingSound from your computer, played in the note",
+    "Upload a fileAny file from your computer, shown as what it is",
+  ]);
   const shown = await options(page).allTextContents();
   expect(shown.filter((option) => /::|\{|\||```|^#/.test(option))).toEqual([]);
   await expect(list(page).locator(".cm-completionDetail")).toHaveCount(0);
@@ -81,6 +86,15 @@ test(":: lists the embeds alone, filters them by what follows, and writes what /
   await page.keyboard.type("::");
   await expect(options(page)).toHaveText(EMBEDS);
   await expect(headings(page)).toHaveCount(0);
+  await page.keyboard.type("con");
+  await settled(page);
+  await expect(list(page)).toHaveCount(0);
+  for (let i = 0; i < 3; i++) await page.keyboard.press("Backspace");
+  for (const [typed, shows] of [["vid", /^Upload a video/], ["file", /^Upload a file/]] as const) {
+    await page.keyboard.type(typed);
+    await expect(options(page)).toHaveText([shows]);
+    for (let i = 0; i < typed.length; i++) await page.keyboard.press("Backspace");
+  }
   await page.keyboard.type("kan");
   await expect(options(page)).toHaveText([/^Kanban board/]);
   await settled(page);
@@ -100,7 +114,11 @@ test("an embed typed by hand past :: is left as typed, and neither a written one
   await settled(page);
   await expect(list(page)).toHaveCount(0);
   await page.keyboard.press("Enter");
-  await page.keyboard.type("::event{", { delay: 20 });
+  // An event or a contact is in no menu, as `@` finds them, and is still written by hand.
+  await page.keyboard.type("::eve", { delay: 20 });
+  await settled(page);
+  await expect(list(page)).toHaveCount(0);
+  await page.keyboard.type("nt{", { delay: 20 });
   await settled(page);
   await expect(list(page)).toHaveCount(0);
   await page.keyboard.type("}\n:::html{}\n<b>hi</b>\n:::", { delay: 20 });
@@ -109,4 +127,5 @@ test("an embed typed by hand past :: is left as typed, and neither a written one
   await page.keyboard.press("Enter");
   await page.keyboard.type("x ::: y");
   await expect.poll(() => text(page, note.id)).toBe("# Hand\n\n::image{abcdefabcdef} and ::timer{5m}\n::event{}\n:::html{}\n<b>hi</b>\n:::\nx ::: y");
+  await expect(editor(page).locator(".embed-unread", { hasText: /^Event: / })).toBeVisible();
 });

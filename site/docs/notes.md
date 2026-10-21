@@ -44,9 +44,11 @@ Type `/` at the start of a line or after a space to open the insert menu. Each i
 | Kanban board | Columns of cards to drag from one to another |
 | Form | Questions that members answer, with the answers kept in the note |
 | HTML | A block of HTML that runs in a frame shut off from the app |
-| Event, Contact | A place for a reference to one of your events or contacts, which you paste over it. Typing `@` and a name finds one directly. See [Calendar and contacts](/docs/calendar-contacts) |
-| Upload a file | A file you pick from your computer |
+| Upload an image, Upload a video, Upload a recording | A picture, a video or a recording you pick from your computer, shown in the note |
+| Upload a file | Any file you pick from your computer. A picture, a video or a recording shows in the note, and anything else as a card |
 | Insert an upload | A file already uploaded to the workspace |
+
+To reference an event or a contact, type `@` and its name. See [Calendar and contacts](/docs/calendar-contacts).
 
 Typing `::` opens the same menu with the embeds alone, from the timer down, so `::kan` and Enter makes a kanban board.
 

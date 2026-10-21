@@ -79,7 +79,6 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
         // Typing carried on after it while it was made: the cursor stays where that left it.
         const still = view.state.selection.main.empty && view.state.selection.main.head === to;
         view.dispatch({ changes, ...(still && { selection: { anchor, head } }), scrollIntoView: true, userEvent: "input.complete" });
-        item.run?.();
       };
       if (typeof item.insert === "string") return write(item.insert);
       const typed = view.state.doc.sliceString(start, end);

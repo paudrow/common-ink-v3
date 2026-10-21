@@ -49,13 +49,13 @@ interface Entry {
   pick?: EmbedPick;
 }
 
-const entriesOf = (embed: EmbedInfo): Entry[] => (embed.pick === undefined ? [{ embed }] : ("run" in embed.pick ? [embed.pick] : embed.pick).map((pick) => ({ embed, pick })));
+const entriesOf = (embed: EmbedInfo): Entry[] => (embed.pick === undefined ? [{ embed }] : ("insert" in embed.pick ? [embed.pick] : embed.pick).map((pick) => ({ embed, pick })));
 
 /** How a new embed is written, with its config left selected when there is one to type over. */
 function embedItem({ embed: { name, title, block, starts, description, preview }, pick }: Entry): CompletionItem {
   if (pick) {
     const said = pick.description ?? pick.detail;
-    return { kind: "embed", label: pick.title, ...(said && { description: said }), ...(pick.preview && { preview: pick.preview }), insert: "", run: pick.run };
+    return { kind: "embed", label: pick.title, ...(said && { description: said }), ...(pick.preview && { preview: pick.preview }), insert: pick.insert };
   }
   const shown = { kind: "embed" as const, label: title, ...(description && { description }), ...(preview && { preview }) };
   const config = starts?.config ?? "";
@@ -69,10 +69,14 @@ function embedItem({ embed: { name, title, block, starts, description, preview }
 /** What an item is found by: its words and not "a" or "an", as in "Upload a file", so `N /A` is still just words. */
 const found = (text: string) => text.replace(/\b(?:a|an|the)\b/gi, " ");
 
-/** What `::` offers for what was typed after it, from `embeds`: those it writes, then what it can only ask for, such as a file to upload. */
+/**
+ * What `::` offers for what was typed after it, from `embeds`: those it writes, found by title or
+ * name, then what it can only ask for, such as a file to upload, found by title alone, so `file`
+ * finds "Upload a file" and not every way into the `file` embed.
+ */
 export function embedItems(embeds: readonly EmbedInfo[], typed: string): CompletionItem[] {
   const entries = embeds.flatMap(entriesOf).toSorted((a, b) => Number(!!a.pick) - Number(!!b.pick));
-  return starting(entries, typed, (e) => found(`${e.pick?.title ?? e.embed.title} ${e.embed.name}`)).map(embedItem);
+  return starting(entries, typed, (e) => found(e.pick ? e.pick.title : `${e.embed.title} ${e.embed.name}`)).map(embedItem);
 }
 
 /** What `/` offers for what was typed after it: the blocks of markdown that fit, then the embeds as `::` offers them. */

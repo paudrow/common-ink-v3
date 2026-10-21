@@ -59,7 +59,7 @@ async function drag(page: Page, from: Locator, to: Locator, at: { x: number; y: 
 
 /** Everything / lists with every plugin on: the blocks of markdown, then the embeds. */
 const BLOCKS = [/^Heading 1/, /^Heading 2/, /^Heading 3/, /^Bulleted list/, /^Numbered list/, /^Task list/, /^Table/, /^Code block/, /^Quote/, /^Divider/];
-const EMBEDS = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/];
+const EMBEDS = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Insert an upload/];
 
 const BOARD = "# Plan\n\n:::kanban{}\n## To do\n- write\n- review\n\n## Doing\n- build\n\n## Done\n:::\n\nAfter the board.\n";
 

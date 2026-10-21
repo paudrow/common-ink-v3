@@ -173,7 +173,7 @@ test("a member who can't change the note still sees the bar's clocks and count, 
 });
 
 test("every embed is in the / menu after the blocks and alone in the :: menu, and every command-started widget is in the command palette", async ({ page }) => {
-  const embeds = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/];
+  const embeds = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Insert an upload/];
   await open(page, "# Tea\n\n");
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");

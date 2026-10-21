@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import type { Embed, Plugin, PluginHost, SourceRecord } from "../../plugin-api.ts";
 import { openPopover } from "./Popover.tsx";
-import { panel, sketch, words } from "./sketch.ts";
 
 /**
  * What a reference to an event or a contact reads as for whoever is looking. `private` is what
@@ -34,9 +33,6 @@ function readOf(host: PluginHost, ref: string) {
   return entry;
 }
 
-/** A chip among words with `glyph` at its start, as the insert menu pictures a reference. */
-export const chipSketch = (glyph: string) => sketch(words(10, 39, 28) + panel(44, 28, 112, 28, 14) + glyph + words(78, 39, 64) + words(164, 39, 26));
-
 /** What a note writes of a reference: the id `record.refer` answered, then what to call it. */
 export function writtenReference(config: string): { ref: string; label: string } | null {
   const read = /^([a-z0-9]{12})(?: (.*))?$/.exec(config.trim());
@@ -60,12 +56,14 @@ interface Kind<K extends SourceRecord["kind"]> {
 /**
  * An embed that stands for one event or contact: `::event{ref label}`. It is one chip in the line,
  * drawn with the label the note holds and then, for the member whose record it is, with the record
- * as it is now. Anyone else is shown the label, which is all the note says.
+ * as it is now. Anyone else is shown the label, which is all the note says. No menu lists it: `@`
+ * finds events and people and writes their references, and one can be typed or pasted by hand.
  */
 export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, title, hint, shown, details }: Kind<K>): Embed {
   return {
     name: kind,
     title,
+    menu: false,
     render(el, first) {
       const { noteId } = first;
       let drawnFor: string | null = null;
