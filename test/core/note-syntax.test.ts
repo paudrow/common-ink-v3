@@ -30,7 +30,7 @@ describe("note_syntax", () => {
     expect(text).toContain("- [ ] !! Call the bank due:2026-10-14 every:1w");
     expect(linksIn("See [[k3f9q2m8x1ab|Budget]].")).toEqual([{ from: 4, to: 27, target: "k3f9q2m8x1ab", display: "Budget" }]);
     expect(mentionsIn("Ask @[[Ada Lovelace]].")).toEqual([{ from: 4, to: 21, target: "Ada Lovelace", label: null }]);
-    expect(todosIn("- [ ] !! Call the bank due:2026-10-14 every:1w")).toMatchObject([{ done: false, importance: 2, due: { date: "2026-10-14" }, every: { written: "1w" } }]);
+    expect(todosIn("- [ ] !! Call the bank due:2026-10-14 every:1w")).toMatchObject([{ state: "open", importance: 2, due: { date: "2026-10-14" }, every: { written: "1w" } }]);
     expect(uploadIn("u2p9l4d8a3c7 640x480")).toBe("u2p9l4d8a3c7");
     const refused = await callTool(null as never, { personId: "p" } as never, "note_syntax", { form: true });
     expect(refused).toEqual({ content: [{ type: "text", text: 'invalid: note_syntax takes no "form". It takes no arguments.' }], isError: true });

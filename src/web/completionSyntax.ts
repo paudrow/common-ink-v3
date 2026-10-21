@@ -1,4 +1,4 @@
-import type { CompletionItem } from "./plugin-api.ts";
+import { BOX_PATTERN, type CompletionItem } from "./plugin-api.ts";
 
 /**
  * What has been typed after `trigger`, given the line up to the cursor, or null when the cursor
@@ -17,7 +17,7 @@ export function typedAfter(before: string, trigger: string, { spaces = false, an
 }
 
 /** Blank space, a quote's `>`, and a list item's mark and task box: what may come before a trigger at the start of a line. */
-const LEAD = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?$/;
+const LEAD = new RegExp(`^\\s*(?:>\\s*)*(?:(?:[-*+]|\\d+[.)])\\s+(?:${BOX_PATTERN}\\s+)?)?$`);
 
 /**
  * Whether the trigger `typedAfter` found starts its line, given the line up to the cursor and what

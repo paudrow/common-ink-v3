@@ -2,7 +2,7 @@ import type { ChangeSpec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { ReactNode } from "react";
 import { Icon, type IconName } from "./icons.tsx";
-import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type Folders } from "./plugin-api.ts";
+import { ALL_NOTES, BOX_PATTERN, SHARED_WITH_ME, folderTitle, type Folders } from "./plugin-api.ts";
 import type { Route } from "./router.ts";
 
 /**
@@ -95,8 +95,8 @@ interface Mark {
 
 const MARKS = {
   heading: { text: "# ", is: /^# /, replaces: /^#{2,6} / },
-  todo: { text: "- [ ] ", is: /^[-*+] \[[ xX]\] /, replaces: /^[-*+] / },
-  bullet: { text: "- ", is: /^[-*+] (?!\[[ xX]\] )/, replaces: /^[-*+] \[[ xX]\] / },
+  todo: { text: "- [ ] ", is: new RegExp(`^[-*+] ${BOX_PATTERN} `), replaces: /^[-*+] / },
+  bullet: { text: "- ", is: new RegExp(`^[-*+] (?!${BOX_PATTERN} )`), replaces: new RegExp(`^[-*+] ${BOX_PATTERN} `) },
 } satisfies Record<string, Mark>;
 
 /** Puts the mark on each line the selection covers, or takes it off when every one has it. */

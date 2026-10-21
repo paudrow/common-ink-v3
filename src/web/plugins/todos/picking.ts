@@ -1,9 +1,33 @@
-import { DAY_NAMES, nameKey, ordinal, parseRule, skippedTo, tagsOn, writeRule, type Importance, type TodoChange } from "../../plugin-api.ts";
+import { DAY_NAMES, nameKey, ordinal, parseRule, skippedTo, tagsOn, writeRule, type IconName, type Importance, type TodoChange, type TodoState } from "../../plugin-api.ts";
 import { addDays, dueLabel } from "./dates.ts";
 import { shortDay } from "./recurrence.ts";
 
 /** A todo's priority in words, by its level: the note writes it `!`, `!!` or `!!!` after the checkbox, and nothing for None. */
 export const PRIORITY = ["None", "Low", "Medium", "High"] as const;
+
+/** What a todo's box says, in words: its name to a screen reader, in a note and on the Todos page. */
+export const STATE_NAMES: Record<TodoState, string> = { open: "Not done", done: "Done", abandoned: "Abandoned", backlog: "Backlog" };
+
+/** What a click on a todo's box makes it: an open todo done, and any other open again. */
+export const clicked = (state: TodoState): TodoState => (state === "open" ? "done" : "open");
+
+/** A state a todo is put in from the Todos page by a key, a button or its menu: put away, as each of these takes it off the open todos. */
+export type PutAway = Exclude<TodoState, "open">;
+
+/**
+ * How the Todos page puts a todo in each state: the menu item and button that do it, the icon they
+ * show, the command and the keys that do it to the row the keyboard is on, what is said once it is
+ * done, and what it was, said when Undo finds the line changed since.
+ */
+export const PUTTING: Record<PutAway, { label: string; icon: IconName; command: string; title: string; keys: readonly string[]; told: string; past: string }> = {
+  done: { label: "Complete", icon: "check", command: "todos.complete", title: "Complete the selected todo, or open it again", keys: ["x"], told: "Task completed", past: "checked off" },
+  abandoned: { label: "Abandon", icon: "abandoned", command: "todos.abandon", title: "Abandon the selected todo, or open it again", keys: ["-"], told: "Task abandoned", past: "abandoned" },
+  // Where > is typed with Shift, as on most keyboards, the press is written shift+>.
+  backlog: { label: "Move to backlog", icon: "backlog", command: "todos.backlog", title: "Move the selected todo to the backlog, or open it again", keys: ["shift+>", ">"], told: "Task moved to the backlog", past: "moved to the backlog" },
+};
+
+/** What a key, a button or a menu item for a state makes a todo: that state, or open again when it is in it already. */
+export const pressed = (state: TodoState, to: PutAway): TodoState => (state === to ? "open" : to);
 
 /** The chips of a todo that open a popover of choices, in a note and on the Todos page. */
 export type ChipKind = "due" | "importance" | "every";
@@ -32,6 +56,7 @@ export function picking(open: Picking, { type, row, chip }: PickingEvent): Picki
 
 /** What a todo's chips are set from. `every` is its rule as written after `every:`, or null. */
 export interface Picked {
+  state: TodoState;
   due: string | null;
   importance: Importance;
   every: string | null;
@@ -49,15 +74,15 @@ export interface Choice {
 
 /**
  * What the priority or the due date chip's popover offers for a todo, in the order shown, on day `now`.
- * A date of the member's own is the popover's date field. A todo that repeats can also skip to its next
- * date, with nothing checked off.
+ * A date of the member's own is the popover's date field. An open todo that repeats can also skip to its
+ * next date, with nothing checked off; one abandoned or in the backlog waits, and has no skip.
  */
 export function choicesFor(chip: Exclude<ChipKind, "every">, todo: Picked, now: string): Choice[] {
   if (chip === "importance") return ([3, 2, 1, 0] as const).map((level) => ({ label: PRIORITY[level], change: { importance: level }, current: todo.importance === level }));
   const day = (label: string, due: string, detail?: string): Choice => ({ label, ...(detail && { detail }), change: { due }, current: todo.due === due });
   const week = addDays(now, 7);
   const rule = todo.every === null ? null : parseRule(todo.every);
-  const next = rule && skippedTo(rule, { due: todo.due, on: now });
+  const next = todo.state === "open" && rule && skippedTo(rule, { due: todo.due, on: now });
   return [
     day("Today", now),
     day("Tomorrow", addDays(now, 1)),

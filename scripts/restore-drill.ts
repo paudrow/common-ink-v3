@@ -49,7 +49,7 @@ INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, created_a
   ('n2', 'w1', 'f1', 1, '# Groceries\n\nIt''s 50% off.', 'Groceries', 1760000200000, 1760000200000, 'p2', 8);
 INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at) VALUES
   ('n1', 1, 0, 'member', 'p1', '[]', 1760000000000), ('n1', 2, 1, 'member', 'p1', '[]', 1760000100000), ('n2', 1, 0, 'member', 'p2', '[]', 1760000200000);
-INSERT INTO todos (note_id, line, done, importance, due, text) VALUES ('n1', 2, 0, 0, NULL, 'Pick a date');
+INSERT INTO todos (note_id, line, state, importance, due, text) VALUES ('n1', 2, 'open', 0, NULL, 'Pick a date');
 INSERT INTO note_search_rows (note_id) VALUES ('n1'), ('n2');
 INSERT INTO note_search (rowid, workspace, title, text) SELECT r.id, n.workspace_id, n.title, n.text FROM note_search_rows r JOIN notes n ON n.id = r.note_id;
 INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, hash, created_at, created_by, uploaded_by, uploaded_by_kind, state) VALUES

@@ -18,7 +18,7 @@ const codeOf = async (run: Promise<unknown>) => run.then(() => "done", (err) => 
 /** What the index holds for a note, read straight from the tables, in the shape the text gives. */
 async function indexed(noteId: string) {
   const [todos, tags] = await env.DB.batch<Record<string, unknown>>([
-    env.DB.prepare("SELECT line, done, importance, due, text FROM todos WHERE note_id = ? ORDER BY line").bind(noteId),
+    env.DB.prepare("SELECT line, state, importance, due, text FROM todos WHERE note_id = ? ORDER BY line").bind(noteId),
     env.DB.prepare("SELECT tag, name FROM note_tags WHERE note_id = ? ORDER BY rowid").bind(noteId),
   ]);
   return { todos: todos!.results.map((r) => Object.values(r)), tags: tags!.results.map((r) => Object.values(r)) };
@@ -33,10 +33,10 @@ describe("the index of todos", () => {
 
     expect(await indexed(note.id)).toEqual({
       todos: [
-        [2, 0, 2, "2026-10-14", "- [ ] !! Call the bank due:2026-10-14 +Home"],
-        [3, 1, 0, null, "- [x] Book flights +Trip"],
-        [8, 0, 1, null, "  - [ ] ! Water plants +home #garden"],
-        [9, 0, 0, null, "- [ ] Nothing set"],
+        [2, "open", 2, "2026-10-14", "- [ ] !! Call the bank due:2026-10-14 +Home"],
+        [3, "done", 0, null, "- [x] Book flights +Trip"],
+        [8, "open", 1, null, "  - [ ] ! Water plants +home #garden"],
+        [9, "open", 0, null, "- [ ] Nothing set"],
       ],
       tags: [
         ["work", "work"],
@@ -56,7 +56,7 @@ describe("the index of todos", () => {
     const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan #q4\n\nIntro\n- [x] one +A\n- [ ] two due:2026-01-02 +B" });
     await same(written.text);
     await same((await perform(env.DB, ada, { type: "note.undo", id: note.id })).text);
-    expect((await indexed(note.id)).todos).toEqual([[2, 0, 0, null, "- [ ] one +A"]]);
+    expect((await indexed(note.id)).todos).toEqual([[2, "open", 0, null, "- [ ] one +A"]]);
     await same((await perform(env.DB, ada, { type: "note.redo", id: note.id })).text);
     expect((await indexed(note.id)).tags).toEqual([["q4", "q4"]]);
     await same((await perform(env.DB, ada, { type: "note.revert", id: note.id, revision: 1 })).text);
@@ -101,7 +101,7 @@ describe("the index of todos", () => {
 
     const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "# Old, renamed\n\n- [ ] from before +P #t" });
     expect(await indexed(note.id)).toEqual(todoIndex(written.text));
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 8 });
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 9 });
   });
 
   it("is made again from every note's text by an admin, another member's private note included, and the answer says nothing of how many", async () => {
@@ -112,7 +112,7 @@ describe("the index of todos", () => {
     await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: true });
     // An index and a record of links that say what the text doesn't, which no write would notice.
     await env.DB.batch([
-      env.DB.prepare("UPDATE todos SET text = '- [ ] wrong', done = 1 WHERE note_id IN (?, ?)").bind(plan.id, diary.id),
+      env.DB.prepare("UPDATE todos SET text = '- [ ] wrong', state = 'done' WHERE note_id IN (?, ?)").bind(plan.id, diary.id),
       env.DB.prepare("DELETE FROM note_tags WHERE note_id = ?").bind(diary.id),
       env.DB.prepare("DELETE FROM links WHERE source_id = ?").bind(diary.id),
     ]);
@@ -150,7 +150,7 @@ describe("listing todos", () => {
       revision: 1,
       line: 8,
       text: "  - [ ] ! Water plants +home #garden",
-      done: false,
+      state: "open",
       importance: 1,
       due: null,
       every: null,

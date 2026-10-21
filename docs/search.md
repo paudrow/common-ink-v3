@@ -27,7 +27,7 @@ A day is `YYYY-MM-DD`, or counted from today: `today`, `yesterday`, `tomorrow`, 
 
 ## What a query covers
 
-A search covers live notes. It covers archived notes too when the query says `is:archived` anywhere, and Trash when it says `is:trashed`: so `is:archived` alone is the archived notes, and `budget (is:open OR is:archived)` is both. Todos are the same, and for done ones: a query that says neither `is:open` nor `is:done` anywhere lists only open todos, `is:done` or `-is:open` is the done ones, and `is:open OR is:done` is both.
+A search covers live notes. It covers archived notes too when the query says `is:archived` anywhere, and Trash when it says `is:trashed`: so `is:archived` alone is the archived notes, and `budget (is:open OR is:archived)` is both. Todos are the same for the state their box says, `is:open`, `is:done`, `is:abandoned` or `is:backlog`: a query that names none of them anywhere lists only open todos, `is:backlog` is the ones in the backlog, `-is:open` every one that isn't open, and `is:open OR is:backlog` is both.
 
 `is:shared` is true of a note with a grant of its own, a person or a link, and only where the asker may list that note's grants: a member who can share it. For an agent and for a guest it is true of nothing, since neither is told how a note is shared.
 
@@ -81,7 +81,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `is:trashed` | In Trash. A query that doesn't say so leaves Trash out | `is:trashed` |
 | `is:shared` | Shared by itself with a person or by a link, where you may see how it is shared | `is:shared` |
 | `is:private` | Private to one member | `is:private` |
-| `has:todo` | Has a todo, open or done | `has:todo` |
+| `has:todo` | Has a todo, in any state | `has:todo` |
 | `has:open-todo` | Has an open todo | `has:open-todo` |
 | `has:link` | Links to another note | `has:link` |
 | `has:backlink` | Linked to from a note you can see | `has:backlink` |
@@ -119,8 +119,10 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `editor:NAME, edited-by:NAME` | Changed by a member or an agent, by name. @me is you | `editor:@me` |
 | `author:NAME` | First written by a member or an agent, by name. @me is you | `author:@me` |
 | `assignee:NAME, assigned:NAME` | Assigned to a person: mentioned on the todo's line, by name or id. @me is you | `assignee:@me` |
-| `is:open` | Not done. A query that says neither is:open nor is:done lists only open todos | `is:open` |
-| `is:done` | Done. With is:open OR is:done, both | `is:done` |
+| `is:open` | A box written [ ]: open. A query that names no state lists only open todos | `is:open` |
+| `is:done` | A box written [x]: done. With is:open OR is:done, both | `is:done` |
+| `is:abandoned` | A box written [-]: abandoned, which won't be done | `is:abandoned` |
+| `is:backlog` | A box written [>]: in the backlog, put off for some day | `is:backlog` |
 | `is:archived` | Archived. A query that doesn't say so leaves archived notes out | `is:archived` |
 | `is:trashed` | In Trash. A query that doesn't say so leaves Trash out | `is:trashed` |
 | `is:shared` | Shared by itself with a person or by a link, where you may see how it is shared | `is:shared` |
@@ -188,7 +190,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 
 The search field is a plain text field that takes all of this. As a filter's name or its value is typed it is offered under the field: Tab takes the first offer, the arrows move and Enter takes the one they came to, and Escape closes the list. Folders, tags and people are offered from what the member can already list. A query that can't be read says so under the field, with the part that is wrong marked, and nothing is asked of the server until it reads.
 
-**Advanced**, beside the field, opens the builder: a row for each condition, with its field, is or is not, a comparison where the field has one, and its value. It opens on a first row to fill in, which is no part of the query until it is. **State** is open, archived or in Trash (and done, of a todo), and **Visibility** is shared or private; both are written `is:`. **Add a condition** adds a row, **Match all** or **any** joins them, and there is the order and where words are looked for. Every change is written into the field, and what is typed in the field is read back into the rows. A query rows can't show, one with a group inside it or AND and OR together, stays as it is typed, and the builder says so and changes nothing. **?** in the builder opens the help over the page: every form with what it means and an example, under the builder's headings, and an example is a button that puts it in the field, runs it and closes the help. Escape or its close button closes it and gives the keyboard back to the **?**.
+**Advanced**, beside the field, opens the builder: a row for each condition, with its field, is or is not, a comparison where the field has one, and its value. It opens on a first row to fill in, which is no part of the query until it is. **State** is open, archived or in Trash (and done, abandoned or backlog, of a todo), and **Visibility** is shared or private; both are written `is:`. **Add a condition** adds a row, **Match all** or **any** joins them, and there is the order and where words are looked for. Every change is written into the field, and what is typed in the field is read back into the rows. A query rows can't show, one with a group inside it or AND and OR together, stays as it is typed, and the builder says so and changes nothing. **?** in the builder opens the help over the page: every form with what it means and an example, under the builder's headings, and an example is a button that puts it in the field, runs it and closes the help. Escape or its close button closes it and gives the keyboard back to the **?**.
 
 On the Search page the inspector is about the notes found (`useInspected`, labelled "Search" and the query): Info counts them and History is theirs, and both follow the query as it is typed.
 

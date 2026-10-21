@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { createElement, type ReactNode } from "react";
-import { changeTodo, parseTodo, rewriteTodo, type Importance, type LastDone, type PluginHost, type Ticking } from "../../plugin-api.ts";
+import { changeTodo, markOf, parseTodo, rewriteTodo, type Importance, type LastDone, type PluginHost, type Ticking, type TodoState } from "../../plugin-api.ts";
 import { BOX_EM } from "../gfm/lists.ts";
 import { chips, type Chip, type Source, type Token } from "../lib/chips.ts";
 import { clock } from "../lib/historyView.ts";
@@ -11,12 +11,13 @@ import { replacing } from "../lib/rewrite.ts";
 import { onTodo, todoLines } from "../lib/todoLines.ts";
 import { ChipMenu } from "./ChipMenu.tsx";
 import { Completions } from "./Completions.tsx";
+import { continuedTodos } from "./continuing.ts";
 import { dueLabel, dueState, tickedLabel, today } from "./dates.ts";
-import { CHIP_NAMES, PRIORITY, pickerLabel, type ChipKind } from "./picking.ts";
+import { CHIP_NAMES, PRIORITY, STATE_NAMES, clicked, pickerLabel, type ChipKind } from "./picking.ts";
 import { doneLabel, doneName, everyLabel, everyName } from "./recurrence.ts";
 
 interface Checkbox extends Token {
-  checked: boolean;
+  state: TodoState;
 }
 interface ImportanceMarks extends Token {
   level: Importance;
@@ -75,13 +76,14 @@ export function tickedIn(view: EditorView): { line: number; text: string } | nul
 export function untick(view: EditorView): boolean {
   const at = writable(view.state) ? tickedIn(view) : null;
   if (!at) return false;
-  const changes = replacing(at.text, rewriteTodo(at.text, { done: false }), view.state.doc.line(at.line + 1).from);
+  const changes = replacing(at.text, rewriteTodo(at.text, { state: "open" }), view.state.doc.line(at.line + 1).from);
   if (changes) view.dispatch({ changes, userEvent: "input.task" });
   return true;
 }
 
 /**
- * A checkbox that writes `[x]` or `[ ]` when it is clicked, as typing in the brackets does. The server
+ * A checkbox that writes `[x]` or `[ ]` when it is clicked, as typing in the brackets does: an open
+ * todo is checked off, and any other opened again, an abandoned or backlogged one too. The server
  * completes a recurring todo whose box a write checked, and the editor takes the line it answers with.
  * Only the server can file the line on the daily note, so nothing is rolled forward here.
  */
@@ -90,30 +92,33 @@ const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
   id: "task",
   find(line, offset) {
     const todo = parseTodo(line, offset);
-    return todo ? [{ ...todo.box, checked: todo.done }] : [];
+    return todo ? [{ ...todo.box, state: todo.state }] : [];
   },
   draw(el, token, source) {
     const { host, noteId, onCompleted, onRecurred } = context;
     const box = document.createElement("input");
     box.type = "checkbox";
-    box.checked = token.checked;
+    box.checked = token.state === "done";
+    box.dataset.state = token.state;
     box.disabled = source.readOnly;
-    box.setAttribute("aria-label", token.checked ? "Done" : "Not done");
+    box.setAttribute("aria-label", STATE_NAMES[token.state]);
     box.addEventListener("change", () => {
+      const to = clicked(token.state);
+      box.checked = to === "done";
       const editor = el.closest<HTMLElement>(".cm-editor");
       const view = editor && EditorView.findFromDOM(editor);
       const at = view?.posAtDOM(el);
       const was = view && at !== undefined ? parseTodo(view.state.doc.lineAt(Math.min(at, view.state.doc.length)).text) : null;
       // What was typed before the click goes first, in a write of its own, so that the change that completes a recurring todo holds the check alone and Undo takes back nothing else.
       const before = box.checked && was?.every ? host.app().saveNote(noteId) : undefined;
-      source.rewrite(box.checked ? "[x]" : "[ ]");
+      source.rewrite(`[${markOf(to)}]`);
       // Saved at once, so the write holds the check alone and not what is typed on the line in the pause after it.
       const saved = host.app().saveNote(noteId);
       if (!box.checked || !view || at === undefined) return;
       const line = view.state.doc.lineAt(Math.min(at, view.state.doc.length));
       const todo = parseTodo(line.text);
       // A note that can't be written has nothing to undo.
-      if (!todo?.done) return;
+      if (todo?.state !== "done") return;
       if (todo.every) {
         // The server completes it, and says so of the write that checked it: that change is what Undo takes back.
         void Promise.all([saved, before]).then((writes) => {
@@ -133,7 +138,7 @@ const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
     });
     // The tick is an element of its own, so it is painted in the theme's ink.
     el.append(box, document.createElement("i"));
-    if (token.checked) tickedCard(el, box, () => historyOf(context, source).then((history) => history.completed));
+    if (token.state === "done") tickedCard(el, box, () => historyOf(context, source).then((history) => history.completed));
   },
 });
 
@@ -219,7 +224,7 @@ function opener(el: HTMLElement, says: string, chip: ChipKind, source: Source, n
     const read = line && parseTodo(line.text);
     return createElement(ChipMenu, {
       chip,
-      todo: { due: read?.due?.date ?? null, importance: read?.importance ?? 0, every: read?.every?.written ?? null },
+      todo: { state: read?.state ?? "open", due: read?.due?.date ?? null, importance: read?.importance ?? 0, every: read?.every?.written ?? null },
       now: today(),
       onClose: close,
       onPick(change) {
@@ -343,6 +348,28 @@ function lastDone(context: TodoChipsContext): Chip<Done> {
   };
 }
 
+/** How a todo's words are drawn after its box, for a state that changes them: abandoned struck through, and in the backlog dimmed. */
+const STATE_WORDS: Partial<Record<TodoState, Decoration>> = {
+  abandoned: Decoration.mark({ class: "md-todo-abandoned" }),
+  backlog: Decoration.mark({ class: "md-todo-backlog" }),
+};
+
+/** The words of each todo on screen that is abandoned or in the backlog, from the first after its box to the end of its line. */
+const stateWords = drawnInView((view) => {
+  const { state } = view;
+  const drawn: Range<Decoration>[] = [];
+  for (const from of state.field(todoLines)) {
+    if (!view.visibleRanges.some((range) => range.from <= from && from <= range.to)) continue;
+    const line = state.doc.lineAt(from);
+    const todo = parseTodo(line.text, from);
+    const mark = todo ? STATE_WORDS[todo.state] : undefined;
+    if (!todo || !mark) continue;
+    const start = todo.box.to + /^\s*/.exec(line.text.slice(todo.box.to - from))![0].length;
+    if (start < line.to) drawn.push(mark.range(start, line.to));
+  }
+  return drawn;
+});
+
 const written = Decoration.mark({ class: "md-todo-token" });
 
 /** A todo's token the cursor is on, where it is shown as written: it stays in one piece, as its chip is, so the line wraps where it did. */
@@ -360,7 +387,7 @@ const asWritten = drawnInView((view) => {
 
 const look = EditorView.baseTheme({
   // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark. It is as wide
-  // as the box, and so is the `[ ]`, `[x]` or `[X]` it stands for when that is shown as written, so neither moves the words.
+  // as the box, and so is the `[ ]`, `[x]` or other mark it stands for when that is shown as written, so neither moves the words.
   ".md-chip.md-chip-task": { width: `${BOX_EM}em` },
   ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", paddingLeft: "0.35em", justifyContent: "flex-start", cursor: "pointer" },
   ".md-chip-task input": {
@@ -380,6 +407,14 @@ const look = EditorView.baseTheme({
   ".md-chip-task input:checked": { borderColor: "var(--accent)", backgroundColor: "var(--accent)" },
   ".md-chip-task i": { display: "none", position: "absolute", left: "50%", top: "50%", width: "0.3em", height: "0.58em", margin: "-0.37em 0 0 -0.15em", boxSizing: "border-box", border: "solid var(--on-accent)", borderWidth: "0 0.13em 0.13em 0", transform: "rotate(45deg)", pointerEvents: "none" },
   ".md-chip-task input:checked + i": { display: "block" },
+  // Abandoned and backlogged boxes are quieter than an open one: abandoned is struck through as its words are, and backlog has a › in a dashed box.
+  ".md-chip-task input[data-state=abandoned], .md-chip-task input[data-state=backlog]": { borderColor: "color-mix(in srgb, var(--muted) 55%, transparent)", backgroundColor: "transparent" },
+  ".md-chip-task input[data-state=backlog]": { borderStyle: "dashed" },
+  ".md-chip-task input[data-state=abandoned] + i": { display: "block", left: "-0.2em", right: "-0.2em", width: "auto", height: "0", margin: "-0.065em 0 0", border: "solid var(--muted)", borderWidth: "0.13em 0 0", transform: "none" },
+  ".md-chip-task input[data-state=backlog] + i": { display: "flex", alignItems: "center", justifyContent: "center", inset: "0", width: "auto", height: "auto", margin: "0", border: "none", transform: "none", fontStyle: "normal", fontWeight: "700", lineHeight: "1", color: "var(--muted)" },
+  ".md-chip-task input[data-state=backlog] + i::before": { content: '"›"' },
+  ".md-todo-abandoned": { color: "var(--muted)", textDecoration: "line-through", textDecorationColor: "var(--muted)" },
+  ".md-todo-backlog": { color: "var(--muted)" },
   ".md-chip-task input:focus-visible": { outline: "2px solid var(--accent)", outlineOffset: "2px" },
   ".md-chip-task input:disabled": { cursor: "default", opacity: "0.7" },
   ".md-chip-task:has(input:disabled) > :last-child": { cursor: "default" },
@@ -400,4 +435,4 @@ const look = EditorView.baseTheme({
 });
 
 /** Draws a todo's checkbox and its options as chips. */
-export const todoChips = (context: TodoChipsContext): Extension => [todoLines, ticked, chips(checkbox(context)), chips(importance), chips(due), chips(every), chips(lastDone(context)), asWritten, look];
+export const todoChips = (context: TodoChipsContext): Extension => [todoLines, ticked, chips(checkbox(context)), chips(importance), chips(due), chips(every), chips(lastDone(context)), stateWords, continuedTodos, asWritten, look];

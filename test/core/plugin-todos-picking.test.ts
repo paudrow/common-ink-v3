@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choicesFor, picking, repeatOf, repeats, sameRule, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
+import { choicesFor, clicked, picking, pressed, repeatOf, repeats, sameRule, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
 
 const run = (events: PickingEvent[], from: Picking = null) => events.reduce(picking, from);
 const open = (row: string, chip: Opened): PickingEvent => ({ type: "open", row, chip });
@@ -34,27 +34,29 @@ describe("what a chip's popover offers", () => {
   const now = "2026-10-14";
 
   it("for a due date: today, tomorrow, a week on with its date, and clearing one that is set, the one it says now marked", () => {
-    expect(choicesFor("due", { due: "2026-10-15", importance: 0, every: null }, now)).toEqual([
+    expect(choicesFor("due", { state: "open", due: "2026-10-15", importance: 0, every: null }, now)).toEqual([
       { label: "Today", change: { due: "2026-10-14" }, current: false },
       { label: "Tomorrow", change: { due: "2026-10-15" }, current: true },
       { label: "Next week", detail: "Oct 21", change: { due: "2026-10-21" }, current: false },
       { label: "Clear", change: { due: null }, current: false },
     ]);
-    expect(choicesFor("due", { due: null, importance: 0, every: null }, now).map((c) => c.label)).toEqual(["Today", "Tomorrow", "Next week"]);
+    expect(choicesFor("due", { state: "open", due: null, importance: 0, every: null }, now).map((c) => c.label)).toEqual(["Today", "Tomorrow", "Next week"]);
   });
 
   it("for a todo that repeats: Skip to the date it moves to, before Clear, and with the year when it is another", () => {
-    expect(choicesFor("due", { due: "2026-10-14", importance: 0, every: "1w" }, now).slice(3)).toEqual([
+    expect(choicesFor("due", { state: "open", due: "2026-10-14", importance: 0, every: "1w" }, now).slice(3)).toEqual([
       { label: "Skip to Oct 21", change: { skip: true }, current: false },
       { label: "Clear", change: { due: null }, current: false },
     ]);
-    expect(choicesFor("due", { due: "2026-12-20", importance: 0, every: "1m" }, now)[3]!.label).toBe("Skip to Jan 20, 2027");
+    expect(choicesFor("due", { state: "open", due: "2026-12-20", importance: 0, every: "1m" }, now)[3]!.label).toBe("Skip to Jan 20, 2027");
+    // One abandoned or in the backlog waits until it is open, so it has nothing to skip.
+    expect(choicesFor("due", { state: "backlog", due: "2026-10-14", importance: 0, every: "1w" }, now).slice(3)).toEqual([{ label: "Clear", change: { due: null }, current: false }]);
     // The last time of a rule that ends has no later one to skip to.
-    expect(choicesFor("due", { due: "2026-10-14", importance: 0, every: "1d-times-1" }, now).map((c) => c.label)).toEqual(["Today", "Tomorrow", "Next week", "Clear"]);
+    expect(choicesFor("due", { state: "open", due: "2026-10-14", importance: 0, every: "1d-times-1" }, now).map((c) => c.label)).toEqual(["Today", "Tomorrow", "Next week", "Clear"]);
   });
 
   it("for priority: High, Medium and Low in words, then None, the one it has marked", () => {
-    expect(choicesFor("importance", { due: null, importance: 2, every: null }, now)).toEqual([
+    expect(choicesFor("importance", { state: "open", due: null, importance: 2, every: null }, now)).toEqual([
       { label: "High", change: { importance: 3 }, current: false },
       { label: "Medium", change: { importance: 2 }, current: true },
       { label: "Low", change: { importance: 1 }, current: false },
@@ -109,5 +111,18 @@ describe("adding a tag from a row", () => {
     expect(tagged("Call the bank", "money")).toBe("Call the bank #money");
     expect(tagged("Call the bank #Money", "money")).toBe("Call the bank #Money");
     expect(tagged("", "money")).toBe("#money");
+  });
+});
+
+describe("a todo's box", () => {
+  it("is checked off by a click when it is open, and opened again when it is anything else", () => {
+    expect((["open", "done", "abandoned", "backlog"] as const).map(clicked)).toEqual(["done", "open", "open", "open"]);
+  });
+
+  it("is put in a state by its key or button, and opened again by the one for the state it is in", () => {
+    const from = ["open", "done", "abandoned", "backlog"] as const;
+    expect(from.map((state) => pressed(state, "done"))).toEqual(["done", "open", "done", "done"]);
+    expect(from.map((state) => pressed(state, "abandoned"))).toEqual(["abandoned", "abandoned", "open", "abandoned"]);
+    expect(from.map((state) => pressed(state, "backlog"))).toEqual(["backlog", "backlog", "backlog", "open"]);
   });
 });

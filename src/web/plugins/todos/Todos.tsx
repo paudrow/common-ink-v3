@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Icon, MAX_SEARCH_LENGTH, TODO_SORT_WORDS, changeTodo, isNoteId, isPersonId, linksOn, mentionKey, mentionName, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useInspected, useNow, type App, type ListedTodo, type Mentioned, type PluginHost, type Results, type SortKey, type TodoChange, type TodoCompletion, type TodoSort, type WrittenLink } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
@@ -6,13 +6,13 @@ import { QueryBar } from "../lib/QueryBar.tsx";
 import { EMPTY, keyOf, left, listing, pending, type Hold, type Listing, type ListingEvent } from "./arranged.ts";
 import { Assignees, sameWho, whoOf } from "./Assignees.tsx";
 import { ChipMenu, MoreTags, TagMenu, type PlacedTag } from "./ChipMenu.tsx";
-import { completed, refused, takeBack } from "./completed.ts";
+import { putAway, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
 import { linksOut, type LinkOut } from "./linksOut.ts";
 import { openPage } from "../lib/opening.ts";
-import { CHIP_NAMES, PRIORITY, pickerLabel, picking, tagged, type Opened, type PickingEvent, type RowChip } from "./picking.ts";
+import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, clicked, pickerLabel, picking, pressed, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
 
@@ -74,11 +74,11 @@ function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
   const known = [...todo.assignees, ...(change.assign ? [change.assign] : [])];
   const assignees = new Map(read.assignees.map((a) => [mentionKey(a), known.find((person) => sameWho(person, mentionKey(a))) ?? { id: isPersonId(a.target) ? a.target : null, name: mentionName(a), member: false }]));
-  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.done ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
+  return { ...todo, text, state: read.state, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.state === "done" ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
-const comesAround = (todo: ListedTodo, on: string) => !todo.done && changeTodo(todo.text, { done: true }, on).filed !== null;
+const comesAround = (todo: ListedTodo, on: string) => todo.state !== "done" && changeTodo(todo.text, { state: "done" }, on).filed !== null;
 
 /**
  * A todo's words, and the tags written at their end, which are drawn as chips after them. A tag inside the
@@ -187,6 +187,36 @@ function Words({ words, titleOf, onLink }: { words: string; titleOf: TitleOf; on
   );
 }
 
+/** How each row of a list of todos that can be changed is put away, by the row's element: what the Todos page's keys do to the row they are on. */
+const putters = new WeakMap<Element, (to: PutAway) => void>();
+
+/**
+ * What puts the todo the keyboard is on in a state, or null where the keyboard is on none: on a row of
+ * a list of todos, and not in the field its words are edited in or in its menu. A chip's popover is
+ * over the page, and not in the row.
+ */
+export function putterHere(): ((to: PutAway) => void) | null {
+  const at = document.activeElement;
+  const row = at && !at.closest(".todo-edit, [role='menu']") ? at.closest(".todo-list > .todo-row") : null;
+  return (row && putters.get(row)) ?? null;
+}
+
+/**
+ * Gives the keyboard to a row of a list of todos, the whole row, as vim's j and k select a row: the
+ * keys for a todo work on it, and Tab goes on to its checkbox.
+ */
+const selectRow = (row: Element | null | undefined) => {
+  if (!(row instanceof HTMLElement)) return;
+  row.focus();
+  row.scrollIntoView({ block: "nearest" });
+};
+
+/** The keys for the selected row, as a screen reader names them: those that put it away, then Space and Enter. */
+const ROW_KEYS = [...Object.values(PUTTING).map(({ keys }) => keys.find((key) => !key.includes("+"))), "Space", "Enter"].join(" ");
+
+/** Each state a row's buttons put a todo in. Done is its checkbox. */
+const BUTTONS = ["abandoned", "backlog"] as const satisfies readonly PutAway[];
+
 interface RowProps {
   todo: ListedTodo;
   now: string;
@@ -220,12 +250,15 @@ interface RowProps {
 /**
  * A todo's row, in two lines. The first is the todo: its checkbox, its words, which are edited right
  * there when pressed, and at the right its note's name, which opens the note at the todo's line. The
- * second, under the words, has a chip for each thing a todo has, each in its one place whether it is set
- * or not: the due date, the repeat, the last time it was done, the priority, the first three tags and a
- * "+N" for the rest, and Add tag. Set, a chip says what it is; not set, it is a quiet word shown while
- * the row is pointed at or has the keyboard. Each opens a small popover under itself, and a tag's chip
- * narrows the list through its query; its cross, or Delete on it, takes the tag off. A link in the words opens its note. The row's menu, a right-click,
- * Shift+F10 or the menu key, opens the note, in front or beside the list.
+ * second, under the words, has a chip for each thing set on the todo, side by side: the due date, the
+ * repeat, the last time it was done, the priority, its assignees, the first three tags and a "+N" for
+ * the rest. After them, shown while the row is pointed at or has the keyboard, are Abandon and Move to
+ * backlog, a quiet icon for the date and for Assign when they aren't set, and Add tag, which keep
+ * their room after what is set, so nothing moves when they show; and last Repeat and Priority when
+ * they aren't set, which take room only while they show. Each chip opens a small popover under itself, and a tag's chip narrows the list
+ * through its query; its cross, or Delete on it, takes the tag off. A link in the words opens its note.
+ * The row's menu, a right-click, Shift+F10 or the menu key, opens the note, in front or beside the
+ * list, and puts the todo in each state.
  */
 function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, completing, gone, why, onChange, onUntag, onOpen, completions, onPicking, onTag }: RowProps) {
   /** While the words are edited, how tall they were, which their line keeps so that nothing under it moves. */
@@ -237,6 +270,8 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
   const said = useRef<HTMLSpanElement>(null);
   /** What had the keyboard when the menu was opened, which has it again when the menu closes. */
   const before = useRef<Element | null>(null);
+  /** The row, by which the page's keys find how to put its todo away. */
+  const li = useRef<HTMLLIElement>(null);
   // A popover stays open while the list is read again: what is picked in it is made to the todo as the list has it then.
   const latest = useRef(todo);
   latest.current = todo;
@@ -271,7 +306,9 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
     show(chip, anchor, pickerLabel(chip, words), (close) => {
       const made = (to: TodoChange) => {
         close();
-        if (latest.current.text === todo.text) onChange(latest.current, to as RowChange);
+        if (latest.current.text !== todo.text) return;
+        keepOn(chip, anchor);
+        onChange(latest.current, to as RowChange);
       };
       return chip === "tag" ? (
         <TagMenu tags={tags} has={trailing} onPick={(name) => made({ words: tagged(latest.current.words, name) })} />
@@ -287,7 +324,9 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
         people={people}
         onPick={(to) => {
           close();
-          if (latest.current.text === todo.text) onChange(latest.current, to);
+          if (latest.current.text !== todo.text) return;
+          keepOn("who", anchor);
+          onChange(latest.current, to);
         }}
       />
     ));
@@ -322,29 +361,43 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
         }}
         {...(offers && {
           onRemove: (placed: PlacedTag) => {
-            const chips = focusable();
             // The last tag past the first three takes "+N" with it: the keyboard goes to what comes in its place, Add tag.
-            if (trailingNow().length - 1 <= SHOWN_TAGS) refocus.current = chips.findIndex((el) => el.classList.contains("todo-more-tags"));
+            if (trailingNow().length - 1 <= SHOWN_TAGS) refocus.current = (all) => all.find((el) => el.classList.contains("todo-add-tag"));
             ownChange.current = onUntag(latest.current, placed);
             return ownChange.current;
           },
         })}
       />
     ));
-  /** After a tag is taken off from the keyboard, which of the line's chips has it: the one that took its place. */
-  const refocus = useRef<number | null>(null);
+  /**
+   * Which of the line's buttons has the keyboard once the todo's line is written again: after a tag is
+   * taken off from the keyboard, the one that took its place; after a pick in a chip's popover, the chip,
+   * which a value set or cleared moves between what is set and what isn't.
+   */
+  const refocus = useRef<((all: HTMLElement[]) => HTMLElement | undefined) | null>(null);
   const chipsLine = useRef<HTMLSpanElement>(null);
   const focusable = () => [...chipsLine.current!.querySelectorAll<HTMLElement>("button:not([tabindex='-1'])")];
   useLayoutEffect(() => {
-    const at = refocus.current;
+    const find = refocus.current;
     refocus.current = null;
-    if (at === null) return;
-    const all = focusable();
-    all[Math.min(at, all.length - 1)]?.focus();
-  }, [todo.words]);
+    find?.(focusable())?.focus();
+  }, [todo.text]);
+  const keepOn = (chip: Opened, anchor: HTMLElement) => {
+    if (document.activeElement !== anchor) return;
+    // Only when the chip was moved and so lost the keyboard: a pick that changed nothing, or a later change, takes it from nothing.
+    // The last assignee taken off in a workspace of one leaves no Assign chip, and Add tag has it.
+    refocus.current = (all) => (document.activeElement === document.body ? (all.find((el) => el.dataset.chip === chip) ?? all.find((el) => el.matches(".todo-add-tag"))) : undefined);
+  };
   const trailingNow = () => splitTags(latest.current.words).trailing;
   const untag = (placed: PlacedTag, from?: HTMLElement) => {
-    if (from) refocus.current = focusable().indexOf(from);
+    if (from) {
+      const at = focusable().indexOf(from);
+      // Past the last tag are Abandon and Move to backlog, which the keyboard doesn't land on: Add tag has it.
+      refocus.current = (all) => {
+        const next = all[Math.min(at, all.length - 1)];
+        return next?.matches(".todo-state") ? (all.find((el) => el.matches(".todo-add-tag")) ?? next) : next;
+      };
+    }
     onUntag(latest.current, placed);
   };
   const chipProps = (chip: RowChip, value: string | null) => ({
@@ -358,8 +411,18 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
     onClick: (e: { currentTarget: HTMLElement }) => pick(chip, e.currentTarget),
   });
 
+  /** Whether the words take the keyboard back when their field closes, as Enter and Escape close it. */
+  const toWords = useRef(false);
+  // In the commit that puts the words back, so nothing pressed after Enter or Escape is beaten to the keyboard.
+  useLayoutEffect(() => {
+    if (editing !== null || !toWords.current) return;
+    toWords.current = false;
+    said.current?.focus();
+  }, [editing]);
+
   const edit = () => {
     ending.current = false;
+    toWords.current = false;
     editedOn.current = todo.text;
     setEditing(said.current!.parentElement!.getBoundingClientRect().height);
   };
@@ -395,19 +458,55 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
   const due = todo.due && dueLabel(todo.due, now);
   const repeat = todo.every && (todo.recurs ?? todo.every);
   const level = todo.importance ? PRIORITY[todo.importance] : null;
-  // A todo that can't be changed shows only what is set on it, and so does one that is done.
-  const offers = !readOnly && !todo.done;
+  // A todo that can't be changed shows only what is set on it, and so does one that isn't open.
+  const offers = !readOnly && todo.state === "open";
+  // Each drawn with what is set when it is, and with what the row reveals when it isn't.
+  const dueChip = (
+    <button className="todo-chip todo-due" data-due={todo.due ? dueState(todo.due, now) : undefined} title={due ? undefined : "Add date"} {...chipProps("due", due)}>
+      <Icon name="calendar" />
+      {due || <span className="todo-chip-word">Add date</span>}
+    </button>
+  );
+  const repeatChip = (
+    <button className="todo-chip todo-every" title={repeat ? everyName(todo.every!) : "Repeat"} {...chipProps("every", repeat)}>
+      <Icon name="repeat" />
+      {repeat || <span className="todo-chip-word">Repeat</span>}
+    </button>
+  );
+  const levelChip = (
+    <button className="todo-chip todo-importance" data-level={todo.importance || undefined} title={level ? undefined : "Priority"} {...chipProps("importance", level)}>
+      <Icon name="flag" />
+      {level || <span className="todo-chip-word">Priority</span>}
+    </button>
+  );
   // The note's name and nothing after it: not the tags its title ends in, nor the one the list may be narrowed to.
   const title = splitTags(todo.noteTitle).lead || "Untitled";
-  const items: MenuItem[] = [{ label: "Open note", action: () => onOpen(todo) }, ...(app.openBeside ? [{ label: "Open to the side", action: () => onOpen(todo, true) }] : [])];
+  /** Puts the todo in a state, or opens it again when it is in that state. */
+  const put = (to: PutAway) => !completing && onChange(latest.current, { state: pressed(latest.current.state, to) });
+  useLayoutEffect(() => {
+    const row = li.current!;
+    if (readOnly) return;
+    putters.set(row, put);
+    return () => void putters.delete(row);
+  });
+  const items: MenuItem[] = [
+    { label: "Open note", action: () => onOpen(todo) },
+    ...(app.openBeside ? [{ label: "Open to the side", action: () => onOpen(todo, true) }] : []),
+    ...(readOnly ? [] : (Object.keys(PUTTING) as PutAway[]).map((to, i) => ({ label: todo.state === to ? "Open again" : PUTTING[to].label, icon: todo.state === to ? ("restore" as const) : PUTTING[to].icon, action: () => put(to), separated: i === 0 }))),
+  ];
 
   return (
     <li
+      ref={li}
       className="todo-row"
       data-row={row}
-      data-done={todo.done || undefined}
+      data-state={todo.state === "open" ? undefined : todo.state}
       data-gone={gone || undefined}
       data-picking={picked ?? (menu ? "menu" : undefined)}
+      // Selected by the keys, not a stop of its own for Tab.
+      tabIndex={-1}
+      aria-label={`${words}, ${STATE_NAMES[todo.state]}`}
+      aria-keyshortcuts={readOnly ? "Enter" : ROW_KEYS}
       onContextMenu={(e) => {
         if (editing !== null) return;
         e.preventDefault();
@@ -415,7 +514,18 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
         openMenu(e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : null, e.target as Element);
       }}
       onKeyDown={(e) => {
-        if (editing !== null || menu || (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey))) return;
+        if (editing !== null || menu) return;
+        // On the selected row, Space checks the todo off or opens it again, as its checkbox does, and Enter opens its note.
+        if (e.target === e.currentTarget && (e.key === " " || e.key === "Enter")) {
+          if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+          e.preventDefault();
+          // A key held down does it once.
+          if (e.repeat) return;
+          if (e.key === "Enter") onOpen(todo);
+          else if (!readOnly && !completing) onChange(todo, { state: clicked(todo.state) });
+          return;
+        }
+        if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
         e.preventDefault();
         openMenu(null, e.target as Element);
       }}
@@ -423,13 +533,16 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
       <input
         type="checkbox"
         className="todo-box"
-        checked={todo.done}
+        checked={todo.state === "done"}
+        data-state={todo.state}
         disabled={readOnly}
         // Not disabled while its completion is on its way: that would take the keyboard off it.
         aria-disabled={completing || undefined}
-        aria-label={todo.done ? "Done" : "Not done"}
-        onChange={(e) => !completing && onChange(todo, { done: e.target.checked })}
+        aria-label={STATE_NAMES[todo.state]}
+        // An open todo is checked off, and any other opened again.
+        onChange={() => !completing && onChange(todo, { state: clicked(todo.state) })}
       />
+      <i className="todo-box-mark" aria-hidden="true" />
       <span className="todo-text" style={editing === null ? undefined : { minHeight: editing }}>
         {editing !== null ? (
           <input
@@ -441,8 +554,8 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
               if (e.key !== "Enter" && e.key !== "Escape") return;
               e.preventDefault();
               e.stopPropagation();
+              toWords.current = true;
               finish(e.key === "Enter" ? e.currentTarget.value : null);
-              setTimeout(() => said.current?.focus());
             }}
             onBlur={(e) => finish(e.currentTarget.value)}
           />
@@ -468,29 +581,14 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
         )}
       </span>
       <span className="todo-chips" ref={chipsLine}>
-        {(due || offers) && (
-          <button className="todo-chip todo-due" data-due={todo.due ? dueState(todo.due, now) : undefined} title={due ? undefined : "Add date"} {...chipProps("due", due)}>
-            <Icon name="calendar" />
-            {due || <span className="todo-chip-word">Add date</span>}
-          </button>
-        )}
-        {(repeat || offers) && (
-          <button className="todo-chip todo-every" title={repeat ? everyName(todo.every!) : "Repeat"} {...chipProps("every", repeat)}>
-            <Icon name="repeat" />
-            {repeat || <span className="todo-chip-word">Repeat</span>}
-          </button>
-        )}
+        {due && dueChip}
+        {repeat && repeatChip}
         {todo.lastDone && (
           <button type="button" className="todo-chip todo-done" aria-label={doneName(todo.lastDone, now)} aria-haspopup="dialog" aria-expanded={picked === "done"} onClick={(e) => listDone(e.currentTarget)}>
             {doneLabel(todo.lastDone, now)}
           </button>
         )}
-        {(level || offers) && (
-          <button className="todo-chip todo-importance" data-level={todo.importance || undefined} title={level ? undefined : "Priority"} {...chipProps("importance", level)}>
-            <Icon name="flag" />
-            {level || <span className="todo-chip-word">Priority</span>}
-          </button>
-        )}
+        {level && levelChip}
         {todo.assignees.map((person) => (
           <button
             key={whoOf(person)}
@@ -508,13 +606,6 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
             @{person.name}
           </button>
         ))}
-        {/* Only where there is someone to assign it to besides the member: a workspace of one has no Assign chip. */}
-        {offers && !todo.assignees.length && people.length > 1 && (
-          <button type="button" className="todo-chip todo-assign" data-chip="who" data-unset title="Assign" aria-label="Assign: nobody" aria-haspopup="dialog" aria-expanded={picked === "who"} onClick={(e) => pickWho(e.currentTarget)}>
-            <span className="chip-at" aria-hidden="true">@</span>
-            <span className="todo-chip-word">Assign</span>
-          </button>
-        )}
         {trailing.slice(0, SHOWN_TAGS).map((name, at) => (
           <span key={`${at} ${name}`} className="todo-tag-chip">
             <button
@@ -553,13 +644,44 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
             +{trailing.length - SHOWN_TAGS}
           </button>
         )}
+        {todo.completed && <span className="todo-ticked">{tickedLabel(todo.completed.at, now)}</span>}
+        {/* After what is set, what the row reveals while it is pointed at or has the keyboard, so that showing it moves nothing. */}
+        {!readOnly && (
+          <span className="todo-states">
+            {BUTTONS.map((to) => (
+              <button
+                key={to}
+                type="button"
+                className="todo-state"
+                // What vim's dd presses on a row.
+                data-row-delete={to === "abandoned" ? "" : undefined}
+                aria-label={PUTTING[to].label}
+                aria-pressed={todo.state === to}
+                title={todo.state === to ? "Open again" : PUTTING[to].label}
+                onClick={() => put(to)}
+              >
+                <Icon name={PUTTING[to].icon} />
+              </button>
+            ))}
+          </span>
+        )}
+        {offers && !due && dueChip}
+        {/* Only where there is someone to assign it to besides the member: a workspace of one has no Assign chip. */}
+        {offers && !todo.assignees.length && people.length > 1 && (
+          <button type="button" className="todo-chip todo-assign" data-chip="who" data-unset title="Assign" aria-label="Assign: nobody" aria-haspopup="dialog" aria-expanded={picked === "who"} onClick={(e) => pickWho(e.currentTarget)}>
+            <span className="chip-at" aria-hidden="true">@</span>
+            <span className="todo-chip-word">Assign</span>
+          </button>
+        )}
         {offers && (
           <button className="todo-chip todo-add-tag" title="Add tag" {...chipProps("tag", null)} aria-label="Add tag">
             <span className="chip-hash" aria-hidden="true" />
             <span className="todo-chip-word">Add tag</span>
           </button>
         )}
-        {todo.completed && <span className="todo-ticked">{tickedLabel(todo.completed.at, now)}</span>}
+        {/* Last, as they take no room until they show: showing them moves nothing that was there. */}
+        {offers && !repeat && repeatChip}
+        {offers && !level && levelChip}
       </span>
       <button type="button" className="todo-note" title={`Open ${title}`} data-row-open onClick={() => onOpen(todo)}>
         <span className="todo-note-title">{title}</span>
@@ -583,8 +705,9 @@ export function TodoGlance({ todo, now, titleOf, onOpen }: { todo: ListedTodo; n
   const title = splitTags(todo.noteTitle).lead || "Untitled";
   return (
     <li className="todo-glance">
-      <button type="button" className="todo-row" data-done={todo.done || undefined} title={`Open ${title} at this todo`} onClick={() => onOpen(todo)}>
-        <span className="todo-box" data-checked={todo.done || undefined} aria-hidden="true" />
+      <button type="button" className="todo-row" data-state={todo.state === "open" ? undefined : todo.state} title={`Open ${title} at this todo`} onClick={() => onOpen(todo)}>
+        <span className="todo-box" data-state={todo.state} aria-hidden="true" />
+        <i className="todo-box-mark" aria-hidden="true" />
         <span className="todo-text">
           <span className="todo-words">
             <Words words={lead || todo.words || "Nothing written"} titleOf={titleOf} />
@@ -654,14 +777,18 @@ interface ListProps extends Props {
   none: string | null;
   /** Whether a row a change took out of the list says why under itself: the Todos page's setting, which another plugin's page can't read. */
   sayWhy?: boolean;
+  /** Where the keyboard goes when the row it was in leaves the list and no row is left: the Todos page's bar. */
+  home?: RefObject<HTMLElement | null>;
+  /** Whether a todo put away stays in its place, in its new state, until the list is refreshed, instead of going after its moment: the Todos page's setting too. */
+  keepPutAway?: boolean;
 }
 
 /**
  * Todos as rows, read for a query and read again whenever a note changes: each row changed in place,
  * one change after another, a checked one lingering struck through, and a row a change took out of the
- * query staying, dimmed, until Refresh. The Todos page is its bar over one of these, and a person's page has one of their open todos.
+ * query staying, dimmed, until Refresh. With `keepPutAway`, a todo put away stays until Refresh as well. The Todos page is its bar over one of these, and a person's page has one of their open todos.
  */
-export function TodoList({ host, app, onOpen, query, label, inspected = false, narrowedTo: narrowedTags = [], onTag, onUnanswered, none, sayWhy = false }: ListProps) {
+export function TodoList({ host, app, onOpen, query, label, inspected = false, narrowedTo: narrowedTags = [], onTag, onUnanswered, none, sayWhy = false, home, keepPutAway = false }: ListProps) {
   /** Whether the list was read yet, and where more of it starts when there is more. */
   const [page, setPage] = useState<Pick<Results["todo.list"], "next"> | null>(null);
   const [list, arrange] = useReducer(listing<ListedTodo>, EMPTY as Listing<ListedTodo>);
@@ -774,12 +901,13 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
     // The first row after it that is still listed, or else the last one before it.
     const at = was.indexOf(had);
     const next = [...was.slice(at + 1), ...was.slice(0, Math.max(at, 0)).reverse()].find((key) => now.includes(key));
-    if (next) ul.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(next)}"] .todo-box`)?.focus();
+    if (next) selectRow(ul.current?.querySelector(`[data-row="${CSS.escape(next)}"]`));
+    else home?.current?.focus();
   }, [listed]);
 
   /** A button of the order bar pressed from the keys gives the keyboard to the list's first row as the bar goes. */
   const keepKeyboard = (button: HTMLElement) => {
-    if (button.matches(":focus-visible")) requestAnimationFrame(() => ul.current?.querySelector<HTMLElement>(".todo-box")?.focus());
+    if (button.matches(":focus-visible")) requestAnimationFrame(() => selectRow(ul.current?.firstElementChild));
   };
 
   const narrowing = useMemo(() => narrowingOf(query), [query]);
@@ -800,7 +928,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
             queue.revisions.set(keyOf(todo), note.revision);
             // A row the list no longer has keeps the revision its line was written at, for the next change made to it there.
             // One this change ticked says so now, as the list read again will: the change is the note's latest.
-            arrange({ type: "change", key: keyOf(todo), to: (t) => ({ ...t, revision: note.revision, ...(t.done && !t.completed && { completed: { at: note.updatedAt, by: note.updatedBy } }) }) });
+            arrange({ type: "change", key: keyOf(todo), to: (t) => ({ ...t, revision: note.revision, ...(t.state === "done" && !t.completed && { completed: { at: note.updatedAt, by: note.updatedBy } }) }) });
             app.noteChanged(note);
           },
           () => arrange({ type: "refused", key: keyOf(todo) }),
@@ -814,36 +942,58 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
     [host, app.noteChanged, now],
   );
 
+  /**
+   * When the keyboard is in a row that a change takes out of the list, gives it to the next row that
+   * stays, or else the one before, so that the member can go on down the list with the keys.
+   */
+  const onward = useCallback(
+    (todo: ListedTodo, after: ListedTodo) => {
+      const { states } = narrowing;
+      const key = keyOf(todo);
+      const rowOf = (of: string) => ul.current?.querySelector(`[data-row="${CSS.escape(of)}"]`);
+      if (!states || states.includes(after.state) || !rowOf(key)?.contains(document.activeElement)) return;
+      const rows = had.current.list.shown;
+      const going = left(had.current.list);
+      const at = rows.findIndex((t) => keyOf(t) === key);
+      const next = [...rows.slice(at + 1), ...rows.slice(0, Math.max(at, 0)).reverse()].find((t) => !going.has(keyOf(t)) && states.includes(t.state));
+      if (next) selectRow(rowOf(keyOf(next)));
+    },
+    [narrowing],
+  );
+
   const change = useCallback(
     (todo: ListedTodo, to: RowChange) => {
       setProblem(null);
-      const done = to.done === true && !todo.done;
-      const rolls = done && comesAround(todo, now);
+      const after = changed(todo, to, now);
+      // Checking a todo off, abandoning it or moving it to the backlog puts it away: it says so with an Undo, and goes after its moment or is kept.
+      const away = to.state !== undefined && to.state !== "open" && to.state !== todo.state ? to.state : null;
+      const rolls = away === "done" && comesAround(todo, now);
       if (rolls) setCompleting((keys) => new Set(keys).add(keyOf(todo)));
-      // Checking one off says Task completed instead, and opening one again says nothing; either stays where it is until the list is refreshed.
-      if (to.done === undefined) announce.current = true;
+      // Putting one away says so instead, and opening one again says nothing; either stays where it is until the list is refreshed.
+      if (to.state === undefined) announce.current = true;
       else quiet.current = true;
-      const sent = send(todo, to, done ? "done" : "changed");
+      onward(todo, after);
+      const hold: Hold = away ? (keepPutAway ? "kept" : "put away") : "changed";
+      const sent = send(todo, to, hold);
       if (rolls) void sent.catch(() => {}).finally(() => setCompleting((keys) => new Set([...keys].filter((key) => key !== keyOf(todo)))));
       sent.then(
         (note) => {
-          if (!done) return;
-          // A todo checked off stays its moment, and then goes when the list no longer has it, as the last time of a repeating one doesn't.
+          if (!away) return;
+          // A todo put away stays its moment, and then goes when the list no longer has it, as the last time of a repeating one doesn't. One kept stays until Refresh.
           const key = keyOf(todo);
-          setTimeout(() => arrange({ type: "let go", key }), LINGER_MS);
+          if (hold === "put away") setTimeout(() => arrange({ type: "let go", key }), LINGER_MS);
           // A recurring todo's completion moved its due date, counted it and filed a line on the daily note: Undo reverts the change that did, which takes all of it back.
-          if (note.filed) return completed(host, () => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
-          const left = changed(todo, to, now);
-          if (!left.done) return;
+          if (note.filed) return putAway(host, "done", () => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
+          if (after.state !== away) return;
           // Undo is the same change the other way, made to the line this one left, at the revision it made.
           // It is made to the todo as the page has it by then, which may have been changed again since.
-          completed(host, () => send(shown.current.find((t) => keyOf(t) === key && t.done) ?? { ...left, revision: note.revision }, { done: false }).then(() => undefined, refused));
+          putAway(host, away, () => send(shown.current.find((t) => keyOf(t) === key && t.state === away) ?? { ...after, revision: note.revision }, { state: todo.state }).then(() => undefined, (err: unknown) => refused(err, away)));
         },
         (err: unknown) => setProblem(err instanceof Error ? err.message : "The todo couldn't be changed."),
       );
       return sent;
     },
-    [send, now, host],
+    [send, now, host, onward, keepPutAway],
   );
 
   /** Takes a tag off a todo's line, with an Undo that puts it back where it was, or after its words when they were changed since. */
@@ -964,6 +1114,17 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
               // A row taken out of the list takes the keyboard with it; one the member moved away from is forgotten.
               if (!e.currentTarget.contains(e.relatedTarget)) setTimeout(() => left.isConnected && (focused.current = null));
             }}
+            onKeyDown={(e) => {
+              // The arrows select the row above or below, from anywhere in a row but the field its words are edited in and its menu.
+              if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented) return;
+              const at = e.target as HTMLElement;
+              if (!e.currentTarget.contains(at) || at.closest(".todo-edit, [role='menu']")) return;
+              const rows = [...e.currentTarget.children];
+              const next = rows[rows.findIndex((row) => row.contains(at)) + (e.key === "ArrowDown" ? 1 : -1)];
+              if (!next) return;
+              e.preventDefault();
+              selectRow(next);
+            }}
           >
             {listed.map((todo) => (
               <Row
@@ -977,7 +1138,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
                 titleOf={titleOf}
                 picked={picked?.row === keyOf(todo) ? picked.chip : null}
                 completing={completing.has(keyOf(todo))}
-                gone={gone.has(keyOf(todo)) && list.held.get(keyOf(todo)) === "changed"}
+                gone={gone.has(keyOf(todo)) && list.held.get(keyOf(todo)) !== "put away"}
                 why={sayWhy && gone.has(keyOf(todo)) ? whyGone(todo) : null}
                 onChange={change}
                 onUntag={untag}
@@ -1012,6 +1173,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
   /** The tags the list is narrowed to: their chips read as pressed. */
   const narrowedTags = useMemo(() => narrowedTo(query), [query]);
   const read = useMemo(() => parseQuery(query, "todos"), [query]);
+  const field = useRef<HTMLInputElement>(null);
 
   const run = (text: string) => {
     setQuery(text);
@@ -1085,6 +1247,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
           scope="todos"
           value={typed}
           label="Filter todos"
+          fieldRef={field}
           placeholder="Filter todos: words, #tag, due:<today, assignee:@me"
           problem={unanswered?.query === query ? unanswered.message : null}
           onChange={(text, how) => {
@@ -1093,6 +1256,12 @@ export function TodosPage({ host, app, onOpen }: Props) {
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && wanted !== query) askFor(wanted);
+            // With nothing offered under it, ArrowDown selects the list's first row.
+            if (e.key !== "ArrowDown" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            const first = e.currentTarget.closest(".todos-page")?.querySelector(".todo-list > .todo-row");
+            if (!first) return;
+            e.preventDefault();
+            selectRow(first);
           }}
         />
         <label className="todo-sort">
@@ -1119,6 +1288,8 @@ export function TodosPage({ host, app, onOpen }: Props) {
         onUnanswered={(message, of) => setUnanswered(message === null ? null : { query: of, message })}
         none={query ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}
         sayWhy={host.settings.get<boolean>("sayWhyLeaving")}
+        home={field}
+        keepPutAway={host.settings.get<boolean>("keepPutAway")}
         onTag={(name) => {
           // The chip does what it shows: a tag already typed and not yet run is not taken off by a chip that reads unpressed.
           const typedHas = narrowedTo(typed).some((tag) => nameKey(tag) === nameKey(name));

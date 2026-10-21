@@ -1,3 +1,5 @@
+import { STATES_WRITTEN } from "./boxes.ts";
+
 /**
  * What a note can hold besides plain paragraphs, and a short example of each. `note_syntax` says
  * this, and `create_note` and `write_note` point at it. A built-in embed with no row fails
@@ -159,7 +161,7 @@ $$`,
     name: "todo",
     kind: "prose",
     called: "a todo",
-    about: "A todo is a checkbox line. !, !! or !!! right after the checkbox is its priority. due:YYYY-MM-DD is the day. every:RULE makes it repeat, and the rules are in list_todos. @[[Name]] on the line assigns it. #tag anywhere in the note tags it.",
+    about: `A todo is a checkbox line: ${STATES_WRITTEN}. !, !! or !!! right after the checkbox is its priority. due:YYYY-MM-DD is the day. every:RULE makes it repeat, and the rules are in list_todos. @[[Name]] on the line assigns it. #tag anywhere in the note tags it.`,
     example: "- [ ] !! Call the bank due:2026-10-14 every:1w",
   },
 ];
