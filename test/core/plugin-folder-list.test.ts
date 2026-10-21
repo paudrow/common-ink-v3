@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NoteSummary } from "../../src/core/protocol.ts";
 import { ALL_NOTES, SHARED_WITH_ME } from "../../src/web/plugin-api.ts";
-import { INITIAL_VIEW, SHOWS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, withLife } from "../../src/web/plugins/noteListView.ts";
+import { INITIAL_VIEW, SHOWS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, todosOf, withLife, withTodos } from "../../src/web/plugins/noteListView.ts";
 
 const note = (id: string, over: Partial<NoteSummary> = {}) =>
   ({ id, title: id, snippet: "", folderId: "f", openTodos: 0, createdAt: 0, updatedAt: 0, state: "live", ...over }) as NoteSummary;
@@ -92,5 +92,23 @@ describe("a card", () => {
     const two = listReducer(listReducer(INITIAL_VIEW, whole), { type: "wholeOrLess", noteId: "b" });
     expect(two.whole).toEqual({ a: true, b: true });
     expect(listReducer(two, whole).whole).toEqual({ b: true });
+  });
+});
+
+describe("the choice of todos under the search bar", () => {
+  it("writes the choice into the bar and replaces the one already there", () => {
+    expect(withTodos("", "open")).toBe("has:open-todo");
+    expect(withTodos("tea is:open", "done")).toBe("tea is:open has:todo no:open-todo");
+    expect(withTodos("tea has:todo no:open-todo", "open")).toBe("tea has:open-todo");
+    expect(withTodos("has:task -has:open-task sort:title-asc", "any")).toBe("sort:title-asc");
+    expect(withTodos("((", "open")).toBe("has:open-todo");
+  });
+
+  it("reads the choice back, and one inside an OR is no choice", () => {
+    expect(todosOf("")).toBe("any");
+    expect(todosOf("tea has:open-todo")).toBe("open");
+    expect(todosOf("has:todo no:open-todo is:open")).toBe("done");
+    expect(todosOf("has:todo")).toBe("any");
+    expect(todosOf("has:open-todo OR tea")).toBe("any");
   });
 });

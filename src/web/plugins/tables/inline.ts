@@ -1,6 +1,7 @@
 import { markdownLanguage } from "@codemirror/lang-markdown";
 import type { MarkdownParser } from "@lezer/markdown";
 import type { DrawMath } from "../lib/drawnMath.ts";
+import { opens } from "../lib/opening.ts";
 import { formulasIn, type Formula } from "../math/syntax.ts";
 
 interface Element {
@@ -16,21 +17,37 @@ const nameOf = (el: Element) => parser.nodeSet.types[el.type]!.name;
 const TAGS: Record<string, string> = { Emphasis: "em", StrongEmphasis: "strong", InlineCode: "code", Strikethrough: "s", Link: "span" };
 const LEFT_OUT = new Set(["EmphasisMark", "CodeMark", "StrikethroughMark", "LinkMark", "URL", "LinkTitle"]);
 
+/** Makes `el` a link out to `href`, as a note draws one, when it is an address that may be opened. */
+function linkOut(el: HTMLElement, href: string) {
+  el.className = "md-link";
+  if (!opens(href)) return;
+  el.dataset.href = href;
+  el.title = `${href}\nClick to open`;
+}
+
 /** Puts `text` from `from` to `to` into `parent`, each formula wholly in that stretch drawn. */
 type Put = (parent: ParentNode, from: number, to: number) => void;
 
-function drawInto(parent: ParentNode, text: string, from: number, to: number, children: readonly Element[], put: Put) {
+function drawInto(parent: ParentNode, text: string, from: number, to: number, children: readonly Element[], put: Put, inLink = false) {
   let at = from;
   for (const child of children) {
     put(parent, at, child.from);
     at = child.to;
     const name = nameOf(child);
-    if (LEFT_OUT.has(name)) continue;
-    if (name === "Escape") parent.append(text.slice(child.from + 1, child.to));
+    const url = name === "URL" ? child : name === "Link" || name === "Autolink" ? child.children?.find((c) => nameOf(c) === "URL") : undefined;
+    const address = url && text.slice(url.from, url.to);
+    // An address written bare, or in <>, is its own words.
+    if (!inLink && (name === "URL" || name === "Autolink") && address) {
+      const el = document.createElement("span");
+      linkOut(el, address);
+      el.append(address);
+      parent.append(el);
+    } else if (LEFT_OUT.has(name)) continue;
+    else if (name === "Escape") parent.append(text.slice(child.from + 1, child.to));
     else if (TAGS[name]) {
       const el = document.createElement(TAGS[name]);
-      if (name === "Link") el.className = "md-link";
-      drawInto(el, text, child.from, child.to, child.children ?? [], put);
+      if (name === "Link") linkOut(el, address ?? "");
+      drawInto(el, text, child.from, child.to, child.children ?? [], put, inLink || name === "Link");
       parent.append(el);
     } else put(parent, child.from, child.to);
   }

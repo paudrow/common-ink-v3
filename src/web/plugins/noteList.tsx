@@ -6,7 +6,7 @@ import { ContextMenu, type MenuItem } from "./lib/Menu.tsx";
 import { QueryBar } from "./lib/QueryBar.tsx";
 import { EXCERPT_HEIGHT, ITEM_ICONS, ITEM_LABELS, NEAR_PX, cardItems, editorLabel, editorsOf, estimatedHeight, shownHeight, type CardItem } from "./noteCard.ts";
 import { NoteCrumbs } from "./NoteCrumbs.tsx";
-import { INITIAL_VIEW, LIVES, ORDERS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, showOf, titleOf, withLife, type Life, type ListAction, type ListView } from "./noteListView.ts";
+import { INITIAL_VIEW, LIVES, ORDERS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, showOf, titleOf, todosOf, withLife, withTodos, TODO_CHOICES, type Life, type TodoChoice, type ListAction, type ListView } from "./noteListView.ts";
 import { pieces } from "./search/marks.ts";
 import { IDLE, againLimit, queryOf, reduce, type Ask } from "./search/request.ts";
 
@@ -269,6 +269,11 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     setTyped(next);
     setQuery(next);
   };
+  const chooseTodos = (choice: TodoChoice) => {
+    const next = withTodos(typed, choice);
+    setTyped(next);
+    setQuery(next);
+  };
   useEffect(() => {
     if (wanted === view.query) return;
     const timer = setTimeout(() => setQuery(wanted), PAUSE_MS);
@@ -513,6 +518,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     } else if (e.key === "e" && !e.metaKey && !e.ctrlKey && !e.altKey && note.access === "edit") {
       e.preventDefault();
       archiveOrNot(note, at);
+    } else if (e.key === " " && !withModifier(e) && !e.shiftKey && !e.altKey && e.currentTarget.querySelector("[data-row-toggle]")) {
+      // Space grows the card to the whole note, or cuts it back, as its Show whole note does. A card that is all there scrolls the list as Space does.
+      e.preventDefault();
+      wholeOrLess(note.id);
     }
   };
 
@@ -683,19 +692,35 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
           }}
         />
         {whichNotes && (
-          <div className="segmented note-life" role="radiogroup" aria-label="Which notes">
-            {LIVES.map((life) => (
-              <label key={life.id}>
-                <input
-                  type="radio"
-                  name={`${ids}-life`}
-                  checked={lifeOf(typed) === life.id}
-                  onClick={() => chooseLife(life.id)}
-                  onChange={() => chooseLife(life.id)}
-                />
-                <span>{life.label}</span>
-              </label>
-            ))}
+          <div className="note-choices">
+            <div className="segmented note-life" role="radiogroup" aria-label="Which notes">
+              {LIVES.map((life) => (
+                <label key={life.id}>
+                  <input
+                    type="radio"
+                    name={`${ids}-life`}
+                    checked={lifeOf(typed) === life.id}
+                    onClick={() => chooseLife(life.id)}
+                    onChange={() => chooseLife(life.id)}
+                  />
+                  <span>{life.label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="segmented note-todos" role="radiogroup" aria-label="Notes by todos">
+              {TODO_CHOICES.map((choice) => (
+                <label key={choice.id}>
+                  <input
+                    type="radio"
+                    name={`${ids}-todos`}
+                    checked={todosOf(typed) === choice.id}
+                    onClick={() => chooseTodos(choice.id)}
+                    onChange={() => chooseTodos(choice.id)}
+                  />
+                  <span>{choice.label}</span>
+                </label>
+              ))}
+            </div>
           </div>
         )}
         {error && (

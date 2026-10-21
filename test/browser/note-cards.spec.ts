@@ -327,6 +327,32 @@ test("Active, Archived and All under the search bar write that choice into the b
   await expect.poll(async () => (await perform(page, { type: "note.read", id: short.id })).state).toBe("archived");
 });
 
+test("Any, Open todos and All done under the search bar write that choice into the bar, beside which notes", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "note.create", text: "# Errands\n\n- [ ] Buy milk\n- [x] Post the letter\n" });
+  await perform(page, { type: "note.create", text: "# Packing\n\n- [x] Tent\n- [x] Stove\n" });
+  await perform(page, { type: "note.create", text: "# Musings\n\nNo todos here.\n" });
+  await openAllNotes(page);
+  const field = page.getByRole("searchbox", { name: "Search notes" });
+  const todos = page.getByRole("radiogroup", { name: "Notes by todos" });
+  await expect(todos.getByRole("radio", { name: "Any" })).toBeChecked();
+
+  await todos.getByRole("radio", { name: "Open todos" }).check();
+  await expect(field).toHaveValue("has:open-todo");
+  await expect(listedNotes(page)).toHaveText(["Errands"]);
+
+  await todos.getByRole("radio", { name: "All done" }).check();
+  await expect(field).toHaveValue("has:todo no:open-todo");
+  await expect(listedNotes(page)).toHaveText(["Packing"]);
+
+  // It keeps what else is asked for, the choice of which notes with it.
+  await page.getByRole("radiogroup", { name: "Which notes" }).getByRole("radio", { name: "Active" }).click();
+  await expect(field).toHaveValue("has:todo no:open-todo is:open");
+  await todos.getByRole("radio", { name: "Any" }).check();
+  await expect(field).toHaveValue("is:open");
+  await expect(listedNotes(page)).toHaveText(["Musings", "Packing", "Errands"]);
+});
+
 test("every item in a card's menu has an icon, each its own, and so has the list of folders to move to", async ({ page }) => {
   await withProjects(page);
   await perform(page, { type: "folder.create", name: "Journal" });

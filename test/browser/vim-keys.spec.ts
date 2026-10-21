@@ -101,6 +101,35 @@ async function createNotes(page: Page, texts: string[]) {
   }, texts);
 }
 
+test("Space on a card j and k reached grows it to the whole note and cuts it back, and on a card that is all there it does nothing", async ({ page }) => {
+  await signIn(page);
+  const long = Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} of a long note.\n`).join("\n");
+  await createNotes(page, ["# Short\n\nTwo lines.", `# Long\n\n${long}`]);
+  await open(page, "/folder/all");
+  const cards = page.locator(".cards > li");
+  await expect(cards).toHaveCount(2);
+  const toggle = cards.nth(0).locator("[data-row-toggle]");
+
+  await page.keyboard.press("j");
+  await expectSelected(cards.nth(0), "the long note");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press(" ");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(cards.nth(0)).toContainText("Paragraph 40 of a long note.");
+  // The card keeps the keyboard, so j and k go on from it.
+  await expect.poll(() => cards.nth(0).evaluate((li) => li.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press(" ");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+  await page.keyboard.press("j");
+  await expectSelected(cards.nth(1), "the short note");
+  await page.keyboard.press(" ");
+  await expect(cards.nth(1).locator("[data-row-toggle]")).toHaveCount(0);
+  await page.keyboard.press("k");
+  await expectSelected(cards.nth(0), "the long note again");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+});
+
 test("a folder's notes move with j, k, gg, G and half pages; / goes to the search box and Escape back; Enter opens the note with its text in normal mode", async ({ page }) => {
   await signIn(page);
   const titles = Array.from({ length: 30 }, (_, n) => `Note ${String(n).padStart(2, "0")}`);
