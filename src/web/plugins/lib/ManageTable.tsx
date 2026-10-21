@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { Icon, carry, type IconName, type Opened } from "../../plugin-api.ts";
+import { Icon, draggableAs, type IconName, type Opened } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "./Menu.tsx";
 import { Palette } from "./Palette.tsx";
 
@@ -420,12 +420,10 @@ export function ManageTable({ label, column, noun, notesHeading, adding, icon, r
                 title={item.may.move ? "Drag to move" : undefined}
                 onDoubleClick={() => item.may.rename && start({ kind: "rename", key: item.key })}
                 {...(item.may.move && {
-                  draggable: true,
-                  onDragStart: (e: DragEvent) => {
-                    carry(e.dataTransfer, item.dragged);
+                  ...draggableAs(item.dragged, (e) => {
                     setMenu(null);
                     setDrag({ key: item.key, over: null, x: e.clientX, y: e.clientY });
-                  },
+                  }),
                   onDragEnd: () => setDrag(null),
                 })}
               >

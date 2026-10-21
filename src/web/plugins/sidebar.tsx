@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { Icon, carry, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
+import { Icon, draggableAs, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
@@ -144,14 +144,16 @@ function NewNote({ app }: ViewProps) {
   const create = () => {
     if (!refused) app.createNote().catch((err: Error) => app.notify({ message: err.message }));
   };
+  // The folder is read as the drag starts, and the note is made only once it is dropped.
+  const dragged = refused ? {} : draggableAs({ kind: "new note", ...(app.folderId ? { folderId: app.folderId } : {}) });
   if (!app.sidebarOpen)
     return (
-      <button type="button" className="icon-button new-note" aria-label="New note" aria-disabled={!!refused} title={title} onClick={create}>
+      <button type="button" className="icon-button new-note" aria-label="New note" aria-disabled={!!refused} title={title} onClick={create} {...dragged}>
         <Icon name="plus" />
       </button>
     );
   return (
-    <button type="button" className="button new-note" aria-disabled={!!refused} title={title} onClick={create}>
+    <button type="button" className="button new-note" aria-disabled={!!refused} title={title} onClick={create} {...dragged}>
       <Icon name="plus" />
       New note
     </button>
@@ -160,7 +162,8 @@ function NewNote({ app }: ViewProps) {
 
 /**
  * A page's link. Clicked, it goes there; dragged to the editor area, the page is dropped in a group
- * as a tab is; and where the editor area has splits its menu opens the page in one.
+ * as a tab is, or for a page that only leads somewhere, as Today does, where it leads; and where the
+ * editor area has splits its menu opens the page in one.
  */
 function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelled?: boolean }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -174,8 +177,7 @@ function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelle
         aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) || (page.home && app.path === "/") ? "page" : undefined}
         aria-label={labelled ? undefined : page.label}
         title={labelled ? undefined : page.label}
-        draggable
-        onDragStart={(e) => carry(e.dataTransfer, tab)}
+        {...(page.transient === true ? {} : draggableAs(tab))}
         onContextMenu={(e) => {
           if (!openBeside) return;
           e.preventDefault();

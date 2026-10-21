@@ -1,5 +1,5 @@
 import { useId, useState, useSyncExternalStore, type MouseEvent } from "react";
-import { ALL_NOTES, isTagName, nameKey, type App, type ListedTag, type Opened, type PluginHost } from "../../plugin-api.ts";
+import { ALL_NOTES, draggableAs, isTagName, nameKey, type App, type ListedTag, type Opened, type PluginHost } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { NoteFinder, type keeping } from "../noteList.tsx";
 import { listReducer, taggedQuery } from "../noteListView.ts";
@@ -50,9 +50,11 @@ export const going = (app: App, path: string) => ({
   },
 });
 
+const tagTab = (name: string) => ({ kind: "page", id: TAGS_PAGE, path: tagPath(name) }) satisfies Opened;
+
 /** What a tag's menu offers, as a folder's does: to open its page, in a split too where there are splits, to go to its row in Settings, and for whoever may, to rename it there. */
 function tagMenu(app: App, store: TagStore, name: string): MenuItem[] {
-  const tab: Opened = { kind: "page", id: TAGS_PAGE, path: tagPath(name) };
+  const tab = tagTab(name);
   const { openBeside } = app;
   const toRow = (request: TagRequest) => () => {
     store.ask(request);
@@ -73,7 +75,7 @@ function tagMenu(app: App, store: TagStore, name: string): MenuItem[] {
 
 /**
  * Each tag, which opens its page. `described` shows each one's description under it, where there is room for it.
- * A right-click, Shift+F10 or the menu key opens its menu, as a folder's row does.
+ * A right-click, Shift+F10 or the menu key opens its menu, and it drags to the editor area, as a folder's row does.
  */
 function TagLinks({ app, store, tags, labelledBy, described = false }: { app: App; store: TagStore; tags: readonly ListedTag[]; labelledBy: string; described?: boolean }) {
   const [menu, setMenu] = useState<{ name: string; x: number; y: number; from: HTMLElement } | null>(null);
@@ -87,6 +89,7 @@ function TagLinks({ app, store, tags, labelledBy, described = false }: { app: Ap
             data-tag-card="beside"
             aria-current={app.path === tagPath(tag.name) ? "page" : undefined}
             {...going(app, tagPath(tag.name))}
+            {...draggableAs(tagTab(tag.name))}
             onContextMenu={(e) => {
               e.preventDefault();
               setMenu({ name: tag.name, x: e.clientX, y: e.clientY, from: e.currentTarget });
@@ -144,7 +147,7 @@ export function TagSection({ app, store }: { app: App; store: TagStore }) {
       </div>
       {tags && (tags.length ? <TagLinks app={app} store={store} tags={tags.slice(0, MOST_IN_SECTION)} labelledBy={`${ids}-label`} /> : <p className="tags-hint">Write #tag in a note to tag it.</p>)}
       {tags && (tags.length > MOST_IN_SECTION || more) && (
-        <a className="tag-row tags-all" {...going(app, TAGS_PATH)}>
+        <a className="tag-row tags-all" {...going(app, TAGS_PATH)} {...draggableAs({ kind: "page", id: TAGS_PAGE, path: TAGS_PATH })}>
           {more ? "All tags" : `All ${every.length} tags`}
         </a>
       )}

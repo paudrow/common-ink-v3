@@ -1,9 +1,9 @@
-import type { ListedTag, Plugin } from "../../plugin-api.ts";
+import { nameKey, type ListedTag, type Plugin } from "../../plugin-api.ts";
 import { keeping } from "../noteList.tsx";
 import { tagCards } from "./card.tsx";
 import { tagDrawing } from "./drawing.ts";
 import { ManageTags } from "./Manage.tsx";
-import { MANAGE_PATH, SETTINGS_ID, TAGS_PAGE, TAGS_PATH, tagPath } from "./path.ts";
+import { MANAGE_PATH, SETTINGS_ID, TAGS_PAGE, TAGS_PATH, tagOfPath, tagPath } from "./path.ts";
 import { TagSection, TagsPage, type TagRequest, type TagStore } from "./Tags.tsx";
 
 /** How long the notes are left to settle before the tags are read again, so typing doesn't ask once a save. */
@@ -106,7 +106,17 @@ export const tags: Plugin = {
     const lists = keeping();
     const cards = tagCards(host, store);
     host.views.register("section", { id: "tags", label: "Tags", icon: "tag", component: ({ app }) => <TagSection app={app} store={store} /> });
-    host.views.register("page", { id: TAGS_PAGE, path: TAGS_PATH, label: "Tags", component: ({ app }) => <TagsPage host={host} app={app} store={store} lists={lists} /> });
+    host.views.register("page", {
+      id: TAGS_PAGE,
+      path: TAGS_PATH,
+      label: "Tags",
+      // Each tag's page is a tab of its own, so two tags can be side by side, and the page of every tag is one more.
+      tabAt: (path) => {
+        const tag = tagOfPath(path);
+        return tag === null ? { key: "", title: "Tags" } : { key: nameKey(tag), title: `#${tag}` };
+      },
+      component: ({ app }) => <TagsPage host={host} app={app} store={store} lists={lists} />,
+    });
     host.views.register("settings", { id: SETTINGS_ID, label: "Tags", component: ({ app }) => <ManageTags host={host} app={app} store={store} /> });
     host.commands.register({ id: "tags.manage", title: "Manage tags", aliases: ["describe tags", "rename tag"], run: () => host.app().go(MANAGE_PATH) });
     host.editorExtensions.register({ id: "tags", extension: tagDrawing((name) => host.app().go(tagPath(name)), cards) });

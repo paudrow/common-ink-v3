@@ -3,9 +3,11 @@ import { z } from "zod";
 /**
  * What a tab holds: a note, a folder's list of notes, or a page. It is the plugin API's `Opened`,
  * written here so the layout stands on its own. A page is the same tab wherever under its path it
- * is, so `path`, the address it is at, is no part of which tab it is.
+ * is, so `path`, the address it is at, is no part of which tab it is, unless the page has a tab for
+ * each of several keys, as each tag's page does: `ownTab` is then the key of the one at this address,
+ * which the Tabs plugin puts on it from what the page says.
  */
-export type Opened = { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "page"; id: string; path: string };
+export type Opened = { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "page"; id: string; path: string; ownTab?: string };
 
 /** A note, a folder's list or a page open in a group. The window has at most one preview tab, which the next thing opened as a preview takes the place of. */
 export type Tab = Opened & { preview: boolean };
@@ -45,15 +47,17 @@ export const EMPTY_LAYOUT: EditorLayout = { groups: [{ id: "1", tabs: [], active
 /** The notes that have a tab in any group. */
 export const notesIn = (layout: EditorLayout): Set<string> => new Set(layout.groups.flatMap((g) => g.tabs.flatMap((t) => (t.kind === "note" ? [t.id] : []))));
 
-export const same = (a: Opened | null, b: Opened | null) => a?.kind === b?.kind && a?.id === b?.id;
+/** Which tab something is: no group has two with one key, and a folder or a page has one in one group at most. */
+export const keyOf = (tab: Opened) => (tab.kind === "page" && tab.ownTab !== undefined ? `page ${tab.id} ${tab.ownTab}` : `${tab.kind} ${tab.id}`);
+export const same = (a: Opened | null, b: Opened | null) => (a && b ? keyOf(a) === keyOf(b) : a === b);
 /** What a tab holds, without whether it is a preview. A page's is the plugin API's whole `Opened`, its address with it. */
-const refOf = (tab: Opened): Opened => (tab.kind === "page" ? { kind: tab.kind, id: tab.id, path: tab.path } : { kind: tab.kind, id: tab.id });
+const refOf = (tab: Opened): Opened => (tab.kind === "page" ? { kind: tab.kind, id: tab.id, path: tab.path, ...(tab.ownTab !== undefined && { ownTab: tab.ownTab }) } : { kind: tab.kind, id: tab.id });
 const has = (group: Group, tab: Opened) => group.tabs.some((t) => same(t, tab));
 const indexOf = (group: Group, tab: Opened | null) => group.tabs.findIndex((t) => same(t, tab));
 
 const leaves = (pane: Pane): string[] => (typeof pane === "string" ? [pane] : pane.panes.flatMap(leaves));
 
-const Ref = z.union([z.object({ kind: z.enum(["note", "folder"]), id: z.string() }), z.object({ kind: z.literal("page"), id: z.string(), path: z.string().regex(/^\/(?!\/)/) })]);
+const Ref = z.union([z.object({ kind: z.enum(["note", "folder"]), id: z.string() }), z.object({ kind: z.literal("page"), id: z.string(), path: z.string().regex(/^\/(?!\/)/), ownTab: z.string().optional() })]);
 const StoredSplit: z.ZodType<Split> = z
   .object({ direction: z.enum(["row", "column"]), panes: z.array(z.union([z.string(), z.lazy(() => StoredSplit)])).min(1), sizes: z.array(z.number().positive()) })
   .refine((s) => s.panes.length === s.sizes.length);
@@ -64,14 +68,14 @@ const Stored = z
     split: StoredSplit.optional(),
   })
   .refine((l) => {
-    const keys = l.groups.flatMap((g) => g.tabs.flatMap((t) => (t.kind === "note" ? [] : [`${t.kind} ${t.id}`])));
+    const keys = l.groups.flatMap((g) => g.tabs.flatMap((t) => (t.kind === "note" ? [] : [keyOf(t)])));
     const ids = l.groups.map((g) => g.id);
     const placed = l.split ? leaves(l.split) : ids;
     return (
       l.groups.some((g) => g.id === l.focusedGroupId) &&
       l.groups.every((g) => g.active === null || has(g, g.active)) &&
       new Set(keys).size === keys.length &&
-      l.groups.every((g) => new Set(g.tabs.map((t) => `${t.kind} ${t.id}`)).size === g.tabs.length) &&
+      l.groups.every((g) => new Set(g.tabs.map(keyOf)).size === g.tabs.length) &&
       new Set(ids).size === ids.length &&
       placed.length === ids.length &&
       ids.every((id) => placed.includes(id))
@@ -100,6 +104,23 @@ export function keptLayout(v: unknown): EditorLayout {
       }
     : v;
   return isEditorLayout(now) ? arranged(onePreview(now), arrangement(now)) : EMPTY_LAYOUT;
+}
+
+/** A tab as the layout keys it: for a page with a tab for each of several keys, `ownTab` says the key of the one at an address. */
+export function keyed<T extends Opened>(tab: T, ownTab: (pageId: string, path: string) => string | undefined): T {
+  if (tab.kind !== "page") return tab;
+  const key = ownTab(tab.id, tab.path.split("?")[0]!);
+  return key === tab.ownTab || key === undefined ? tab : { ...tab, ownTab: key };
+}
+
+/**
+ * The layout with every tab keyed as `keyed` keys it, as one kept before a page had a tab at each
+ * address is once the pages are known. Each such page had one tab at most then, so no two tabs come to
+ * have one key. Answers the layout itself where nothing changes.
+ */
+export function keyedLayout(layout: EditorLayout, ownTab: (pageId: string, path: string) => string | undefined): EditorLayout {
+  if (layout.groups.every((g) => g.tabs.every((t) => keyed(t, ownTab) === t))) return layout;
+  return { ...layout, groups: layout.groups.map((g) => ({ ...g, tabs: g.tabs.map((t) => keyed(t, ownTab)), active: g.active && keyed(g.active, ownTab) })) };
 }
 
 /** How the groups are laid out, said in full where the layout leaves it unsaid. */

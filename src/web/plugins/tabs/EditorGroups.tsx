@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { arrangement, same, type EditorAction, type EditorLayout, type Group, type Pane, type Side, type Split } from "./editorLayout.ts";
-import { Icon, ResizeHandle, carried, carriesTab, carry, type IconName, type Opened } from "../../plugin-api.ts";
+import { arrangement, keyOf, same, type EditorAction, type EditorLayout, type Group, type Pane, type Side, type Split } from "./editorLayout.ts";
+import { Icon, ResizeHandle, carried, carriesTab, draggableAs, linkIn, type Dragged, type IconName, type Opened } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 
 /** Where on a group's body a dragged tab is: near one of its edges, which splits the group that way, or in the middle, which adds the tab to it. */
@@ -8,13 +8,13 @@ export type Zone = Side | "middle";
 /** Where a dragged tab would land: a gap between a group's tabs, or a zone of its body. */
 type Drop = { groupId: string; at: number | Zone };
 type TabMenu = { groupId: string; tab: Opened; x: number; y: number };
+/** What is dropped on a group: what a tab can hold, or the address of a link of the app's own, which opens what going there would. */
+export type Dropped = Dragged | { kind: "link"; address: string };
 
 /** How much of a group's width or height, from each edge, splits it. The rest is the middle. */
 const EDGE = 0.25;
 /** The least share of a split a pane can be dragged down to. */
 const LEAST = 0.1;
-
-const keyOf = (tab: Opened) => `${tab.kind} ${tab.id}`;
 
 function gapAt(bar: HTMLElement, x: number) {
   const tabs = [...bar.querySelectorAll('[role="tab"]')];
@@ -45,6 +45,10 @@ interface Props {
   /** An open note's own buttons, drawn before Focus while the note is the group's tab in front. */
   noteTools: (noteId: string) => ReactNode;
   dispatch: (action: EditorAction) => void;
+  /** What a drop opens: what was dragged, or what it leads to once dropped, as a new note does once made. Null opens nothing. */
+  opening: (dropped: Dropped) => Promise<Opened | null>;
+  /** Whether going to an address of the app's opens something a tab can hold, so a link to it is taken when dropped. */
+  opens: (address: string) => boolean;
   render: (group: Group, tab: Opened) => ReactNode;
   /** What a group with nothing open shows. */
   empty: ReactNode;
@@ -64,7 +68,7 @@ export function showTabMenu() {
   tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: left, clientY: bottom }));
 }
 
-export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, noteTools, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
+export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, noteTools, dispatch, opening, opens: opensAt, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -76,18 +80,45 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
    * box does, isn't the member turning to its group, in whichever half of a split it is drawn.
    */
   const tabbing = useRef(false);
+  /**
+   * The address of the app's own a link being dragged from inside the window goes to, while one is.
+   * One dragged in from elsewhere, or to another site, is left to whatever is under it, as it always was.
+   */
+  const link = useRef<string | null>(null);
+  const opens = useRef(opensAt);
+  opens.current = opensAt;
   useEffect(() => {
     const down = (e: KeyboardEvent) => void (tabbing.current = e.key === "Tab");
     const up = () => void (tabbing.current = false);
-    // A drag let go of anywhere, or given up with Escape, leaves no mark of where it would have landed.
-    const ended = () => setDrop(null);
+    // A link dragged from inside the window is known as it starts: over a group only what a drag holds can be told, not what it says.
+    // Text that only reads as an address is no link, so it is taken only from a link or what the browser says is one.
+    const started = (e: globalThis.DragEvent) => {
+      const data = e.dataTransfer;
+      const fromLink = data?.types.includes("text/uri-list") || (e.target instanceof Element && e.target.closest("a[href]") !== null);
+      const address = data && fromLink ? linkIn(data) : null;
+      link.current = address !== null && opens.current(address) ? address : null;
+    };
+    // A drag let go of anywhere, or given up with Escape, leaves no mark of where it would have landed. A drag whose
+    // element went from the page ends with no dragend, and the pointer moving again says it is over.
+    const ended = () => {
+      link.current = null;
+      setDrop(null);
+    };
+    const forgotten = () => void (link.current = null);
+    const moved = (e: PointerEvent) => void (e.buttons === 0 && forgotten());
     addEventListener("keydown", down, true);
     addEventListener("keyup", up, true);
+    addEventListener("dragstart", started, true);
     addEventListener("dragend", ended, true);
+    addEventListener("drop", forgotten);
+    addEventListener("pointermove", moved, true);
     return () => {
       removeEventListener("keydown", down, true);
       removeEventListener("keyup", up, true);
+      removeEventListener("dragstart", started, true);
       removeEventListener("dragend", ended, true);
+      removeEventListener("drop", forgotten);
+      removeEventListener("pointermove", moved, true);
     };
   }, []);
   const groups = useRef<HTMLDivElement>(null);
@@ -106,23 +137,27 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
 
   /** Over a drop target the note can't fall through to the editor beneath, which would paste its link. */
   const over = (e: DragEvent, next: Drop) => {
-    if (!carriesTab(e.dataTransfer)) return;
+    const tab = carriesTab(e.dataTransfer);
+    if (!tab && link.current === null) return;
     e.preventDefault();
     e.stopPropagation();
-    e.dataTransfer.dropEffect = "move";
+    // A link keeps the effect its drag allows.
+    if (tab) e.dataTransfer.dropEffect = "move";
     setDrop((d) => (d?.groupId === next.groupId && d.at === next.at ? d : next));
   };
   /** The group a tab is being dragged out of, while one is: a note dragged from a tab leaves that group, and its tabs in other groups stay. */
   const draggedFrom = useRef<string | null>(null);
   const dropped = (e: DragEvent, action: (tab: Opened, from: { from?: string }) => EditorAction) => {
-    if (!carriesTab(e.dataTransfer)) return;
+    const address = link.current;
+    if (!carriesTab(e.dataTransfer) && address === null) return;
     e.preventDefault();
     e.stopPropagation();
     setDrop(null);
-    const tab = carried(e.dataTransfer);
+    link.current = null;
+    const dragged: Dropped | null = carriesTab(e.dataTransfer) ? carried(e.dataTransfer) : { kind: "link", address: address! };
     const from = draggedFrom.current;
     draggedFrom.current = null;
-    if (tab) dispatch(action(tab, from === null ? {} : { from }));
+    if (dragged) void opening(dragged).then((tab) => tab && dispatch(action(tab, from === null ? {} : { from })));
   };
   const left = (e: DragEvent) => {
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null);
@@ -150,7 +185,10 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
                 className="tab-bar"
                 onDragOver={(e) => over(e, { groupId: group.id, at: gapAt(e.currentTarget, e.clientX) })}
                 onDragLeave={left}
-                onDrop={(e) => dropped(e, (tab, from) => ({ type: "drop", groupId: group.id, index: gapAt(e.currentTarget, e.clientX), tab, ...from }))}
+                onDrop={(e) => {
+                  const index = gapAt(e.currentTarget, e.clientX);
+                  dropped(e, (tab, from) => ({ type: "drop", groupId: group.id, index, tab, ...from }));
+                }}
               >
                 {group.tabs.map(({ preview, ...tab }, at) => {
                   const title = titleOf(tab);
@@ -169,11 +207,7 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
                       data-drop={dropAt === at ? "before" : dropAt === at + 1 && at === group.tabs.length - 1 ? "after" : undefined}
                       tabIndex={0}
                       title={title}
-                      draggable
-                      onDragStart={(e) => {
-                        carry(e.dataTransfer, tab);
-                        draggedFrom.current = group.id;
-                      }}
+                      {...draggableAs(tab, () => (draggedFrom.current = group.id))}
                       onDragEnd={() => (draggedFrom.current = null)}
                       onClick={activate}
                       onDoubleClick={() => dispatch({ type: "pin", groupId: group.id, tab })}

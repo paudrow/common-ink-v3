@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { folderTitle, type EditorProps, type Opened, type Plugin } from "../../plugin-api.ts";
+import { folderTitle, openedAt, type App, type Dragged, type EditorProps, type Opened, type Plugin } from "../../plugin-api.ts";
 import { lifecycle } from "../lib/lifecycle.ts";
-import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
-import { editorReducer, focused, keptLayout, notesIn, same, type CloseScope, type EditorAction } from "./editorLayout.ts";
+import { EditorGroups, showTabMenu, type Dropped } from "./EditorGroups.tsx";
+import { editorReducer, focused, keptLayout, keyed, keyedLayout, notesIn, same, type CloseScope, type EditorAction } from "./editorLayout.ts";
 
 /** Whether the tab in front is this one and, for a page, at this address. */
 const inFront = (tab: Opened | null, opened: Opened) => same(tab, opened) && (tab?.kind !== "page" || opened.kind !== "page" || tab.path === opened.path);
@@ -17,6 +17,25 @@ const CLOSES: { scope: CloseScope; id: string; title: string }[] = [
   { scope: "right", id: "tab.closeRight", title: "Close tabs to the right" },
   { scope: "all", id: "tab.closeAll", title: "Close all tabs" },
 ];
+
+/**
+ * What a drop on a group opens. A link of the app's own opens what going to its address would. A new
+ * note is made first, where it was dragged from asked; a page that only leads somewhere else opens
+ * where it leads. Anything else is opened as it was dragged. A refusal is said in a notice, and
+ * nothing is opened.
+ */
+async function opening(app: App, dropped: Dropped): Promise<Opened | null> {
+  const dragged: Dragged | null = dropped.kind === "link" ? openedAt(dropped.address, app.pages) : dropped;
+  if (!dragged) return null;
+  const leads = dragged.kind === "page" ? app.pages.find((p) => p.id === dragged.id)?.transient : undefined;
+  try {
+    if (dragged.kind === "new note") return { kind: "note", id: await app.createNote(dragged.folderId, { open: false }) };
+    return typeof leads === "function" ? await leads() : dragged;
+  } catch (err) {
+    app.notify({ message: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
 
 export const tabs: Plugin = {
   id: "tabs",
@@ -49,7 +68,10 @@ export const tabs: Plugin = {
       cursorTo = null;
       for (const listener of [...listeners]) listener();
     };
-    const dispatch = (action: EditorAction) => {
+    /** For a page with a tab for each of several keys, as each tag's page has, the key of the one at an address. */
+    const ownTab = (pageId: string, path: string) => host.app().pages.find((p) => p.id === pageId)?.tabAt?.(path).key;
+    const dispatch = (asked: EditorAction) => {
+      const action = "tab" in asked ? { ...asked, tab: keyed(asked.tab, ownTab) } : asked;
       const next = editorReducer(layout, action);
       if ((action.type === "split" || action.type === "send") && next !== layout) {
         // A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
@@ -92,8 +114,16 @@ export const tabs: Plugin = {
       const notes = useMemo(() => app.notes && new Map([...app.notes, ...app.trashed].map((n) => [n.id, n])), [app.notes, app.trashed]);
       const home = app.path === "/";
 
+      // A layout kept before a page had a tab at each address has them once the page is there.
       useEffect(() => {
-        if (app.opened && !inFront(focused(layout), app.opened)) dispatch({ type: "open", tab: app.opened, preview: true });
+        const next = keyedLayout(layout, ownTab);
+        if (next === layout) return;
+        layout = next;
+        host.storage.set("layout", layout);
+        for (const listener of [...listeners]) listener();
+      }, [app.pages]);
+      useEffect(() => {
+        if (app.opened && !inFront(focused(layout), keyed(app.opened, ownTab))) dispatch({ type: "open", tab: app.opened, preview: true });
       }, [app.opened]);
       const homePage = app.pages.find((p) => p.home)?.id;
       const nothing = !focused(shown);
@@ -112,7 +142,7 @@ export const tabs: Plugin = {
       }, [app.pages]);
       // A page that has gone is called what it was, or by its address; an address no page was ever at has its path for an id and is "Page".
       const titleOf = (tab: Opened) =>
-        tab.kind === "page" ? (pages.get(tab.id)?.label ?? pageNames[tab.id] ?? (tab.id.startsWith("/") ? "Page" : tab.path)) : tab.kind === "folder" ? (app.folders ? (folderTitle(app.folders, tab.id) ?? "Folder") : "") : notes ? notes.get(tab.id)?.title || "Untitled" : "";
+        tab.kind === "page" ? (pages.get(tab.id)?.tabAt?.(tab.path.split("?")[0]!).title ?? pages.get(tab.id)?.label ?? pageNames[tab.id] ?? (tab.id.startsWith("/") ? "Page" : tab.path)) : tab.kind === "folder" ? (app.folders ? (folderTitle(app.folders, tab.id) ?? "Folder") : "") : notes ? notes.get(tab.id)?.title || "Untitled" : "";
 
       return (
         <EditorGroups
@@ -123,6 +153,8 @@ export const tabs: Plugin = {
           noteItems={(tab) => (tab.kind === "note" ? items(notes?.get(tab.id)) : [])}
           noteTools={renderNoteTools}
           dispatch={dispatch}
+          opening={(dragged) => opening(app, dragged)}
+          opens={(address) => openedAt(address, app.pages) !== null}
           render={(group, tab) =>
             tab.kind === "folder"
               ? renderFolder(tab.id)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carriesTab, carry, type App, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
+import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carriesTab, draggableAs, type App, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
 import { MANAGE_PATH, ManageFolders, SETTINGS_ID, asking, folderCards } from "./folderDescriptions.tsx";
 import { canMove, canRename, movable, placesFor, type Place } from "./lib/folderMoves.ts";
 import { useKept } from "./lib/kept.ts";
@@ -122,9 +122,6 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
     </div>
   );
 
-  /** Dragged to the editor area, a row's list is dropped in a group as a tab is. */
-  const dragged = (id: string) => ({ draggable: true, onDragStart: (e: DragEvent) => carry(e.dataTransfer, { kind: "folder", id }) });
-
   /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and its menu only opens it. */
   const listRow = (id: string, name: string, count: number) => (
     <div
@@ -137,7 +134,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
       aria-labelledby={`${ids}-${id}`}
       aria-describedby={`${ids}-${id}-count`}
       tabIndex={selectedId === id || (id === ALL_NOTES && !(selectedId && (tree.byId.has(selectedId) || (selectedId === SHARED_WITH_ME && loose > 0)))) ? 0 : -1}
-      {...dragged(id)}
+      {...draggableAs({ kind: "folder", id })}
       onClick={() => onOpen(id, false)}
       onDoubleClick={() => onOpen(id, true)}
       onContextMenu={(e) => {
@@ -187,11 +184,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             aria-labelledby={`${ids}-${folder.id}`}
             aria-describedby={`${ids}-${folder.id}-count`}
             tabIndex={folder.id === selectedId ? 0 : -1}
-            draggable
-            onDragStart={(e) => {
-              carry(e.dataTransfer, { kind: "folder", id: folder.id });
-              dragging.current = folder.id;
-            }}
+            {...draggableAs({ kind: "folder", id: folder.id }, () => (dragging.current = folder.id))}
             onDragEnd={() => {
               dragging.current = null;
               setDropTarget(null);

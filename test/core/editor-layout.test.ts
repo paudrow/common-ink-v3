@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_LAYOUT, editorReducer, focused, isEditorLayout, keptLayout, type EditorAction, type EditorLayout, type Opened } from "../../src/web/plugins/tabs/editorLayout.ts";
+import { EMPTY_LAYOUT, editorReducer, focused, isEditorLayout, keptLayout, keyed, keyedLayout, type EditorAction, type EditorLayout, type Opened } from "../../src/web/plugins/tabs/editorLayout.ts";
 
 const note = (id: string) => ({ kind: "note" as const, id });
 const folder = (id: string) => ({ kind: "folder" as const, id });
@@ -769,6 +769,57 @@ describe("a page's tab", () => {
     const layout = open(open(EMPTY_LAYOUT, at("tags", "/tags/work"), false), note("a"), false);
 
     expect(focused(editorReducer(layout, { type: "close", scope: "tab", groupId: "1", tab: note("a") }))).toEqual(at("tags", "/tags/work"));
+  });
+});
+
+describe("a page with a tab at each address", () => {
+  const tag = (name: string) => ({ kind: "page" as const, id: "tags", path: `/tags/${name}`, ownTab: name.toLowerCase() });
+  const tagKey = (id: string, path: string) => (id === "tags" ? path.slice("/tags/".length).toLowerCase() : undefined);
+  const open = (layout: EditorLayout, tab: Opened, preview = false) => editorReducer(layout, { type: "open", tab, preview });
+
+  it("has a tab of its own at each address, and the page at its own path is one more", () => {
+    const layout = open(open(open(EMPTY_LAYOUT, tag("garden")), tag("money")), { kind: "page", id: "tags", path: "/tags", ownTab: "" });
+
+    expect(layout.groups[0]!.tabs.map((t) => t.kind === "page" && t.path)).toEqual(["/tags/garden", "/tags/money", "/tags"]);
+    expect(open(layout, tag("garden")).groups[0]!.tabs).toHaveLength(3);
+    expect(open(layout, { ...tag("garden"), path: "/tags/garden?sort=title" }).groups[0]!.tabs).toHaveLength(3);
+    // One key, one tab, however the address writes the tag.
+    expect(open(layout, tag("Garden")).groups[0]!.tabs.map((t) => t.kind === "page" && t.path)).toEqual(["/tags/Garden", "/tags/money", "/tags"]);
+  });
+
+  it("drags a second one to a group as a tab beside the first, which stays", () => {
+    const one = open(EMPTY_LAYOUT, tag("garden"));
+    const both = editorReducer(one, { type: "split", groupId: "1", side: "right", tab: tag("money"), keep: true });
+
+    expect(both.groups.map((g) => g.tabs.map((t) => t.kind === "page" && t.path))).toEqual([["/tags/garden"], ["/tags/money"]]);
+    expect(editorReducer(both, { type: "add", groupId: "1", tab: tag("money") }).groups.map((g) => g.tabs.map((t) => t.kind === "page" && t.path))).toEqual([["/tags/garden", "/tags/money"]]);
+  });
+
+  it("is keyed by what the page says of the address, however the address writes it, and another page's tab is left as it is", () => {
+    const page = (path: string) => ({ kind: "page" as const, id: "tags", path });
+
+    expect(keyed(page("/tags/Garden?sort=title"), tagKey)).toEqual({ ...page("/tags/Garden?sort=title"), ownTab: "garden" });
+    const search = { kind: "page" as const, id: "search", path: "/search?q=a" };
+    expect(keyed(search, tagKey)).toBe(search);
+    const stamped = tag("garden");
+    expect(keyed(stamped, tagKey)).toBe(stamped);
+  });
+
+  it("is kept and read again, two tabs of one page and all", () => {
+    const layout = open(open(EMPTY_LAYOUT, tag("garden")), tag("money"));
+
+    expect(keptLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+
+  it("takes over the one tab a layout kept from before had for the page, which comes to be the tab at its address", () => {
+    const before = open(open(EMPTY_LAYOUT, note("a")), { kind: "page", id: "tags", path: "/tags/garden" });
+    const keyed = keyedLayout(keptLayout(JSON.parse(JSON.stringify(before))), tagKey);
+
+    expect(keyed.groups[0]!.tabs).toEqual([{ kind: "note", id: "a", preview: false }, { ...tag("garden"), preview: false }]);
+    expect(focused(keyed)).toEqual(tag("garden"));
+    expect(keyedLayout(keyed, tagKey)).toBe(keyed);
+    expect(keyedLayout(before, () => undefined)).toBe(before);
+    expect(open(keyed, tag("money")).groups[0]!.tabs).toHaveLength(3);
   });
 });
 

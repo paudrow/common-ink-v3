@@ -169,7 +169,7 @@ A list of notes, uploads and calendar events a member can see, matched on title,
 A note, a folder's list or a page open in the editor. Each has at most one tab.
 
 **Page tab**:
-A tab that holds a page. It is one tab wherever under the page's address it is, and it keeps the address it is at. A page already open is turned to and not opened twice. It is a preview like any other: a note previewed from it takes its place, and Back returns to it.
+A tab that holds a page. It is one tab wherever under the page's address it is, and it keeps the address it is at, except where the page has a tab of its own at each address, as each tag's page does. A page already open is turned to and not opened twice. It is a preview like any other: a note previewed from it takes its place, and Back returns to it.
 
 **Folder tab**:
 A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
@@ -178,7 +178,7 @@ A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `
 The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, and it is where the next thing opened with a single click goes, whatever either is of and whichever editor group is focused: so no group is closed by opening something in another. With none, it opens in the focused group. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
 
 **Editor group**:
-A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
+A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. Anything that opens in a tab drags onto a group and lands as a dragged tab does, whatever it is dragged from: a note's card, a folder's row, a tag, a page's link, a crumb. The middle adds a kept tab, an edge splits, and the tab bar puts it at the gap. Today drops the day's note, and New note drops a note made then, in the folder it would be made in by a click.
 _Avoid_: Pane
 
 **Split**:

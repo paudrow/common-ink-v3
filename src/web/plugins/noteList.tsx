@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, ago, dayOf, folderTitle, parseQuery, queryNames, useDismiss, useInspected, useNow, type App, type Author, type Showing, type FolderProps, type NoteSummary, type Plugin, type PluginHost, type SearchMatch, type ViewProps } from "../plugin-api.ts";
+import { ALL_NOTES, Icon, SHARED_WITH_ME, draggableAs, ago, dayOf, folderTitle, parseQuery, queryNames, useDismiss, useInspected, useNow, type App, type Author, type Showing, type FolderProps, type NoteSummary, type Plugin, type PluginHost, type SearchMatch, type ViewProps } from "../plugin-api.ts";
 import { reasonOf } from "./lib/FoundNote.tsx";
 import { lifecycle } from "./lib/lifecycle.ts";
 import { ContextMenu, type MenuItem } from "./lib/Menu.tsx";
@@ -676,6 +676,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
                 setError(null);
                 app.createNote(newIn).catch((err: Error) => setError(err.message));
               }}
+              {...draggableAs({ kind: "new note", folderId: newIn })}
             >
               <Icon name="plus" />
               New note
@@ -791,14 +792,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
                       openMenu(note, { x: e.clientX, y: e.clientY }, e.currentTarget);
                     }}
                   >
-                    <header
-                      className="card-head"
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData(NOTE_DRAG, note.id);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                    >
+                    <header className="card-head" {...draggableAs({ kind: "note", id: note.id })}>
                       {/* The note under it is the card's title. This names the card for a screen reader and for the keyboard, and is not drawn, unless there is no note under it to say it. */}
                       <h2 className="card-title" id={`${ids}-${note.id}`}>
                         {name}

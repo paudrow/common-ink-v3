@@ -1,5 +1,5 @@
 export const TAGS_PATH = "/tags";
-/** The id of the page at that address, which a tag's page is opened in a tab as. */
+/** The id of the page at that address. Each tag's page is a tab of that page, one of its own at each tag's address. */
 export const TAGS_PAGE = "tags";
 /** Where every tag is managed: the Tags section of Settings, which the Tags plugin adds. */
 export const SETTINGS_ID = "tags";

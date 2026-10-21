@@ -114,11 +114,15 @@ export { useOpenNote, type OpenNote } from "./openNotes.ts";
 export { noteJump } from "./openNotes.ts";
 
 /**
- * Dragging to the editor area. `carry` puts a note, a folder's list or a page on a drag, `carried`
- * reads it back where it is dropped, and `carriesTab` says while it is over something whether it
- * has one. A note is carried under `NOTE_DRAG` as its id, so it also drops wherever a note does.
+ * Dragging to the editor area. `draggableAs(what)` is the props that make an element drag a note, a
+ * folder's list, a page or a new note there, spread on it as `{...draggableAs(what)}`. `carried`
+ * reads what was dragged back where it is dropped, and `carriesTab` says while it is over something
+ * whether it has one. A note is carried under `NOTE_DRAG` as its id, so it also drops wherever a note does.
  */
-export { NOTE_DRAG, carried, carriesTab, carry } from "./dragged.ts";
+export { NOTE_DRAG, carried, carriesTab, draggableAs, linkIn, type Dragged } from "./dragged.ts";
+
+/** What going to an address of the app's opens in a tab, as a link to it does, from the pages there are. Null where no tab is. */
+export { openedAt } from "./router.ts";
 
 /** What a plugin can't do without: a keyboard with keys, or more room than a phone's width. */
 export type Need = "keyboard" | "room";
@@ -544,9 +548,15 @@ export interface Slots {
    * it reads the rest from `app.path`. One that is `transient` only leads somewhere else, as Today
    * leads to the day's note with `app.show`: it is never a tab, and is drawn in place of the editor
    * area for the moment it takes to find where to go, with the editor area kept as it is underneath.
+   * Given as the function that finds where it leads, its link dragged to the editor area opens that
+   * place where it is dropped; given as `true`, its link isn't dragged.
    * One with `home` is where the app goes from `/` when the editor area has nothing to return to: it is opened as any page is, a tab where there are tabs.
+   * A page is one tab wherever under its path it is, unless it has `tabAt`: then the addresses under
+   * its path are tabs of their own, one for each `key` that `tabAt` gives an address (its path, without
+   * the query), called its `title`. Each tag's page is "#name" beside the others and the page of every
+   * tag, its key the tag's name in lower case, so `/tags/Garden` and `/tags/garden` are one tab.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; home?: boolean; command?: { id: string; title: string }; component: View };
+  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: true | (() => Promise<Opened>); home?: boolean; tabAt?: (path: string) => { key: string; title: string }; command?: { id: string; title: string }; component: View };
   /**
    * A panel on the Dashboard. It is listed in Add panel and drawn in a card once the member adds it.
    * The member's arrangement still decides whether it is shown, as it does for the Dashboard's own panels.
@@ -1040,7 +1050,7 @@ export interface OpenTab {
   pane: number;
 }
 
-export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav" | "home">;
+export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav" | "home" | "transient" | "tabAt">;
 
 /** The app at one moment: what is open, and what can be done about it. */
 export interface App {
@@ -1150,9 +1160,10 @@ export interface App {
   /**
    * Creates a note and opens it. It goes in `folderId` when that is a folder; otherwise in the
    * folder in front, which is the open note's folder when a note is in front; otherwise in Unsorted.
-   * Refused with the server's reason where the member can't.
+   * Refused with the server's reason where the member can't. Answers the note's id. With `open: false`
+   * it is made and not opened, for whoever opens it somewhere of their own, as a drop on a group does.
    */
-  createNote(folderId?: string): Promise<void>;
+  createNote(folderId?: string, options?: { open?: boolean }): Promise<string>;
   moveNote(noteId: string, folderId: string): Promise<void>;
   /** Tells the app a note changed, with the note as it is now: its text, its folder, or its state. */
   noteChanged(note: Note): void;

@@ -32,7 +32,7 @@ Common Ink saves as you type. A note that you never typed anything into is disca
 
 The sidebar is on the left. The workspace menu at its top switches between your workspaces and opens **Agents**, **Members**, **Sharing**, and **Settings**. Under it are links to pages such as Dashboard, Search, Todos, Today, and Calendar. **More** shows the rest, such as History, Uploads, Trash, and Plugins. Below the links is the folder tree, which starts with All notes.
 
-Every note, folder, and page opens in a tab. A single click opens a preview tab, shown in italics, and the next single click replaces it. To keep a tab open, double-click it or edit the note. To see two tabs side by side, drag a tab to an edge of the editor, or, when the pane has more than one tab, choose **Split right** or **Split down** from the tab's menu.
+Every note, folder, and page opens in a tab. A single click opens a preview tab, shown in italics, and the next single click replaces it. To keep a tab open, double-click it or edit the note. To see two tabs side by side, drag a tab to an edge of the editor, or, when the pane has more than one tab, choose **Split right** or **Split down** from the tab's menu. A note's card, a folder, a tag, a page's link, a crumb and **New note** drag the same way.
 
 The inspector is on the right. Its bar opens the History, Backlinks, and Info panels for whatever is in front.
 

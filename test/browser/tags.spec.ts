@@ -317,7 +317,7 @@ test("a tag in the sidebar has a menu, as a folder's row has: a right-click, Shi
   await menu.getByRole("menuitem", { name: "Open in a split right" }).click();
   const groups = page.getByRole("tablist", { name: "Open notes" });
   await expect(groups).toHaveCount(2);
-  await expect(groups.nth(1).getByRole("tab")).toHaveText(["Tags"]);
+  await expect(groups.nth(1).getByRole("tab")).toHaveText(["#garden"]);
   await expect(notesOf(page, "garden")).toHaveText(["Seeds"]);
 
   // From the keyboard, and Escape gives the keyboard back to the tag.

@@ -104,6 +104,8 @@ A single click opens a note in a preview tab, shown in italics, which the next s
 
 To split the editor, choose **Split right** or **Split down** from a tab's menu, or drag a tab to the edge of a group. `mod+.` fills the window with the tab in front, and pressing it again puts everything back.
 
+Anything you can open drags the same way: a tab, a note's card, a folder in the sidebar, a tag, a page's link such as Todos, a crumb above a note, and any link to a note, folder, tag or page inside a page, such as a note on the Dashboard. Each tag opens in a tab of its own, so two tags can sit side by side. Drop it on the edge of a group to split it, on the middle to add a tab, or on the tab bar to put the tab where you let go. **Today** drops the day's note. **New note** makes a note where you drop it, in the folder you're looking at, as clicking it does.
+
 ## Vim mode
 
 Vim mode is off until you turn it on, on the **Plugins** page or with `"vim.enabled": true` in your settings. It gives every note's editor vim's modes, motions, and operators, and `gd` follows the link under the cursor.

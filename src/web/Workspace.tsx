@@ -29,7 +29,7 @@ import { Plugins } from "./Plugins.tsx";
 import { createInstaller, loadAgain } from "./pluginRuntime.ts";
 import { referredUploads } from "./referredUploads.ts";
 import { ResizeHandle } from "./resize.tsx";
-import { folderPath, keepsATab, routeOf, type Navigate, type Place } from "./router.ts";
+import { folderPath, keepsATab, pageAt, routeOf, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
 import { ROOT as SETTINGS, Settings, type Account } from "./Settings.tsx";
 import { SETTINGS_FILE, SettingsFile } from "./SettingsFile.tsx";
@@ -452,7 +452,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   useEffect(() => host.setInstalled(installer.list()), [host, installer, record, drafts]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   /** The page the address names: the one at exactly that address, or else the one whose path it is under. */
-  const routePage = route.kind === "page" ? (contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`))) : undefined;
+  const routePage = route.kind === "page" ? pageAt(contributed.views.page, route.path) : undefined;
   /** A page that only leads somewhere else is no tab: it has the editor area's place while it finds where to go. */
   const passing = routePage?.transient ? routePage : undefined;
   const address = place.path + place.query;
@@ -815,11 +815,12 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     }
   };
 
-  const createNote = async (folderId?: string) => {
+  const createNote = async (folderId?: string, { open = true }: { open?: boolean } = {}) => {
     const note = await perform(workspaceId, { type: "note.create", folderId: (folderId === undefined ? newNoteFolderId : folderForNew(folderId)) ?? undefined });
     void loadFolders();
     remember(note);
-    openNote(note.id);
+    if (open) openNote(note.id);
+    return note.id;
   };
 
   /** A note no tab holds now. One the member made and never wrote in is removed, once what was typed in it is sent and its editor has gone: the server decides, and refuses any other. */
@@ -1243,7 +1244,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     const cut = path.indexOf("?");
     const at = { path: cut < 0 ? path : path.slice(0, cut), query: cut < 0 ? "" : path.slice(cut), pageState: here ? place.state : null };
     return (
-      <div className="page-pane" key={page.id}>
+      <div className="page-pane" key={page.tabAt ? `${page.id} ${page.tabAt(at.path).key}` : page.id}>
         <Drawn host={host} view={page} as={(app) => ({ ...app, ...at, opened: { kind: "page", id: pageId, path }, noteId: null, note: null, unseen: false, folderId: null, inspect: inspectFor(pageId) })} />
       </div>
     );
