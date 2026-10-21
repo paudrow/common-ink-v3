@@ -7,8 +7,12 @@ export interface Placed {
 
 export const keyOf = (row: Placed) => `${row.noteId}/${row.line}`;
 
-/** Why a row the list no longer has is still shown: the member changed it here, or put it away a moment ago: checked it off, abandoned it or moved it to the backlog. */
-export type Hold = "changed" | "put away";
+/**
+ * Why a row the list no longer has is still shown: the member changed it here, or put it away (checked
+ * it off, abandoned it or moved it to the backlog) a moment ago. "kept" is a row put away while the
+ * member leaves the todos they put away in place, which stays until the list is refreshed.
+ */
+export type Hold = "changed" | "put away" | "kept";
 
 /**
  * The Todos page's list, which keeps its order while the member works on it. A change there, a tag
@@ -44,10 +48,11 @@ export const EMPTY: Listing<never> = { fresh: [], shown: [], held: new Map() };
  * The rows in the order they were shown, as `fresh` has them now, and the rows whose line moved, by
  * their key before and after. A row shown is the row `fresh` has on its line saying the same; else one
  * of its note saying the same on another line, as when a line is written above it; else, for a row the
- * member changed, the one on its line, as the change left it. A row shown that `fresh` no longer has goes, unless it is held. A row that came goes
- * right after the row `fresh` has before it, or first.
+ * member changed, the one on its line, as the change left it. A row shown that `fresh` no longer has goes, unless it is held and no other
+ * todo has its line now, as one does when a line is written above it: those held rows that go are `lost`. A row that came goes right after
+ * the row `fresh` has before it, or first.
  */
-export function arrange<T extends Placed>(shown: readonly T[], fresh: readonly T[], held: ReadonlyMap<string, Hold>): { rows: T[]; moved: Map<string, string> } {
+export function arrange<T extends Placed>(shown: readonly T[], fresh: readonly T[], held: ReadonlyMap<string, Hold>): { rows: T[]; moved: Map<string, string>; lost: Set<string> } {
   const free = new Set(fresh);
   const matched = new Map<T, T>();
   const pass = (same: (had: T, read: T) => boolean) => {
@@ -64,10 +69,16 @@ export function arrange<T extends Placed>(shown: readonly T[], fresh: readonly T
   // Only for a row the member changed: a line that says something else otherwise may be another todo, written there by someone else.
   pass((had, read) => keyOf(had) === keyOf(read) && held.has(keyOf(had)));
   const moved = new Map<string, string>();
+  const lost = new Set<string>();
+  const lines = new Set(fresh.map(keyOf));
   const rows = shown.flatMap((row) => {
     const read = matched.get(row);
     if (read && keyOf(read) !== keyOf(row)) moved.set(keyOf(row), keyOf(read));
-    return read ? [read] : held.has(keyOf(row)) ? [row] : [];
+    if (read) return [read];
+    if (!held.has(keyOf(row))) return [];
+    if (!lines.has(keyOf(row))) return [row];
+    lost.add(keyOf(row));
+    return [];
   });
   const placed = new Set(rows.map(keyOf));
   fresh.forEach((row, i) => {
@@ -77,16 +88,16 @@ export function arrange<T extends Placed>(shown: readonly T[], fresh: readonly T
     rows.splice(after, 0, row);
     placed.add(keyOf(row));
   });
-  return { rows, moved };
+  return { rows, moved, lost };
 }
 
-/** The list read again: its rows kept where they were shown, and a held row's hold gone with it to the line it moved to. */
+/** The list read again: its rows kept where they were shown, and a held row's hold gone with it to the line it moved to, or with it when it goes. */
 function follow<T extends Placed>(had: Listing<T>, fresh: readonly T[], held = had.held): Listing<T> {
-  const { rows, moved } = arrange(had.shown, fresh, held);
-  if (!moved.size) return { fresh, shown: rows, held };
-  const kept = new Map([...held].filter(([key]) => !moved.has(key)));
-  for (const [from, to] of moved) if (held.has(from)) kept.set(to, held.get(from)!);
-  return { fresh, shown: rows, held: kept };
+  const { rows, moved, lost } = arrange(had.shown, fresh, held);
+  if (!moved.size && !lost.size) return { fresh, shown: rows, held };
+  const holds = new Map([...held].filter(([key]) => !moved.has(key) && !lost.has(key)));
+  for (const [from, to] of moved) if (held.has(from)) holds.set(to, held.get(from)!);
+  return { fresh, shown: rows, held: holds };
 }
 
 export function listing<T extends Placed>(had: Listing<T>, event: ListingEvent<T>): Listing<T> {
@@ -122,7 +133,8 @@ export function left<T extends Placed>({ fresh, shown }: Listing<T>): Set<string
 
 /**
  * Whether refreshing would show the list another way: in another order, or without a row the member
- * changed out of it. A row put away a moment ago is going by itself, so it doesn't count.
+ * changed out of it. A row put away doesn't count: one put away a moment ago is going by itself, and
+ * one kept stays as the member asked.
  */
 export function pending<T extends Placed>(list: Listing<T>): boolean {
   const gone = left(list);

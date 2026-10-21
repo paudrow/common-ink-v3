@@ -37,6 +37,12 @@ export const todos: Plugin = {
       title: "Say why a changed todo will leave the list",
       description: "On the Todos page, a todo you change so that it no longer matches the filters stays, greyed, until you refresh. On, a line under it says what changed and why it will leave. Off, it is only greyed.",
     },
+    keepPutAway: {
+      type: "boolean",
+      default: false,
+      title: "Leave todos in place when you check them off",
+      description: "On the Todos page, a todo you check off, abandon or move to the backlog leaves the list a moment later. On, it stays where it is, in its new state, until the list is refreshed: when you come back to the page or change the filter. The notice with Undo comes either way.",
+    },
   },
   activate(host) {
     const editors = new Map<string, EditorView>();

@@ -7074,8 +7074,9 @@ button.diff-fold:hover {
   outline-offset: 2px;
 }
 
-/* A row a change took out of the list, which stays where it was, greyed, until the list is refreshed. What it says under itself isn't. */
-.todo-row[data-gone] > :not(.todo-why) {
+/* A row a change took out of the list, which stays where it was, greyed, until the list is refreshed. What it says under itself isn't,
+   and nor is a row whose box says it isn't open: its state has quietened it already, and greyed again its words fall to about 2:1. */
+.todo-row[data-gone]:not([data-state]) > :not(.todo-why) {
   opacity: 0.5;
 }
 

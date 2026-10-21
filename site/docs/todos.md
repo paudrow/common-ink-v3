@@ -82,7 +82,7 @@ A row's second line shows only what is set on the todo. Point at a row, or give 
 | `-` | Abandon it |
 | `>` | Move it to the backlog |
 
-Press the key for the state a todo is in to open it again. The up and down arrows select the row above or below, and the down arrow in the query bar selects the first row. On a selected row, Space checks the todo off and Enter opens its note. With [vim mode](/docs/notes#vim-mode) on, `dd` abandons it too, and `j` and `k` move between rows as the arrows do. When a todo leaves the list, the next row is selected, so you can work down the list. A notice says what happened, with **Undo**. Press `?` to see every key, or change them in Settings.
+Press the key for the state a todo is in to open it again. The up and down arrows select the row above or below, and the down arrow in the query bar selects the first row. On a selected row, Space checks the todo off and Enter opens its note. With [vim mode](/docs/notes#vim-mode) on, `dd` abandons it too, and `j` and `k` move between rows as the arrows do. When a todo leaves the list, the next row is selected, so you can work down the list. A notice says what happened, with **Undo**. To keep the todos you put away in sight, turn on **Leave todos in place when you check them off** under Todos in Settings: each stays where it is, in its new state, until you come back to the page or change the filter. Press `?` to see every key, or change them in Settings.
 
 The query bar at the top narrows the list. It reads the same language as search, so `assignee:@me due:<=today` lists what is yours and due. **Advanced** builds a query by picking. **Sort** orders the list by **Due date**, **Priority**, **Recently changed**, **Note**, or the todo's words. A few queries to start from:
 

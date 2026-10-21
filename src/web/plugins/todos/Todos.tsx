@@ -779,14 +779,16 @@ interface ListProps extends Props {
   sayWhy?: boolean;
   /** Where the keyboard goes when the row it was in leaves the list and no row is left: the Todos page's bar. */
   home?: RefObject<HTMLElement | null>;
+  /** Whether a todo put away stays in its place, in its new state, until the list is refreshed, instead of going after its moment: the Todos page's setting too. */
+  keepPutAway?: boolean;
 }
 
 /**
  * Todos as rows, read for a query and read again whenever a note changes: each row changed in place,
  * one change after another, a checked one lingering struck through, and a row a change took out of the
- * query staying, dimmed, until Refresh. The Todos page is its bar over one of these, and a person's page has one of their open todos.
+ * query staying, dimmed, until Refresh. With `keepPutAway`, a todo put away stays until Refresh as well. The Todos page is its bar over one of these, and a person's page has one of their open todos.
  */
-export function TodoList({ host, app, onOpen, query, label, inspected = false, narrowedTo: narrowedTags = [], onTag, onUnanswered, none, sayWhy = false, home }: ListProps) {
+export function TodoList({ host, app, onOpen, query, label, inspected = false, narrowedTo: narrowedTags = [], onTag, onUnanswered, none, sayWhy = false, home, keepPutAway = false }: ListProps) {
   /** Whether the list was read yet, and where more of it starts when there is more. */
   const [page, setPage] = useState<Pick<Results["todo.list"], "next"> | null>(null);
   const [list, arrange] = useReducer(listing<ListedTodo>, EMPTY as Listing<ListedTodo>);
@@ -963,7 +965,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
     (todo: ListedTodo, to: RowChange) => {
       setProblem(null);
       const after = changed(todo, to, now);
-      // Checking a todo off, abandoning it or moving it to the backlog puts it away: it says so with an Undo, and goes after its moment.
+      // Checking a todo off, abandoning it or moving it to the backlog puts it away: it says so with an Undo, and goes after its moment or is kept.
       const away = to.state !== undefined && to.state !== "open" && to.state !== todo.state ? to.state : null;
       const rolls = away === "done" && comesAround(todo, now);
       if (rolls) setCompleting((keys) => new Set(keys).add(keyOf(todo)));
@@ -971,14 +973,15 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
       if (to.state === undefined) announce.current = true;
       else quiet.current = true;
       onward(todo, after);
-      const sent = send(todo, to, away ? "put away" : "changed");
+      const hold: Hold = away ? (keepPutAway ? "kept" : "put away") : "changed";
+      const sent = send(todo, to, hold);
       if (rolls) void sent.catch(() => {}).finally(() => setCompleting((keys) => new Set([...keys].filter((key) => key !== keyOf(todo)))));
       sent.then(
         (note) => {
           if (!away) return;
-          // A todo put away stays its moment, and then goes when the list no longer has it, as the last time of a repeating one doesn't.
+          // A todo put away stays its moment, and then goes when the list no longer has it, as the last time of a repeating one doesn't. One kept stays until Refresh.
           const key = keyOf(todo);
-          setTimeout(() => arrange({ type: "let go", key }), LINGER_MS);
+          if (hold === "put away") setTimeout(() => arrange({ type: "let go", key }), LINGER_MS);
           // A recurring todo's completion moved its due date, counted it and filed a line on the daily note: Undo reverts the change that did, which takes all of it back.
           if (note.filed) return putAway(host, "done", () => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
           if (after.state !== away) return;
@@ -990,7 +993,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
       );
       return sent;
     },
-    [send, now, host, onward],
+    [send, now, host, onward, keepPutAway],
   );
 
   /** Takes a tag off a todo's line, with an Undo that puts it back where it was, or after its words when they were changed since. */
@@ -1135,7 +1138,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
                 titleOf={titleOf}
                 picked={picked?.row === keyOf(todo) ? picked.chip : null}
                 completing={completing.has(keyOf(todo))}
-                gone={gone.has(keyOf(todo)) && list.held.get(keyOf(todo)) === "changed"}
+                gone={gone.has(keyOf(todo)) && list.held.get(keyOf(todo)) !== "put away"}
                 why={sayWhy && gone.has(keyOf(todo)) ? whyGone(todo) : null}
                 onChange={change}
                 onUntag={untag}
@@ -1286,6 +1289,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
         none={query ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}
         sayWhy={host.settings.get<boolean>("sayWhyLeaving")}
         home={field}
+        keepPutAway={host.settings.get<boolean>("keepPutAway")}
         onTag={(name) => {
           // The chip does what it shows: a tag already typed and not yet run is not taken off by a chip that reads unpressed.
           const typedHas = narrowedTo(typed).some((tag) => nameKey(tag) === nameKey(name));

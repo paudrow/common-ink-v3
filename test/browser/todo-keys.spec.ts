@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { expectRowSelected, perform, runCommand, signInAsNewPerson, test } from "./helpers.ts";
+import { closeSettings, group } from "./settings-helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -20,7 +21,9 @@ const toast = (page: Page, message: string) => page.locator(".toast-card").filte
 const toasts = (page: Page) => page.locator(".toast-card");
 const menu = (page: Page) => page.getByRole("menu");
 const sheet = (page: Page) => page.getByRole("dialog", { name: "Keyboard shortcuts" });
-const keysOf = (page: Page, group: string, title: string) => sheet(page).getByRole("table", { name: group }).getByRole("row").filter({ has: page.getByRole("rowheader", { name: title, exact: true }) }).locator("kbd");
+/** Longer than a row put away lingers before it goes. */
+const PAST_LINGER_MS = 2500;
+const keysOf = (page: Page, table: string, title: string) => sheet(page).getByRole("table", { name: table }).getByRole("row").filter({ has: page.getByRole("rowheader", { name: title, exact: true }) }).locator("kbd");
 
 const CHORES = "# Chores\n\n- [ ] Sweep due:2031-10-01\n- [ ] Dust due:2031-10-02\n- [ ] Paint the fence due:2031-10-03\n- [ ] Learn the cello due:2031-10-04\n";
 
@@ -410,4 +413,82 @@ test("x on a repeating todo completes it and leaves it open, due next, so its ro
   await expect(toast(page, "Task completed")).toHaveText("Task completedUndo");
   await expect(box(page, "Water the plants")).toBeFocused();
   await expect(words(page)).toHaveText(["Water the plants", "Dust"]);
+});
+
+test("with todos left in place, a todo checked off, abandoned or moved to the backlog, by key or click, stays where it is, in its new state and saying why, until the list is refreshed; Undo puts it back and the keyboard goes on down the list", async ({ page }) => {
+  const { lines } = await open(page, { "todos.keepPutAway": true });
+  await box(page, "Sweep").focus();
+  await page.keyboard.press("x");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [ ] Dust due:2031-10-02", "- [ ] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(toast(page, "Task completed")).toHaveText("Task completedUndo");
+  await expectRowSelected(row(page, "Dust"));
+
+  await page.keyboard.press("-");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [-] Dust due:2031-10-02", "- [ ] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expectRowSelected(row(page, "Paint the fence"));
+
+  await row(page, "Paint the fence").getByRole("button", { name: "Move to backlog" }).click();
+  await box(page, "Learn the cello").click();
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [-] Dust due:2031-10-02", "- [>] Paint the fence due:2031-10-03", "- [x] Learn the cello due:2031-10-04"]);
+
+  await page.waitForTimeout(PAST_LINGER_MS);
+  await expect(words(page)).toHaveText(["Sweep", "Dust", "Paint the fence", "Learn the cello"]);
+  expect(await rows(page).locator(".todo-box").evaluateAll((all) => all.map((el) => el.getAttribute("aria-label")))).toEqual(["Done", "Abandoned", "Backlog", "Done"]);
+  expect(await rows(page).evaluateAll((all) => all.map((el) => el.getAttribute("data-gone")))).toEqual(["true", "true", "true", "true"]);
+  // Its state has quietened it already, so it isn't greyed as well.
+  await expect(row(page, "Sweep").locator(".todo-text")).toHaveCSS("opacity", "1");
+  await expect(rows(page).locator(".todo-why")).toHaveText([
+    "Checked off, so it no longer shows with the open todos. It leaves when you refresh.",
+    "Abandoned, so it no longer shows with the open todos. It leaves when you refresh.",
+    "Moved to the backlog, so it no longer shows with the open todos. It leaves when you refresh.",
+    "Checked off, so it no longer shows with the open todos. It leaves when you refresh.",
+  ]);
+  // The member asked for them to stay, so nothing asks for a refresh.
+  await expect(todosPage(page).locator(".todo-order")).toHaveCount(0);
+
+  await toast(page, "Task completed").getByRole("button", { name: "Undo" }).click();
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [-] Dust due:2031-10-02", "- [>] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(row(page, "Learn the cello")).not.toHaveAttribute("data-gone");
+  await expect(words(page)).toHaveText(["Sweep", "Dust", "Paint the fence", "Learn the cello"]);
+
+  // A kept row opened again from its own box stays, open and no longer greyed.
+  await box(page, "Dust").click();
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [ ] Dust due:2031-10-02", "- [>] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(row(page, "Dust")).not.toHaveAttribute("data-gone");
+
+  await page.goto("/");
+  await page.goto("/todos");
+  await expect(words(page)).toHaveText(["Dust", "Learn the cello"]);
+});
+
+test("Leave todos in place is the Todos plugin's setting in Settings, off at first, and turned on it is kept with the account", async ({ page }) => {
+  const { lines } = await open(page);
+  await page.goto("/settings/plugins/todos");
+  const keep = group(page, "Todos").getByRole("checkbox", { name: "Leave todos in place when you check them off" });
+  await expect(keep).not.toBeChecked();
+  await keep.check();
+  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)).toEqual({ "todos.keepPutAway": true });
+  await closeSettings(page);
+  await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Todos" }).click();
+
+  await box(page, "Sweep").focus();
+  await page.keyboard.press("x");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [ ] Dust due:2031-10-02", "- [ ] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await page.waitForTimeout(PAST_LINGER_MS);
+  await expect(words(page)).toHaveText(["Sweep", "Dust", "Paint the fence", "Learn the cello"]);
+  await expect(row(page, "Sweep")).toHaveAttribute("data-gone", "true");
+
+  await page.reload();
+  await page.goto("/settings/plugins/todos");
+  await expect(keep).toBeChecked();
+  await keep.uncheck();
+  await closeSettings(page);
+  await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Todos" }).click();
+  await expect(words(page)).toHaveText(["Dust", "Paint the fence", "Learn the cello"]);
+  await box(page, "Dust").focus();
+  await page.keyboard.press("x");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [x] Dust due:2031-10-02", "- [ ] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  // Off, it is gone by the time a kept one was seen to stay.
+  await page.waitForTimeout(PAST_LINGER_MS);
+  expect(await words(page).allTextContents()).toEqual(["Paint the fence", "Learn the cello"]);
 });
