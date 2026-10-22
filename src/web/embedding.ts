@@ -464,6 +464,6 @@ const noteOf = Facet.define<string, string>({ combine: (values) => values[0] ?? 
  * under that name, and keeps what an embed draws below its line. A name nobody registered stays as
  * text. Which embeds there are is said with `embedsAre`.
  */
-export const embedding = (noteId: string): Extension => [noteOf.of(noteId), used, blocks, steppingIn, arrowsIn, Prec.lowest(inline), keptBelow((state) => ({ embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
+export const embedding = (noteId: string): Extension => [noteOf.of(noteId), used, blocks, steppingIn, arrowsIn, Prec.lowest(inline), keptBelow((state) => ({ noteId: state.facet(noteOf), embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
 
 export const embedsAre = (embeds: readonly (Embed | AddressEmbed)[]): Extension => [registered.of(embeds.filter((e): e is Embed => !("claims" in e))), addressed.of(embeds.filter((e): e is AddressEmbed => "claims" in e))];

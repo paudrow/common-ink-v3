@@ -1,26 +1,29 @@
 import { useEffect, useState } from "react";
-import { DAILY_FOLDER, DAILY_SETTINGS, today, type App, type Plugin, type PluginHost } from "../../plugin-api.ts";
+import { DAILY_FOLDER, DAILY_SETTINGS, today, type App, type Opened, type Plugin, type PluginHost } from "../../plugin-api.ts";
 import { browserZone, dayTitled, todayIn, toward } from "./days.ts";
 import { openDay } from "./opening.ts";
 import { dayStepper } from "./steps.ts";
 
 const PATH = "/today";
 
-/**
- * Finds or makes the member's daily note for today, where today is this browser's day, and shows it
- * in place of this page, so Back goes to where the member was before and not through here again.
- */
+/** Finds or makes the member's daily note for today, where today is this browser's day: where Today leads, whether gone to or dropped on a group. */
+async function todaysNote(host: PluginHost): Promise<Opened> {
+  const note = await host.perform({ type: "daily.open", on: today() });
+  // It may have just been made, in a folder that was just made.
+  host.app().noteChanged(note);
+  host.app().refresh();
+  return { kind: "note", id: note.id };
+}
+
+/** Shows today's daily note in place of this page, so Back goes to where the member was before and not through here again. */
 function Today({ host, app }: { host: PluginHost; app: App }) {
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => {
     let stale = false;
-    host.perform({ type: "daily.open", on: today() }).then(
+    todaysNote(host).then(
       (note) => {
         if (stale) return;
-        // It may have just been made, in a folder that was just made.
-        app.noteChanged(note);
-        app.refresh();
-        app.show({ kind: "note", id: note.id }, { replace: true });
+        app.show(note, { replace: true });
         app.openNote(note.id, { focus: true });
       },
       (err: unknown) => !stale && setProblem(err instanceof Error ? err.message : "Common Ink can't be reached."),
@@ -94,7 +97,7 @@ export const daily: Plugin = {
     },
   },
   activate(host) {
-    host.views.register("page", { id: "today", path: PATH, label: "Today", icon: "today", nav: "primary", order: 25, transient: true, component: ({ app }) => <Today host={host} app={app} /> });
+    host.views.register("page", { id: "today", path: PATH, label: "Today", icon: "today", nav: "primary", order: 25, transient: () => todaysNote(host), component: ({ app }) => <Today host={host} app={app} /> });
     host.commands.register({ id: "daily.today", title: "Open today's daily note", group: "Navigation", run: () => host.app().go(PATH) });
     const step = (from: string, by: number) => void openDay(host, toward(from, by, todayHere()));
     host.commands.register({ id: "daily.yesterday", title: "Yesterday's note", group: "Navigation", run: () => step(todayHere(), -1) });

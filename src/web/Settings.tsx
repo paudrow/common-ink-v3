@@ -1,34 +1,14 @@
-import {
-  defaultKeymap,
-  history,
-  historyKeymap,
-  indentWithTab,
-} from "@codemirror/commands";
-import { json } from "@codemirror/lang-json";
-import {
-  HighlightStyle,
-  ensureSyntaxTree,
-  syntaxHighlighting,
-  syntaxTree,
-} from "@codemirror/language";
-import {
-  forceLinting,
-  lintGutter,
-  linter,
-  type Diagnostic,
-} from "@codemirror/lint";
-import { Annotation, Compartment, EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
+import { EditorView } from "@codemirror/view";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { dismissing } from "./dismiss.ts";
+import { Drawn } from "./Drawn.tsx";
 import { Icon } from "./icons.tsx";
 import { KeyboardShortcuts } from "./KeyboardShortcuts.tsx";
 import { SettingRow } from "./SettingRow.tsx";
-import type { Folders } from "./plugin-api.ts";
+import type { Folders, Slots } from "./plugin-api.ts";
 import type { Host, MemberSettings } from "./pluginHost.ts";
-import { readOnly } from "./readOnly.ts";
-import { documentOf, type Problem } from "./settings.ts";
+import { SETTINGS_FILE } from "./SettingsFile.tsx";
+import { AGENTS_FILE } from "./AgentsFile.tsx";
 import {
   ACCOUNT,
   KEYBOARD,
@@ -42,13 +22,11 @@ import { formatBytes } from "./plugins/uploads/sizing.ts";
 import { clipperTarget } from "./plugins/lib/clipperLink.ts";
 import { listClipperGrants, revokeClipperGrant } from "./api.ts";
 
-const NOT_JSON = "Settings are one JSON object, such as {}.";
-
 interface Props {
   host: Host;
   store: SettingsStore;
   mac: boolean;
-  /** Where in the settings it is: `/settings`, or under it a category, such as `/settings/keyboard`, or `/settings/json`. */
+  /** Where in the settings it is: `/settings`, or under it a category, such as `/settings/keyboard`. */
   path: string;
   /** Goes to an address: one under `/settings` moves the settings, and any other closes them and goes there. */
   go: (path: string, options?: { replace?: boolean }) => void;
@@ -76,23 +54,21 @@ export interface Account {
 }
 
 export const ROOT = "/settings";
-export const JSON_VIEW = "json";
 
 /**
- * Where a member changes their settings: by category, as options drawn from the schema and a table
- * of keyboard shortcuts, or as the JSON itself. All of it shows the one document. It belongs to the
- * app, so it is here whatever is turned off. It opens over whatever the member is doing, as a dialog,
- * and Escape closes it: it is never a tab, so it moves nothing of the window under it.
+ * Where a member changes their settings by category, as options drawn from the schema and a table
+ * of keyboard shortcuts. The JSON itself is a document of its own, opened in a tab like a note
+ * (`SettingsFile`), and both show the one document. It belongs to the app, so it is here whatever is
+ * turned off. It opens over whatever the member is doing, as a dialog, and Escape closes it: it is
+ * never a tab, so it moves nothing of the window under it.
  */
 export function Settings({ host, store, mac, path, go, storage, exportPlan, onClose, children, account, folders }: Props) {
-  const { settings } = useSyncExternalStore(host.subscribe, host.contributions);
+  const { settings, views } = useSyncExternalStore(host.subscribe, host.contributions);
   const text = useSyncExternalStore(store.subscribe, store.text);
   const status = useSyncExternalStore(store.subscribe, store.status);
+  const draft = useSyncExternalStore(store.subscribe, store.draft);
   const unread = status.kind === "loading" || status.kind === "unread";
   const at = path.slice(ROOT.length + 1);
-  const asJson = at === JSON_VIEW;
-  /** JSON the member is typing that isn't an object yet. It is kept here, unsaved, until it is one. */
-  const [draft, setDraft] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useRef<HTMLButtonElement>(null);
 
@@ -112,26 +88,13 @@ export function Settings({ host, store, mac, path, go, storage, exportPlan, onCl
     };
   }, []);
 
-  const typed = (next: string) => {
-    if (documentOf(next) && store.replace(next)) setDraft(null);
-    else setDraft(next);
-  };
-
-  const problemList = ((draft !== null && !unread) ||
-    settings.problems.length > 0) && (
+  const problemList = settings.problems.length > 0 && (
     <ul aria-label="Problems" className="settings-problems">
-      {draft !== null && !unread && (
-        <li>
-          The JSON can't be read. {NOT_JSON} Your settings stay as they were
-          until it can.
+      {settings.problems.map((p, i) => (
+        <li key={i} data-kind={p.kind}>
+          <code>{p.key}</code> {p.reason}
         </li>
-      )}
-      {(draft === null || unread) &&
-        settings.problems.map((p, i) => (
-          <li key={i} data-kind={p.kind}>
-            <code>{p.key}</code> {p.reason}
-          </li>
-        ))}
+      ))}
     </ul>
   );
 
@@ -168,24 +131,19 @@ export function Settings({ host, store, mac, path, go, storage, exportPlan, onCl
               Try again
             </button>
           )}
-          <button type="button" className="button small" onClick={() => go(asJson ? ROOT : `${ROOT}/${JSON_VIEW}`)}>
-            {asJson ? "Open settings (UI)" : "Open settings (JSON)"}
+          <button type="button" className="button small" onClick={() => go(SETTINGS_FILE)}>
+            Open settings (JSON)
+          </button>
+          <button type="button" className="button small" onClick={() => go(AGENTS_FILE)}>
+            Open agents file
           </button>
           <button ref={close} type="button" className="icon-button" aria-label="Close settings" title="Close (Escape)" onClick={onClose}>
             <Icon name="close" />
           </button>
         </div>
         <p className="soon">Yours alone, in this workspace. Only what you change from a default is kept.</p>
-        {/* Above the JSON, where each is underlined. Under the options, where each is said at its own row too, so one that comes or goes with a change moves nothing above it. */}
-        {asJson && problemList}
-        {asJson ? (
-          <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} locked={unread} onChange={typed} />
-        ) : (
-          <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} account={account} folders={folders} />
-        )}
-        {!asJson && problemList}
-        <Storage storage={storage} />
-        <Export exportPlan={exportPlan} />
+        <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} account={account} folders={folders} storage={storage} exportPlan={exportPlan} host={host} panes={views.settings} />
+        {problemList}
       </section>
       {children}
     </dialog>
@@ -204,8 +162,8 @@ function Storage({ storage }: Pick<Props, "storage">) {
     return () => void (current = false);
   }, []);
   return (
-    <section aria-label="Storage" className="settings-group settings-storage">
-      <h2>Storage</h2>
+    <section aria-label="Storage" className="settings-storage">
+      <h3>Storage</h3>
       <p>
         {told === null
           ? "Counting this workspace's files…"
@@ -230,8 +188,8 @@ function Export({ exportPlan }: Pick<Props, "exportPlan">) {
   }, []);
   const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
   return (
-    <section aria-label="Export" className="settings-group settings-storage">
-      <h2>Export</h2>
+    <section aria-label="Export" className="settings-storage">
+      <h3>Export</h3>
       <p>
         {plan === null
           ? "Counting what there is to export…"
@@ -266,6 +224,11 @@ interface OptionsProps {
   onSet: Host["setSetting"];
   account: Account;
   folders: Props["folders"];
+  storage: Props["storage"];
+  exportPlan: Props["exportPlan"];
+  host: Host;
+  /** The sections plugins add, which hold no setting. */
+  panes: readonly Slots["settings"][];
 }
 
 /** One entry of the list of categories: where it goes, and how much of what is searched for it holds. */
@@ -285,6 +248,10 @@ function Options({
   onSet,
   account,
   folders,
+  storage,
+  exportPlan,
+  host,
+  panes: offered,
 }: OptionsProps) {
   const [typed, setTyped] = useState("");
   const [modified, setModified] = useState(false);
@@ -294,6 +261,8 @@ function Options({
   const filtering = needle !== "" || modified;
 
   const whole = layoutOf(settings);
+  // A plugin's section never takes the place of one of the app's own.
+  const panes = offered.filter((pane) => ![KEYBOARD.id, ACCOUNT.id, UNKNOWN.id, ...whole.categories.map((c) => c.id)].includes(pane.id));
   const found = filtering
     ? filterLayout(whole, { needle, modified }, settings.document, mac)
     : whole;
@@ -313,11 +282,11 @@ function Options({
     found.categories
       .filter((c) => (c.pluginId !== null) === plugins)
       .map(entry);
-  // Account holds no setting, so a search never finds it.
+  // Account and a plugin's section hold no setting, so a search never finds them.
   const own = [
     ...listed(false),
     ...(found.shortcuts.length > 0 ? [entry(KEYBOARD)] : []),
-    ...(filtering ? [] : [entry(ACCOUNT)]),
+    ...(filtering ? [] : [...panes.map((pane) => entry({ id: pane.id, name: pane.label })), entry(ACCOUNT)]),
   ];
   const plugins = listed(true);
   const rest = unknown.length > 0 ? [entry(UNKNOWN)] : [];
@@ -371,7 +340,7 @@ function Options({
           <button
             type="button"
             className="button small"
-            onClick={() => go(`${ROOT}/${JSON_VIEW}`)}
+            onClick={() => go(SETTINGS_FILE)}
           >
             Show the JSON
           </button>
@@ -433,7 +402,18 @@ function Options({
         </select>
         {current?.id === ACCOUNT.id ? (
           <div className="settings-pane">
-            <AccountSection account={account} />
+            <AccountSection account={account} storage={storage} exportPlan={exportPlan} />
+          </div>
+        ) : panes.some((pane) => pane.id === current?.id) ? (
+          <div className="settings-pane">
+            {panes
+              .filter((pane) => pane.id === current?.id)
+              .map((pane) => (
+                <section key={pane.id} aria-label={pane.label} className="settings-group">
+                  <h2>{pane.label}</h2>
+                  <Drawn host={host} view={pane} />
+                </section>
+              ))}
           </div>
         ) : (
           <fieldset
@@ -540,8 +520,11 @@ function Options({
   );
 }
 
-/** Kept apart from the settings, so JSON that can't be read never stands between a person and signing out everywhere. */
-function AccountSection({ account }: { account: Account }) {
+/**
+ * Kept apart from the settings, so JSON that can't be read never stands between a person and signing out everywhere. What the
+ * workspace's files take and an export of it are here too, before what deletes the account or the workspace.
+ */
+function AccountSection({ account, storage, exportPlan }: { account: Account } & Pick<Props, "storage" | "exportPlan">) {
   const [asked, ask] = useState(false);
   const [agents, setAgents] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -614,6 +597,8 @@ function AccountSection({ account }: { account: Account }) {
         )}
       </div>
       <ClipperRow />
+      <Storage storage={storage} />
+      <Export exportPlan={exportPlan} />
       {account.workspace && <DeleteWorkspaceRow workspace={account.workspace} />}
       <DeleteAccountRow account={account} />
     </section>
@@ -834,141 +819,4 @@ function ClipperRow() {
       )}
     </div>
   );
-}
-
-const external = Annotation.define<boolean>();
-
-const jsonHighlighting = syntaxHighlighting(
-  HighlightStyle.define([
-    { tag: tags.propertyName, color: "var(--accent)" },
-    { tag: tags.string, color: "var(--added)" },
-    { tag: [tags.number, tags.bool, tags.null], color: "var(--danger)" },
-  ]),
-);
-
-/** What to underline in the JSON: where it stops being JSON, or each key the schema has a problem with. */
-function diagnose(
-  state: EditorState,
-  problems: readonly Problem[] | null,
-): Diagnostic[] {
-  const tree =
-    ensureSyntaxTree(state, state.doc.length, 1000) ?? syntaxTree(state);
-  if (!problems) {
-    const broken: { from: number; to: number }[] = [];
-    tree.iterate({
-      enter: (node) =>
-        void (
-          node.type.isError && broken.push({ from: node.from, to: node.to })
-        ),
-    });
-    const at = broken[0];
-    // A mistake at the very end has no text of its own, so the character before it is marked.
-    const to = at
-      ? Math.min(Math.max(at.to, at.from + 1), state.doc.length)
-      : state.doc.length;
-    const from = at ? Math.min(at.from, Math.max(0, to - 1)) : 0;
-    return [
-      {
-        from,
-        to,
-        severity: "error",
-        message: at ? `This isn't JSON from here. ${NOT_JSON}` : NOT_JSON,
-      },
-    ];
-  }
-  const found: Diagnostic[] = [];
-  for (
-    let property = tree.topNode.firstChild?.firstChild;
-    property;
-    property = property.nextSibling
-  ) {
-    const name = property.getChild("PropertyName");
-    const value = property.lastChild;
-    if (!name || !value) continue;
-    const key = JSON.parse(state.sliceDoc(name.from, name.to)) as string;
-    for (const p of problems.filter((p) => p.key === key)) {
-      const on = p.kind === "unknown" ? name : value;
-      found.push({
-        from: on.from,
-        to: on.to,
-        severity: p.kind === "invalid" ? "error" : "warning",
-        message: p.reason,
-      });
-    }
-  }
-  return found;
-}
-
-interface JsonProps {
-  value: string;
-  /** The schema's problems with `value`, or null when it isn't a JSON object and so has only that one. */
-  problems: readonly Problem[] | null;
-  /**
-   * Whether nothing can be typed, as while the stored settings haven't been read: what was typed
-   * then couldn't be saved, and kept as a draft it would be written over them a key after they came.
-   */
-  locked: boolean;
-  onChange: (text: string) => void;
-}
-
-function JsonEditor({ value, problems, locked, onChange }: JsonProps) {
-  const [lock] = useState(() => new Compartment());
-  const parent = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<EditorView | null>(null);
-  const now = useRef({ value, problems, onChange });
-  now.current = { value, problems, onChange };
-
-  useEffect(() => {
-    const view = (viewRef.current = new EditorView({
-      parent: parent.current!,
-      state: EditorState.create({
-        doc: now.current.value,
-        extensions: [
-          lock.of(locked ? readOnly : []),
-          history(),
-          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
-          json(),
-          jsonHighlighting,
-          lintGutter(),
-          linter((v) => diagnose(v.state, now.current.problems), {
-            delay: 100,
-          }),
-          EditorView.lineWrapping,
-          EditorView.contentAttributes.of({ "aria-label": "Settings JSON" }),
-          EditorView.updateListener.of((u) => {
-            if (
-              u.docChanged &&
-              !u.transactions.some((tr) => tr.annotation(external))
-            )
-              now.current.onChange(u.state.doc.toString());
-          }),
-        ],
-      }),
-    }));
-    return () => {
-      viewRef.current = null;
-      view.destroy();
-    };
-  }, []);
-
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    // Not filtered, so the settings as they arrive reach an editor that is still locked.
-    if (view.state.doc.toString() !== value)
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: value },
-        filter: false,
-        annotations: external.of(true),
-      });
-    forceLinting(view);
-  }, [value, problems]);
-
-  useEffect(() => {
-    viewRef.current?.dispatch({
-      effects: lock.reconfigure(locked ? readOnly : []),
-    });
-  }, [locked, lock]);
-
-  return <div className="settings-json" ref={parent} />;
 }

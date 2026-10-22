@@ -95,6 +95,9 @@ export function tagsOn(line: string, offset = 0): (Span & { name: string })[] {
   return [...readable(line).matchAll(TAG)].filter((m) => /\D/.test(m[1]!)).map((m) => ({ from: offset + m.index, to: offset + m.index + m[0].length, name: m[1]! }));
 }
 
+/** Whether `name` is a tag's whole name, as `#name` would write it. */
+export const isTagName = (name: string) => tagsOn(`#${name}`)[0]?.name === name;
+
 /** The todo on one line of a note, which starts at `offset`, or null when the line isn't one. */
 export function parseTodo(line: string, offset = 0): Todo | null {
   const box = BOX.exec(line);
@@ -345,6 +348,44 @@ export function tagsIn(text: string): string[] {
   const tags = new Map<string, string>();
   for (const { line } of linesOutsideCode(text)) for (const { name } of tagsOn(line)) if (!tags.has(nameKey(name))) tags.set(nameKey(name), name);
   return [...tags.values()];
+}
+
+/** The tags `text` has that `base` doesn't, each once ignoring case, as `text` first writes them. */
+export function tagsAdded(text: string, base: string): string[] {
+  const had = new Set(tagsIn(base).map(nameKey));
+  return tagsIn(text).filter((name) => !had.has(nameKey(name)));
+}
+
+/**
+ * The name tag `name` is given when `from` is renamed `to`, or null when it isn't `from` or a tag
+ * under it, as `#from/sub` is: `#from/sub` becomes `#to/sub`, keeping the case it was written in
+ * below `from`. Matched ignoring case, part by part, so `#from-2` is another tag.
+ */
+export function renamedTag(name: string, from: string, to: string): string | null {
+  const parts = name.split("/");
+  const depth = from.split("/").length;
+  if (parts.length < depth || nameKey(parts.slice(0, depth).join("/")) !== nameKey(from)) return null;
+  return [to, ...parts.slice(depth)].join("/");
+}
+
+/**
+ * The text with every tag `from` names, ignoring case, and every tag under it, written as `to`
+ * renames it, and nothing else changed. Only where a tag is read: not in code, not in a link's
+ * address, and never a longer tag such as `#from-2`.
+ */
+export function renamedTags(text: string, from: string, to: string): string {
+  if (!text.includes("#")) return text;
+  let renamed = "";
+  let at = 0;
+  for (const { line, from: start } of linesOutsideCode(text)) {
+    for (const tag of tagsOn(line, start)) {
+      const name = renamedTag(tag.name, from, to);
+      if (name === null) continue;
+      renamed += `${text.slice(at, tag.from)}#${name}`;
+      at = tag.to;
+    }
+  }
+  return renamed + text.slice(at);
 }
 
 /** The tags a note has on its lines but one, each once ignoring case, outside code. */

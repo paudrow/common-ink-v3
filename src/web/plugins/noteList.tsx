@@ -1,12 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, ago, dayOf, folderTitle, parseQuery, queryNames, useDismiss, useInspected, useNow, type App, type Author, type Showing, type FolderProps, type NoteSummary, type Plugin, type PluginHost, type SearchMatch, type ViewProps } from "../plugin-api.ts";
+import { ALL_NOTES, Icon, SHARED_WITH_ME, draggableAs, ago, dayOf, folderTitle, parseQuery, queryNames, useDismiss, useInspected, useNow, type App, type Author, type Showing, type FolderProps, type NoteSummary, type Plugin, type PluginHost, type SearchMatch, type ViewProps } from "../plugin-api.ts";
 import { reasonOf } from "./lib/FoundNote.tsx";
 import { lifecycle } from "./lib/lifecycle.ts";
 import { ContextMenu, type MenuItem } from "./lib/Menu.tsx";
 import { QueryBar } from "./lib/QueryBar.tsx";
 import { EXCERPT_HEIGHT, ITEM_ICONS, ITEM_LABELS, NEAR_PX, cardItems, editorLabel, editorsOf, estimatedHeight, shownHeight, type CardItem } from "./noteCard.ts";
 import { NoteCrumbs } from "./NoteCrumbs.tsx";
-import { INITIAL_VIEW, LIVES, ORDERS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, showOf, titleOf, todosOf, withLife, withTodos, TODO_CHOICES, type Life, type TodoChoice, type ListAction, type ListView } from "./noteListView.ts";
+import { INITIAL_VIEW, LIVES, ORDERS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, showOf, taggedQuery, titleOf, todosOf, withLife, withTodos, withoutTagMarks, TODO_CHOICES, type Life, type TodoChoice, type ListAction, type ListView } from "./noteListView.ts";
 import { pieces } from "./search/marks.ts";
 import { IDLE, againLimit, queryOf, reduce, type Ask } from "./search/request.ts";
 
@@ -53,8 +53,15 @@ export interface FinderProps extends FolderProps {
   autoFocus?: boolean;
   /** Whether the inspector is about the notes listed, called by the heading and the query, as on the Search page. */
   inspected?: boolean;
-  /** Takes the search out of this folder to every note, for a list that is of one folder. */
+  /** Takes the search out of this folder to every note, for a list that is of one folder or one tag. */
   onWiden?: () => void;
+  /**
+   * The tag the list is of, in place of a folder, with `folderId` every note: the notes with it, which
+   * only the server knows, held in the search field as a folder is and asked for with whatever is typed.
+   */
+  tag?: string;
+  /** A count that goes up when what the server finds may have changed, as when notes gain or lose the tag, which asks the search again. */
+  again?: number;
   /**
    * Whether Active, Archived and All sit under the search. A folder's list has them. The Search page
    * leaves them out. There the query is the one control, and those choices are written in it.
@@ -212,7 +219,7 @@ function folderForNew(app: App, folderId: string) {
  * nothing typed it is the notes the app already holds, and nothing is asked of the server. With
  * something typed it is what the server's search finds in the folder, each card with the lines that matched.
  */
-export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, autoFocus, inspected, onWiden, whichNotes = true }: FinderProps) {
+export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, autoFocus, inspected, onWiden, whichNotes = true, tag, again = 0 }: FinderProps) {
   const ids = useId();
   const now = useNow();
   const { setArchived, trash } = useMemo(() => lifecycle(host), [host]);
@@ -244,11 +251,12 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
    */
   const toggled = useRef<string | null>(null);
 
-  const title = app.folders && folderTitle(app.folders, folderId);
+  const title = tag !== undefined ? `#${tag}` : app.folders && folderTitle(app.folders, folderId);
   const inFolder = app.notes && notesIn(app.notes, folderId);
   const ready = !!inFolder && !!title;
   /** A list of one folder says so in its search field. Every note, and what was shared with a guest, are of no one folder. */
-  const scoped = folderId !== ALL_NOTES && folderId !== SHARED_WITH_ME;
+  const inOneFolder = tag === undefined && folderId !== ALL_NOTES && folderId !== SHARED_WITH_ME;
+  const scoped = inOneFolder || tag !== undefined;
 
   useEffect(() => {
     if (autoFocus && ready) field.current?.focus();
@@ -281,9 +289,11 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
   }, [wanted, view.query]);
 
   // A query that can't be read yet is not asked, and one that names no word and no filter, such as a sort: alone, is the folder's own notes.
+  // A tag's notes are always asked for: the app holds no note's tags.
   const read = useMemo(() => parseQuery(view.query, "notes"), [view.query]);
-  const asked = read.ok && read.query.where ? view.query : "";
-  const order = read.ok && !read.query.where ? read.query.sort : null;
+  const typedWhere = read.ok && !!read.query.where;
+  const asked = tag !== undefined ? taggedQuery(tag, view.query) : typedWhere ? view.query : "";
+  const order = tag === undefined && read.ok && !read.query.where ? read.query.sort : null;
   /** The states the query itself asks for, which are then listed whatever Open, Archived or All is set to. */
   const namesArchived = read.ok && queryNames(read.query.where, "archived");
   const namesTrashed = read.ok && queryNames(read.query.where, "trashed");
@@ -292,8 +302,8 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
   const count = inFolder ? listed(inFolder, { ...INITIAL_VIEW, show: namesArchived && view.show === "open" ? "all" : view.show }).length : 0;
   const days = { today: dayOf(new Date(now)), zone: Intl.DateTimeFormat().resolvedOptions().timeZone };
   const ask = useMemo<Ask>(
-    () => ({ query: ready ? asked : "", ...(scoped && { folderId }), includeArchived: includeArchivedOf(view.show), hasTodos: view.hasTodos, sort: view.sort ?? "match" }),
-    [ready, asked, scoped, folderId, view.show, view.hasTodos, view.sort],
+    () => ({ query: ready ? asked : "", ...(inOneFolder && { folderId }), includeArchived: includeArchivedOf(view.show), hasTodos: view.hasTodos, sort: view.sort ?? "match" }),
+    [ready, asked, inOneFolder, folderId, view.show, view.hasTodos, view.sort],
   );
   const find = (asked: Ask, after: string | null = null) => {
     dispatch(after ? { type: "moreAsked" } : { type: "asked", ask: asked });
@@ -304,6 +314,17 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     );
   };
   useEffect(() => find(ask), [host, ask]);
+  /** The count the search was last asked again at. A change while an answer is on its way is asked once that answer is in. */
+  const askedAgain = useRef(again);
+  useEffect(() => {
+    if (again === askedAgain.current || search.status !== "listed" || search.more === "asking") return;
+    askedAgain.current = again;
+    const { ask: was, results } = search;
+    host.perform({ type: "search", ...was, ...days, limit: againLimit(results.length) }).then(
+      ({ results, next, indexing }) => dispatch({ type: "reanswered", ask: was, results, next, indexing }),
+      () => {},
+    );
+  }, [again, search]);
 
   const found = search.status === "listed" ? search : null;
   const partial = found?.indexing && found.more !== "asking" ? found : null;
@@ -339,6 +360,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     if (search.status === "failed") return [];
     const results = search.status === "listed" ? search.results : search.status === "searching" ? search.before : null;
     if (!results) {
+      if (tag !== undefined) return [];
       const own = listed(inFolder, view);
       return (order && ORDERS[order] ? own.sort(ORDERS[order]) : own).map((note) => ({ note, matches: [] }));
     }
@@ -352,9 +374,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
       const stated = current.state === note.state || (namesArchived && current.state === "archived") || (namesTrashed && current.state === "trashed") || (namesOpen && current.state === "live");
       const fitting = named ? stated && (!view.hasTodos || current.openTodos > 0) : fits(view, current);
       // What was shared with a guest is of no folder the server can be asked for, so it is picked out of every note found.
-      return fitting && (folderId !== SHARED_WITH_ME || current.folderId === null) ? [{ note: current, matches }] : [];
+      // A tag's list marks what was typed, and not the tag every note on it has.
+      return fitting && (folderId !== SHARED_WITH_ME || current.folderId === null) ? [{ note: current, matches: tag === undefined ? matches : typedWhere ? withoutTagMarks(matches, tag) : [] }] : [];
     });
-  }, [inFolder, search, view.show, view.hasTodos, view.sort, order, namesArchived, namesTrashed, namesOpen, app.notes, app.trashed, folderId]);
+  }, [inFolder, search, view.show, view.hasTodos, view.sort, order, namesArchived, namesTrashed, namesOpen, app.notes, app.trashed, folderId, tag, typedWhere]);
   const notes = items.map((item) => item.note);
   // History is then the history of the notes found, and Info counts them, each following the query.
   // Told only once the list answers its query: while a search is on its way it says what it said before.
@@ -479,7 +502,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     ) : null;
   if (!title) return <p className="notice">This folder doesn't exist, or you can't see it.</p>;
 
-  const newIn = folderForNew(app, folderId);
+  const newIn = tag === undefined ? folderForNew(app, folderId) : null;
   const open = (note: NoteSummary, how: "preview" | "keep" | "behind") =>
     how === "behind" ? app.openNote(note.id, { background: true }) : app.openNote(note.id, { preview: how === "preview", focus: true });
   const wholeOrLess = (noteId: string) => {
@@ -525,16 +548,21 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     }
   };
 
+  const counted = (n: number) => `${n} ${n === 1 ? "note" : "notes"}`;
   const status =
     search.status === "searching"
       ? "Searching…"
       : found
-        ? `${notes.length}${found.next === null ? "" : "+"} of ${count} ${count === 1 ? "note" : "notes"}`
-        : `${count} ${count === 1 ? "note" : "notes"}`;
+        ? tag !== undefined
+          ? `${counted(notes.length)}${found.next === null ? "" : "+"}`
+          : `${notes.length}${found.next === null ? "" : "+"} of ${counted(count)}`
+        : counted(count);
   /** How a search that left archived notes out has them: by its query on the Search page, by All on a folder's list. */
   const leftOut = view.show !== "open" || namesArchived || namesTrashed ? "" : " Archived notes are left out: add is:archived to search them.";
   const nothing = found
-    ? `No notes match “${found.ask.query}”${scoped ? ` in ${title}` : ""}.${leftOut}`
+    ? tag !== undefined && !typedWhere
+      ? `No notes have #${tag}.${leftOut}`
+      : `No notes match “${tag !== undefined ? view.query.trim() : found.ask.query}”${scoped ? ` in ${title}` : ""}.${leftOut}`
     : count
       ? "No notes match."
       : view.show === "archived"
@@ -648,6 +676,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
                 setError(null);
                 app.createNote(newIn).catch((err: Error) => setError(err.message));
               }}
+              {...draggableAs({ kind: "new note", folderId: newIn })}
             >
               <Icon name="plus" />
               New note
@@ -661,10 +690,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
           value={typed}
           fieldRef={field}
           label="Search notes"
-          placeholder={`${scoped ? "Search this folder" : "Search all notes"}: ${SYNTAX}`}
+          placeholder={`${tag !== undefined ? `Search #${tag}` : scoped ? "Search this folder" : "Search all notes"}: ${SYNTAX}`}
           lead={
             scoped && (
-              <span className="finder-scope" title={`Searching the notes in ${title}, not those of the folders inside it`}>
+              <span className="finder-scope" title={tag !== undefined ? `Searching the notes tagged ${title}` : `Searching the notes in ${title}, not those of the folders inside it`}>
                 <span>{title}</span>
                 {onWiden && (
                   <button type="button" aria-label={`Search all notes, not only ${title}`} title="Search all notes" onClick={onWiden}>
@@ -738,7 +767,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
         )}
         {found?.indexing && <p className="search-status">{STILL_INDEXING}</p>}
         <nav aria-label="Notes">
-          {!notes.length && search.status !== "failed" && search.status !== "searching" && <p className="empty">{nothing}</p>}
+          {!notes.length && (tag === undefined ? search.status !== "failed" && search.status !== "searching" : !!found) && <p className="empty">{nothing}</p>}
           <ul className="cards" data-list aria-busy={search.status === "searching"}>
             {items.map(({ note, matches }, at) => {
               const whole = !!view.whole[note.id];
@@ -763,14 +792,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
                       openMenu(note, { x: e.clientX, y: e.clientY }, e.currentTarget);
                     }}
                   >
-                    <header
-                      className="card-head"
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData(NOTE_DRAG, note.id);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                    >
+                    <header className="card-head" {...draggableAs({ kind: "note", id: note.id })}>
                       {/* The note under it is the card's title. This names the card for a screen reader and for the keyboard, and is not drawn, unless there is no note under it to say it. */}
                       <h2 className="card-title" id={`${ids}-${note.id}`}>
                         {name}
@@ -891,19 +913,19 @@ interface KeptList extends Kept {
   view: ListView;
 }
 
-/** How each folder's list was left, for as long as the app is open. A list drawn for a folder follows what is kept for it, whoever changed it. */
-function keeping() {
+/** How each list was left, by what it is of, such as a folder or a tag, for as long as the app is open. A list drawn for one follows what is kept for it, whoever changed it. */
+export function keeping() {
   const kept = new Map<string, KeptList>();
   const listeners = new Set<() => void>();
-  const of = (folderId: string) => {
-    if (!kept.has(folderId)) kept.set(folderId, { view: INITIAL_VIEW, scrollTop: 0, heights: new Map() });
-    return kept.get(folderId)!;
+  const of = (key: string) => {
+    if (!kept.has(key)) kept.set(key, { view: INITIAL_VIEW, scrollTop: 0, heights: new Map() });
+    return kept.get(key)!;
   };
   return {
     of,
-    set(folderId: string, view: ListView) {
-      if (of(folderId).view === view) return;
-      of(folderId).view = view;
+    set(key: string, view: ListView) {
+      if (of(key).view === view) return;
+      of(key).view = view;
       for (const listener of [...listeners]) listener();
     },
     subscribe(listener: () => void) {

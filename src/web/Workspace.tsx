@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { redo, undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import type { DraftSummary, PluginRecord } from "../core/plugins.ts";
 import { allPages } from "../core/allPages.ts";
@@ -28,9 +29,12 @@ import { Plugins } from "./Plugins.tsx";
 import { createInstaller, loadAgain } from "./pluginRuntime.ts";
 import { referredUploads } from "./referredUploads.ts";
 import { ResizeHandle } from "./resize.tsx";
-import { folderPath, keepsATab, routeOf, type Navigate, type Place } from "./router.ts";
+import { folderPath, keepsATab, pageAt, routeOf, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
-import { JSON_VIEW, ROOT as SETTINGS, Settings, type Account } from "./Settings.tsx";
+import { ROOT as SETTINGS, Settings, type Account } from "./Settings.tsx";
+import { SETTINGS_FILE, SettingsFile } from "./SettingsFile.tsx";
+import { AGENTS_FILE, AgentsFile } from "./AgentsFile.tsx";
+import { createAgentsFileStore } from "./agentsFileStore.ts";
 import type { SettingsStore } from "./settingsStore.ts";
 import { forgetAll } from "./stash.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
@@ -313,6 +317,10 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   const [host] = useState(() => {
     let created: Host;
     const account = accountOf(me, workspaceId);
+    const agentsFile = createAgentsFileStore({
+      read: () => perform(workspaceId, { type: "agentsFile.read" }),
+      write: (text, on) => perform(workspaceId, { type: "agentsFile.write", text, ...on }),
+    });
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} adminElsewhere={me.workspaces.some((w) => w.id !== workspaceId && w.role === "admin")} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} folders={app.folders} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
@@ -343,7 +351,6 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
         h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], group: "Navigation", run: () => inner.current.toggleFocus() });
         h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], group: "Navigation", run: () => inner.current.toggleSidebar() });
         h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", group: "Navigation", run: () => inner.current.toggleInspector() });
-        h.commands.register({ id: "settings.openJson", title: "Open settings JSON", group: "Navigation", run: () => h.app().go(`${SETTINGS}/${JSON_VIEW}`) });
       },
     };
     /** Kept apart from the rest so their links and commands come after the plugins', where the others come before. */
@@ -352,7 +359,10 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       name: "Plugins",
       activate(h) {
         // At an address under /settings they are drawn over the window, and this page is never: see `under`. A tab kept on it from before is told so.
-        h.views.register("page", { id: "settings", path: SETTINGS, label: "Settings", nav: "menu", component: ({ app }) => <SettingsMoved go={app.go} /> });
+        h.views.register("page", { id: "settings", path: SETTINGS, label: "Settings", nav: "menu", command: { id: "go.settings", title: "Go to settings (UI)" }, component: ({ app }) => <SettingsMoved go={app.go} /> });
+        // Its command is `settings.openJson`, so a key a member bound to that opens it.
+        h.views.register("page", { id: "settings-json", path: SETTINGS_FILE, label: "Settings (JSON)", command: { id: "settings.openJson", title: "Go to settings (JSON)" }, component: () => <SettingsFile store={settings} host={created} /> });
+        h.views.register("page", { id: "agents-file", path: AGENTS_FILE, label: "Agents file", command: { id: "go.agents-file", title: "Go to agents file" }, component: () => <AgentsFile store={agentsFile} host={created} canEdit={role === "admin" || role === "editor"} /> });
         h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage });
       },
     };
@@ -455,7 +465,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   useEffect(() => host.setInstalled(installer.list()), [host, installer, record, drafts]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   /** The page the address names: the one at exactly that address, or else the one whose path it is under. */
-  const routePage = route.kind === "page" ? (contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`))) : undefined;
+  const routePage = route.kind === "page" ? pageAt(contributed.views.page, route.path) : undefined;
   /** A page that only leads somewhere else is no tab: it has the editor area's place while it finds where to go. */
   const passing = routePage?.transient ? routePage : undefined;
   const address = place.path + place.query;
@@ -588,9 +598,9 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     return () => clearTimeout(timer);
   }, [unlisted.notes, notes]);
 
-  const refresh = useCallback(() => {
-    void loadFolders();
+  const refresh = useCallback(async () => {
     setListVersion((v) => v + 1);
+    await loadFolders();
   }, [loadFolders]);
 
   // A recurring todo checked off anywhere in the app is filed on a daily note, which may be new, in a folder that may be new.
@@ -825,11 +835,12 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     }
   };
 
-  const createNote = async (folderId?: string) => {
+  const createNote = async (folderId?: string, { open = true }: { open?: boolean } = {}) => {
     const note = await perform(workspaceId, { type: "note.create", folderId: (folderId === undefined ? newNoteFolderId : folderForNew(folderId)) ?? undefined });
     void loadFolders();
     remember(note);
-    openNote(note.id);
+    if (open) openNote(note.id);
+    return note.id;
   };
 
   /** A note no tab holds now. One the member made and never wrote in is removed, once what was typed in it is sent and its editor has gone: the server decides, and refuses any other. */
@@ -868,7 +879,12 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   );
 
   const step = (type: "note.undo" | "note.redo") => {
-    if (!routeNoteId) return;
+    if (!routeNoteId) {
+      // Text that is no note, such as the settings JSON, has its editor's own history and no other.
+      const editor = document.activeElement instanceof HTMLElement ? EditorView.findFromDOM(document.activeElement) : null;
+      if (editor) (type === "note.undo" ? undo : redo)(editor);
+      return;
+    }
     undoOrRedo(workspaceId, { type, id: routeNoteId }).then(
       (note) => {
         setStuck(null);
@@ -975,8 +991,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       if (e.isComposing || isModifier(e.key)) return;
       // A press in a plugin frame is the frame's to give back. Handling it here as well would step back twice.
       if (e.target instanceof HTMLIFrameElement) return;
-      // A press in the keyboard shortcuts table's recorder is a key to write down, not one to run.
-      if (e.target instanceof Element && e.target.closest("[data-records-keys]")) return;
+      // A press in the keyboard shortcuts table's recorder is a key to write down, and one in a drawing's editor is Excalidraw's, not one to run.
+      if (e.target instanceof Element && e.target.closest("[data-records-keys], [data-keeps-keys]")) return;
       const { keybindings, commands } = host.contributions();
       const chord = chordOf(e, MAC);
       const begun = pending;
@@ -1248,7 +1264,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     const cut = path.indexOf("?");
     const at = { path: cut < 0 ? path : path.slice(0, cut), query: cut < 0 ? "" : path.slice(cut), pageState: here ? place.state : null };
     return (
-      <div className="page-pane" key={page.id}>
+      <div className="page-pane" key={page.tabAt ? `${page.id} ${page.tabAt(at.path).key}` : page.id}>
         <Drawn host={host} view={page} as={(app) => ({ ...app, ...at, opened: { kind: "page", id: pageId, path }, noteId: null, note: null, unseen: false, folderId: null, inspect: inspectFor(pageId) })} />
       </div>
     );

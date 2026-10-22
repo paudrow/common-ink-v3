@@ -179,10 +179,14 @@ export const FILTERS = {
     aliases: [],
     value: { type: "tag" },
     compares: false,
-    means: "Tagged. #NAME is short for it. A todo has its note's tags",
+    means: "Tagged with it or a tag inside it, as #NAME/sub. #NAME is short for it. A todo has its note's tags",
     example: "tag:money",
     shown: "NAME",
-    sql: (c, given) => `EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = ${c.bind(nameKey(given.value))})`,
+    // By `substr`, since `_` is a tag's letter and LIKE's wildcard.
+    sql: (c, given) => {
+      const key = nameKey(given.value);
+      return `EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND (g.tag = ${c.bind(key)} OR substr(g.tag, 1, length(${c.bind(key)}) + 1) = ${c.bind(`${key}/`)}))`;
+    },
   },
   updated: {
     scopes: BOTH,

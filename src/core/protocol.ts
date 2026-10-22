@@ -7,14 +7,26 @@ import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Or
 import { parseRule } from "./recurrence.ts";
 import { dayIn } from "./history.ts";
 import { MAX_SEARCH_LENGTH, type SortKey } from "./query.ts";
-import { TODO_STATES, isDay, type LastDone, type TodoState } from "./todos.ts";
+import { TODO_STATES, isDay, isTagName, type LastDone, type TodoState } from "./todos.ts";
 
 export { MAX_SEARCH_LENGTH };
 
 export const MAX_NOTE_LENGTH = 500_000;
+/** The longest a tag's description can be. */
+export const MAX_TAG_DESCRIPTION = 500;
+/** The longest a folder's description can be. */
+export const MAX_FOLDER_DESCRIPTION = 500;
 export const MAX_SETTINGS_LENGTH = 100_000;
+/** The longest a workspace's agents file can be. */
+export const MAX_AGENTS_FILE_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
+/** A tag's name, with or without its `#`. */
+const TagName = z
+  .string()
+  .max(100)
+  .transform((name) => name.replace(/^#/, ""))
+  .refine(isTagName, "not a tag's name: letters, digits, _, / and -, with something besides digits");
 const Revision = z.number().int().min(0);
 /**
  * Line endings as a note keeps them and no half of a character pair: what the database and a recorded change would each make of them differs, and the text stored must be the text its changes replay to.
@@ -129,6 +141,13 @@ const IfExists = z.enum(["return", "error"]).default("error");
  * are kept.
  */
 const MentionNames = z.enum(["resolve", "keep"]).default("resolve");
+/**
+ * The tags, with or without the `#`, an agent's write may bring in though no note the agent can see has
+ * them: the new tags its member asked for, matched ignoring case. An agent's write that brings in
+ * any other tag no such note has is refused, so an agent reuses the workspace's tags. A person's
+ * write and a plugin's are never refused for a tag.
+ */
+const NewTags = z.array(z.string().min(1).max(100).transform((name) => name.replace(/^#/, ""))).max(50).optional();
 /** A member's id, or the name of anyone else as a mention writes it. */
 const Person = z
   .string()
@@ -251,6 +270,7 @@ export const Op = z.discriminatedUnion("type", [
     folderId: Id.optional(),
     linkTitles: LinkTitles,
     mentionNames: MentionNames,
+    newTags: NewTags,
     /** Chosen by the writer. A create sent again with the same id returns the note from the first time. */
     writeId: z.string().min(1).max(64).optional(),
   }),
@@ -265,6 +285,7 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
     linkTitles: LinkTitles,
     mentionNames: MentionNames,
+    newTags: NewTags,
     /**
      * The day it is for the writer, which counts when the write checks off a recurring todo: the todo
      * is completed on that day, as todo.set does it. Left out, it is today in the member's zone, as
@@ -290,6 +311,7 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
     linkTitles: LinkTitles,
     mentionNames: MentionNames,
+    newTags: NewTags,
     on: Day.optional(),
   }),
   /** The notes whose text links to this one, latest change first. */
@@ -322,8 +344,37 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note.discard"), id: Id }),
   /** The notes in Trash that the asker can see, latest trashed first. Pass the answer's `next` as `after` for the page after. */
   z.object({ type: z.literal("trash.list"), limit: Limit(100, 500), after: After }),
-  /** The tags of the notes the asker can see, by name, each with how many of those notes have it. Pass the answer's `next` as `after` for the page after. */
-  z.object({ type: z.literal("tag.list"), includeArchived: IncludeArchived, limit: Limit(200, 1000), after: After }),
+  /**
+   * The tags of the notes the asker can see, by name, each with how many of those notes have it and
+   * its description, and for a tag with tags inside it, as `name/sub`, `inside`: how many have it or
+   * one inside it. A tag that notes have only tags inside of is listed, with 0 notes. A member who
+   * sees the whole workspace is also given each tag that is described, or was made in Settings, and
+   * that none of those notes has, with 0 notes. `name` lists that one
+   * tag alone, ignoring case. Pass the answer's `next` as `after` for the page after.
+   */
+  z.object({ type: z.literal("tag.list"), name: z.string().min(1).max(100).optional(), includeArchived: IncludeArchived, limit: Limit(200, 1000), after: After }),
+  /**
+   * Says when to use a tag, for everyone who tags a note to choose by: tag.list answers it beside the
+   * tag. It is kept by the tag's name ignoring case, whether or not a note has the tag now, so it is
+   * there again when one does, and a tag no note has yet is listed by it: making a tag ahead in
+   * Settings describes it with nothing. An empty description takes it away, and keeps a tag no note
+   * has. Null forgets a tag no note has, nor a tag inside it: its description goes, and it is listed
+   * no more. A tag a note has is left as it is, and it is refused while notes are still being indexed.
+   */
+  z.object({ type: z.literal("tag.describe"), name: TagName, description: z.string().trim().max(MAX_TAG_DESCRIPTION).nullable() }),
+  /**
+   * Renames a tag, and each tag under it, in every note the asker may change, as their own change in
+   * each note's history: each `#name`, ignoring case, is written `#to`, as `to` is typed, outside
+   * code, and `#name/sub` is written `#to/sub`, which is how a tag is moved under another or to the
+   * top. A tag `to` that notes have already merges the two. Each description goes with its name,
+   * unless the name it goes to has one, which it keeps; while notes the asker can't change still have
+   * the old name, it stays with that name too. A tag no note has, made ahead, is renamed by its
+   * description alone. Notes the asker may see and not change keep `#name`, and are counted in
+   * `skipped`. With `preview`, nothing is written: the answer is what renaming would change. Refused
+   * as `unavailable` while notes are still being indexed, which a rename then could miss, and as
+   * `invalid` for a `to` under `name`.
+   */
+  z.object({ type: z.literal("tag.rename"), name: TagName, to: TagName, preview: z.boolean().default(false) }),
   /**
    * The notes the asker can see that `query` finds, written in the query language of docs/search.md:
    * words, each matching the start of a word in the note, ignoring case and accents; "a phrase"; filters
@@ -507,6 +558,7 @@ export const Op = z.discriminatedUnion("type", [
     on: Day.optional(),
     /** What the todo says instead: its words and tags, as todo.list's `words`, on one line. */
     words: z.string().max(MAX_NOTE_LENGTH).regex(/^[^\r\n]*$/, "A todo's words are one line").optional(),
+    newTags: NewTags,
   }).strict(),
   /**
    * Each time a recurring todo was checked off: the day, and who did it, latest first. `revision`,
@@ -576,6 +628,11 @@ export const Op = z.discriminatedUnion("type", [
   /** Puts a folder inside another, or at the top with a null `parentId`. What is in it goes with it. */
   z.object({ type: z.literal("folder.move"), id: Id, parentId: Id.nullable() }),
   z.object({ type: z.literal("folder.delete"), id: Id }),
+  /**
+   * Says what a folder is for, for everyone who files a note to choose by: folder.list and
+   * folder.find answer it beside the folder. An empty description takes it away.
+   */
+  z.object({ type: z.literal("folder.describe"), id: Id, description: z.string().trim().max(MAX_FOLDER_DESCRIPTION) }),
   /** The settings of whoever asks, in this workspace. Nobody reads another member's. */
   z.object({ type: z.literal("settings.read") }),
   /**
@@ -587,6 +644,20 @@ export const Op = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("settings.write"),
     /** At most MAX_SETTINGS_LENGTH characters, which the operation checks so that it can say so plainly. */
+    text: z.string(),
+    baseRevision: Revision,
+    writeId: z.string().min(1).max(64).optional(),
+    supersedes: z.string().min(1).max(64).optional(),
+  }),
+  /** The workspace's agents file: Markdown that tells agents how the workspace is organized. Everyone who reaches the workspace reads it. */
+  z.object({ type: z.literal("agentsFile.read") }),
+  /**
+   * Replaces the agents file, for an admin or an editor, signed in: no agent, plugin or guest writes it.
+   * `baseRevision`, `writeId` and `supersedes` are as settings.write has them.
+   */
+  z.object({
+    type: z.literal("agentsFile.write"),
+    /** At most MAX_AGENTS_FILE_LENGTH characters, which the operation checks so that it can say so plainly. */
     text: z.string(),
     baseRevision: Revision,
     writeId: z.string().min(1).max(64).optional(),
@@ -981,6 +1052,33 @@ export interface ListedTag {
   name: string;
   /** How many notes the asker can see have it. */
   notes: number;
+  /** For a tag with tags inside it, as `name/sub`: how many of those notes have it or any tag inside it, each counted once. */
+  inside?: number;
+  /** When to use it, as tag.describe last said. Left out when nobody has. */
+  description?: string;
+}
+
+/** What renaming a tag, and each tag under it, changed, or would change. */
+export interface RenamedTag {
+  name: string;
+  to: string;
+  /** Whether notes the asker sees had `to`, or a tag under it the rename makes, already, so those tags are now one. */
+  merged: boolean;
+  /** The notes written, each at the revision the rename made, which Undo reverts: or with `preview` at the revision they are at. */
+  renamed: { noteId: string; noteTitle: string; revision: number }[];
+  /** How many notes the asker sees have the tag and may not change: they keep it. */
+  skipped: number;
+  /** How many the asker may change and couldn't be, as one the new name would make too long: they keep it too. */
+  failed: number;
+  /** The tags under `name`, as `name/sub`, that went with it, by name. */
+  under: string[];
+  /**
+   * The description of the tag and of each under it that has one, or a tag made ahead with nothing
+   * said: what it was, which Undo says again, and the name it goes to. `toDescribed` is whether that
+   * one has its own, which it keeps, and `describedTo` whether the rename wrote it there, which Undo
+   * takes away.
+   */
+  descriptions: { name: string; to: string; description: string; toDescribed: boolean; describedTo: boolean }[];
 }
 
 export interface Note extends NoteSummary {
@@ -1263,6 +1361,8 @@ export interface ListedFolder extends Folder {
   access: GrantAccess;
   /** Its name after those of the folders it is in, as far up as the one asking can see: `Projects/Skills`. */
   path: string;
+  /** What it is for, as folder.describe last said. Left out when nobody has. */
+  description?: string;
 }
 
 /** A link written by title that a write left as written: no note the writer can see has the title, or several do (`matches`). */
@@ -1503,6 +1603,16 @@ export interface Visit {
   now: number;
 }
 
+/** A workspace's agents file as it is stored. */
+export interface AgentsFile {
+  /** Markdown. Empty until someone writes it. */
+  text: string;
+  /** How many times it has been written. 0 until someone writes it. */
+  revision: number;
+  /** Null until someone writes it. */
+  updatedAt: number | null;
+}
+
 /** One member's settings in one workspace, as they wrote them. */
 export interface StoredSettings {
   /** A JSON object holding only what differs from the defaults. `{}` until the member changes something. */
@@ -1554,6 +1664,8 @@ export interface Results {
   "trash.list": { notes: TrashedNote[]; next: string | null };
   /** `indexing` is true while some notes are still to be read into the index, as after a deploy: the answer may lack them, and asking again reads more. */
   "tag.list": { tags: ListedTag[]; next: string | null; indexing: boolean };
+  "tag.describe": { name: string; description: string | null };
+  "tag.rename": RenamedTag;
   /** `indexing` is as for tag.list. */
   search: { results: SearchResult[]; next: string | null; indexing: boolean };
   "note.label": { id: string; revision: number; label: string | null };
@@ -1579,7 +1691,10 @@ export interface Results {
   "folder.rename": Folder;
   "folder.move": Folder;
   "folder.delete": { id: string };
+  "folder.describe": { id: string; description: string | null };
   "settings.read": StoredSettings;
+  "agentsFile.read": AgentsFile;
+  "agentsFile.write": AgentsFile;
   "settings.write": StoredSettings;
   "timeZone.record": { timeZone: string };
   "member.list": Member[];

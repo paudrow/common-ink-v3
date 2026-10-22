@@ -197,7 +197,7 @@ export async function runCommand(page: Page, title: string) {
   await page.keyboard.press("ControlOrMeta+Shift+P");
   const palette = page.getByRole("dialog", { name: "Commands" });
   await palette.getByRole("combobox").fill(title);
-  await expect(palette.getByRole("option").first()).toHaveText(new RegExp(`^${title}`));
+  await expect(palette.getByRole("option").first()).toHaveText(new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
 }

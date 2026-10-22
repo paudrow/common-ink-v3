@@ -1,7 +1,10 @@
-import type { ListedTag, Plugin } from "../../plugin-api.ts";
+import { nameKey, type ListedTag, type Plugin } from "../../plugin-api.ts";
+import { keeping } from "../noteList.tsx";
+import { tagCards } from "./card.tsx";
 import { tagDrawing } from "./drawing.ts";
-import { TAGS_PATH, tagPath } from "./path.ts";
-import { TagSection, TagsPage, type TagStore } from "./Tags.tsx";
+import { ManageTags } from "./Manage.tsx";
+import { MANAGE_PATH, SETTINGS_ID, TAGS_PAGE, TAGS_PATH, tagOfPath, tagPath } from "./path.ts";
+import { TagSection, TagsPage, type TagRequest, type TagStore } from "./Tags.tsx";
 
 /** How long the notes are left to settle before the tags are read again, so typing doesn't ask once a save. */
 const SETTLE_MS = 1000;
@@ -13,12 +16,13 @@ const MOST = 1000;
 
 /**
  * Tags. A `#tag` anywhere in a note tags the note. The sidebar lists the workspace's tags with how
- * many notes have each, a tag's page lists its notes, and a tag in a note is drawn as one.
+ * many notes have each, a tag's page is a folder's list of its notes, a tag in a note is drawn as
+ * one, and wherever a tag is drawn, resting on it shows its card. Tags are managed in Settings.
  */
 export const tags: Plugin = {
   id: "tags",
   name: "Tags",
-  description: "A #tag in a note tags it: the sidebar lists every tag, and each has a page of its notes.",
+  description: "A #tag in a note tags it: the sidebar lists every tag, each has a page of its notes, and Settings has every tag to describe and rename.",
   icon: "tag",
   activate(host) {
     let listed: readonly ListedTag[] | null = null;
@@ -27,6 +31,7 @@ export const tags: Plugin = {
     let indexing = false;
     let version = 0;
     let again: ReturnType<typeof setTimeout> | undefined;
+    let request: TagRequest | null = null;
     const listeners = new Set<() => void>();
     const tell = () => listeners.forEach((listener) => listener());
 
@@ -57,7 +62,7 @@ export const tags: Plugin = {
       clearTimeout(again);
       tell();
       // Read again, as many tags are read as were listed, so the ones Show more brought stay.
-      host.perform({ type: "tag.list", limit: Math.min(MOST, Math.max(PAGE, listed?.length ?? 0)) }).then(
+      return host.perform({ type: "tag.list", limit: Math.min(MOST, Math.max(PAGE, listed?.length ?? 0)) }).then(
         (answer) => take(mine, answer, []),
         () => {},
       );
@@ -72,6 +77,15 @@ export const tags: Plugin = {
       more: () => more,
       indexing: () => indexing,
       version: () => version,
+      reload: read,
+      ask(asked) {
+        request = asked;
+      },
+      take() {
+        const asked = request;
+        request = null;
+        return asked;
+      },
     };
 
     // A note's tags are in its text, so they can have changed whenever a note has: written, archived, trashed, or put back.
@@ -89,11 +103,26 @@ export const tags: Plugin = {
       else settling = setTimeout(read, SETTLE_MS);
     });
 
+    const lists = keeping();
+    const cards = tagCards(host, store);
     host.views.register("section", { id: "tags", label: "Tags", icon: "tag", component: ({ app }) => <TagSection app={app} store={store} /> });
-    host.views.register("page", { id: "tags", path: TAGS_PATH, label: "Tags", component: ({ app }) => <TagsPage host={host} app={app} store={store} /> });
-    host.editorExtensions.register({ id: "tags", extension: tagDrawing((name) => host.app().go(tagPath(name))) });
+    host.views.register("page", {
+      id: TAGS_PAGE,
+      path: TAGS_PATH,
+      label: "Tags",
+      // Each tag's page is a tab of its own, so two tags can be side by side, and the page of every tag is one more.
+      tabAt: (path) => {
+        const tag = tagOfPath(path);
+        return tag === null ? { key: "", title: "Tags" } : { key: nameKey(tag), title: `#${tag}` };
+      },
+      component: ({ app }) => <TagsPage host={host} app={app} store={store} lists={lists} />,
+    });
+    host.views.register("settings", { id: SETTINGS_ID, label: "Tags", component: ({ app }) => <ManageTags host={host} app={app} store={store} /> });
+    host.commands.register({ id: "tags.manage", title: "Manage tags", aliases: ["describe tags", "rename tag"], run: () => host.app().go(MANAGE_PATH) });
+    host.editorExtensions.register({ id: "tags", extension: tagDrawing((name) => host.app().go(tagPath(name)), cards) });
 
     return () => {
+      cards.dispose();
       offNotes();
       clearTimeout(settling);
       clearTimeout(again);

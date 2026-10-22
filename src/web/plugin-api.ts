@@ -18,7 +18,7 @@ import type { UploadKind } from "../core/filetypes.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
+export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_FOLDER_DESCRIPTION, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
 /**
  * The query language notes and todos are found by, as the server reads it: what is typed to a query
  * and back, every filter there is with what it takes and means, and what is being typed at the
@@ -74,11 +74,11 @@ export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../co
 export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, readableName, writtenMention, type WrittenMention } from "../core/mentions.ts";
 
 /** How a note refers to an upload, which is the same for a plugin as for an agent, and what kind of file an upload is. */
-export { SIZE_WORDS, UPLOAD_EMBEDS, sizeIn, sizeWordIn, uploadIn, withSizeWord, writtenUpload, type SizeWord, type UploadEmbed } from "../core/uploadRefs.ts";
+export { SIZE_SHARE, SIZE_WORDS, UPLOAD_EMBEDS, cropIn, shareIn, sizeIn, uploadIn, withCrop, withShare, withUpload, writtenUpload, type Crop, type SizeWord, type UploadEmbed } from "../core/uploadRefs.ts";
 export { FILE_CLASSES, TEXT_ENDINGS, fileClass, type FileClass, type UploadKind } from "../core/filetypes.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { BOX_PATTERN, TODO_STATES, changeTodo, completeTodo, skipTodo, isDay, locateTodo, markOf, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange, type TodoState } from "../core/todos.ts";
+export { BOX_PATTERN, TODO_STATES, changeTodo, completeTodo, skipTodo, isDay, isTagName, locateTodo, markOf, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange, type TodoState } from "../core/todos.ts";
 
 /** The lines of a note that aren't in a fenced code block, which is where the core reads todos and tags. */
 export { linesOutsideCode } from "../core/lines.ts";
@@ -114,11 +114,15 @@ export { useOpenNote, type OpenNote } from "./openNotes.ts";
 export { noteJump } from "./openNotes.ts";
 
 /**
- * Dragging to the editor area. `carry` puts a note, a folder's list or a page on a drag, `carried`
- * reads it back where it is dropped, and `carriesTab` says while it is over something whether it
- * has one. A note is carried under `NOTE_DRAG` as its id, so it also drops wherever a note does.
+ * Dragging to the editor area. `draggableAs(what)` is the props that make an element drag a note, a
+ * folder's list, a page or a new note there, spread on it as `{...draggableAs(what)}`. `carried`
+ * reads what was dragged back where it is dropped, and `carriesTab` says while it is over something
+ * whether it has one. A note is carried under `NOTE_DRAG` as its id, so it also drops wherever a note does.
  */
-export { NOTE_DRAG, carried, carriesTab, carry } from "./dragged.ts";
+export { NOTE_DRAG, carried, carriesTab, draggableAs, linkIn, type Dragged } from "./dragged.ts";
+
+/** What going to an address of the app's opens in a tab, as a link to it does, from the pages there are. Null where no tab is. */
+export { openedAt } from "./router.ts";
 
 /** What a plugin can't do without: a keyboard with keys, or more room than a phone's width. */
 export type Need = "keyboard" | "room";
@@ -236,7 +240,8 @@ export type KeptFromPerform =
   | "plugin.uninstall"
   | "plugin.permit"
   | "plugin.request"
-  | "plugin.read";
+  | "plugin.read"
+  | "agentsFile.write";
 
 /**
  * The operations `host.perform` takes only from Common Ink's own plugins: everything of the
@@ -537,15 +542,22 @@ export interface Slots {
    * `pageState` are its own, so two pages open side by side each read their own address, and
    * `app.go` to an address under its path moves that page and no other. `nav` says where its link goes:
    * with the main links of the sidebar, under More, or in the workspace menu. Each page gets a
-   * `go.<id>` command. `order` places its link among the others: lower first, and those with none
+   * `go.<id>` command titled Go to its label.
+   * A page of the app's own may name its `command` instead, to keep an id a member's keys may be bound to. `order` places its link among the others: lower first, and those with none
    * after them, in the order of their plugins. A page is also shown at every address under its
    * path, such as `/plugins/tabs` for the page at `/plugins`, unless another page is at exactly that address:
    * it reads the rest from `app.path`. One that is `transient` only leads somewhere else, as Today
    * leads to the day's note with `app.show`: it is never a tab, and is drawn in place of the editor
    * area for the moment it takes to find where to go, with the editor area kept as it is underneath.
+   * Given as the function that finds where it leads, its link dragged to the editor area opens that
+   * place where it is dropped; given as `true`, its link isn't dragged.
    * One with `home` is where the app goes from `/` when the editor area has nothing to return to: it is opened as any page is, a tab where there are tabs.
+   * A page is one tab wherever under its path it is, unless it has `tabAt`: then the addresses under
+   * its path are tabs of their own, one for each `key` that `tabAt` gives an address (its path, without
+   * the query), called its `title`. Each tag's page is "#name" beside the others and the page of every
+   * tag, its key the tag's name in lower case, so `/tags/Garden` and `/tags/garden` are one tab.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; home?: boolean; component: View };
+  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: true | (() => Promise<Opened>); home?: boolean; tabAt?: (path: string) => { key: string; title: string }; command?: { id: string; title: string }; component: View };
   /**
    * A panel on the Dashboard. It is listed in Add panel and drawn in a card once the member adds it.
    * The member's arrangement still decides whether it is shown, as it does for the Dashboard's own panels.
@@ -583,6 +595,12 @@ export interface Slots {
   notice: { id: string; component: ComponentType<ViewProps & { note: NoteSummary }> };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it, and what it hands over is `state`. */
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
+  /**
+   * A section of Settings that holds no setting, such as the Tags plugin's list of every tag to
+   * describe and rename: listed among the app's own sections under `label`, at `/settings/<id>`,
+   * and drawn under that heading. A search of the settings never finds it.
+   */
+  settings: { id: string; label: string; component: View };
 }
 
 /**
@@ -777,7 +795,7 @@ export interface Below {
   render(el: HTMLElement, embed: BelowEmbedded): void | (() => void) | BelowDrawn;
 }
 
-export type BelowEmbedded = Pick<Embedded, "config" | "body" | "readOnly" | "update"> & { resize(height: number): void; column(): number };
+export type BelowEmbedded = Pick<Embedded, "config" | "noteId" | "body" | "readOnly" | "update"> & { resize(height: number): void; column(): number };
 
 /** What `Below.render` can give back. */
 export interface BelowDrawn {
@@ -970,11 +988,16 @@ export interface CompletionItem {
 export interface EditorExtension {
   id: string;
   extension: object | ((editor: EditorContext) => object);
+  /**
+   * Also given to an editor of text that is no note: the member's settings JSON and the workspace's agents file. For how an editor is worked,
+   * such as vim's keys, typewriter scrolling and line numbers, and not for what a note holds. Only Common Ink's own plugins may.
+   */
+  anyText?: boolean;
 }
 
 /** What an editor extension given as a function is told about the editor it is being made for. */
 export interface EditorContext {
-  /** The note the editor holds. An editor holds one note for as long as it lasts. */
+  /** The note the editor holds, or for text that is no note, which only an `anyText` extension is made for, its address: `/settings.json` or `/agents-file.md`. An editor holds one for as long as it lasts. */
   noteId: string;
   /**
    * True for a drawing of the note that is only read, such as an expanded card in a folder's list.
@@ -1028,7 +1051,7 @@ export interface OpenTab {
   pane: number;
 }
 
-export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav" | "home">;
+export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav" | "home" | "transient" | "tabAt">;
 
 /** The app at one moment: what is open, and what can be done about it. */
 export interface App {
@@ -1138,14 +1161,15 @@ export interface App {
   /**
    * Creates a note and opens it. It goes in `folderId` when that is a folder; otherwise in the
    * folder in front, which is the open note's folder when a note is in front; otherwise in Unsorted.
-   * Refused with the server's reason where the member can't.
+   * Refused with the server's reason where the member can't. Answers the note's id. With `open: false`
+   * it is made and not opened, for whoever opens it somewhere of their own, as a drop on a group does.
    */
-  createNote(folderId?: string): Promise<void>;
+  createNote(folderId?: string, options?: { open?: boolean }): Promise<string>;
   moveNote(noteId: string, folderId: string): Promise<void>;
   /** Tells the app a note changed, with the note as it is now: its text, its folder, or its state. */
   noteChanged(note: Note): void;
-  /** Reads the folders and notes again, after a change the app wasn't told about. */
-  refresh(): void;
+  /** Reads the folders and notes again, after a change the app wasn't told about: done once the folders are read. */
+  refresh(): Promise<void>;
   /**
    * For the editor area: says a note is open in none of its tabs now. A note the member made that
    * never had anything in it but spaces or a lone `#` is then removed outright, not put in Trash, once

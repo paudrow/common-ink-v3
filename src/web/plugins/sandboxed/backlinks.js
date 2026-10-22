@@ -51,8 +51,9 @@ async function draw() {
   const list = el("ul");
   for (const from of notes) {
     const row = el("a", from.state === "archived" ? "row archived" : "row");
-    // A link, as it is to whoever uses the list, though the frame can go nowhere: pressing it asks the app to open the note.
-    row.href = "#";
+    // A link to the note's own address, which the frame's document is at the app's site to give: the frame can go
+    // nowhere, so pressing it asks the app to open the note, and dragging it carries the note's address.
+    row.href = `/note/${from.id}`;
     row.append(el("span", "title", from.title || "Untitled"));
     if (from.snippet) row.append(el("span", "snippet", from.snippet));
     const meta = el("span", "meta");

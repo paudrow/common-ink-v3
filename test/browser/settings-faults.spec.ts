@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { category, group, json, openOptions, saveState, setPlugin, settingsDialog, typeJson } from "./settings-helpers.ts";
+import { category, group, json, jsonFile, jsonState, openOptions, saveState, setPlugin, settingsDialog, typeJson } from "./settings-helpers.ts";
 import { perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
@@ -10,7 +10,7 @@ test.beforeEach(({ page }) => {
 test.afterEach(() => expect(errors).toEqual([]));
 
 const stored = async (page: Page) => JSON.parse((await perform(page, { type: "settings.read" })).text) as Record<string, unknown>;
-const problems = (page: Page) => page.getByRole("list", { name: "Problems" }).getByRole("listitem");
+const problems = (page: Page) => jsonFile(page).getByRole("list", { name: "Problems" }).getByRole("listitem");
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const theme = (page: Page) => page.locator("html").getAttribute("data-theme");
 const snippets = (page: Page) => group(page, "Note list").getByRole("checkbox", { name: "Show snippets" });
@@ -140,9 +140,11 @@ test("JSON typed before slow settings arrive is not kept as a draft that would w
   await perform(page, { type: "settings.write", text: '{"core.theme":"dark","note-list.snippets":false}', baseRevision: 0 });
   await slow(page, "settings.read", 4000);
 
+  // An address kept from when the JSON was a view of Settings opens it in its tab.
   await page.goto("/settings/json");
   await expect(json(page)).toBeVisible({ timeout: 3500 });
-  await expect(page.locator(".settings-head").getByRole("status")).toHaveText("Loading your settings…");
+  await expect(page).toHaveURL(/\/settings\.json$/);
+  await expect(jsonState(page)).toHaveText("Loading your settings…");
   // Nothing can be changed yet, so nothing typed now is taken: it used to be held and, a key later, written over what was stored.
   await json(page).click();
   await page.keyboard.press("ControlOrMeta+A");
@@ -151,7 +153,7 @@ test("JSON typed before slow settings arrive is not kept as a draft that would w
 
   await expect(json(page)).toContainText("core.theme");
   await expect(problems(page)).toHaveCount(0);
-  await expect(page.locator(".settings-head").getByRole("status")).toHaveText("Saved");
+  await expect(jsonState(page)).toHaveText("Saved");
   await json(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("Space");
@@ -237,7 +239,7 @@ test("settings the server refuses are put back as they were, with its reason and
 
   await typeJson(page, `{"core.theme": "light", "x": "${"a".repeat(100_100)}"}`);
 
-  await expect(saveState(page)).toHaveText("Not saved, and put back as it was: Settings can be at most 100000 characters");
+  await expect(jsonState(page)).toHaveText("Not saved, and put back as it was: Settings can be at most 100000 characters");
   await expect(json(page)).toContainText('"core.theme": "dark"');
   await expect.poll(() => theme(page)).toBe("dark");
   await page.waitForTimeout(3500);
@@ -246,7 +248,7 @@ test("settings the server refuses are put back as they were, with its reason and
 
   await perform(page, { type: "settings.write", text: '{"core.theme":"light"}', baseRevision: 1 });
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(saveState(page)).toHaveText("Saved");
+  await expect(jsonState(page)).toHaveText("Saved");
   await expect.poll(() => theme(page)).toBe("light");
 });
 

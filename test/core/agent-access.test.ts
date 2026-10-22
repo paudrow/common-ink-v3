@@ -37,11 +37,12 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, a plugin's frame, turning full trust on and deleting an account or a workspace are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts, test/core/third-party.test.ts and test/core/erase.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts and test/core/upload-parts.test.ts check, as an export's do, which test/core/export.test.ts checks, and a workspace's storage is for its members. */
-type ToolOp = Exclude<OpType, "note.purge" | "note.discard" | `settings.${string}` | "timeZone.record" | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "export.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "plugin.frame" | "plugin.trust" | "plugin.decide" | `account.${string}` | "workspace.delete">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, a plugin's frame, turning full trust on, renaming a tag, writing the agents file and deleting an account or a workspace are kept from agents, which test/core/tag-rename.test.ts, test/core/agents-file.test.ts, test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts, test/core/third-party.test.ts and test/core/erase.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts and test/core/upload-parts.test.ts check, as an export's do, which test/core/export.test.ts checks, and a workspace's storage is for its members. */
+type ToolOp = Exclude<OpType, "note.purge" | "note.discard" | `settings.${string}` | "timeZone.record" | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "export.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "plugin.frame" | "plugin.trust" | "plugin.decide" | `account.${string}` | "workspace.delete" | "tag.rename" | "agentsFile.write">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
+  "agentsFile.read": {},
   "note.list": {},
   "note.create": { text: "# New" },
   "note.read": { id: noteId },
@@ -62,6 +63,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "note.history": { id: noteId },
   "note.move": { id: noteId, folderId },
   "note.label": { id: noteId, revision: 1, name: "Start" },
+  "tag.describe": { name: "plans", description: "For plans." },
   "note.revert": { id: noteId, revision: 1 },
   "note.revertChanges": { id: noteId, revisions: [2] },
   "note.previewRevert": { id: noteId, revisions: [2] },
@@ -80,6 +82,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "folder.find": { path: "plans" },
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
+  "folder.describe": { id: folderId, description: "For plans." },
   "folder.move": { id: folderId, parentId: null },
   "folder.delete": { id: "aaaaaaaaaaaa" },
   "member.list": {},
@@ -147,6 +150,7 @@ describe("an agent's access is its member's", { timeout: 30_000 }, () => {
       "note.edit",
       "links.rebuild",
       "todo.set",
+      "tag.describe",
       "todos.rebuild",
       "daily.open",
       "note.move",
@@ -171,6 +175,7 @@ describe("an agent's access is its member's", { timeout: 30_000 }, () => {
       "history.revert",
       "folder.create",
       "folder.rename",
+      "folder.describe",
       "folder.move",
       "folder.delete",
       "plugin.install",
@@ -231,7 +236,7 @@ describe("an agent's access is its member's", { timeout: 30_000 }, () => {
     const herFolder = await perform(env.DB, grace, { type: "folder.create", name: "Hers" });
     const ops = everyOp(hers.id, herFolder.id);
 
-    for (const type of ["note.read", "note.write", "note.history", "note.move", "note.label", "note.revert", "note.revertChanges", "note.diff", "note.undo", "note.redo", "folder.rename", "pin.set"] as const) {
+    for (const type of ["note.read", "note.write", "note.history", "note.move", "note.label", "note.revert", "note.revertChanges", "note.diff", "note.undo", "note.redo", "folder.rename", "folder.describe", "pin.set"] as const) {
       const name = TOOLS.find((t) => t.op === type)!.name;
       expect((await tool(token, name, { workspace, ...ops[type] })).text, name).toMatch(/^not_found: No such (note|folder)$/);
       expect((await tool(token, name, { workspace: grace.workspaceId, ...ops[type] })).text, name).toBe("not_found: No such workspace");

@@ -70,7 +70,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `#NAME` | Short for tag:NAME | `#money` |
 | `key:"a value"` | A value with a space in it is written in quotes | `folder:"Common Ink"` |
 | `folder:NAME` | In a folder, named or by its id, or in a folder inside it | `folder:Unsorted` |
-| `tag:NAME` | Tagged. #NAME is short for it. A todo has its note's tags | `tag:money` |
+| `tag:NAME` | Tagged with it or a tag inside it, as #NAME/sub. #NAME is short for it. A todo has its note's tags | `tag:money` |
 | `updated:DAY` | The day the note was last changed | `updated:>=2026-10-01` |
 | `created:DAY` | The day the note was made | `created:2026-10-01..2026-10-14` |
 | `editor:NAME, edited-by:NAME` | Changed by a member or an agent, by name. @me is you | `editor:@me` |
@@ -113,7 +113,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `#NAME` | Short for tag:NAME | `#money` |
 | `key:"a value"` | A value with a space in it is written in quotes | `folder:"Common Ink"` |
 | `folder:NAME` | In a folder, named or by its id, or in a folder inside it | `folder:Unsorted` |
-| `tag:NAME` | Tagged. #NAME is short for it. A todo has its note's tags | `tag:money` |
+| `tag:NAME` | Tagged with it or a tag inside it, as #NAME/sub. #NAME is short for it. A todo has its note's tags | `tag:money` |
 | `updated:DAY` | The day the note was last changed | `updated:>=2026-10-01` |
 | `created:DAY` | The day the note was made | `created:2026-10-01..2026-10-14` |
 | `editor:NAME, edited-by:NAME` | Changed by a member or an agent, by name. @me is you | `editor:@me` |

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
-import { asViewerOfNote, perform, signInAsNewPerson, test } from "./helpers.ts";
+import { asViewerOfNote, perform, signInAsNewPerson, test, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -20,7 +20,20 @@ const noteText = async (page: Page, id: string) => (await perform(page, { type: 
 const settled = (page: Page) => page.evaluate(() => new Promise((done) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 50)));
 
 /** A PNG of one colour, `width` by `height`, that a browser decodes. */
-function png(width: number, height: number, [r, g, b] = [91, 91, 214]): Buffer {
+function png(width: number, height: number, colour = [91, 91, 214]): Buffer {
+  return painted(width, height, () => colour);
+}
+
+const RED = [220, 30, 30];
+const GREEN = [30, 200, 60];
+const BLUE = [40, 60, 220];
+const YELLOW = [240, 220, 40];
+
+/** A PNG in four colours, a quarter each: red at the top left, green at the top right, blue at the bottom left and yellow at the bottom right. */
+const quartered = (width: number, height: number) => painted(width, height, (x, y) => (y < height / 2 ? (x < width / 2 ? RED : GREEN) : x < width / 2 ? BLUE : YELLOW));
+
+/** A PNG `width` by `height` whose every pixel is the colour `colourAt` it. */
+function painted(width: number, height: number, colourAt: (x: number, y: number) => number[]): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
     const [length, sum] = [Buffer.alloc(4), Buffer.alloc(4)];
@@ -32,8 +45,12 @@ function png(width: number, height: number, [r, g, b] = [91, 91, 214]): Buffer {
   head.writeUInt32BE(width, 0);
   head.writeUInt32BE(height, 4);
   head.set([8, 2, 0, 0, 0], 8);
-  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, Buffer.from([r!, g!, b!]))]);
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", head), chunk("IDAT", deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))), chunk("IEND", Buffer.alloc(0))]);
+  const rowAt = (y: number) => {
+    const row = Buffer.alloc(1 + width * 3);
+    for (let x = 0; x < width; x++) row.set(colourAt(x, y), 1 + x * 3);
+    return row;
+  };
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", head), chunk("IDAT", deflateSync(Buffer.concat(Array.from({ length: height }, (_, y) => rowAt(y))))), chunk("IEND", Buffer.alloc(0))]);
 }
 
 /** 20 seconds of a white box moving over blue, 320 by 180, as VP8 in WebM, which every Chromium plays. */
@@ -57,23 +74,58 @@ function wav(): Buffer {
   return Buffer.concat([head, data]);
 }
 
-/** Sends a file as the signed-in person, the way the app does. */
-function send(page: Page, name: string, bytes: Buffer): Promise<Upload> {
+/** Sends a file as the signed-in person, the way the app does, into the folder named or else Unsorted. */
+function send(page: Page, name: string, bytes: Buffer, more: { folderId?: string } = {}): Promise<Upload> {
   return page.evaluate(
-    async ({ name, base64 }) => {
+    async ({ name, base64, more }) => {
       const id = ((await (await fetch("/api/me")).json()) as Me).workspaces[0]!.id;
       const res = await fetch(`/api/workspaces/${id}/uploads`, {
         method: "POST",
-        headers: { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name })) },
+        headers: { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name, ...more })) },
         body: Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message);
       return json;
     },
-    { name, base64: bytes.toString("base64") },
+    { name, base64: bytes.toString("base64"), more },
   );
 }
+
+/** Which of a quartered picture's four colours is drawn nearest each point of `of`, each a share of its width across and of its height down. */
+async function coloursAt(page: Page, of: Locator, points: [number, number][]): Promise<string[]> {
+  const shot = (await of.screenshot()).toString("base64");
+  const pixels = await page.evaluate(
+    async ({ shot, points }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${shot}`;
+      await img.decode();
+      const canvas = Object.assign(document.createElement("canvas"), { width: img.width, height: img.height });
+      const context = canvas.getContext("2d")!;
+      context.drawImage(img, 0, 0);
+      return points.map(([x, y]) => [...context.getImageData(Math.round(x * (img.width - 1)), Math.round(y * (img.height - 1)), 1, 1).data.slice(0, 3)]);
+    },
+    { shot, points },
+  );
+  const named = Object.entries({ red: RED, green: GREEN, blue: BLUE, yellow: YELLOW });
+  const off = (a: number[], b: number[]) => a.reduce((sum, n, i) => sum + Math.abs(n - b[i]!), 0);
+  return pixels.map((pixel) => named.reduce((best, next) => (off(pixel, next[1]) < off(pixel, best[1]) ? next : best))[0]);
+}
+
+const CORNERS_AND_MIDDLE: [number, number][] = [
+  [0.05, 0.05],
+  [0.95, 0.05],
+  [0.05, 0.95],
+  [0.95, 0.95],
+  [0.5, 0.5],
+];
+
+const QUARTERS: [number, number][] = [
+  [0.25, 0.25],
+  [0.75, 0.25],
+  [0.25, 0.75],
+  [0.75, 0.75],
+];
 
 async function open(page: Page, text: string, shows: string) {
   const note = await perform(page, { type: "note.create", text });
@@ -203,13 +255,13 @@ test("nothing moves while a picture arrives: its room is its whole width and sha
 });
 
 for (const width of [1280, 700]) {
-  test(`at ${width} wide a picture is the column's width, or its own when that is narrower, at its own shape, and each size word is its share of the column`, async ({ page }) => {
+  test(`at ${width} wide a picture is the column's width, or its own when that is narrower, at its own shape, and each size word and percent is its share of the column`, async ({ page }) => {
     await signInAsNewPerson(page, "Ada Lovelace");
     const wide = await send(page, "wide.png", png(1200, 800));
     const narrow = await send(page, "narrow.png", png(300, 200));
     // Tall enough that every picture is on screen, and so drawn.
     await page.setViewportSize({ width, height: 4200 });
-    const words = ["", " huge", " small", " medium", " large", " full"];
+    const words = ["", " huge", " small", " medium", " large", " full", " 42%"];
     const text = words.map((w) => `::image{${wide.id} 1200x800${w}}`).concat([`::image{${narrow.id} 300x200}`, `::image{${narrow.id} 300x200 large}`]);
     await open(page, `# Sizes\n\nwords\n\n${text.join("\n\n")}\n\nend\n`, "end");
     await settled(page);
@@ -217,7 +269,7 @@ for (const width of [1280, 700]) {
     // A column at 1280 is wider than at 700, and narrower than the picture.
     expect(column.width).toBeGreaterThan(width === 1280 ? 600 : 300);
     expect(column.width).toBeLessThan(1200);
-    const expected = [1, 1, 1 / 3, 1 / 2, 3 / 4, 1].map((share) => column.width * share).concat([Math.min(300, column.width), Math.min(300, (column.width * 3) / 4)]);
+    const expected = [1, 1, 1 / 3, 1 / 2, 3 / 4, 1, 0.42].map((share) => column.width * share).concat([Math.min(300, column.width), Math.min(300, (column.width * 3) / 4)]);
     const ratios = [...words.map(() => 800 / 1200), 200 / 300, 200 / 300];
     await expect(pictures(page)).toHaveCount(expected.length);
     const boxes = (await below(page, "image").evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ left: r.left, top: r.top, width: r.width, height: r.height })))).sort((a, b) => a.top - b.top);
@@ -230,7 +282,7 @@ for (const width of [1280, 700]) {
   });
 }
 
-test("the size handle is seen on hover or focus, snaps a drag to small, medium, large or full, steps with the keys, writes the word as the member's change that undo takes back, and moves only what is under the picture", async ({ page }) => {
+test("the size handle is seen on hover or focus, steps with the keys, drags to any width at the picture's shape, snaps near a size word unless Shift is held, writes it as the member's change that undo takes back, and moves only what is under the picture", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const photo = await send(page, "harbour.png", png(1200, 800));
   await page.setViewportSize({ width: 1280, height: 1400 });
@@ -269,42 +321,64 @@ test("the size handle is seen on hover or focus, snaps a drag to small, medium, 
   await expect.poll(shown).toBe("1");
   await expect(handle).toHaveAttribute("aria-valuetext", "Full width");
   await page.keyboard.press("ArrowLeft");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" large"));
-  await expect(handle).toHaveAttribute("aria-valuetext", "Large");
-  await expect.poll(() => near(3 / 4), "only the picture and what is under it moved").toBe(true);
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 95%"));
+  await expect(handle).toHaveAttribute("aria-valuetext", "95% of the column");
+  await expect(handle).toHaveAttribute("aria-valuenow", "95");
+  await expect.poll(() => near(0.95), "only the picture and what is under it moved").toBe(true);
   await expect(handle).toBeFocused();
-  await page.keyboard.press("ArrowLeft");
-  await page.keyboard.press("ArrowLeft");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" small"));
-  await page.keyboard.press("ArrowDown");
-  await expect.poll(() => near(1 / 3)).toBe(true);
-  await expect(handle).toHaveAttribute("aria-valuetext", "Small");
+  await page.keyboard.press("Home");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 10%"));
+  await expect.poll(() => near(0.1)).toBe(true);
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 15%"));
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 16%"));
+  await expect(handle).toHaveAttribute("aria-valuetext", "16% of the column");
   await page.keyboard.press("End");
   await expect.poll(() => noteText(page, note.id)).toBe(text());
   await expect.poll(() => near(1)).toBe(true);
-  await page.keyboard.press("Home");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" small"));
-  await page.keyboard.press("ArrowUp");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
   // Presses come faster than the note redraws, as a key held down: each one is a step.
   const twice = (key: string) => handle.evaluate((el, key) => [0, 1].forEach(() => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))), key);
+  await twice("ArrowLeft");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 90%"));
   await twice("ArrowRight");
   await expect.poll(() => noteText(page, note.id)).toBe(text());
-  await twice("ArrowLeft");
-  await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
   expect(await pictures(page).evaluate((img) => (img as HTMLImageElement & { marked?: boolean }).marked), "the same picture, never drawn again").toBe(true);
 
-  // A drag shows where it will snap, and writes that on release.
-  const bar = (await handle.boundingBox())!;
-  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(column.left + column.width * 0.8, bar.y + bar.height / 2, { steps: 4 });
+  /** Drags the handle to `share` of the column from the picture's left edge, and lets go unless told not to. */
+  const drag = async (share: number, { release = true } = {}) => {
+    const bar = (await handle.boundingBox())!;
+    await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(column.left + column.width * share, bar.y + bar.height / 2, { steps: 4 });
+    if (release) await page.mouse.up();
+  };
   const ghost = page.locator(".upload-size-ghost");
-  await expect.poll(async () => Math.round((await ghost.boundingBox())!.width)).toBe(Math.round((column.width * 3) / 4));
-  expect(await noteText(page, note.id)).toBe(text(" medium"));
-  await page.mouse.move(column.left + column.width * 0.95, bar.y + bar.height / 2, { steps: 2 });
+
+  // A drag shows the width it will draw, any width at the picture's shape, and writes it on release.
+  await drag(0.8, { release: false });
+  await expect.poll(async () => Math.round((await ghost.boundingBox())!.width)).toBe(Math.round(column.width * 0.8));
+  expect(Math.abs((await ghost.boundingBox())!.height - (column.width * 0.8 * 800) / 1200)).toBeLessThan(1);
+  expect(await noteText(page, note.id)).toBe(text());
+  await page.mouse.move(column.left + column.width * 0.62, (await handle.boundingBox())!.y + 10, { steps: 2 });
   await page.mouse.up();
   await expect(ghost).toHaveCount(0);
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 62%"));
+  await expect.poll(() => near(0.62)).toBe(true);
+  const drawn = (await pictures(page).boundingBox())!;
+  expect(Math.abs(drawn.width - column.width * 0.62), "as wide as it was dragged").toBeLessThan(1);
+  expect(Math.abs(drawn.width / drawn.height - 1200 / 800), "at its own shape").toBeLessThan(0.01);
+  await expect(handle).toHaveAttribute("aria-valuetext", "62% of the column");
+
+  // Near a size word's width it is that word, and with Shift held it is where it was let go.
+  await drag(0.507);
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
+  await expect(handle).toHaveAttribute("aria-valuetext", "Medium");
+  await page.keyboard.down("Shift");
+  await drag(0.507);
+  await page.keyboard.up("Shift");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 51%"));
+  await drag(0.99);
   await expect.poll(() => noteText(page, note.id)).toBe(text());
   await expect.poll(() => near(1)).toBe(true);
 
@@ -325,21 +399,209 @@ test("the size handle is seen on hover or focus, snaps a drag to small, medium, 
   expect(new Set((await perform(page, { type: "note.history", id: note.id })).map((c) => `${c.author.kind} ${c.author.name}`))).toEqual(new Set(["member Ada Lovelace"]));
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 51%"));
+  await expect.poll(() => near(0.51)).toBe(true);
+  await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
-  await expect.poll(() => near(1 / 2)).toBe(true);
 });
 
-test("a member who can't change the note sees the picture and the video with no size handle", async ({ page }) => {
+test("a picture dragged to any width keeps its share of the column and its shape after a reload, in a narrower window and on a phone", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const photo = await send(page, "harbour.png", png(1200, 800));
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  const text = (word = "") => `# Sizes\n\nbefore it\n\n::image{${photo.id} 1200x800${word}}\n\nafter it\n`;
+  const note = await open(page, text(), "after it");
+  await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
+  await settled(page);
+  const column = await columnOf(page, 3);
+  const bar = (await sizeOf(page, "harbour.png").boundingBox())!;
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(column.left + column.width * 0.42, bar.y + bar.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 42%"));
+  await expect(page.getByRole("status")).toHaveText("Saved");
+
+  /** The picture's width as a share of the column, and its width over its height. */
+  const drawn = async () => {
+    await settled(page);
+    const box = (await pictures(page).boundingBox())!;
+    const { width } = await columnOf(page, 3);
+    return { share: Math.round((box.width / width) * 1000) / 1000, ratio: Math.round((box.width / box.height) * 1000) / 1000 };
+  };
+  expect(await drawn()).toEqual({ share: 0.42, ratio: 1.5 });
+  await page.reload();
+  await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
+  expect(await drawn(), "after a reload").toEqual({ share: 0.42, ratio: 1.5 });
+  for (const width of [700, 390]) {
+    await page.setViewportSize({ width, height: 1400 });
+    await expect.poll(async () => (await columnOf(page, 3)).width).toBeLessThan(column.width);
+    await expect.poll(drawn, `at ${width} wide`).toEqual({ share: 0.42, ratio: 1.5 });
+  }
+});
+
+test("a member who can't change the note sees the picture cropped and the video, with no size handle and no Crop", async ({ page }) => {
   const { admin } = await asViewerOfNote(page, "# Seen\n\nwords\n");
-  const photo = await send(admin, "harbour.png", png(1200, 800));
+  const photo = await send(admin, "harbour.png", quartered(1200, 800));
   const film = await send(admin, "box.webm", VIDEO);
-  const note = await perform(admin, { type: "note.create", text: `# Shown\n\n::image{${photo.id} 1200x800 medium}\n\n::video{${film.id} 320x180}\n\nwords\n` });
+  const note = await perform(admin, { type: "note.create", text: `# Shown\n\n::image{${photo.id} 1200x800 medium crop=600,400,600,400}\n\n::video{${film.id} 320x180}\n\nwords\n` });
   await page.goto(`/note/${note.id}`);
   await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
   await expect(below(page, "video").locator("video")).toHaveCount(1);
   await pictures(page).hover();
   await expect(page.getByRole("slider")).toHaveCount(0);
   await expect(page.locator(".upload-size")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Crop harbour.png" })).toHaveCount(0);
+  await settled(page);
+  const { width, height } = await boxOf(page, "image");
+  expect(Math.round(width / height * 100) / 100, "at the crop's shape").toBe(1.5);
+  expect(await coloursAt(page, below(page, "image"), CORNERS_AND_MIDDLE), "only the bottom right quarter").toEqual(["yellow", "yellow", "yellow", "yellow", "yellow"]);
+});
+
+test("a picture cropped with the handles writes the crop into its embed, is drawn as only that part at its shape, and undo takes it back in one step", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const photo = await send(page, "harbour.png", quartered(1200, 800));
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  const text = (words = "") => `# Crop\n\nbefore it\n\n::image{${photo.id} 1200x800${words}}\n\nafter it\n`;
+  const note = await open(page, text(), "after it");
+  await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
+  await settled(page);
+  const column = await columnOf(page, 3);
+  expect(await coloursAt(page, below(page, "image"), QUARTERS), "the whole picture").toEqual(["red", "green", "blue", "yellow"]);
+
+  const crop = page.getByRole("button", { name: "Crop harbour.png" });
+  const seen = () => crop.evaluate((el) => getComputedStyle(el).opacity);
+  await expect.poll(seen).toBe("0");
+  await pictures(page).hover();
+  await expect.poll(seen).toBe("1");
+  await crop.click();
+  const dialog = page.getByRole("dialog", { name: "Crop harbour.png" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("group", { name: /Crop area/ })).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "Reset" })).toHaveCount(0);
+  await expect.poll(() => dialog.getByRole("img", { name: "harbour.png" }).evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(1200);
+  const stage = (await dialog.locator(".crop-stage").boundingBox())!;
+  // The whole picture is drawn 960 wide in a window 1280 wide, so a pixel of the window is a pixel and a quarter of the picture.
+  expect(stage.width).toBe(960);
+  const said = dialog.locator(".crop-said");
+  await expect(said).toHaveText("1200 × 800");
+
+  const dragBy = async (part: Locator, dx: number, dy: number) => {
+    const box = (await part.boundingBox())!;
+    const [x, y] = [Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2)];
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 4 });
+    await page.mouse.up();
+  };
+  await dragBy(dialog.getByRole("slider", { name: "Left edge" }), 480, 0);
+  await expect(said).toHaveText("600 × 800");
+  await dragBy(dialog.locator(".crop-corner-nw"), 80, 80);
+  await expect(said).toHaveText("500 × 700");
+  await dragBy(dialog.locator(".crop-box"), -80, -80);
+  await expect(said).toHaveText("500 × 700");
+  expect(await noteText(page, note.id), "nothing is written before Done").toBe(text());
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" crop=600,0,500,700"));
+  await expect(crop).toBeFocused();
+
+  await settled(page);
+  const cropped = await boxOf(page, "image");
+  expect(Math.abs(cropped.width - Math.min(500, column.width)), "as wide as the crop, or the column").toBeLessThan(1);
+  expect(Math.abs(cropped.width / cropped.height - 500 / 700), "at the crop's shape").toBeLessThan(0.01);
+  expect(await coloursAt(page, below(page, "image"), [...CORNERS_AND_MIDDLE, [0.5, 0.65]]), "only the right half, down to 700 of 800").toEqual(["green", "green", "yellow", "yellow", "green", "yellow"]);
+
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => noteText(page, note.id)).toBe(text());
+  await settled(page);
+  const whole = await boxOf(page, "image");
+  expect(Math.abs(whole.width / whole.height - 1.5), "the whole picture's shape again").toBeLessThan(0.01);
+  expect(await coloursAt(page, below(page, "image"), QUARTERS)).toEqual(["red", "green", "blue", "yellow"]);
+});
+
+test("a crop is set from the keyboard, Escape leaves it as it was, it survives a new width and a new width survives it, and Reset takes it away", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const photo = await send(page, "harbour.png", quartered(1200, 800));
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  const text = (words = "") => `# Crop\n\nbefore it\n\n::image{${photo.id} 1200x800${words}}\n\nafter it\n`;
+  const note = await open(page, text(" crop=600,0,600,800"), "after it");
+  await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
+  const crop = page.getByRole("button", { name: "Crop harbour.png" });
+  const dialog = page.getByRole("dialog", { name: "Crop harbour.png" });
+  const said = dialog.locator(".crop-said");
+
+  await crop.focus();
+  await page.keyboard.press("Enter");
+  await expect(said).toHaveText("600 × 800");
+  const bottom = dialog.getByRole("slider", { name: "Bottom edge" });
+  await bottom.focus();
+  await expect(bottom).toHaveAttribute("aria-valuenow", "800");
+  for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowUp");
+  await expect(said).toHaveText("600 × 720");
+  await expect(bottom).toHaveAttribute("aria-valuenow", "720");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(crop).toBeFocused();
+  await settled(page);
+  expect(await noteText(page, note.id), "Escape writes nothing").toBe(text(" crop=600,0,600,800"));
+
+  await page.getByRole("slider", { name: "Size of harbour.png" }).focus();
+  await page.keyboard.press("Home");
+  await expect.poll(() => noteText(page, note.id), "a crop survives a new width").toBe(text(" 10% crop=600,0,600,800"));
+
+  await crop.focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog.getByRole("group", { name: /Crop area/ })).toBeFocused();
+  await page.keyboard.press("Shift+ArrowLeft");
+  await expect(said).toHaveText("600 × 800");
+  await bottom.focus();
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press("ArrowLeft");
+  await expect(said).toHaveText("600 × 720");
+  await page.keyboard.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => noteText(page, note.id), "a new width survives a crop").toBe(text(" 10% crop=480,0,600,720"));
+  await settled(page);
+  const { width, height } = await boxOf(page, "image");
+  expect(Math.abs(width / height - 600 / 720)).toBeLessThan(0.01);
+
+  // A shape picked for a crop taller than wide stands as it does, and stays so as an edge moves.
+  await crop.click();
+  await dialog.getByRole("radio", { name: "4:3" }).check();
+  await expect(said).toHaveText("600 × 800");
+  await dialog.getByRole("slider", { name: "Right edge" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(said).toHaveText("588 × 784");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await noteText(page, note.id), "Cancel writes nothing").toBe(text(" 10% crop=480,0,600,720"));
+
+  await crop.click();
+  await dialog.getByRole("button", { name: "Reset" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" 10%"));
+});
+
+test("a folder's link shows a picture cropped, with no Crop", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const folder = await perform(page, { type: "folder.create", name: "Handbook" });
+  const photo = await send(page, "office-map.png", quartered(1200, 800), { folderId: folder.id });
+  const note = await perform(page, { type: "note.create", text: `# Welcome\n\n::image{${photo.id} 1200x800 crop=0,0,600,400}\n\nafter\n`, folderId: folder.id });
+  const link = await perform(page, { type: "grant.link", folderId: folder.id, link: "public" });
+  if (link?.to.kind !== "link") throw new Error("no link was made");
+  const anyone = await visitor(page);
+  await anyone.goto(`/s/${link.to.token}#${note.id}`);
+  await expect(editor(anyone)).toContainText("after");
+  await expect.poll(() => pictures(anyone).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
+  await pictures(anyone).hover();
+  await expect(anyone.getByRole("button", { name: /^Crop/ })).toHaveCount(0);
+  await settled(anyone);
+  const { width, height } = await boxOf(anyone, "image");
+  expect(Math.round(width / height * 100) / 100).toBe(1.5);
+  expect(await coloursAt(anyone, below(anyone, "image"), CORNERS_AND_MIDDLE), "only the top left quarter").toEqual(["red", "red", "red", "red", "red"]);
 });
 
 test("a video plays in the note from its first frame, and typing elsewhere, the cursor on and off its line, and a new size leave the same element playing on", async ({ page }) => {
@@ -391,7 +653,9 @@ test("a video plays in the note from its first frame, and typing elsewhere, the 
 
   await sizeOf(page, "box.webm").focus();
   await page.keyboard.press("Home");
-  await expect.poll(() => noteText(page, note.id)).toContain(embed(" small"));
-  await expect.poll(async () => Math.round((await boxOf(page, "video")).width)).toBe(Math.round((await columnOf(page, 3)).width / 3));
+  await expect.poll(() => noteText(page, note.id)).toContain(embed(" 10%"));
+  await expect.poll(async () => Math.round((await boxOf(page, "video")).width)).toBe(Math.round((await columnOf(page, 3)).width / 10));
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => noteText(page, note.id)).toContain(embed(" 15%"));
   await goesOn("at another size");
 });

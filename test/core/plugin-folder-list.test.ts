@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NoteSummary } from "../../src/core/protocol.ts";
 import { ALL_NOTES, SHARED_WITH_ME } from "../../src/web/plugin-api.ts";
-import { INITIAL_VIEW, SHOWS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, todosOf, withLife, withTodos } from "../../src/web/plugins/noteListView.ts";
+import { INITIAL_VIEW, SHOWS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, taggedQuery, todosOf, withLife, withTodos, withoutTagMarks } from "../../src/web/plugins/noteListView.ts";
 
 const note = (id: string, over: Partial<NoteSummary> = {}) =>
   ({ id, title: id, snippet: "", folderId: "f", openTodos: 0, createdAt: 0, updatedAt: 0, state: "live", ...over }) as NoteSummary;
@@ -110,5 +110,35 @@ describe("the choice of todos under the search bar", () => {
     expect(todosOf("has:todo no:open-todo is:open")).toBe("done");
     expect(todosOf("has:todo")).toBe("any");
     expect(todosOf("has:open-todo OR tea")).toBe("any");
+  });
+});
+
+describe("what a tag's list asks the server", () => {
+  it("is the tag alone with nothing typed, and the tag beside what is typed, an OR kept whole and an order kept last", () => {
+    expect(taggedQuery("garden", "")).toBe("tag:garden");
+    expect(taggedQuery("garden", "seeds")).toBe("tag:garden seeds");
+    expect(taggedQuery("garden", "seeds OR beds")).toBe("tag:garden (seeds OR beds)");
+    expect(taggedQuery("garden", "sort:title-asc")).toBe("tag:garden sort:title-asc");
+    expect(taggedQuery("garden", "is:archived #money")).toBe("tag:garden is:archived tag:money");
+    expect(taggedQuery("work/2026-q4", "plan")).toBe("tag:work/2026-q4 plan");
+  });
+
+  it("is the tag alone while what is typed can't be read yet", () => {
+    expect(taggedQuery("garden", "seeds (")).toBe("tag:garden");
+    expect(taggedQuery("garden", "is:bogus")).toBe("tag:garden");
+  });
+});
+
+describe("the lines a tag's list shows a search matched", () => {
+  it("leaves the tag itself unmarked, whatever its case, and a line marked only for it out", () => {
+    const matches = [
+      { line: 2, text: "Dig the beds #Garden", marks: [[0, 3], [13, 20]] as [number, number][] },
+      { line: 4, text: "#garden", marks: [[0, 7]] as [number, number][] },
+      { line: 5, text: "#gardening dig", marks: [[0, 10], [11, 14]] as [number, number][] },
+    ];
+    expect(withoutTagMarks(matches, "garden")).toEqual([
+      { line: 2, text: "Dig the beds #Garden", marks: [[0, 3]] },
+      { line: 5, text: "#gardening dig", marks: [[0, 10], [11, 14]] },
+    ]);
   });
 });

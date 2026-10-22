@@ -88,9 +88,12 @@ export const PERSON_COLUMNS: readonly PersonColumn[] = [
   { at: "plugin_installs.updated_by", fate: "former" },
   { at: "plugin_permissions.decided_by", fate: "former" },
   { at: "plugin_proposals.decided_by", fate: "former" },
+  // What they said a tag is for stays the workspace's, said by the former member.
+  { at: "tag_descriptions.updated_by", fate: "former" },
   { at: "plugin_installs.installed_via", fate: { kept: AGENT_ID } },
   { at: "plugin_installs.updated_via", fate: { kept: AGENT_ID } },
   { at: "plugin_permissions.decided_via", fate: { kept: AGENT_ID } },
+  { at: "tag_descriptions.updated_via", fate: { kept: AGENT_ID } },
   { at: "mentions.who", fate: { kept: WRITTEN } },
   { at: "notes.text", fate: { kept: WRITTEN } },
   { at: "changes.diff", fate: { kept: WRITTEN } },
@@ -102,8 +105,9 @@ export const PERSON_COLUMNS: readonly PersonColumn[] = [
 
 /**
  * What deleting a workspace does to a column that holds its id. `cut`: the rows go at once, in the
- * batch that marks it, since they are what lets anyone in or what is only someone's own there, and
- * again with the workspace's row, for any written after.
+ * batch that marks it, since they are what lets anyone in, what is only someone's own there, or what
+ * is said of the workspace and kept by no note, and again with the workspace's row, for any written
+ * after.
  * `agent`: an agent limited to the workspace goes then too, with its tokens. `notes` and `uploads`: they go a chunk at
  * a time, each note with everything kept by its id and each upload with its bytes. `last`: once
  * those are gone, in this order, the workspace's own row last.
@@ -122,6 +126,8 @@ export const WORKSPACE_COLUMNS: readonly { at: `${string}.${string}`; fate: Work
   { at: "plugin_trust.workspace_id", fate: "cut" },
   { at: "plugin_requests.workspace_id", fate: "cut" },
   { at: "plugin_proposals.workspace_id", fate: "cut" },
+  { at: "tag_descriptions.workspace_id", fate: "cut" },
+  { at: "agents_files.workspace_id", fate: "cut" },
   { at: "agents.workspace_id", fate: "agent" },
   // Made unreadable at once, as any upload being removed is, and their bytes go a chunk at a time.
   { at: "uploads.workspace_id", fate: "uploads" },

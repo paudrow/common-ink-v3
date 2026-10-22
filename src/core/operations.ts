@@ -18,9 +18,11 @@ import { accountDeletion, deleteAccount, deleteWorkspace } from "./erase.ts";
 import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, signOut, type Asking } from "./membership.ts";
 import {
   Id,
+  MAX_NOTES_AT_ONCE,
   NO_SUCH_WORKSPACE,
   MAX_NOTE_LENGTH,
   MAX_SETTINGS_LENGTH,
+  MAX_AGENTS_FILE_LENGTH,
   Op,
   OpError,
   TODO_SORTS,
@@ -80,7 +82,7 @@ import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as Ac
 import { linkHash } from "./linkSeal.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
-import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
+import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, nameKey, parseTodo, renamedTag, renamedTags, rolledForward, tagsAdded, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
 
 /** The note an author already made with a write id, so a create sent again makes one note. Served by changes_by_author_write. */
 export const PRIOR_WRITE = `SELECT c.note_id AS id FROM changes c JOIN notes n ON n.id = c.note_id
@@ -452,16 +454,16 @@ async function listFolders(ctx: Context): Promise<{ unsortedId: string | null; f
   const { results } = await ctx.db
     .prepare(
       `SELECT (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND ${SEEN("n", "?2", "live")}) AS note_count,
-         (SELECT COUNT(*) FROM uploads u WHERE u.folder_id = f.id AND ${SEEN("u", "?2", "live")}) AS upload_count, ${FOLDER_COLUMNS}
+         (SELECT COUNT(*) FROM uploads u WHERE u.folder_id = f.id AND ${SEEN("u", "?2", "live")}) AS upload_count, f.description, ${FOLDER_COLUMNS}
        WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`,
     )
     .bind(ctx.workspaceId, ctx.sight.bind)
-    .all<FolderRow & { note_count: number; upload_count: number }>();
+    .all<FolderRow & { note_count: number; upload_count: number; description: string | null }>();
   const folders = results.map((row) => toFolder(ctx, row));
   const paths = pathsOf(folders);
   return {
     unsortedId: results.find((row) => row.unsorted)?.id ?? null,
-    folders: results.map((row, i) => ({ ...folders[i]!, noteCount: row.note_count, uploadCount: ctx.shutOff ? 0 : row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view", path: paths.get(row.id)! })),
+    folders: results.map((row, i) => ({ ...folders[i]!, noteCount: row.note_count, uploadCount: ctx.shutOff ? 0 : row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view", path: paths.get(row.id)!, ...(row.description === null ? {} : { description: row.description }) })),
   };
 }
 
@@ -630,8 +632,40 @@ async function mentionedById(ctx: Context, text: string, base: string, how: "res
   return stored;
 }
 
-/** The text a write stores: what was written, with the links and mentions it introduces stored by id. */
-const storedAs = async (ctx: Context, text: string, base: string, op: { linkTitles: LinkTitles; mentionNames: "resolve" | "keep" }) => {
+/** Whether `column` is the tag `key` names or a tag inside it, as `key/sub` is: by `substr`, since `_` is a tag's letter and LIKE's wildcard. */
+const tagWithin = (column: string, key: string) => `(${column} = ${key} OR substr(${column}, 1, length(${key}) + 1) = ${key} || '/')`;
+
+/**
+ * Refuses an agent's write that brings in a tag no note the agent can see has, live or archived, nor
+ * a tag inside it, and that isn't one made ahead in Settings, unless `newTags` names it: an agent reuses the tags
+ * list_tags lists, and makes one only when its member asks. A tag in a note the agent can't see is new to it, so the refusal says nothing of that note.
+ */
+async function refuseNewTags(ctx: Context, text: string, base: string, newTags: readonly string[] = []) {
+  if (ctx.author.kind !== "agent") return;
+  const asked = new Set(newTags.map(nameKey));
+  const added = tagsAdded(text, base).filter((name) => !asked.has(nameKey(name)));
+  if (!added.length) return;
+  await mend(ctx);
+  const { results } = await ctx.db
+    .prepare(
+      `SELECT j.value AS tag FROM json_each(?3) j WHERE EXISTS (SELECT 1 FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} AND ${tagWithin("g.tag", "j.value")})
+       UNION SELECT tag FROM tag_descriptions WHERE ?4 AND workspace_id = ?1 AND tag IN (SELECT value FROM json_each(?3))`,
+    )
+    .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(added.map(nameKey)), seesEveryFolder(ctx.sight) ? 1 : 0)
+    .all<{ tag: string }>();
+  const known = new Set(results.map((r) => r.tag));
+  const fresh = added.filter((name) => !known.has(nameKey(name)));
+  if (!fresh.length) return;
+  const one = fresh.length === 1;
+  throw new OpError(
+    "invalid",
+    `${fresh.map((name) => `#${name}`).join(", ")} ${one ? "is a new tag" : "are new tags"}: no note you can see has ${one ? "it" : "them"}. Use a tag list_tags lists, or if your member asked for ${one ? "this one" : "these"}, pass newTags: ${JSON.stringify(fresh)}`,
+  );
+}
+
+/** The text a write stores: what was written, with the links and mentions it introduces stored by id. An agent's write that brings in a new tag is refused first. */
+const storedAs = async (ctx: Context, text: string, base: string, op: { linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; newTags?: readonly string[] }) => {
+  await refuseNewTags(ctx, text, base, op.newTags);
   const resolved = await linkedById(ctx, text, base, op.linkTitles);
   return { text: await mentionedById(ctx, resolved.text, base, op.mentionNames), unresolved: resolved.unresolved };
 };
@@ -1804,7 +1838,7 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
 export const MAX_ANSWER_LINES = 2000;
 
 /** Records `op.text` as a write of the note at `op.baseRevision`, merging edits made since. */
-async function commitNote(ctx: Context, op: { id: string; baseRevision: number; text: string; writeId?: string; linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; on?: string }) {
+async function commitNote(ctx: Context, op: { id: string; baseRevision: number; text: string; writeId?: string; linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; newTags?: readonly string[]; on?: string }) {
   let unresolved: UnresolvedLink[] = [];
   const written = await settle(async (): Promise<Written | null> => {
     // A write sent again once it was recorded is answered as recorded, though the note has gone to Trash since.
@@ -1851,7 +1885,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const bind = binder(binds);
       const pages = paging([desc("n.updated_at"), asc("n.id")], op.after, bind);
       const sql = `SELECT ${pages.keys}, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR (n.folder_id = ?2 AND EXISTS (SELECT 1 FROM folders f WHERE f.workspace_id = ?1 AND f.id = ?2 AND ${SEEN_FOLDER("f", "?4")}))) AND (?3 IS NULL OR n.updated_at >= ?3 OR n.state_at >= ?3) AND ${SEEN("n", "?4", listing(op.includeArchived))}
-             AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = ?5)) AND ${pages.where}
+             AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND ${tagWithin("g.tag", "?5")})) AND ${pages.where}
            ORDER BY ${pages.orderBy} LIMIT ${bind(op.limit + 1)}`;
       const { results } = await ctx.db.prepare(sql).bind(...binds).all<SummaryRow>();
       const { page, next } = pages.page(results, op.limit);
@@ -2005,7 +2039,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     run: (ctx, op) =>
       settle(async (): Promise<Written | null> => {
         const row = await loadNote(ctx, op.id, "edit", "refused");
-        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, assign, unassign, done, ...rest } = op;
+        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, assign, unassign, done, newTags, ...rest } = op;
         // done is the older way to say a state, which agents still pass.
         if (done !== undefined && rest.state !== undefined && done !== (rest.state === "done")) throw new OpError("invalid", `done: ${done} and state: ${rest.state} say different things. Pass state alone`);
         // A member is assigned by their id with their name, whichever they were named by, as a mention a write introduces is stored.
@@ -2031,6 +2065,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         if (todo && todo.text !== listedAs && todo.text === wanted.line) return toNote(ctx, row);
         if (!todo || todo.text !== listedAs) throw new OpError("conflict", "This todo was changed since it was listed. List the todos again.");
         if (wanted.line === listedAs) return toNote(ctx, row);
+        await refuseNewTags(ctx, wanted.line, row.text, newTags);
         const changes = changesBetween(row.text, row.text.slice(0, todo.from) + wanted.line + row.text.slice(todo.from + todo.text.length));
         if (wanted.filed) return recordCompleting(ctx, row, changes, row.revision, [{ line: wanted.filed, at: todo.from }], mine!);
         const next = await record(ctx, row, changes, row.revision);
@@ -2698,14 +2733,145 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       const indexing = !(await mend(ctx));
-      const binds = [ctx.workspaceId, ctx.sight.bind];
+      // A tag no note has yet is kept by its description, which is the workspace's: listed for whoever sees all of it, and not a guest.
+      const binds = [ctx.workspaceId, ctx.sight.bind, op.name === undefined ? null : nameKey(op.name.replace(/^#/, "")), seesEveryFolder(ctx.sight) ? 1 : 0];
       const bind = binder(binds);
       const pages = paging([asc("g.tag")], op.after, bind);
-      const sql = `SELECT ${pages.keys}, MIN(g.name) AS name, COUNT(*) AS notes FROM note_tags g JOIN notes n ON n.id = g.note_id
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))} AND ${pages.where} GROUP BY g.tag ORDER BY ${pages.orderBy} LIMIT ${bind(op.limit + 1)}`;
-      const { results } = await ctx.db.prepare(sql).bind(...binds).all<{ name: string; notes: number }>();
+      // Each tag a note has, and each tag it is inside, `a` and `a/b` of `a/b/c`: the part up to its last `/` is what rtrim leaves of it.
+      const parent = (column: string) => `substr(rtrim(${column}, replace(${column}, '/', '')), 1, length(rtrim(${column}, replace(${column}, '/', ''))) - 1)`;
+      const sql = `WITH RECURSIVE tagged(note_id, tag, name, own) AS (
+             SELECT g.note_id, g.tag, g.name, 1 FROM note_tags g JOIN notes n ON n.id = g.note_id
+             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))} AND (?3 IS NULL OR ${tagWithin("g.tag", "?3")})
+             UNION ALL SELECT note_id, ${parent("tag")}, ${parent("name")}, 0 FROM tagged WHERE instr(tag, '/') > 0
+           ), seen AS (
+             SELECT g.tag, COALESCE(MIN(CASE WHEN g.own THEN g.name END), MIN(g.name)) AS name, COUNT(DISTINCT CASE WHEN g.own THEN g.note_id END) AS notes,
+               CASE WHEN MIN(g.own) = 0 THEN COUNT(DISTINCT g.note_id) END AS inside
+             FROM tagged g WHERE (?3 IS NULL OR g.tag = ?3) AND ${pages.where} GROUP BY g.tag
+           ), kept AS (
+             SELECT tag, name, notes, inside FROM seen
+             UNION ALL SELECT g.tag, COALESCE(g.name, g.tag), 0, NULL FROM tag_descriptions g WHERE ?4 AND g.workspace_id = ?1 AND (?3 IS NULL OR g.tag = ?3) AND ${pages.where} AND g.tag NOT IN (SELECT tag FROM seen)
+           )
+           SELECT ${pages.keys}, g.name, g.notes, g.inside, NULLIF(d.description, '') AS description FROM kept g LEFT JOIN tag_descriptions d ON d.workspace_id = ?1 AND d.tag = g.tag
+           ORDER BY ${pages.orderBy} LIMIT ${bind(op.limit + 1)}`;
+      const { results } = await ctx.db.prepare(sql).bind(...binds).all<{ name: string; notes: number; inside: number | null; description: string | null }>();
       const { page, next } = pages.page(results, op.limit);
-      return { tags: page.map(({ name, notes }) => ({ name, notes })), next, indexing };
+      return { tags: page.map(({ name, notes, inside, description }) => ({ name, notes, ...(inside === null ? {} : { inside }), ...(description === null ? {} : { description }) })), next, indexing };
+    },
+  },
+
+  // A description is the workspace's, so a guest, who sees only what was given them, writes none.
+  "tag.describe": {
+    needs: "edit",
+    members: true,
+    async run(ctx, op) {
+      const tag = nameKey(op.name);
+      // Whether a note has the tag, or a tag inside it, seen by the asker or not, is only ever told as which statement runs: the answer is the same.
+      const used = `SELECT 1 FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND ${tagWithin("g.tag", "?2")} AND n.state != 'trashed'`;
+      // Forgotten, a tag no note has goes; one a note has stays as it is, so a Delete that crosses a note gaining the tag takes nothing from it.
+      if (op.description === null) {
+        if (!(await mend(ctx))) throw new OpError("unavailable", "Notes are still being read in, so a note with the tag could be missed. Try again in a moment");
+        await ctx.db.prepare(`DELETE FROM tag_descriptions WHERE workspace_id = ?1 AND tag = ?2 AND NOT EXISTS (${used})`).bind(ctx.workspaceId, tag).run();
+        return { name: op.name, description: null };
+      }
+      // Emptied, a tag a note has keeps nothing of it; one no note has is kept, with nothing said, so a tag made ahead stays.
+      if (!op.description && (await ctx.db.prepare(`${used} LIMIT 1`).bind(ctx.workspaceId, tag).first())) {
+        await ctx.db.prepare("DELETE FROM tag_descriptions WHERE workspace_id = ? AND tag = ?").bind(ctx.workspaceId, tag).run();
+        return { name: op.name, description: null };
+      }
+      await ctx.db
+        .prepare(
+          `INSERT INTO tag_descriptions (workspace_id, tag, name, description, updated_at, updated_by, updated_via) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+           ON CONFLICT (workspace_id, tag) DO UPDATE SET name = excluded.name, description = excluded.description, updated_at = excluded.updated_at, updated_by = excluded.updated_by, updated_via = excluded.updated_via`,
+        )
+        .bind(ctx.workspaceId, tag, op.name, op.description, ctx.now, ctx.personId, ctx.author.kind === "agent" ? ctx.author.agentId : null)
+        .run();
+      return { name: op.name, description: op.description || null };
+    },
+  },
+
+  // People alone rename a tag: it rewrites every note that has it, which an agent talked into it could do to the whole workspace.
+  "tag.rename": {
+    needs: "edit",
+    by: "member",
+    members: true,
+    async run(ctx, op) {
+      if (!(await mend(ctx))) throw new OpError("unavailable", "Notes are still being read in, so renaming now could miss some with the tag. Try again in a moment");
+      const from = nameKey(op.name);
+      const into = nameKey(op.to);
+      if (from !== into && renamedTag(op.to, op.name, op.name) !== null) throw new OpError("invalid", `#${op.to} is under #${op.name}: a tag can't go inside itself`);
+      const within = (column: string) => tagWithin(column, "?2");
+      const target = (key: string) => nameKey(renamedTag(key, from, into)!);
+      const [having, seenTags, rows] = await Promise.all([
+        seenAmong(ctx, "kept", `SELECT note_id FROM note_tags WHERE ${within("tag")}`, from),
+        ctx.db
+          .prepare(`SELECT g.tag, MIN(g.name) AS name FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?3", "kept")} AND ${within("g.tag")} GROUP BY g.tag`)
+          .bind(ctx.workspaceId, from, ctx.sight.bind)
+          .all<{ tag: string; name: string }>(),
+        ctx.db.prepare(`SELECT tag, name, description FROM tag_descriptions WHERE workspace_id = ?1 AND ${within("tag")}`).bind(ctx.workspaceId, from).all<{ tag: string; name: string | null; description: string }>(),
+      ]);
+      const moving = new Set([...seenTags.results.map((t) => t.tag), ...rows.results.map((r) => r.tag)]);
+      // What the tags renamed into already are, besides those of the tags that are renamed themselves.
+      const targets = from === into ? [] : [...new Set([...moving].map(target))].filter((key) => !moving.has(key));
+      const [merging, kept] = targets.length
+        ? await Promise.all([
+            ctx.db.prepare(`SELECT 1 FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} AND g.tag IN (SELECT value FROM json_each(?3)) LIMIT 1`).bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(targets)).first(),
+            ctx.db.prepare("SELECT tag FROM tag_descriptions WHERE workspace_id = ?1 AND description != '' AND tag IN (SELECT value FROM json_each(?2))").bind(ctx.workspaceId, JSON.stringify(targets)).all<{ tag: string }>(),
+          ])
+        : [null, { results: [] }];
+      const described = new Set(kept.results.map((r) => r.tag));
+      // Asked of each note, as `loadNote` asks it of one: a role that may edit doesn't say this note may be.
+      const mine = having.filter((row) => allows(itemLevel(ctx.sight, row), "edit"));
+      const renameOne = async (id: string) => {
+        try {
+          // One written by someone else meanwhile is read again and renamed in what it says now.
+          return await settle(async () => {
+            const row = await loadNote(ctx, id, "edit", "refused");
+            const changes = changesBetween(row.text, renamedTags(row.text, op.name, op.to));
+            if (changes.empty) return { ...titled(row), revision: null };
+            if (op.preview) return { ...titled(row), revision: row.revision };
+            const next = await record(ctx, row, changes, row.revision);
+            return next && { ...titled(row), revision: next.revision };
+          });
+        } catch (err) {
+          if (!(err instanceof OpError)) throw err;
+          return "failed" as const;
+        }
+      };
+      // As many notes at once as a revert takes, so a tag on hundreds of notes doesn't write them all in one go.
+      const written: Awaited<ReturnType<typeof renameOne>>[] = [];
+      for (let at = 0; at < mine.length; at += MAX_NOTES_AT_ONCE) written.push(...(await Promise.all(mine.slice(at, at + MAX_NOTES_AT_ONCE).map((row) => renameOne(row.id)))));
+      const renamed = written.flatMap((note) => (note === "failed" || note.revision === null ? [] : [{ ...note, revision: note.revision }]));
+      // The descriptions go with the names once a note is renamed, or at once for tags no note has, as one made ahead.
+      const moves = renamed.length > 0 || having.length === 0;
+      const descriptions = rows.results.map((row) => {
+        const name = row.name ?? row.tag;
+        const to = renamedTag(name, op.name, op.to)!;
+        const toDescribed = target(row.tag) !== row.tag && described.has(target(row.tag));
+        return { name, to, description: row.description, toDescribed, describedTo: moves && target(row.tag) !== row.tag && !toDescribed };
+      });
+      if (!op.preview && moves && rows.results.length) {
+        // Whether any note, seen by the asker or not, still has an old name: only ever told as which statements run.
+        const { results: left } = await ctx.db
+          .prepare(`SELECT DISTINCT g.tag FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND n.state != 'trashed' AND ${within("g.tag")}`)
+          .bind(ctx.workspaceId, from)
+          .all<{ tag: string }>();
+        const still = new Set(left.map((r) => r.tag));
+        const copy = `INSERT INTO tag_descriptions (workspace_id, tag, name, description, updated_at, updated_by, updated_via) SELECT workspace_id, ?, ?, description, updated_at, updated_by, updated_via FROM tag_descriptions WHERE workspace_id = ? AND tag = ?
+           ON CONFLICT (workspace_id, tag) DO UPDATE SET description = excluded.description, updated_at = excluded.updated_at, updated_by = excluded.updated_by, updated_via = excluded.updated_via WHERE tag_descriptions.description = ''`;
+        // All at once. A tag renamed into keeps what is said of it, and one that has nothing said, made ahead too, takes the renamed tag's, which stays with the old name too while a note has it.
+        await ctx.db.batch(
+          rows.results.flatMap((row, i) =>
+            target(row.tag) === row.tag
+              ? [ctx.db.prepare("UPDATE tag_descriptions SET name = ? WHERE workspace_id = ? AND tag = ?").bind(descriptions[i]!.to, ctx.workspaceId, row.tag)]
+              : [
+                  ctx.db.prepare(copy).bind(target(row.tag), descriptions[i]!.to, ctx.workspaceId, row.tag),
+                  ...(still.has(row.tag) ? [] : [ctx.db.prepare("DELETE FROM tag_descriptions WHERE workspace_id = ? AND tag = ?").bind(ctx.workspaceId, row.tag)]),
+                ],
+          ),
+        );
+      }
+      const under = [...moving].filter((key) => key !== from).sort().map((key) => seenTags.results.find((t) => t.tag === key)?.name ?? descriptions.find((d) => nameKey(d.name) === key)!.name);
+      return { name: op.name, to: op.to, merged: merging !== null, renamed, skipped: having.length - mine.length, failed: written.filter((note) => note === "failed").length, under, descriptions };
     },
   },
 
@@ -2853,6 +3019,18 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     },
   },
 
+  // As a tag's, a folder's description steers how the whole workspace is filed, so a guest, or an agent limited to folders, writes none.
+  "folder.describe": {
+    needs: "edit",
+    members: true,
+    async run(ctx, op) {
+      const folder = await loadFolder(ctx, op.id, "edit");
+      const description = op.description || null;
+      await ctx.db.prepare("UPDATE folders SET description = ? WHERE id = ?").bind(description, folder.id).run();
+      return { id: folder.id, description };
+    },
+  },
+
   "folder.delete": {
     needs: "manage",
     async run(ctx, op) {
@@ -2932,6 +3110,39 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .bind(ctx.workspaceId, ctx.personId, op.text, ctx.now, op.writeId ?? null, op.baseRevision, op.supersedes ?? null)
         .first<{ revision: number }>();
       if (!row) throw new OpError("conflict", "Your settings changed somewhere else since they were read here");
+      return { text: op.text, revision: row.revision, updatedAt: ctx.now };
+    },
+  },
+
+  // Whoever reaches the workspace reads it: a viewer, a guest, and an agent of any of them, limited to folders or not.
+  "agentsFile.read": {
+    needs: "view",
+    async run(ctx) {
+      const row = await ctx.db.prepare("SELECT text, revision, updated_at FROM agents_files WHERE workspace_id = ?").bind(ctx.workspaceId).first<{ text: string; revision: number; updated_at: number }>();
+      return row ? { text: row.text, revision: row.revision, updatedAt: row.updated_at } : { text: "", revision: 0, updatedAt: null };
+    },
+  },
+
+  // It steers every agent in the workspace, so only an admin or an editor writes it, signed in: see NOT_FOR_AGENTS.
+  "agentsFile.write": {
+    needs: "edit",
+    by: "member",
+    members: true,
+    async run(ctx, op) {
+      if (op.text.length > MAX_AGENTS_FILE_LENGTH) throw new OpError("invalid", `The agents file can be at most ${MAX_AGENTS_FILE_LENGTH} characters`);
+      // As settings.write: one statement, so of two writes on the same revision exactly one is taken.
+      const taken = "agents_files.revision = ?5 OR (agents_files.revision = ?5 + 1 AND agents_files.write_id = ?6)";
+      const statement =
+        op.baseRevision === 0
+          ? `INSERT INTO agents_files (workspace_id, text, updated_at, write_id, revision) VALUES (?1, ?2, ?3, ?4, 1)
+             ON CONFLICT (workspace_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at, write_id = excluded.write_id, revision = agents_files.revision + 1 WHERE ${taken}
+             RETURNING revision`
+          : `UPDATE agents_files SET text = ?2, updated_at = ?3, write_id = ?4, revision = revision + 1 WHERE workspace_id = ?1 AND (${taken}) RETURNING revision`;
+      const row = await ctx.db
+        .prepare(statement)
+        .bind(ctx.workspaceId, op.text, ctx.now, op.writeId ?? null, op.baseRevision, op.supersedes ?? null)
+        .first<{ revision: number }>();
+      if (!row) throw new OpError("conflict", "The agents file changed somewhere else since it was read here");
       return { text: op.text, revision: row.revision, updatedAt: ctx.now };
     },
   },

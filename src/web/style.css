@@ -549,6 +549,13 @@ button.link:hover {
   color: var(--muted);
 }
 
+.menu > button .menu-shortcut {
+  margin-left: 16px;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(11.5px * var(--text-scale));
+}
+
 .menu > button:disabled .menu-icon {
   color: inherit;
 }
@@ -1970,7 +1977,8 @@ button.link:hover {
   top: 50%;
 }
 
-.note {
+.note,
+.text-file {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -4188,10 +4196,17 @@ kbd {
   margin-top: 0;
 }
 
-/* What the workspace's files take, under the settings: not a setting, so outside their panes. */
+/* What the workspace's files take, and an export of it, in Account: no setting, and drawn as Account's rows are. */
 .settings-storage {
-  margin-top: 28px;
+  padding: 10px 0 10px 12px;
   color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.settings-storage h3 {
+  margin: 0 0 2px;
+  color: var(--ink);
+  font-size: calc(13px * var(--text-scale));
 }
 
 .settings-storage p {
@@ -4464,37 +4479,50 @@ kbd {
   margin: 6px 0 0;
 }
 
-.settings-json {
-  margin-top: 14px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: var(--bg-elev);
-  overflow: hidden;
+/* Text that is no note in a tab, as the settings JSON and the agents file are: a note's editor, with a word on what it is over it and whether it is saved at its foot. */
+.text-file-head {
+  box-sizing: border-box;
+  max-width: var(--editor-width);
+  margin: 0 auto;
+  padding: 1.5rem 2rem 0;
 }
 
-.settings-json .cm-editor {
-  min-height: 16rem;
-  font-size: calc(13px * var(--text-scale));
+.text-file-head .soon {
+  margin: 0;
 }
 
-.settings-json .cm-editor.cm-focused {
-  outline: none;
+.text-file .editor {
+  padding-top: 1rem;
 }
 
-.settings-json .cm-content,
-.settings-json .cm-gutters {
-  font-family: var(--mono);
-}
-
-.settings-json .cm-gutters {
+.text-file .cm-gutters {
   border-right: 0;
   background: none;
 }
 
-.settings-json .cm-tooltip {
+.text-file .cm-tooltip {
   border-color: var(--line-strong);
   background: var(--bg-elev);
   color: var(--ink);
+}
+
+.text-file-state {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: calc(1.75rem * var(--text-scale));
+  padding: 0 16px 0 8px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+}
+
+.text-file-state[data-failed] {
+  color: var(--danger);
+}
+
+.note-panels:has(.cm-panels) + .text-file-state {
+  border-top: 1px solid var(--line);
 }
 
 /* Inspector */
@@ -8318,6 +8346,431 @@ button.todo-tag[aria-pressed="true"] {
   line-height: 26px;
 }
 
+.tag-row-description {
+  margin: 0 0 4px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: calc(12.5px * var(--text-scale));
+  overflow-wrap: anywhere;
+}
+
+.tags-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* A tag's or a folder's card, laid over the app under what it is resting on. Shown by the keyboard or the cursor in a note, a press goes through it to what is under it, but on its links. */
+.hover-card {
+  pointer-events: none;
+  position: fixed;
+  z-index: 95;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  display: grid;
+  gap: 4px;
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 16px));
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.4;
+}
+
+/* Shown by the pointer, all of it holds the pointer, so resting anywhere on it, its text or its padding, keeps it. */
+[data-showing="pointer"] > .hover-card,
+.hover-card a {
+  pointer-events: auto;
+}
+
+.hover-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* Whole, however long: a chip may cut a tag short, and its card is where it is read in full. */
+.hover-card-name {
+  min-width: 0;
+  color: var(--accent);
+  font-weight: 550;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.hover-card-name:hover {
+  text-decoration: underline;
+}
+
+.hover-card-count {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.hover-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hover-card .hover-card-none {
+  color: var(--muted);
+}
+
+.hover-card-manage {
+  justify-self: start;
+  color: var(--accent);
+}
+
+/* Settings' Tags and Folders: a tree of names, indented under the row each is inside, with what each is for and its count of notes. Each column lines up down the table, nested rows too. */
+.manage-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.manage-search {
+  flex: 1;
+  min-width: 0;
+  max-width: 24rem;
+  margin: 0;
+}
+
+.manage-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.manage-new svg {
+  width: 14px;
+  height: 14px;
+}
+
+.manage-table {
+  width: 100%;
+  margin: 0 0 8px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  /* A whole number of pixels, so a field grown to its text is the height of the text it stands in for. */
+  --manage-line: round(calc(19.5px * var(--text-scale)), 1px);
+  font-size: calc(13px * var(--text-scale));
+  line-height: var(--manage-line);
+}
+
+.manage-table th,
+.manage-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.manage-table thead th {
+  color: var(--muted);
+  font-size: calc(11.5px * var(--text-scale));
+  font-weight: 600;
+}
+
+.manage-table thead th:first-child {
+  width: 36%;
+}
+
+.manage-table thead th:last-child {
+  width: 4.5rem;
+}
+
+.manage-table thead th:last-child,
+.manage-table .manage-count {
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.manage-row {
+  outline: none;
+}
+
+.manage-row:hover,
+.manage-table:not([data-pointer]) .manage-row:focus-visible {
+  background: var(--hover);
+}
+
+/* The keyboard's row has a bar at its edge; a click leaves no mark behind. */
+.manage-table:not([data-pointer]) .manage-row:focus-visible {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.manage-row[data-dragging] {
+  opacity: 0.45;
+}
+
+.manage-row[data-drop] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.manage-name-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding-left: calc(var(--depth, 0) * 16px);
+}
+
+.manage-toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: var(--manage-line);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.manage-toggle svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.12s;
+}
+
+.manage-toggle[data-open] svg {
+  transform: rotate(90deg);
+}
+
+/* A name and a description are each a chip, edited in the very box they are shown in: the same font, padding and size, so nothing moves. */
+.manage-table .manage-name {
+  min-width: 0;
+  padding: 1px 4px;
+  margin: -1px 0;
+  border-radius: 4px;
+  color: var(--ink);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.manage-table .manage-name[draggable="true"] {
+  cursor: grab;
+}
+
+.manage-table .manage-name[draggable="true"]:hover,
+.manage-table .manage-description[data-editable]:hover {
+  background: var(--hover);
+}
+
+.manage-table .manage-name[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.manage-table input.manage-name-input,
+.manage-table textarea.manage-description-input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  border: 0;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  color: var(--ink);
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  outline: none;
+  appearance: none;
+}
+
+.manage-table input.manage-name-input {
+  height: calc(var(--manage-line) + 2px);
+  font-weight: 550;
+}
+
+.manage-table p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.manage-table .manage-description {
+  display: block;
+  min-height: var(--manage-line);
+  padding: 1px 4px;
+  margin: -1px -4px;
+  border-radius: 4px;
+}
+
+.manage-table .manage-description[data-editable] {
+  cursor: text;
+}
+
+.manage-table textarea.manage-description-input {
+  width: calc(100% + 8px);
+  max-width: none;
+  overflow: hidden;
+  resize: none;
+}
+
+/* Said only on the row under the pointer or the keyboard, so the column isn't one of grey words. */
+.manage-placeholder,
+.manage-pencil {
+  visibility: hidden;
+}
+
+/* A little darker than muted: it is read on the row's and the chip's grey at once. */
+.manage-placeholder {
+  color: color-mix(in srgb, var(--muted), var(--ink) 35%);
+}
+
+.manage-row:hover :is(.manage-placeholder, .manage-pencil),
+.manage-table:not([data-pointer]) .manage-row:focus-visible :is(.manage-placeholder, .manage-pencil) {
+  visibility: visible;
+}
+
+/* A bare icon: no box until it is pointed at, and a ring for the keyboard. */
+.manage-table .manage-pencil {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: calc((var(--manage-line) - 22px) / 2) 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+  cursor: pointer;
+  appearance: none;
+}
+
+.manage-pencil svg {
+  width: 14px;
+  height: 14px;
+}
+
+.manage-table .manage-pencil:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.manage-table .manage-pencil:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.manage-aside td {
+  padding: 4px 8px 10px calc(var(--depth, 0) * 16px + 26px);
+}
+
+.manage-aside form {
+  display: grid;
+  gap: 8px;
+  max-width: 40rem;
+}
+
+.manage-aside .error {
+  margin: 0;
+}
+
+.manage-aside-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Under the table while a row inside another is dragged, for the top. */
+.manage-drop-top {
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  text-align: center;
+}
+
+.manage-drop-top[data-drop] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* What a drop would make of the row, beside the pointer. */
+.manage-drag-label {
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  box-shadow: var(--shadow);
+  color: var(--bg);
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+}
+
+/* Empty until the search finds nothing, and then what it says is read out. */
+.manage-status:empty {
+  margin: 0;
+}
+
+.manage-table[hidden] {
+  display: none;
+}
+
+/* In a narrow pane each row is a card: its name with the count at the end of that line, and what it is for under them. */
+@container settings-pane (max-width: 38rem) {
+  .manage-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .manage-table,
+  .manage-table tbody {
+    display: block;
+  }
+
+  .manage-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 2px 10px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .manage-table tr > :is(th, td) {
+    padding: 0;
+    border: 0;
+  }
+
+  .manage-table tr > .manage-description-cell {
+    grid-area: 2 / 1 / 3 / 3;
+    padding-left: calc(var(--depth, 0) * 16px + 22px);
+  }
+
+  .manage-table tr > .manage-description-cell:empty {
+    display: none;
+  }
+
+  .manage-aside td {
+    grid-column: 1 / 3;
+  }
+}
+
 /* End of search and tags */
 
 /* Archive and Trash: begin */
@@ -9776,7 +10229,7 @@ button.todo-tag[aria-pressed="true"] {
  * around it. It fills the room the note keeps for it, and the room never follows it. Its size handle
  * and the width a drag will snap to are drawn past its edges.
  */
-.embed-below:has(> .embed-below-drawn > :is(.upload-image, .upload-video, .upload-audio)) {
+.embed-below:has(> .embed-below-drawn > :is(.upload-picture, .upload-video, .upload-audio)) {
   overflow: visible;
   border: 0;
   border-radius: 0;
@@ -9796,13 +10249,29 @@ button.todo-tag[aria-pressed="true"] {
   background: #000;
 }
 
+/* A picture is drawn in a frame of its room, so a crop of it is the part of it that is in the frame. */
+.upload-picture {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.upload-image.cropped {
+  position: absolute;
+  max-width: none;
+  border-radius: 0;
+  object-fit: fill;
+}
+
 .upload-audio {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-/* The size handle: a bar on the right edge, seen on hover or focus, which drags the width to small, medium, large or full. */
+/* The size handle: a bar on the right edge, seen on hover or focus, which drags the width to any share of the column. */
 .upload-size {
   display: grid;
   position: absolute;
@@ -9855,6 +10324,249 @@ button.todo-tag[aria-pressed="true"] {
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   pointer-events: none;
+}
+
+/* The crop button and a drawing's edit button: at its top right corner, seen with the size handle. */
+.upload-crop,
+.upload-edit {
+  display: grid;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1.5px solid rgb(255 255 255 / 0.9);
+  border-radius: 6px;
+  background: rgb(30 30 36 / 0.7);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  color: #fff;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.embed-below:hover :is(.upload-crop, .upload-edit),
+:is(.upload-crop, .upload-edit):focus-visible {
+  opacity: 1;
+}
+
+:is(.upload-crop, .upload-edit):hover,
+:is(.upload-crop, .upload-edit):focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  background: var(--accent);
+}
+
+/* Cropping a picture: the whole of it over the app, with the part kept clear and the rest dimmed. */
+.crop-dialog {
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  padding: 20px 20px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.crop-dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.crop-frame {
+  position: relative;
+  width: fit-content;
+  margin: 0 auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.crop-stage {
+  position: relative;
+  overflow: hidden;
+}
+
+/* As large as fits, a small picture made larger, at its own shape. */
+.crop-picture {
+  display: block;
+  width: min(960px, calc(100vw - 72px), calc((100dvh - 150px) * var(--ratio)));
+  height: auto;
+  aspect-ratio: var(--ratio);
+}
+
+.crop-shade,
+.crop-box {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.crop-shade {
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.55);
+  pointer-events: none;
+}
+
+.crop-box {
+  border: 1px solid rgb(255 255 255 / 0.9);
+  outline: 1px solid rgb(0 0 0 / 0.4);
+  cursor: move;
+}
+
+.crop-box:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+}
+
+.crop-corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 0 solid #fff;
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 0.6));
+}
+
+.crop-corner-nw {
+  top: -3px;
+  left: -3px;
+  border-width: 4px 0 0 4px;
+  cursor: nwse-resize;
+}
+
+.crop-corner-ne {
+  top: -3px;
+  right: -3px;
+  border-width: 4px 4px 0 0;
+  cursor: nesw-resize;
+}
+
+.crop-corner-se {
+  right: -3px;
+  bottom: -3px;
+  border-width: 0 4px 4px 0;
+  cursor: nwse-resize;
+}
+
+.crop-corner-sw {
+  bottom: -3px;
+  left: -3px;
+  border-width: 0 0 4px 4px;
+  cursor: nesw-resize;
+}
+
+/* Each edge is pressed a little either side of its line, between the corners. */
+.crop-edge {
+  position: absolute;
+}
+
+.crop-edge-w,
+.crop-edge-e {
+  top: min(18px, 25%);
+  bottom: min(18px, 25%);
+  width: 14px;
+  cursor: ew-resize;
+}
+
+.crop-edge-w {
+  left: -7px;
+}
+
+.crop-edge-e {
+  right: -7px;
+}
+
+.crop-edge-n,
+.crop-edge-s {
+  right: min(18px, 25%);
+  left: min(18px, 25%);
+  height: 14px;
+  cursor: ns-resize;
+}
+
+.crop-edge-n {
+  top: -7px;
+}
+
+.crop-edge-s {
+  bottom: -7px;
+}
+
+.crop-edge:focus-visible {
+  outline: none;
+}
+
+.crop-edge:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.crop-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 14px;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.crop-said {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.crop-buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* A drawing not drawn yet, with the button that draws it. */
+.upload-drawing-empty {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 1.5px dashed var(--line);
+  border-radius: 6px;
+}
+
+/* Editing a drawing: Excalidraw over the whole window, under a bar with Save and Cancel, and under Excalidraw's own dialogs and menus, which are at 1000 and above. */
+.drawing-dialog {
+  display: flex;
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.drawing-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: calc(13px * var(--text-scale));
+}
+
+.drawing-title {
+  margin-right: auto;
+  color: var(--muted);
+}
+
+.drawing-said {
+  color: var(--danger);
+}
+
+.drawing-editor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 /* In place of a file that can't be shown, in the same room. */
@@ -12115,6 +12827,12 @@ button.crumb[aria-expanded="true"] {
   background: rgb(0 0 0 / 0.7);
 }
 
+:root[data-night-shift] :is(.upload-crop, .upload-edit):not(:hover, :focus-visible) {
+  border-color: var(--ink);
+  background: rgb(0 0 0 / 0.7);
+  color: var(--ink);
+}
+
 /* The app's own pictures: its mark, and the plugins' screenshots of the app. They are tinted whether or not pictures in notes are. */
 :root[data-night-shift] :is(img[src="/favicon.svg"], .plugin-shots img) {
   filter: url(#night-shift-tint);
@@ -12246,7 +12964,7 @@ button.crumb[aria-expanded="true"] {
 }
 
 .phone-failed {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: calc(12px * var(--text-scale));
 }
 

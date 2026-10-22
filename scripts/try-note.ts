@@ -116,11 +116,11 @@ async function showing(written: string): Promise<string> {
   }
   let out = "";
   let at = 0;
-  for (const { embed, name, word, from, to } of namedUploads(written)) {
+  for (const { embed, name, words, from, to } of namedUploads(written)) {
     const upload = sent.get(name);
     if (!upload) continue;
     const plain = writtenUpload(embed, upload.id, upload.width && upload.height ? { width: upload.width, height: upload.height } : sampleSize(name));
-    out += written.slice(at, from) + (word ? `${plain.slice(0, -1)} ${word}}` : plain);
+    out += written.slice(at, from) + (words ? `${plain.slice(0, -1)} ${words}}` : plain);
     at = to;
   }
   return out + written.slice(at);

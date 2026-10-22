@@ -133,12 +133,19 @@ export const nightShift: Plugin = {
       locate();
       apply();
     };
-    queueMicrotask(() => !stopped && refresh());
+    // A hidden page's clock may be held back, so a window shown again after sunset is put right at once.
+    const shown = () => !stopped && document.visibilityState === "visible" && apply();
+    queueMicrotask(() => {
+      if (stopped) return;
+      refresh();
+      document.addEventListener("visibilitychange", shown);
+    });
     host.settings.subscribe(refresh);
     const clock = setInterval(() => !stopped && apply(), 60_000);
     return () => {
       stopped = true;
       clearInterval(clock);
+      document.removeEventListener("visibilitychange", shown);
       clear();
       filter?.remove();
     };

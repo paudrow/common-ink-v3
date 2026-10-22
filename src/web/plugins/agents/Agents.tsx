@@ -448,6 +448,12 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
       <p className="lead">
         An agent is a program you connect, such as Claude. It reads and edits notes as you, with your role in each workspace and no more, and its changes are recorded under its own name.
       </p>
+      <p>
+        Every agent connected to {workspace.name} reads its agents file, which says how the workspace is organized: what goes where, and how notes are named and tagged.{" "}
+        <button type="button" className="button small" onClick={() => host.commands.run("go.agents-file")}>
+          Open agents file
+        </button>
+      </p>
 
       <form className="connect" aria-label="Connect an agent" onSubmit={connect}>
         <h2>Connect an agent</h2>

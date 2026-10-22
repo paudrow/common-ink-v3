@@ -30,7 +30,7 @@ test("a member exports the workspace from Settings as one zip of their notes and
     { workspaceId, folderId: plans.id },
   );
 
-  await page.goto("/settings");
+  await page.goto("/settings/account");
   const exporting = settingsDialog(page).getByRole("region", { name: "Export" });
   await expect(exporting).toContainText("2 notes and 1 file");
   const [download] = await Promise.all([page.waitForEvent("download"), exporting.getByRole("link", { name: "Download" }).click()]);

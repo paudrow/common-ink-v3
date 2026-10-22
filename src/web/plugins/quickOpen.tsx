@@ -26,8 +26,6 @@ function useEvents(host: PluginHost, calendar: boolean, timeZone: string): reado
 /** How many places visited lately are offered at most, after the tabs open. */
 const MOST_RECENT = 12;
 
-const sameTab = (a: Opened, b: Opened) => a.kind === b.kind && a.id === b.id;
-
 /**
  * What is offered first before anything is typed: the tabs open, each with its pane where there are
  * several, the one visited last first and the one in front last; then the notes, lists and pages
@@ -37,18 +35,21 @@ function placesFor(app: App): { item: { id: string; label: string; hint: string 
   const recent = app.recent();
   const tabs = app.openTabs();
   const panes = new Set(tabs.map((t) => t.pane)).size;
+  const note = (id: string) => app.notes?.find((n) => n.id === id);
+  const page = (id: string) => app.pages.find((p) => p.id === id);
+  /** Where a page has a tab for each of several keys, as each tag's page does, which one an address is. */
+  const tabAt = (opened: Opened) => (opened.kind === "page" ? page(opened.id)?.tabAt?.(opened.path.split("?")[0]!) : undefined);
+  const sameTab = (a: Opened, b: Opened) => a.kind === b.kind && a.id === b.id && tabAt(a)?.key === tabAt(b)?.key;
   const rank = (opened: Opened) => {
     const at = recent.findIndex((r) => sameTab(r, opened));
     return app.opened && sameTab(app.opened, opened) ? Infinity : at < 0 ? recent.length : at;
   };
-  const note = (id: string) => app.notes?.find((n) => n.id === id);
-  const page = (id: string) => app.pages.find((p) => p.id === id);
   const named = (opened: Opened) =>
     opened.kind === "note"
       ? (note(opened.id)?.title || "Untitled")
       : opened.kind === "folder"
         ? ((app.folders && folderTitle(app.folders, opened.id)) ?? "Folder")
-        : (page(opened.id)?.label ?? "Page");
+        : (tabAt(opened)?.title ?? page(opened.id)?.label ?? "Page");
   const kindOf = (opened: Opened) => {
     if (opened.kind === "note") return app.folders?.pathName(note(opened.id)?.folderId ?? null) ?? "";
     if (opened.kind === "folder") return "Folder";

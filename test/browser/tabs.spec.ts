@@ -536,8 +536,8 @@ test("every page opens in a tab at its own address, and is drawn there", async (
 
   // Settings is the one that opens in no tab: it is drawn over the window, whose tab stays as it was.
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("Go to Settings");
-  await page.getByRole("dialog", { name: "Commands" }).getByRole("option", { name: /^Go to Settings/ }).first().click();
+  await page.keyboard.type("Go to settings (UI)");
+  await page.getByRole("dialog", { name: "Commands" }).getByRole("option", { name: /^Go to settings \(UI\)/ }).first().click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(settingsDialog(page).getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   await expect(tabs(page)).toHaveText(["Agents"]);
@@ -624,7 +624,7 @@ test("Settings opens over the window and in no tab through every category, the J
   await withNotes(page, "Alpha");
   const categories = settingsDialog(page).getByRole("navigation", { name: "Categories" });
   const more = page.getByRole("navigation", { name: "Modes" });
-  const settingsTabs = page.getByRole("tab", { name: /Settings/ });
+  const settingsTabs = page.getByRole("tab", { name: "Settings", exact: true });
 
   // At its address Settings is over what the app opens to, the Dashboard, which keeps its tab.
   await tab(page, "Dashboard").dblclick();
@@ -640,21 +640,20 @@ test("Settings opens over the window and in no tab through every category, the J
     await expect(tabs(page)).toHaveText(["Dashboard"]);
     await expect(settingsTabs).toHaveCount(0);
   }
+  // The JSON is a document of its own, in a tab, and Settings closes for it.
   await settingsDialog(page).getByRole("button", { name: "Open settings (JSON)" }).click();
-  await expect(page).toHaveURL(/\/settings\/json$/);
-  await expect(tabs(page)).toHaveText(["Dashboard"]);
-  // A category takes the place of the one before in the history, and the JSON is a step of its own, so Back from it is the category.
+  await expect(page).toHaveURL(/\/settings\.json$/);
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect(tabs(page)).toHaveText(["Dashboard", "Settings (JSON)"]);
+  await page.reload();
+  await expect(page).toHaveURL(/\/settings\.json$/);
+  await expect(page.getByRole("textbox", { name: "Settings JSON" })).toBeVisible();
+  await expect(tabs(page)).toHaveText(["Dashboard", "Settings (JSON)"]);
+  // A category takes the place of the one before in the history, and the JSON is a step of its own, so Back from it is Settings at the category.
   await page.goBack();
   await expect(page).toHaveURL(/\/settings\/plugins\/vim$/);
   await expect(settingsDialog(page).getByRole("region", { name: "Vim mode", exact: true })).toBeVisible();
-  await page.goForward();
-  await expect(page).toHaveURL(/\/settings\/json$/);
-  await page.reload();
-  await expect(page).toHaveURL(/\/settings\/json$/);
-  await expect(settingsDialog(page).getByRole("textbox", { name: "Settings JSON" })).toBeVisible();
-  await expect(tabs(page)).toHaveText(["Dashboard"]);
   await expect(settingsTabs).toHaveCount(0);
-  await settingsDialog(page).getByRole("button", { name: "Open settings (UI)" }).click();
   await categories.getByRole("link", { name: "Vim mode", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/plugins\/vim$/);
 
@@ -698,7 +697,7 @@ test("Settings opens over the window and in no tab through every category, the J
   await expect(tabs(page, 1)).toHaveText(["Plugins"]);
   await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("Go to Settings");
+  await page.keyboard.type("Go to settings (UI)");
   await page.keyboard.press("Enter");
   await categories.getByRole("link", { name: "Appearance", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/appearance$/);

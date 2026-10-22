@@ -124,6 +124,7 @@ describe("MCP protocol", () => {
     const list = (await (await call(token, rpc("tools/list"))).json()) as any;
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "list_workspaces",
+      "read_agents_file",
       "list_notes",
       "read_note",
       "note_syntax",
@@ -146,6 +147,7 @@ describe("MCP protocol", () => {
       "move_note",
       "search",
       "list_tags",
+      "describe_tag",
       "archive_note",
       "trash_note",
       "restore_note",
@@ -168,6 +170,7 @@ describe("MCP protocol", () => {
       "find_folder",
       "create_folder",
       "rename_folder",
+      "describe_folder",
       "move_folder",
       "delete_folder",
       "note_history",
@@ -233,7 +236,7 @@ describe("MCP protocol", () => {
     const answered = await post([rpc("initialize", { protocolVersion: "2025-06-18" }, 1), rpc("tools/list", {}, 2), rpc("ping", {}, 3), rpc("tools/call", { name: "list_folders", arguments: {} }, 4)]);
     expect(answered.status).toBe(200);
     const [init, list, ping, called] = (await answered.json()) as any[];
-    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 86, {}]);
+    expect([init.result.serverInfo.name, list.result.tools.length, ping.result]).toEqual(["common-ink", 89, {}]);
     expect(called).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: "rate_limited: Too many calls. An agent makes at most 300 a minute. Wait a minute, then call again." }], isError: true } });
     expect(keys).toEqual([agent.id]);
   });
@@ -283,7 +286,7 @@ describe("MCP 2026-07-28", () => {
   it("lists its tools for this token with how long the list keeps", async () => {
     const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
     const { status, body } = await post(token, rpc("tools/list", { _meta: META }), { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list" });
-    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 86]);
+    expect([status, body.result.resultType, body.result._meta, body.result.ttlMs, body.result.cacheScope, body.result.tools.length]).toEqual([200, "complete", SERVER_INFO, 3600000, "private", 89]);
   });
 
   it("calls a tool whose name the Mcp-Name header mirrors, plain or as base64, and refuses one that differs or a missing version header", async () => {
@@ -316,7 +319,7 @@ describe("MCP 2026-07-28", () => {
       capabilities: { tools: {} },
       instructions: true,
       ttlMs: 3600000,
-      cacheScope: "public",
+      cacheScope: "private",
       _meta: SERVER_INFO,
     });
   });
@@ -425,8 +428,8 @@ describe("MCP tools", () => {
     const { token } = await connectAgent(env.DB, ada.personId, "Claude");
     const folder = await perform(env.DB, { kind: "member", ...ada }, { type: "folder.create", name: "Plans" });
 
-    expect(await tool(token, "create_note", { text: "# Hi", folder_id: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder_id": did you mean "folderId"? It takes workspaceId, text, folderId, linkTitles, mentionNames, writeId.' });
-    expect(await tool(token, "create_note", { text: "# Hi", folder: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder". It takes workspaceId, text, folderId, linkTitles, mentionNames, writeId.' });
+    expect(await tool(token, "create_note", { text: "# Hi", folder_id: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder_id": did you mean "folderId"? It takes workspaceId, text, folderId, linkTitles, mentionNames, newTags, writeId.' });
+    expect(await tool(token, "create_note", { text: "# Hi", folder: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder". It takes workspaceId, text, folderId, linkTitles, mentionNames, newTags, writeId.' });
     expect(await tool(token, "list_workspaces", { all: true })).toMatchObject({ isError: true, text: 'invalid: list_workspaces takes no "all". It takes no arguments.' });
     expect((await tool(token, "list_notes")).json().notes).toEqual([]);
   });

@@ -162,7 +162,7 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "dashboard", "bar", "overlay", "mark", "tool", "notice"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "dashboard", "bar", "overlay", "mark", "tool", "notice", "settings"] as const satisfies readonly (keyof Slots)[];
 
 /** The most a plugin may keep in one remembered setting, in characters of JSON: the member's settings are small, and theirs. */
 const MAX_REMEMBERED = 10_000;
@@ -210,6 +210,7 @@ function keptFromPerform(type: string): string | null {
   if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
   if (/^plugin\.(install|uninstall|permit|request|read)$/.test(type)) return "which plugins a workspace has, and what they are permitted, is decided on the Plugins page";
   if (type.startsWith("account.") || type === "workspace.delete") return "only the person deletes an account or a workspace, in Settings";
+  if (type === "agentsFile.write") return "the agents file steers every agent in the workspace, so only an admin or an editor writes it, in the app";
   return null;
 }
 
@@ -368,6 +369,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         register(slot, view) {
           const table = views.get(slot) as Map<string, Owned<typeof view>>;
           if (slot === "page" && (view as Slots["page"]).home && !trusted.includes(plugin)) throw new Error(`Only Common Ink's own plugins add the page shown at /, and ${plugin.name} asked to with ${(view as Slots["page"]).path}`);
+          if (slot === "page" && (view as Slots["page"]).command && !required.includes(plugin.id)) throw new Error(`Only the app names a page's command, and ${plugin.name} named ${(view as Slots["page"]).command!.id}`);
           if (slot === "page" && /^\/folder(\/|$)/.test((view as Slots["page"]).path)) throw new Error(`${(view as Slots["page"]).path} is where a folder's notes are listed, so no page can be there`);
           if (slot === "page" && [...table.values()].some((o) => (o.value as Slots["page"]).path === (view as Slots["page"]).path)) throw new Error(`There's already a page at ${(view as Slots["page"]).path}`);
           const dispose = keep(add(table, view.id, view, index, `a ${slot} view with the id`));
@@ -375,7 +377,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
           if (slot !== "page" && slot !== "inspector") return dispose;
           const own =
             slot === "page"
-              ? keep(command({ id: `go.${view.id}`, title: `Go to ${(view as Slots["page"]).label}`, run: () => provided.app().go((view as Slots["page"]).path) }))
+              ? keep(command({ id: `go.${view.id}`, title: `Go to ${(view as Slots["page"]).label}`, ...(view as Slots["page"]).command, run: () => provided.app().go((view as Slots["page"]).path) }))
               : keep(command({ id: `inspector.${view.id}`, title: `Toggle ${(view as Slots["inspector"]).label} panel`, run: () => provided.app().togglePanel(view.id) }));
           return () => {
             dispose();
@@ -407,6 +409,8 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       },
       editorExtensions: {
         register(extension) {
+          // The settings JSON is the member's alone, and a plugin changes no setting but its own remembered ones.
+          if (extension.anyText && !trusted.includes(plugin)) throw new Error(`Only Common Ink's own plugins add to the settings JSON's editor, and ${plugin.name} asked to with ${extension.id}`);
           const dispose = keep(add(editorExtensions, extension.id, extension, index, "an editor extension with the id"));
           owners.set(extension, owner);
           return dispose;

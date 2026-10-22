@@ -17,6 +17,7 @@ const argumentsOf = (tool: (typeof TOOLS)[number]) => Object.keys((tool.inputSch
 /** For each tool, `ink` commands that between them set every argument the tool takes. */
 const COMMANDS: Record<string, string[][]> = {
   list_workspaces: [["workspaces"]],
+  read_agents_file: [["agents-file"]],
   list_members: [["members"]],
   list_plugins: [["plugins"]],
   scaffold_plugin: [["plugin-new", "Greeter"]],
@@ -33,21 +34,22 @@ const COMMANDS: Record<string, string[][]> = {
   discard_draft: [["draft-discard", ID]],
   list_notes: [["notes", "--folder", ID, "--since", "2026-10-01", "--tag", "money", "--archived", "true", "--limit", "5", "--after", "WzEsImEiXQ"]],
   search: [["search", "budget #money", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--archived", "only", "--has-todos", "true", "--sort", "title", "--limit", "5", "--after", "WzEsImEiXQ"]],
-  list_tags: [["tags", "--archived", "true", "--limit", "5", "--after", "WyJhIl0"]],
+  list_tags: [["tags", "--name", "money", "--archived", "true", "--limit", "5", "--after", "WyJhIl0"]],
+  describe_tag: [["tag-describe", "money", "--description", "Bills and budgets"]],
   archive_note: [["archive", ID], ["unarchive", ID]],
   trash_note: [["trash", ID]],
   restore_note: [["restore", ID]],
   list_trash: [["trashed", "--limit", "5", "--after", "WzEsImEiXQ"]],
   read_note: [["read", ID, "--revision", "1", "--from", "1", "--to", "3", "--numbered", "true"]],
   note_syntax: [["note-syntax"]],
-  create_note: [["create", "--text", "# Hi", "--folder", ID, "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep"]],
-  write_note: [["write", ID, "--base", "1", "--text", "# Hi", "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--on", "2026-10-11"]],
-  edit_note: [["edit", ID, "--base", "1", "--edits", '[{"from":1,"to":2,"text":"Hi"}]', "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--on", "2026-10-11"]],
+  create_note: [["create", "--text", "# Hi", "--folder", ID, "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--new-tags", "money,bills"]],
+  write_note: [["write", ID, "--base", "1", "--text", "# Hi", "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--new-tags", "money", "--on", "2026-10-11"]],
+  edit_note: [["edit", ID, "--base", "1", "--edits", '[{"from":1,"to":2,"text":"Hi"}]', "--write-id", "w1", "--link-titles", "keep", "--mention-names", "keep", "--new-tags", "money", "--on", "2026-10-11"]],
   backlinks: [["backlinks", ID]],
   rebuild_links: [["links-rebuild"]],
   list_todos: [["todos", "due:<today -tag:someday", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--assignee", "Sam Okafor", "--assigned-to-me", "true", "--completed", "true", "--archived", "true", "--note", ID, "--sort", "priority", "--limit", "5", "--after", "WzEsImEiXQ"]],
   todo_filters: [["todo-filters", "--archived", "true"]],
-  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--every", "2w", "--assign", "Sam Okafor", "--unassign", ID, "--on", "2026-10-11", "--words", "Call the bank #money"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w", "--skip", "true"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--state", "backlog"]],
+  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--every", "2w", "--assign", "Sam Okafor", "--unassign", ID, "--on", "2026-10-11", "--words", "Call the bank #money", "--new-tags", "money"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w", "--skip", "true"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--state", "backlog"]],
   todo_history: [["todo-history", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w"]],
   daily_note: [["daily", "--on", "2026-10-11"]],
   find_daily_note: [["daily-find", "--on", "2026-10-11"]],
@@ -74,6 +76,7 @@ const COMMANDS: Record<string, string[][]> = {
   find_folder: [["folder-find", "Projects/Skills"]],
   create_folder: [["folder-create", "Plans", "--parent", ID, "--if-exists", "error"]],
   rename_folder: [["folder-rename", ID, "--name", "Plans"]],
+  describe_folder: [["folder-describe", ID, "--description", "Plans for the house"]],
   move_folder: [["folder-move", ID, "--parent", ID]],
   delete_folder: [["folder-delete", ID]],
   note_history: [["history", ID]],
@@ -373,7 +376,7 @@ describe("what each argument is called", () => {
         expect(opArguments(tool, { [name]: ID }).fields, `${tool.name} ${name}`).toEqual({ ...tool.defaults, [field]: ID });
       }
     }
-    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(40);
+    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(41);
   });
 
   it("ends every description with an example call the tool takes as it stands", () => {

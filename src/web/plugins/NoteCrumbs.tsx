@@ -1,11 +1,14 @@
 import { useId, useRef, useState } from "react";
-import { Icon, type NoteSummary, type PluginHost, type ViewProps } from "../plugin-api.ts";
+import { Icon, draggableAs, type NoteSummary, type PluginHost, type ViewProps } from "../plugin-api.ts";
 import { matching } from "./lib/match.ts";
 import { openPopover } from "./lib/Popover.tsx";
 import { MOST_ROWS, crumbsOf, entriesOf, goLabel, type Crumb, type Entry } from "./noteCrumbs.ts";
 import { titleOf } from "./noteListView.ts";
 
 const GO = "go";
+
+/** A screen nothing rests on, as a touch screen is, where no card shows. */
+const hoverless = () => matchMedia("(hover: none)").matches;
 
 /** The list under a crumb: "Go to folder", then its subfolders and notes, narrowed by what is typed. Arrow keys move, Enter picks and Escape closes. */
 function CrumbList({ label, go, entries, onPick }: { label: string; go: string; entries: Entry[]; onPick: (id: string) => void }) {
@@ -94,13 +97,14 @@ export function NoteCrumbs({ app, host, note }: ViewProps & { host: PluginHost; 
       <ol>
         {crumbs.map((crumb) => (
           <li key={crumb.folderId}>
-            <button type="button" className="crumb" aria-haspopup="dialog" title={crumb.name} onClick={(e) => open(crumb, e.currentTarget)}>
+            {/* A folder's card names it whole where a pointer rests on it, so there a folder's crumb has no title. A touch screen shows no card, and every crumb keeps one. */}
+            <button type="button" className="crumb" aria-haspopup="dialog" {...(tree.byId.has(crumb.folderId) ? { "data-folder": crumb.folderId } : {})} title={hoverless() || !tree.byId.has(crumb.folderId) ? crumb.name : undefined} onClick={(e) => open(crumb, e.currentTarget)} {...draggableAs({ kind: "folder", id: crumb.folderId })}>
               {crumb.name}
             </button>
           </li>
         ))}
         <li aria-current="page">
-          <span className="crumb crumb-note" title={titleOf(note)}>
+          <span className="crumb crumb-note" title={titleOf(note)} {...draggableAs({ kind: "note", id: note.id })}>
             {titleOf(note)}
           </span>
         </li>

@@ -67,6 +67,9 @@ async function fold(page: Page, text: string | RegExp, within = editor(page)) {
 
 const TABLE = "# Stock\n\n| Name  | Qty |\n| ----- | --: |\n| Pens  | 12  |\n| Paper | 500 |\n\nAfter.";
 const OUTLINE = "# Trip\n\n- pack\n  - socks\n  - maps\n- book\n  - train\n- go\n\nAfter.";
+const MAC = process.platform === "darwin";
+/** The chords that move a bullet in and out: Option+→ and Option+← on a Mac, and with Shift elsewhere, where Alt+← and Alt+→ go back and forward. */
+const [RIGHT, LEFT] = MAC ? ["Alt+ArrowRight", "Alt+ArrowLeft"] : ["Alt+Shift+ArrowRight", "Alt+Shift+ArrowLeft"];
 
 test("markdown is drawn where it is written, only what the cursor is on shows its marks, and the note's text is never changed by it", async ({ page }) => {
   const text = "# Title\n\nSome **bold**, *italic*, ~~struck~~, `code` and a [link](https://example.com/a).\n\n## Section ##\n\n> quoted\n\n---\n\nPlain <b>html</b> <img src=x onerror=\"document.title='pwned'\"> stays.\n";
@@ -718,6 +721,112 @@ test("Tab and Shift+Tab indent and outdent a bullet with what is under it, and A
   await expect.poll(() => read(page, note.id)).toContain("  - maps\n  - go\n- book");
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => read(page, note.id)).toContain("  - maps\n- go\n- book");
+});
+
+test("Option+arrows move a bullet with what is under it up, down, in and out, and do nothing where the outline has no room for it", async ({ page }) => {
+  const text = "# Plan\n\n- a\n- b\n  - under b\n- c\n\nAfter.";
+  const note = await open(page, text);
+
+  await clickLine(page, /^\s*- b$/);
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n- c\n- b\n  - under b\n\nAfter.");
+  await page.keyboard.press("Alt+ArrowUp");
+  await expect.poll(() => read(page, note.id)).toBe(text);
+
+  await page.keyboard.press(RIGHT);
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n  - b\n    - under b\n- c\n\nAfter.");
+  // Two levels further in than the bullet above is refused: nothing changes, and the cursor stays at the end of its bullet, not a word along.
+  await page.keyboard.press(RIGHT);
+  await page.keyboard.type("!");
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n  - b!\n    - under b\n- c\n\nAfter.");
+  await page.keyboard.press("Backspace");
+
+  await page.keyboard.press(LEFT);
+  await expect.poll(() => read(page, note.id)).toBe(text);
+  // A bullet under nothing has nowhere further out to go.
+  await page.keyboard.press(LEFT);
+  await page.keyboard.type("?");
+  await expect.poll(() => read(page, note.id)).toBe(text.replace("- b\n", "- b?\n"));
+  await page.keyboard.press("Backspace");
+
+  // The first bullet of a list has nothing to go under.
+  await clickLine(page, /^\s*- a$/);
+  await page.keyboard.press(RIGHT);
+  await page.keyboard.type("!");
+  await expect.poll(() => read(page, note.id)).toBe(text.replace("- a\n", "- a!\n"));
+  expect(new Set(await authors(page, note.id))).toEqual(new Set(["member Ada Lovelace"]));
+});
+
+test("Option+arrows move the bullets a selection takes in together, and the selection goes with them", async ({ page }) => {
+  const note = await open(page, "# Plan\n\n- a\n- b\n- c\n- d");
+
+  await clickLine(page, /^\s*- b$/);
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n- d\n- b\n- c");
+  await page.keyboard.press(RIGHT);
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n- d\n  - b\n  - c");
+  await page.keyboard.press(LEFT);
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n- d\n- b\n- c");
+
+  // A selection of whole lines, which ends at the start of the line after them, goes with them, so the next press moves them again.
+  await clickLine(page, /^\s*- d$/);
+  await keys(page, "Home", "Shift+ArrowDown", "Shift+ArrowDown", "Alt+ArrowUp");
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- d\n- b\n- a\n- c");
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n- d\n- b\n- c");
+});
+
+test("a numbered list is numbered in order again after a bullet moves or goes in, and undo takes back the move and the numbers in one step", async ({ page }) => {
+  const text = "# Steps\n\n1. one\n2. two\n3. three\n4. four\n\nAfter.";
+  const note = await open(page, text);
+
+  await clickLine(page, "three");
+  await page.keyboard.press("Alt+ArrowUp");
+  await expect.poll(() => read(page, note.id)).toBe("# Steps\n\n1. one\n2. three\n3. two\n4. four\n\nAfter.");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => read(page, note.id)).toBe(text);
+
+  await clickLine(page, "three");
+  await page.keyboard.press(RIGHT);
+  await expect.poll(() => read(page, note.id)).toBe("# Steps\n\n1. one\n2. two\n   1. three\n3. four\n\nAfter.");
+  await page.keyboard.press(LEFT);
+  await expect.poll(() => read(page, note.id)).toBe(text);
+  await page.keyboard.press(RIGHT);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => read(page, note.id)).toBe(text);
+});
+
+test("Option+arrows off a list are the editor's own: in a paragraph they move the cursor by words", async ({ page }) => {
+  const text = "# Words\n\nsome plain words\n\n- a\n- b";
+  const note = await open(page, text);
+
+  await clickLine(page, "some plain words");
+  await page.keyboard.press("Home");
+  await page.keyboard.press(RIGHT);
+  if (MAC) {
+    await page.keyboard.type("!");
+    await expect.poll(() => read(page, note.id)).toBe(text.replace("some plain", "some! plain"));
+    await page.keyboard.press("Backspace");
+    await page.keyboard.press(LEFT);
+    await page.keyboard.type("^");
+    await expect.poll(() => read(page, note.id)).toBe(text.replace("some plain", "^some plain"));
+  } else await expect.poll(() => read(page, note.id)).toBe(text);
+});
+
+test("in vim's normal mode Option+arrows move a bullet and vim stays in normal mode", async ({ page }) => {
+  const text = "# Plan\n\n- a\n- b";
+  const note = await open(page, text, { "vim.enabled": true });
+
+  await clickLine(page, /^\s*- b$/);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press(RIGHT);
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n  - b");
+  await keys(page, "$", "x");
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- a\n  - ");
+  await page.keyboard.press("u");
+  await page.keyboard.press(LEFT);
+  await expect.poll(() => read(page, note.id)).toBe(text);
 });
 
 test("a bullet folds what is under it without changing the note, stays folded after a reload, and unfolds when asked", async ({ page }) => {

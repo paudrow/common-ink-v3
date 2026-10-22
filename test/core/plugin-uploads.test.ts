@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { matching } from "../../src/web/plugins/lib/match.ts";
 import { MINE, onlyMine, openable, reachWords, selectedIn, uploaderWords, uploadItem, uploadPath, withMine, writtenFor } from "../../src/web/plugins/uploads/finding.ts";
 import { droppedFiles, onItsOwnLine, pastedFiles, refusal } from "../../src/web/plugins/uploads/pasting.ts";
-import { boxFor, formatBytes, nearest, stepped, widthsIn } from "../../src/web/plugins/uploads/sizing.ts";
+import { shareIn, withShare } from "../../src/core/uploadRefs.ts";
+import { boxFor, dragged, formatBytes, reachOf, stepped } from "../../src/web/plugins/uploads/sizing.ts";
 import { referredUploads } from "../../src/web/referredUploads.ts";
 
 const ID = "abcdefgh1234";
@@ -24,6 +25,12 @@ describe("the room an upload's embed keeps", () => {
     expect(boxFor("image", `${ID} 640x480 full`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
   });
 
+  it("is a share of the column for a percent, at the same shape and no wider than the picture", () => {
+    expect(boxFor("image", `${ID} 640x480 42%`)).toEqual({ ratio: 640 / 480, maxWidth: 640, share: 0.42 });
+    expect(boxFor("video", `${ID} 640x360 7%`)).toEqual({ ratio: 16 / 9, maxWidth: 640, share: 0.07 });
+    expect(boxFor("image", `${ID} 640x480 100%`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
+  });
+
   it("is the whole column for a size it can't read, which is no error", () => {
     expect(boxFor("image", `${ID} 640x480 huge`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
     expect(boxFor("image", `${ID} 640x480 300`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
@@ -36,6 +43,17 @@ describe("the room an upload's embed keeps", () => {
     expect(boxFor("image", `${ID} small`)).toEqual({ ratio: 16 / 9, maxWidth: 480, share: 1 / 3 });
   });
 
+  it("is a cropped picture's crop: its shape, no wider than it, at its share of the column", () => {
+    expect(boxFor("image", `${ID} 1200x800 crop=120,40,800,600`)).toEqual({ ratio: 800 / 600, maxWidth: 800 });
+    expect(boxFor("image", `${ID} 1200x800 42% crop=0,0,400,800`)).toEqual({ ratio: 0.5, maxWidth: 400, share: 0.42 });
+    expect(boxFor("image", `${ID} 1200x800 crop=1000,0,800,800`)).toEqual({ ratio: 200 / 800, maxWidth: 200 });
+    expect(boxFor("image", `${ID} 1200x800 crop=0,0,1200,800`)).toEqual({ ratio: 1.5, maxWidth: 1200 });
+  });
+
+  it("is a video's whole size, which is never cropped", () => {
+    expect(boxFor("video", `${ID} 640x360 crop=0,0,100,100`)).toEqual({ ratio: 16 / 9, maxWidth: 640 });
+  });
+
   it("is a fixed height for a recording, whatever else its embed says, and nothing for a file", () => {
     expect(boxFor("audio", ID)).toEqual({ height: 56 });
     expect(boxFor("audio", `${ID} 640x480 small`)).toEqual({ height: 56 });
@@ -43,37 +61,83 @@ describe("the room an upload's embed keeps", () => {
   });
 });
 
-describe("the widths the size handle snaps to", () => {
-  it("are a third, a half, three quarters and all of the column, narrowest first", () => {
-    expect(widthsIn(600, 2000)).toEqual([
-      { word: "small", width: 200 },
-      { word: "medium", width: 300 },
-      { word: "large", width: 450 },
-      { word: "full", width: 600 },
-    ]);
+describe("a drag of the size handle", () => {
+  const wide = reachOf(600, 2000);
+  const written = (x: number, free = false, reach = wide) => withShare(`${ID} 2000x1000`, dragged(reach, x, free));
+
+  it("draws a picture any width it is dragged to, as a whole percent of the column", () => {
+    expect(written(252)).toBe(`${ID} 2000x1000 42%`);
+    expect(written(287)).toBe(`${ID} 2000x1000 48%`);
+    expect(written(410)).toBe(`${ID} 2000x1000 68%`);
   });
 
-  it("are never wider than the picture, and two words that draw it as wide are one width, the wider word's", () => {
-    expect(widthsIn(600, 320)).toEqual([
-      { word: "small", width: 200 },
-      { word: "medium", width: 300 },
-      { word: "full", width: 320 },
-    ]);
-    expect(widthsIn(600, 100)).toEqual([{ word: "full", width: 100 }]);
+  it("snaps to a size word's width within 12 pixels of it, unless free", () => {
+    expect(written(190)).toBe(`${ID} 2000x1000 small`);
+    expect(written(288)).toBe(`${ID} 2000x1000 medium`);
+    expect(written(461)).toBe(`${ID} 2000x1000 large`);
+    expect(written(589)).toBe(`${ID} 2000x1000`);
+    expect(written(290, true)).toBe(`${ID} 2000x1000 48%`);
+    expect(written(589, true)).toBe(`${ID} 2000x1000 98%`);
   });
 
-  it("snap a dragged width to the nearest", () => {
-    const widths = widthsIn(600, 2000);
-    expect([0, 240, 260, 380, 520, 530, 900].map((w) => nearest(widths, w))).toEqual(["small", "small", "medium", "large", "large", "full", "full"]);
+  it("is no narrower than a tenth of the column and no wider than the column", () => {
+    expect(written(0)).toBe(`${ID} 2000x1000 10%`);
+    expect(written(-40, true)).toBe(`${ID} 2000x1000 10%`);
+    expect(written(900)).toBe(`${ID} 2000x1000`);
   });
 
-  it("step one at a time from the width a word draws, and stop at either end", () => {
-    const widths = widthsIn(600, 320);
-    expect(stepped(widths, "small", 1)).toBe("medium");
-    expect(stepped(widths, "medium", 1)).toBe("full");
-    expect(stepped(widths, "large", -1)).toBe("medium");
-    expect(stepped(widths, "full", 1)).toBe("full");
-    expect(stepped(widths, "small", -1)).toBe("small");
+  it("is never wider than the picture, and at its own width is the whole column, which draws it as wide", () => {
+    const narrow = reachOf(600, 320);
+    expect(narrow.most).toBeCloseTo(0.5333, 4);
+    expect(written(250, false, narrow)).toBe(`${ID} 2000x1000 42%`);
+    expect(written(315, false, narrow)).toBe(`${ID} 2000x1000`);
+    expect(written(500, true, narrow)).toBe(`${ID} 2000x1000`);
+    expect(written(10, false, reachOf(600, 40))).toBe(`${ID} 2000x1000`);
+  });
+});
+
+describe("a step of the size handle from the keyboard", () => {
+  const wide = reachOf(600, 2000);
+
+  it("is a twentieth of the column, stopping at a third, and stays at either end", () => {
+    expect(stepped(wide, 1, -1)).toBe(0.95);
+    expect(stepped(wide, 0.5, -1)).toBe(0.45);
+    expect(stepped(wide, 0.42, 1)).toBe(0.45);
+    expect(stepped(wide, 0.37, -1)).toBe(0.35);
+    expect(stepped(wide, 0.35, -1)).toBe(1 / 3);
+    expect(stepped(wide, 1 / 3, -1)).toBe(0.3);
+    expect(stepped(wide, 0.3, 1)).toBe(1 / 3);
+    expect(stepped(wide, 0.95, 1)).toBe(1);
+    expect(stepped(wide, 1, 1)).toBe(1);
+    expect(stepped(wide, 0.1, -1)).toBe(0.1);
+  });
+
+  it("is a hundredth of the column when fine", () => {
+    expect(stepped(wide, 0.42, 1, true)).toBe(0.43);
+    expect(stepped(wide, 0.5, -1, true)).toBe(0.49);
+    expect(stepped(wide, 0.34, -1, true)).toBe(1 / 3);
+  });
+
+  it("goes on past a third a hundredth at a time, as the note writes each one back", () => {
+    const shares = [0.35];
+    for (let i = 0; i < 4; i++) shares.push(shareIn(withShare(ID, stepped(wide, shares.at(-1)!, -1, true))));
+    expect(shares).toEqual([0.35, 0.34, 1 / 3, 0.32, 0.31]);
+    const up = [0.31];
+    for (let i = 0; i < 4; i++) up.push(shareIn(withShare(ID, stepped(wide, up.at(-1)!, 1, true))));
+    expect(up).toEqual([0.31, 0.32, 1 / 3, 0.34, 0.35]);
+  });
+
+  it("steps a picture written with no size within the room kept for one, 480 pixels", () => {
+    const unsized = reachOf(600, 480);
+    expect(stepped(unsized, 1, -1)).toBe(0.75);
+    expect(stepped(unsized, 0.75, 1)).toBe(1);
+  });
+
+  it("goes no wider than the picture, where it is the whole column", () => {
+    const narrow = reachOf(600, 320);
+    expect(stepped(narrow, 0.5, 1)).toBe(1);
+    expect(stepped(narrow, 1, -1)).toBe(0.5);
+    expect(stepped(narrow, 0.6, -1)).toBe(0.5);
   });
 });
 

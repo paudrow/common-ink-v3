@@ -40,7 +40,7 @@ export interface Filter {
 
 export const KEYBOARD = { id: "keyboard", name: "Keyboard shortcuts" } as const;
 export const UNKNOWN = { id: "unknown", name: "Not recognized" } as const;
-/** Who is signed in, and signing out everywhere. It is the person's, in every workspace, and no setting. */
+/** Who is signed in, signing out everywhere, what the workspace's files take, an export, and deleting the account or the workspace. No setting is here. */
 export const ACCOUNT = { id: "account", name: "Account" } as const;
 const GENERAL = { id: "general", name: "General" };
 

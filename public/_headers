@@ -1,6 +1,7 @@
 # The built files under /assets/ are served without the Worker (run_worker_first in wrangler.jsonc),
 # so they are given here what src/worker/headers.ts gives every other response: nosniff, the referrer
 # rule, and the policy of what runs and draws nothing. Each one's name carries a hash of what it holds,
+# or its path the version it came with, as Excalidraw's fonts under /assets/excalidraw-<version>/ do,
 # so a browser keeps it for a year and never asks again. test/core/headers.test.ts holds the two in step.
 /assets/*
   X-Content-Type-Options: nosniff

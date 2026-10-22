@@ -26,6 +26,7 @@ export interface Io {
 export const USAGE = `Usage: ink [--workspace ID] <command>
 
   workspaces                          the workspaces you can reach
+  agents-file                         the workspace's agents file: how it is organized, as its admins and editors wrote
   members                             everyone in a workspace, with their role
   plugins                             the plugins installed in a workspace, and what each is permitted
   plugin-new NAME [--out DIR]         a new plugin's manifest and code to start from, written to
@@ -54,8 +55,10 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       folder:Plans, #tag, editor:@me, updated:>=7d, is:archived, has:link,
                                       with -, OR, NOT and ( ). "ink syntax" lists every one. --today and
                                       --zone are this machine's unless given
-  tags [--archived true] [--limit N] [--after NEXT]
-                                      the tags of the notes you can see, and how many notes have each
+  tags [--name NAME] [--archived true] [--limit N] [--after NEXT]
+                                      the tags of the notes you can see, how many notes have each, and when to use it
+  tag-describe NAME --description TEXT
+                                      say when to use a tag, as your member asked; an empty TEXT takes it away
   archive ID                          archive a note: kept, and left out of listings
   unarchive ID                        bring an archived note back
   trash ID                            move a note to Trash, where it waits 30 days
@@ -65,11 +68,11 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       a note's markdown, and the titles of the notes it links to. --from and --to
                                       read only those lines, and --numbered puts each line's number first, both
                                       counted as edit counts them
-  create [--text TEXT] [--folder ID] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep]
+  create [--text TEXT] [--folder ID] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--new-tags NAME,NAME]
                                       a new note (text from stdin if --text is left out). The same --write-id again returns the first note
-  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--on DAY]
+  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--new-tags NAME,NAME] [--on DAY]
                                       replace a note's text (from stdin if --text is left out)
-  edit ID --base N (--edits JSON | --from N --to N --text TEXT) [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--on DAY]
+  edit ID --base N (--edits JSON | --from N --to N --text TEXT) [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--new-tags NAME,NAME] [--on DAY]
                                       change lines of a note and leave the rest. Lines are counted from 0 in the
                                       revision you read: --from is included, --to is not, so they are equal to
                                       insert and an empty --text deletes. --edits is a JSON list of {from, to, text}
@@ -86,7 +89,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   todo-filters [--archived true]      the tags and assignees that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--state STATE] [--importance N] [--due DAY|none] [--words TEXT]
         [--every RULE|none] [--skip true] [--assign WHO]
-        [--unassign WHO] [--on DAY]
+        [--unassign WHO] [--on DAY] [--new-tags NAME,NAME]
                                       check a todo off, abandon it, put it in the backlog, change it, or
                                       skip a repeating todo to its next due date; STATE is open, done,
                                       abandoned or backlog, and --done true|false is open or done;
@@ -138,6 +141,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       a new folder; with one of that name there already, ignoring case,
                                       prints that one with "created": false, or refuses with --if-exists error
   folder-rename ID --name NAME        give a folder another name
+  folder-describe ID --description TEXT
+                                      say what goes in a folder, as your member asked; an empty TEXT takes it away
   folder-move ID [--parent ID]        put a folder inside another, or at the top level without --parent
   folder-delete ID                    delete an empty folder
   history ID                          a note's changes and who made them
@@ -203,6 +208,9 @@ A mention of a person is @[[ID|Name]] for a member, with ids from members, or @[
 else. Write @[[Name]] for a member and create and write store it by their id, or refuse when several
 members have the name. --mention-names keep leaves every mention as written. On a todo's line a
 mention assigns the todo. WHO is a member's id or a name. A mention gives nobody access.
+
+A #tag tags the note it is in. Use the tags that tags lists: create, write, edit and todo refuse a tag
+no note you can see has, unless --new-tags names it, which is for a new tag your member asked for.
 
 A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
 Its box says its state: [ ] open, [x] done, [-] abandoned, [>] backlog.
@@ -585,6 +593,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "workspaces":
         tool = "list_workspaces";
         break;
+      case "agents-file":
+        tool = "read_agents_file";
+        break;
       case "members":
         tool = "list_members";
         break;
@@ -645,7 +656,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "tags":
         tool = "list_tags";
-        args = given({ includeArchived: ["archived", truth], limit: ["limit", integer], after: ["after"] });
+        args = given({ name: ["name"], includeArchived: ["archived", truth], limit: ["limit", integer], after: ["after"] });
+        break;
+      case "tag-describe":
+        tool = "describe_tag";
+        args = { name: need("the tag to describe"), description: needFlag("description") };
         break;
       case "archive":
       case "unarchive":
@@ -672,12 +687,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "create":
         tool = "create_note";
-        args = { text: flags.get("text") ?? (await io.stdin()), ...given({ folderId: ["folder"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], writeId: ["write-id"] }) };
+        args = { text: flags.get("text") ?? (await io.stdin()), ...given({ folderId: ["folder"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], newTags: ["new-tags", ids], writeId: ["write-id"] }) };
         break;
       case "write":
         if (!flags.has("base")) throw new UsageError("write needs --base, the revision you read");
         tool = "write_note";
-        args = { noteId: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], on: ["on"] }) };
+        args = { noteId: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], newTags: ["new-tags", ids], on: ["on"] }) };
         break;
       case "edit": {
         if (!flags.has("base")) throw new UsageError("edit needs --base, the revision you read");
@@ -687,7 +702,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         if (ranged && !(flags.has("from") && flags.has("to") && flags.has("text"))) throw new UsageError("edit needs --from, --to and --text together");
         const edits = listed ? json("--edits", flags.get("edits")!) : [{ from: integer("--from", flags.get("from")!), to: integer("--to", flags.get("to")!), text: flags.get("text")! }];
         tool = "edit_note";
-        args = { noteId: needId(), baseRevision: integer("--base", flags.get("base")!), edits, ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], on: ["on"] }) };
+        args = { noteId: needId(), baseRevision: integer("--base", flags.get("base")!), edits, ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], newTags: ["new-tags", ids], on: ["on"] }) };
         break;
       }
       case "backlinks":
@@ -734,7 +749,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           revision: integer("--revision", flags.get("revision")!),
           line: integer("--line", flags.get("line")!),
           text: flags.get("text")!,
-          ...given({ state: ["state"], done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], every: ["every", (_, value) => (value === "none" ? null : value)], skip: ["skip", truth], assign: ["assign"], unassign: ["unassign"], on: ["on"], words: ["words"] }),
+          ...given({ state: ["state"], done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], every: ["every", (_, value) => (value === "none" ? null : value)], skip: ["skip", truth], assign: ["assign"], unassign: ["unassign"], on: ["on"], words: ["words"], newTags: ["new-tags", ids] }),
         };
         break;
       case "todo-history":
@@ -831,6 +846,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "folder-rename":
         tool = "rename_folder";
         args = { folderId: need("a folder id"), name: needFlag("name") };
+        break;
+      case "folder-describe":
+        tool = "describe_folder";
+        args = { folderId: need("a folder id"), description: needFlag("description") };
         break;
       case "folder-move":
         tool = "move_folder";

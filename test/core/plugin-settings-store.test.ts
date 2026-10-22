@@ -135,6 +135,37 @@ describe("the settings store", () => {
     expect(remote.text()).toBe('{ "a":1,\n\n  "b": [ 2 ] }');
   });
 
+  it("keeps JSON typed that isn't an object as a draft, saves nothing of it, and saves the text once it is one", async () => {
+    const remote = server('{"a": 1}');
+    const store = createSettingsStore(remote.api);
+    expect(store.type('{"a": 2}')).toBe(false);
+    expect(store.draft()).toBe(null);
+    await store.load();
+
+    expect(store.type('{"a": 2,')).toBe(true);
+    await settle();
+    expect([store.draft(), store.text(), remote.text()]).toEqual(['{"a": 2,', '{"a": 1}', '{"a": 1}']);
+    expect(store.type("[2]")).toBe(true);
+    expect(store.draft()).toBe("[2]");
+
+    expect(store.type('{"a": 2, "b": true}')).toBe(true);
+    await settle();
+    expect([store.draft(), store.text(), remote.text()]).toEqual([null, '{"a": 2, "b": true}', '{"a": 2, "b": true}']);
+  });
+
+  it("tells who listens when a draft comes and when it goes, though the text it goes back to is the one saved", async () => {
+    const remote = server('{"a": 1}');
+    const store = await loaded(remote);
+    const drafts: (string | null)[] = [];
+    store.subscribe(() => drafts.push(store.draft()));
+
+    store.type('{"a"');
+    store.type('{"a": 1}');
+    await settle();
+    expect(drafts).toEqual(['{"a"', null]);
+    expect(remote.control.writes).toEqual([]);
+  });
+
   it("sends what isn't saved at once when the page is going away, and the newer write stands whichever arrives first", async () => {
     for (const first of ["older", "newer"]) {
       const remote = server();

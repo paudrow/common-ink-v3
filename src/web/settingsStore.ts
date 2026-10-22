@@ -27,6 +27,10 @@ export interface SettingsStore {
   set(key: string, value: SettingValue | undefined): boolean;
   /** Replaces the whole text, which must be a JSON object. False when the change was refused. */
   replace(text: string): boolean;
+  /** What the member typed in the settings JSON that isn't a JSON object yet, or null. It is kept here unsaved, and the settings stay as they were until it is one. */
+  draft(): string | null;
+  /** Takes the settings JSON as the member typed it: saved in place of the text when it is a JSON object, and kept as the draft when it isn't. False before the stored settings are read. */
+  type(text: string): boolean;
   /** Sends what isn't saved now, in place of the write in flight. For when the page is going away. */
   flush(): void;
   /** Reads the document again, for a change made in another browser. Changes made here are put back over it. */
@@ -72,6 +76,7 @@ export function createSettingsStore(server: SettingsServer): SettingsStore {
   /** The changes in `text` that `base` doesn't have, oldest first. */
   let pending: Edit[] = [];
   let loaded = false;
+  let draft: string | null = null;
   let status: SettingsStatus = { kind: "loading" };
   /** The write in flight whose answer is still wanted. A write that took its place is the one here. */
   let sending: { id: string; text: string; count: number } | null = null;
@@ -156,12 +161,22 @@ export function createSettingsStore(server: SettingsServer): SettingsStore {
     }
   }
 
+  function replace(next: string) {
+    const before = documentOf(text) ?? {};
+    const after = documentOf(next);
+    if (!after) return false;
+    const set = Object.keys(after).filter((key) => !sameValue(before[key], after[key]));
+    const gone = Object.keys(before).filter((key) => !Object.hasOwn(after, key));
+    return change(next, [...set.map((key) => ({ key, value: after[key] })), ...gone.map((key) => ({ key, value: undefined }))]);
+  }
+
   return {
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     text: () => text,
+    draft: () => draft,
     status: () => status,
     load,
     set(key, value) {
@@ -169,13 +184,13 @@ export function createSettingsStore(server: SettingsServer): SettingsStore {
       if (value === undefined ? !Object.hasOwn(document, key) : sameValue(document[key], value)) return loaded;
       return change(editSetting(text, key, value), [{ key, value }]);
     },
-    replace(next) {
-      const before = documentOf(text) ?? {};
-      const after = documentOf(next);
-      if (!after) return false;
-      const set = Object.keys(after).filter((key) => !sameValue(before[key], after[key]));
-      const gone = Object.keys(before).filter((key) => !Object.hasOwn(after, key));
-      return change(next, [...set.map((key) => ({ key, value: after[key] })), ...gone.map((key) => ({ key, value: undefined }))]);
+    replace,
+    type(next) {
+      if (!loaded) return false;
+      const was = draft;
+      draft = replace(next) ? null : next;
+      if (draft !== was) tell();
+      return true;
     },
     flush() {
       if (loaded && text !== base.text && sending?.text !== text) save(sending?.id);
