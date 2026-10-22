@@ -56,9 +56,11 @@ export function perform<T extends OpInput>(page: Page, op: T, workspaceId?: stri
   ) as Promise<Results[T["type"]]>;
 }
 
+/** What the built Worker answers for a request it dropped: a 500 whose body is miniflare's own words, not the Worker's JSON. */
+export const DROPPED = { status: 500, contentType: "text/plain", body: "Error: Network connection lost." };
+
 /**
- * Answers the first `times` operations of `type` the page sends as the built Worker answers a request it
- * dropped: a 500 whose body is miniflare's own words, not the Worker's JSON. The rest go through. `dropped` counts those answered so.
+ * Answers the first `times` operations of `type` the page sends as `DROPPED`. The rest go through. `dropped` counts those answered so.
  * `handled` resolves once the page has had the last of those answers and drawn two frames since, so what it made of them is on the page.
  */
 export async function dropFirst(page: Page, type: string, times = 1) {
@@ -79,7 +81,7 @@ export async function dropFirst(page: Page, type: string, times = 1) {
     if (sent.dropped >= times || (route.request().postDataJSON() as { type?: string }).type !== type) return route.fallback();
     sent.dropped++;
     answers.add(route.request());
-    return route.fulfill({ status: 500, contentType: "text/plain", body: "Error: Network connection lost." });
+    return route.fulfill(DROPPED);
   });
   return sent;
 }

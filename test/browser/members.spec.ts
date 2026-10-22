@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { anotherPerson, join, listedNotes, me, newEmail, openAllNotes, openKept, ownPlugin, perform, signInAs, signInAsNewPerson, test } from "./helpers.ts";
+import { anotherPerson, DROPPED, join, listedNotes, me, newEmail, openAllNotes, openKept, ownPlugin, perform, signInAs, signInAsNewPerson, test } from "./helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
 const membersPage = (page: Page) => page.getByRole("region", { name: "Members" });
@@ -221,6 +221,44 @@ test("an invite's link lets in only the invited email, and nobody once it is rev
   await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
 });
 
+test("an invite's link that can't be checked for a moment says so, not that it doesn't let you in, and Try again checks it", async ({ page, browser }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const email = newEmail();
+  const { invite: made } = await perform(page, { type: "member.invite", email, as: "editor" });
+  const grace = await (await browser.newContext({ baseURL: test.info().project.use.baseURL })).newPage();
+  let lookups = 0;
+  await grace.route("**/api/invites/*", (route) => (++lookups === 1 ? route.fulfill(DROPPED) : route.fallback()));
+
+  await signInAs(grace, email, "Grace Hopper", `/invite/${made!.id}`);
+
+  const unchecked = grace.getByRole("alert").filter({ hasText: "Couldn't check this invite" });
+  await expect(unchecked).toBeVisible();
+  await expect(grace.getByText("This invite doesn't let you in")).toHaveCount(0);
+  await unchecked.getByRole("button", { name: "Try again" }).click();
+  await expect(workspaceButton(grace)).toHaveText("Ada's workspaceEditor");
+  await expect(grace).toHaveURL(/\/$/);
+  expect(lookups).toBe(2);
+});
+
+test("an invite's link whose lookup is refused for a moment, as too many requests, says it couldn't be checked, not that it doesn't let you in", async ({ page, browser }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const email = newEmail();
+  const { invite: made } = await perform(page, { type: "member.invite", email, as: "editor" });
+  const grace = await (await browser.newContext({ baseURL: test.info().project.use.baseURL })).newPage();
+  let lookups = 0;
+  const busy = { status: 429, contentType: "application/json", body: JSON.stringify({ error: "rate_limited", message: "Too many requests" }) };
+  await grace.route("**/api/invites/*", (route) => (++lookups === 1 ? route.fulfill(busy) : route.fallback()));
+
+  await signInAs(grace, email, "Grace Hopper", `/invite/${made!.id}`);
+
+  const unchecked = grace.getByRole("alert").filter({ hasText: "Couldn't check this invite" });
+  await expect(unchecked).toBeVisible();
+  await expect(grace.getByText("This invite doesn't let you in")).toHaveCount(0);
+  await unchecked.getByRole("button", { name: "Try again" }).click();
+  await expect(workspaceButton(grace)).toHaveText("Ada's workspaceEditor");
+  expect(lookups).toBe(2);
+});
+
 test("inviting an email twice keeps one invite, and inviting a member changes their role", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const grace = await anotherPerson(page, "Grace Hopper");
@@ -331,6 +369,21 @@ test("a note's address opens it in the workspace it is in, whichever was open, a
   await expect(tabs(page)).toHaveText(["Team plan"]);
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Team plan"]);
+});
+
+test("a note's address that can't be looked up for a moment is looked up again when it is next opened", async ({ page }) => {
+  const { team } = await inTwoWorkspaces(page);
+  let lookups = 0;
+  await page.route(`**/api/notes/${team.id}`, (route) => (++lookups === 1 ? route.fulfill(DROPPED) : route.fallback()));
+
+  await page.goto(`/note/${team.id}`);
+  await expect(workspaceButton(page), "with no answer, the chosen workspace shows what it can").toHaveText("Grace's workspaceAdmin");
+  await openAllNotes(page);
+  await page.goBack();
+
+  await expect(workspaceButton(page)).toHaveText("Ada's workspaceEditor");
+  await expect(editor(page)).toContainText("Shared.");
+  expect(lookups).toBe(2);
 });
 
 test("the address of a note in a workspace the person isn't in shows what the address of no note shows, and opens nothing", async ({ page }) => {
