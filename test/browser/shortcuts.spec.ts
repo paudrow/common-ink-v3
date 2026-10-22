@@ -165,3 +165,38 @@ test("the sheet opened over the query help is pressed in without closing the hel
   await expect(help).toHaveCount(0);
   await expect(helpButton).toBeFocused();
 });
+
+test("the command palette and the keyboard shortcuts closed with Escape give the keyboard back to the note where it was, leaving the note scrolled as it was", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const lines = Array.from({ length: 120 }, (_, i) => `Line ${i + 1} of the note`);
+  const note = await perform(page, { type: "note.create", text: `# Long\n\n${lines.join("\n\n")}\n` });
+  await page.goto(`/note/${note.id}`);
+  await expect(editor(page)).toContainText("Line 1 of");
+  const scroller = page.locator(".note-scroll");
+  const scrolled = () => scroller.evaluate((el) => Math.round(el.scrollTop));
+  await scroller.evaluate((el) => (el.scrollTop = el.scrollHeight / 2));
+  const line = page.locator(".cm-line").filter({ hasText: /^Line 60 of the note/ });
+  await line.click();
+  const top = await scrolled();
+  expect(top).toBeGreaterThan(500);
+
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  const palette = page.getByRole("dialog", { name: "Commands" });
+  await expect(palette).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(palette).toHaveCount(0);
+  await expect(editor(page)).toBeFocused();
+  expect(await scrolled()).toBe(top);
+  // Typing goes in where the cursor was, and nothing moves to show it.
+  await page.keyboard.type("!");
+  await expect(line).toHaveText("Line 60 of the note!");
+  expect(await scrolled()).toBe(top);
+
+  // The keyboard shortcuts, opened from the palette, give it back the same way.
+  await runCommand(page, "Keyboard shortcuts");
+  await expect(sheet(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(editor(page)).toBeFocused();
+  expect(await scrolled()).toBe(top);
+});

@@ -26,7 +26,8 @@ export function HelpOverlay({ title, onClose, children }: Props) {
     return () => {
       // While it is still open as a modal the rest of the page can't take focus.
       modal.close();
-      if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
+      // Back where it was, with whatever it is in scrolled as it was: a note's editor would otherwise be scrolled to its top.
+      if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
     };
   }, []);
 
