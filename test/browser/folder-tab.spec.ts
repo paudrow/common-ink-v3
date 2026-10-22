@@ -74,6 +74,9 @@ test("there is one italic preview tab: the next thing opened takes its place, a 
   // A folder from the tree takes the note's place.
   await folderRow(page, "Projects").click();
   await shows(["Projects"], 0);
+  // A pointer resting on the folder's row shows its card beside it, over Plan's Edit; it leaves the row for the list.
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
   await editOf(page, "Plan").click();
   await shows(["Plan"], 0);
   await expect(folderRow(page, "Projects")).toHaveAttribute("aria-selected", "true");
