@@ -315,7 +315,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-test("a task has no dot beside its box, nothing is drawn beside a bullet with things under it, and a plain bullet keeps its dot", async ({ page }) => {
+test("a task has no dot beside its box, nothing but its disclosure is drawn beside a bullet with things under it, and a plain bullet keeps its dot", async ({ page }) => {
   await open(page, DEPTHS.replace("- Plain bullet", "- Plain bullet\n> - [ ] Quoted task\n- - [ ] Inner task"));
   const marks = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")]
@@ -325,7 +325,7 @@ test("a task has no dot beside its box, nothing is drawn beside a bullet with th
         return {
           line: line.textContent!.trimStart(),
           painted: mark ? getComputedStyle(mark, "::before").content !== "none" || getComputedStyle(mark).webkitTextFillColor !== "rgba(0, 0, 0, 0)" : null,
-          beside: line.querySelectorAll("[role=button]").length,
+          beside: line.querySelectorAll("[role=button]:not(.bullet-disclosure)").length,
         };
       }),
   );

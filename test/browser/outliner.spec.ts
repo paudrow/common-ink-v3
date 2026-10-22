@@ -58,3 +58,55 @@ test("a key selects a bullet with everything under it, and again the bullet it i
   await page.keyboard.type("!");
   await expect.poll(() => read(page, note.id)).toBe("# Trip\n\n\n- book\n  - train\n- go\n\nAfter.!");
 });
+
+test("a bullet's disclosure folds and unfolds it, the fold is kept for the next visit, and all the bullets fold and unfold at once", async ({ page }) => {
+  const note = await open(page, OUTLINE);
+
+  // The disclosure is drawn out in the margin: the line says what it said.
+  await expect(line(page, "pack").getByRole("button", { name: "Fold" })).toHaveCount(1);
+  await expect(line(page, "go").getByRole("button")).toHaveCount(0);
+  await expect(line(page, "pack")).toHaveText("- pack");
+
+  // A cursor in what a click folds goes to the end of the bullet's line, so the fold stays shut.
+  await clickLine(page, "wool");
+  await line(page, "pack").hover();
+  await line(page, "pack").getByRole("button", { name: "Fold" }).click();
+  await expect(editor(page)).not.toContainText("socks");
+  await page.keyboard.type("!");
+  await expect.poll(() => read(page, note.id)).toBe(OUTLINE.replace("- pack", "- pack!"));
+  await page.keyboard.press("Backspace");
+
+  await page.reload();
+  await expect(editor(page)).not.toContainText("socks");
+  await line(page, "pack").getByRole("button", { name: "Unfold" }).first().click();
+  await expect(editor(page)).toContainText("wool");
+
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Commands" }).fill("Fold all bullets");
+  await page.keyboard.press("Enter");
+  await expect(editor(page)).not.toContainText("socks");
+  await expect(editor(page)).not.toContainText("train");
+  await expect(editor(page)).toContainText("go");
+
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Commands" }).fill("Unfold all bullets");
+  await page.keyboard.press("Enter");
+  await expect(editor(page)).toContainText("wool");
+  await expect(editor(page)).toContainText("train");
+  await expect.poll(() => read(page, note.id)).toBe(OUTLINE);
+});
+
+test("bullets fold all at once from the palette straight after a reload, before anything is typed or clicked", async ({ page }) => {
+  await open(page, OUTLINE);
+  await clickLine(page, "go");
+  await page.reload();
+  await expect(editor(page)).toContainText("socks");
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Commands" }).fill("Fold all bullets");
+  await page.keyboard.press("Enter");
+  await expect(editor(page)).not.toContainText("socks");
+  await expect(editor(page)).not.toContainText("train");
+});

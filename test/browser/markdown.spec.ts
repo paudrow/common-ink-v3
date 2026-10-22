@@ -56,7 +56,7 @@ async function clickLine(page: Page, text: string | RegExp) {
   await page.mouse.click(box.x + box.width - 3, box.y + box.height / 2);
 }
 
-/** Folds the bullet on the first line in `within` that says `text` with the key, the cursor at that line's end. Nothing is drawn to click for it. */
+/** Folds the bullet on the first line in `within` that says `text` with the key, the cursor at that line's end. */
 async function fold(page: Page, text: string | RegExp, within = editor(page)) {
   const at = within.locator(".cm-line").filter({ hasText: text }).first();
   const box = (await at.boundingBox())!;
@@ -832,9 +832,9 @@ test("in vim's normal mode Option+arrows move a bullet and vim stays in normal m
 test("a bullet folds what is under it without changing the note, stays folded after a reload, and unfolds when asked", async ({ page }) => {
   const note = await open(page, OUTLINE);
 
-  // Nothing is drawn beside a bullet that has something under it: its key folds it.
+  // A bullet that has something under it has a disclosure out in the margin, which is no letter of its line.
   await expectShown(line(page, "pack"), /^\s*pack$/);
-  await expect(editor(page).getByRole("button")).toHaveCount(0);
+  await expect(editor(page).getByRole("button", { name: "Fold" })).toHaveCount(2);
   await expectShown(line(page, "go"), /^\s*go$/);
   await expect(line(page, "go").locator(".bullet-dot")).toHaveCount(1);
   await fold(page, "pack");

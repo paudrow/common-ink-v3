@@ -59,6 +59,13 @@ export function itemAt(lines: Lines, n: number): Item | null {
   return { line: n, end, indent, inside: indent + match[2]!.length + 1 };
 }
 
+/** Whether the list item on line `n` has anything under it, found from the next line written, so a bullet over a long list is as quick to ask about as one over nothing. */
+export function hasUnder(lines: Lines, n: number) {
+  const indent = indentOf(lines.at(n));
+  for (let m = n + 1; m < lines.count; m++) if (!blank(lines.at(m))) return indentOf(lines.at(m)) > indent;
+  return false;
+}
+
 /** The item before this one in the same list, at the same depth. */
 function before(lines: Lines, item: Item): Item | null {
   for (let n = item.line - 1; n >= 0; n--) {

@@ -14,12 +14,23 @@ const read = async (page: Page, id: string) => (await perform(page, { type: "not
 
 const LISTS = "# Plan\n\n- Bake\n  - Preheat\n  - Mix\n- Shop\n  - Flour\n- Clean\n\n1. One\n2. Two\n3. Three\n\nAfter.";
 
+/** Where the mark of the line that says `text` is painted: a list lines a bullet's dot up with a task's box, further into the mark than its letter. */
+const markAt = (page: Page, text: string | RegExp) =>
+  line(page, text)
+    .locator(".bullet-dot, .bullet-number")
+    .first()
+    .evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const dot = el.classList.contains("bullet-dot") ? getComputedStyle(el, "::before") : null;
+      return { x: dot ? box.x + parseFloat(dot.left) + parseFloat(dot.width) / 2 : box.x + box.width / 2, y: box.y + box.height / 2 };
+    });
+
 /** Presses on the mark of the line that says `from`, and lets go over the line that says `to`: in its upper half, its lower half, or its lower half past the start of its text. */
 async function drag(page: Page, from: string | RegExp, to: string | RegExp, where: "above" | "below" | "under") {
-  const mark = (await line(page, from).locator(".bullet-dot, .bullet-number").first().boundingBox())!;
+  const mark = await markAt(page, from);
   const target = (await line(page, to).boundingBox())!;
   const its = (await line(page, to).locator(".bullet-dot, .bullet-number").first().boundingBox())!;
-  await page.mouse.move(mark.x + mark.width / 2, mark.y + mark.height / 2);
+  await page.mouse.move(mark.x, mark.y);
   await page.mouse.down();
   const x = where === "under" ? its.x + 80 : its.x + 20;
   const y = where === "above" ? target.y + target.height * 0.25 : target.y + target.height * 0.75;
@@ -57,17 +68,17 @@ test("a bullet isn't dropped among its own lines, Escape leaves it where it was,
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Plan");
 
-  const mark = (await line(page, /^\s*- Bake$/).locator(".bullet-dot").boundingBox())!;
+  const mark = await markAt(page, /^\s*- Bake$/);
   const into = (await line(page, "Mix").boundingBox())!;
-  await page.mouse.move(mark.x + 2, mark.y + mark.height / 2);
+  await page.mouse.move(mark.x, mark.y);
   await page.mouse.down();
   await page.mouse.move(into.x + 40, into.y + into.height / 2, { steps: 6 });
   await expect(page.locator(".bullet-drop")).toHaveCount(0);
   await page.mouse.up();
 
-  const shop = (await line(page, "Shop").locator(".bullet-dot").boundingBox())!;
+  const shop = await markAt(page, "Shop");
   const clean = (await line(page, "Clean").boundingBox())!;
-  await page.mouse.move(shop.x + 2, shop.y + shop.height / 2);
+  await page.mouse.move(shop.x, shop.y);
   await page.mouse.down();
   await page.mouse.move(clean.x + 20, clean.y + clean.height * 0.75, { steps: 6 });
   await expect(page.locator(".bullet-drop")).toHaveCount(1);
@@ -75,7 +86,7 @@ test("a bullet isn't dropped among its own lines, Escape leaves it where it was,
   await expect(page.locator(".bullet-drop")).toHaveCount(0);
   await page.mouse.up();
 
-  await page.mouse.click(shop.x + 2, shop.y + shop.height / 2);
+  await page.mouse.click(shop.x, shop.y);
   await page.keyboard.press("End");
   await page.keyboard.type("!");
   await expect.poll(() => read(page, note.id)).toBe(LISTS.replace("- Shop", "- Shop!"));
@@ -91,8 +102,8 @@ test("a bullet goes under another past that bullet's own text, and a bullet in a
   await drag(page, /^\s*- B$/, /^\s*- A$/, "below");
   await expect.poll(() => read(page, note.id)).toBe("# Notes\n\n- A\n  said more\n  - B\n  - child\n\n> - quoted\n> - also");
 
-  const quoted = (await line(page, "quoted").locator(".bullet-dot").boundingBox())!;
-  await page.mouse.move(quoted.x + 2, quoted.y + quoted.height / 2);
+  const quoted = await markAt(page, "quoted");
+  await page.mouse.move(quoted.x, quoted.y);
   await page.mouse.down();
   await page.mouse.move(quoted.x + 10, quoted.y + 40, { steps: 6 });
   await page.mouse.up();
