@@ -1042,7 +1042,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   // Back and Forward arrive without going through `navigate`.
   useEffect(() => setSidebarInFront(false), [place.path, place.query]);
   useLayoutEffect(() => host.deviceChanged({ phone: device.phone, touch: device.touch, keyboard: device.keyboard }), [host, device.phone, device.touch, device.keyboard]);
-  useEffect(() => host.notesChanged(), [host, notes]);
+  // A folder renamed changes how a link to it reads, as a note renamed does.
+  useEffect(() => host.notesChanged(), [host, notes, tree]);
 
   const actions = useLatest({
     go,

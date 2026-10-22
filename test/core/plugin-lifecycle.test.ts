@@ -147,5 +147,7 @@ describe("what a link reads as", () => {
   it("has one wording for a note that is gone, never was, or is hidden, and waits while notes are listed", () => {
     expect(linkWords(null, null, "Ctrl")).toEqual({ text: "Unavailable note", suffix: "", hint: "This note doesn't exist, or you can't see it.", gone: true });
     expect(linkWords(undefined, null, "Ctrl")).toEqual({ text: "…", suffix: "", hint: "", gone: false });
+    expect(linkWords({ title: "Drafts", state: "live" }, null, "Click to open", "folder")).toEqual({ text: "Drafts", suffix: "", hint: "The folder Drafts\nClick to open", gone: false });
+    expect(linkWords(null, null, "Ctrl", "folder")).toEqual({ text: "Unavailable folder", suffix: "", hint: "This folder doesn't exist, or you can't see it.", gone: true });
   });
 });

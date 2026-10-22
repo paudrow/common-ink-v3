@@ -10,6 +10,29 @@ const backlinks = async (actor: Actor, id: string) => (await perform(env.DB, act
 const recorded = async (sourceId: string) => (await env.DB.prepare("SELECT target_id FROM links WHERE source_id = ? ORDER BY target_id").bind(sourceId).all<{ target_id: string }>()).results.map((r) => r.target_id);
 
 describe("a link", () => {
+  it("to a folder is the folder's, left as written however strict the write, and is nobody's backlink", async () => {
+    const ada = await newMember();
+    const { folderId } = await create(ada, "# Somewhere");
+    const text = `# Diary\n\nSee [[folder:${folderId}]] and [[folder:${folderId}|the drafts]].`;
+    const made = await strict(ada, text);
+
+    expect(made.text).toBe(text);
+    expect(made).not.toHaveProperty("unresolved");
+    expect(await recorded(made.id)).toEqual([]);
+  });
+
+  it("to a folder stays as written beside a link by title in the same write, which is stored by id", async () => {
+    const ada = await newMember();
+    const plan = await create(ada, "# Plan");
+    const folder = `[[folder:${plan.folderId}]]`;
+    const made = await strict(ada, `# Diary\n\n${folder} and [[Plan]]`);
+    const loose = await create(ada, `# Notes\n\n${folder} and [[Plan]] and [[Nowhere]]`);
+
+    expect(made.text).toBe(`# Diary\n\n${folder} and [[${plan.id}]]`);
+    expect(loose.text).toBe(`# Notes\n\n${folder} and [[${plan.id}]] and [[Nowhere]]`);
+    expect(loose.unresolved).toEqual([{ target: "Nowhere", matches: [] }]);
+  });
+
   it("is stored by its note's id, so it reads the note's new title after a rename with the linking note untouched", async () => {
     const ada = await newMember();
     const plan = await create(ada, "# Plan");

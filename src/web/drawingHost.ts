@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import type { NoteSummary, Results } from "../core/protocol.ts";
 import { readUpload } from "./api.ts";
 import { usable } from "./editorExtensions.ts";
+import { folderTree } from "./folders.ts";
 import type { App, Plugin } from "./plugin-api.ts";
 import { createPluginHost } from "./pluginHost.ts";
 import { bullets } from "./plugins/bullets/index.ts";
@@ -30,6 +31,8 @@ const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, uploadDrawi
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const NOT_HERE = () => Promise.reject(new Error("Text drawn here asks nothing of a workspace"));
+/** No folder is known here, so a link to one reads as unavailable and goes nowhere. */
+const NO_FOLDERS = folderTree({ unsortedId: null, folders: [] });
 
 /**
  * The plugins that draw a note, started with no workspace behind them: every way to the server is
@@ -39,7 +42,7 @@ const NOT_HERE = () => Promise.reject(new Error("Text drawn here asks nothing of
  * link's page draws its note, and how the app draws markdown that isn't a note, such as a file's.
  */
 export function useDrawing(address: (uploadId: string) => string, open: (noteId: string) => void) {
-  const app = useRef<Pick<App, "notes" | "trashed" | "folders" | "noteId" | "openNote">>({ notes: [], trashed: [], folders: null, noteId: null, openNote: open });
+  const app = useRef<Pick<App, "notes" | "trashed" | "folders" | "noteId" | "openNote">>({ notes: [], trashed: [], folders: NO_FOLDERS, noteId: null, openNote: open });
   app.current.openNote = open;
   const [referred] = useState(referredUploads);
   const [host] = useState(() => {

@@ -11,7 +11,7 @@ import { following as lineFollowing } from "./follow.ts";
 import { dayIn, dayStartIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
 import { newId } from "./ids.ts";
-import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
+import { isNoteId, linkedFolder, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
 import { tagsCovering, todoTagIndex, type InheritedTag } from "./tagScope.ts";
 import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, mentionsOn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
@@ -530,14 +530,14 @@ const quoted = (title: string) => JSON.stringify(title);
  * and a writer is only ever refused for a link they wrote themselves. A new target is looked up as
  * an id and as a title: a note with that id is the one meant, and otherwise the one note so titled.
  * A note in Trash is never the one meant. An archived note is, by its id, and by its title when no
- * live note has that title.
+ * live note has that title. A link to a folder is a folder's, and is left as it is.
  * A target that is neither is left as written and named in `unresolved`, or refused when `how` is
  * `resolve-strict`.
  */
 async function linkedById(ctx: Context, text: string, base: string, how: LinkTitles): Promise<{ text: string; unresolved: UnresolvedLink[] }> {
   if (how === "keep") return { text, unresolved: [] };
   const had = new Set(linksIn(base).map((link) => link.target));
-  const introduced = [...new Set(linksIn(text).map((link) => link.target))].filter((target) => !had.has(target));
+  const introduced = [...new Set(linksIn(text).map((link) => link.target))].filter((target) => !had.has(target) && linkedFolder(target) === null);
   if (!introduced.length) return { text, unresolved: [] };
   // A title is looked up as it is made now, for a note last written under an older rule too.
   await mend(ctx);
@@ -553,7 +553,7 @@ async function linkedById(ctx: Context, text: string, base: string, how: LinkTit
   const byTitle = Map.groupBy(found, (row) => row.title.toLowerCase());
   const unresolved = new Map<string, UnresolvedLink>();
   const stored = retargeted(text, (target) => {
-    if (had.has(target) || ids.has(target)) return undefined;
+    if (had.has(target) || ids.has(target) || linkedFolder(target) !== null) return undefined;
     const titled = byTitle.get(target.toLowerCase()) ?? [];
     const live = titled.filter((n) => n.state === "live");
     const notes = live.length ? live : titled;

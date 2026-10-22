@@ -49,3 +49,50 @@ test("# lists the tags, with what each is for, narrowed as the member types; Ent
   await page.keyboard.type("next");
   await expect.poll(() => text(page, note.id)).toBe("# Today\n\nPlans #garden #Shopping #newt\nnext");
 });
+
+test("a link to a folder that is gone, or that the member can't see, reads Unavailable folder and goes nowhere", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const old = await perform(page, { type: "folder.create", name: "Old plans" });
+  const note = await perform(page, { type: "note.create", text: `# Today\n\nSee [[folder:${old.id}]] and [[folder:zzzzzzzzzzzz]]` });
+  await perform(page, { type: "folder.delete", id: old.id });
+  await open(page, note.id, "See");
+  const drawn = editor(page).locator(".md-chip-link");
+  await expect(drawn).toHaveText(["Unavailable folder", "Unavailable folder"]);
+  await expect(drawn.first()).toHaveAttribute("title", "This folder doesn't exist, or you can't see it.");
+  await drawn.first().click();
+  await expect(page).toHaveURL(new RegExp(`/note/.*${note.id}$`));
+});
+
+test("@ lists the folders under Folders, each with the folder it is in; picking one writes a link to the folder that reads as its name now and opens its list", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const garden = await perform(page, { type: "folder.create", name: "Garden plans" });
+  await perform(page, { type: "folder.create", name: "Gardening notes", parentId: garden.id });
+  await perform(page, { type: "note.create", text: "# Garden diary" });
+  const note = await perform(page, { type: "note.create", text: "# Today\n\nSee" });
+  await open(page, note.id, "See");
+
+  await page.keyboard.type(" @gard");
+  await expect(list(page).locator("completion-section")).toHaveText(["Notes", "Folders"]);
+  await expect(options(page)).toHaveText(["Garden diaryUnsorted", "Garden plansFolder", "Gardening notesFolder in Garden plans"]);
+  await page.keyboard.press("ArrowDown");
+  await expect(highlighted(page)).toHaveText(/^Garden plans/);
+  await page.keyboard.press("Enter");
+  await expect.poll(() => text(page, note.id)).toBe(`# Today\n\nSee [[folder:${garden.id}]]`);
+  // A slash is a path: the part before it a folder the one found is in.
+  await page.keyboard.type(" @gard pl/gard");
+  await expect(options(page).filter({ hasText: /Folder/ })).toHaveText(["Gardening notesFolder in Garden plans"]);
+  await page.keyboard.press("Escape");
+
+  const drawn = editor(page).getByRole("link");
+  await expect(drawn).toHaveText("Garden plans");
+  await expect(drawn).toHaveAttribute("title", /^The folder Garden plans\nClick to open/);
+  // Renamed in the sidebar, the link reads as its new name with nothing reloaded.
+  await page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "Garden plans" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Rename" }).click();
+  await page.keyboard.type("Vegetable beds");
+  await page.keyboard.press("Enter");
+  await expect(drawn).toHaveText("Vegetable beds");
+  await drawn.click();
+  await expect(page).toHaveURL(new RegExp(`/folder/${garden.id}$`));
+  await expect(page.getByRole("main", { name: "Editor" }).getByRole("heading", { level: 1 })).toHaveText("Vegetable beds");
+});

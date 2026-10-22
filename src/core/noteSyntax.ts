@@ -163,7 +163,7 @@ $$`,
     name: "link",
     kind: "prose",
     called: "a link",
-    about: "A link to a note is [[id]] or [[id|the words shown]], with the note's id, so it survives a rename. [[Title]] is stored by the id of the one note with that title. Text in code is left alone.",
+    about: "A link to a note is [[id]] or [[id|the words shown]], with the note's id, so it survives a rename. [[Title]] is stored by the id of the one note with that title. A link to a folder is [[folder:id]], with the folder's id from list_folders. Text in code is left alone.",
     example: "See [[k3f9q2m8x1ab|Budget]].",
   },
   {

@@ -1,23 +1,26 @@
 import { syntaxTree } from "@codemirror/language";
 import { StateField, type EditorState } from "@codemirror/state";
-import { isNoteId, linksIn, linksOn, type WrittenLink } from "../../plugin-api.ts";
+import { isNoteId, linkedFolder, linksIn, linksOn, type WrittenLink } from "../../plugin-api.ts";
 import { inCode } from "../lib/live.ts";
 import { opens } from "../lib/opening.ts";
 
-const noteLinksIn = (text: string) => new Map(linksIn(text).filter((link) => isNoteId(link.target)).map((link) => [link.from, link]));
+/** Whether a link's target is a note's id or a folder's: what the app follows, where any other is a title nobody resolved. */
+const followable = (link: WrittenLink) => isNoteId(link.target) || linkedFolder(link.target) !== null;
+const noteLinksIn = (text: string) => new Map(linksIn(text).filter(followable).map((link) => [link.from, link]));
 
 /**
- * The note's links to notes, by where each starts, read from the whole text by the function the
- * server records backlinks with. So what is drawn as a link is what is a link, where the editor's
- * own parse would say otherwise: in a deeply nested bullet, which is indented as far as a code block is.
+ * The note's links to notes and folders, by where each starts, read from the whole text by the
+ * function the server records backlinks with. So what is drawn as a link is what is a link, where
+ * the editor's own parse would say otherwise: in a deeply nested bullet, which is indented as far as
+ * a code block is.
  */
 export const noteLinks = StateField.define<ReadonlyMap<number, WrittenLink>>({
   create: (state) => noteLinksIn(state.doc.toString()),
   update: (links, tr) => (tr.docChanged ? noteLinksIn(tr.state.doc.toString()) : links),
 });
 
-/** What reads as a link to a note on one line. Whether it is one is `noteLinks`' to say. */
-export const noteLinksOn = (line: string, offset: number): WrittenLink[] => linksOn(line, offset).filter((link) => isNoteId(link.target));
+/** What reads as a link to a note or a folder on one line. Whether it is one is `noteLinks`' to say. */
+export const noteLinksOn = (line: string, offset: number): WrittenLink[] => linksOn(line, offset).filter(followable);
 
 export type Followed = { note: string } | { page: string };
 

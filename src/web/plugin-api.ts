@@ -68,7 +68,7 @@ export { allPages } from "../core/allPages.ts";
 export { reline } from "../core/blame.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
-export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
+export { isNoteId, linkedFolder, linksIn, linksOn, writtenFolderLink, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
 export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, readableName, writtenMention, type WrittenMention } from "../core/mentions.ts";
@@ -323,7 +323,7 @@ export interface PluginHost {
   report(error: unknown): void;
   /** Calls `listener` each time the app arrives at an address, and once for the address it is at when the plugin starts later than the app. */
   onNavigate(listener: () => void): Dispose;
-  /** Calls `listener` each time the notes the member can see change: one made, renamed, moved, or changed by anyone. `app().notes` then holds them as they are. */
+  /** Calls `listener` each time the notes the member can see change: one made, renamed, moved, or changed by anyone, and each time the folders do. `app().notes` and `app().folders` then hold them as they are. */
   onItems(listener: () => void): Dispose;
   /** The app as it is now. A view is handed this as `app`; a command reads it when it runs. It isn't there yet during `activate`. */
   app(): App;
@@ -921,6 +921,7 @@ export const COMPLETION_KINDS = [
   { kind: "person", heading: "People" },
   { kind: "date", heading: "Dates" },
   { kind: "note", heading: "Notes" },
+  { kind: "folder", heading: "Folders" },
   { kind: "upload", heading: "Uploads" },
   { kind: "event", heading: "Events" },
   { kind: "block", heading: "Blocks" },
