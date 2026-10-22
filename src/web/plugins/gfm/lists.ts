@@ -22,14 +22,18 @@ export function spaced(lead: string, tabSize: number): string {
   return out;
 }
 
-/** How much further in each level of a list starts than the level it is under, in the text's own size. */
-export const STEP_EM = 1.5;
-
 /** How wide a task's box is, in the text's own size. */
 export const BOX_EM = 1.1;
 
 /** How far a task's words start after its box, in the text's own size. */
 export const TASK_GAP_EM = 0.6;
+
+/**
+ * How much further in each level of a list starts than the level it is under, in the text's own size,
+ * and how far an item's words start after its mark. It is a task's box and the gap after it, so a
+ * level's dots and boxes stand in one column and its words in the next, where its children's are.
+ */
+export const STEP_EM = BOX_EM + TASK_GAP_EM;
 
 /** The face and size each editor's lines are set in, read once it is on the page, where its styles are. */
 interface Face {
@@ -65,8 +69,11 @@ interface Start {
   hang: number;
 }
 
-const hangs = (width: number) => Decoration.line({ class: "md-item", attributes: { style: `--md-hang: ${width.toFixed(3)}px` } });
+const hangs = (width: number, dotAt?: number) =>
+  Decoration.line({ class: dotAt === undefined ? "md-item" : "md-item md-item-dotted", attributes: { style: `--md-hang: ${width.toFixed(3)}px${dotAt === undefined ? "" : `; --md-dot-at: ${dotAt.toFixed(3)}px`}` } });
 const indented = (width: number) => Decoration.mark({ class: "md-item-indent", attributes: { style: `width: ${width.toFixed(3)}px` } });
+/** The space after a list's mark, as wide as puts what follows it on the grid. */
+const afterMark = (width: number) => Decoration.mark({ class: "md-item-space", attributes: { style: `width: ${width.toFixed(3)}px` } });
 /** A task's box as written, `[ ]` or any other mark: as wide as the box drawn in its place, whatever its letters' widths. */
 const boxed = Decoration.mark({ class: "md-task-box" });
 /** The space after a task's box, made as wide as the gap after the box asks, the same with the box drawn or written. */
@@ -129,9 +136,24 @@ const hanging = drawnInView(
           const space = task ? widthOf(font, task[2]!) : 0;
           const room = task ? Math.max(0, TASK_GAP_EM * size - space) : 0;
           const before = task ? lead.slice(0, task.index) : lead;
-          const hang = wide + widthOf(font, columns(before)) - written + (task ? BOX_EM * size + space + room : 0);
-          if (!hang) return;
-          drawn.push(hangs(hang).range(line.from));
+          // Every level's dots and boxes stand in one column, as far after the level's start as `- ` is wide, so a task's
+          // bullet keeps its place before its box. A bullet's dot is drawn there, and its words start a step on, as a task's do.
+          const sign = /^\S+/.exec(lead.slice(indent.length))![0];
+          const signTo = line.from + indent.length + sign.length;
+          const toBox = widthOf(font, "- ");
+          const signWide = widthOf(font, sign);
+          const bullet = /^[-*+]$/.test(sign);
+          let hang: number;
+          if (task) {
+            // A number wider than a bullet puts its task's box further in, as little as it can.
+            const afterSign = Math.max(0, toBox - signWide, bullet ? 0 : widthOf(font, columns(before)) - written - signWide);
+            hang = wide + signWide + afterSign + BOX_EM * size + space + room;
+            drawn.push(hangs(hang).range(line.from), afterMark(afterSign).range(signTo, line.from + before.length));
+          } else {
+            const afterSign = Math.max(widthOf(font, columns(lead)) - written - signWide, toBox + STEP_EM * size - signWide);
+            hang = wide + signWide + afterSign;
+            drawn.push(hangs(hang, bullet ? toBox : undefined).range(line.from), afterMark(afterSign).range(signTo, line.from + lead.length));
+          }
           if (task) drawn.push(boxed.range(line.from + task.index, line.from + task.index + 3), gap(room).range(line.from + lead.length - task[2]!.length, line.from + lead.length));
           if (indent && (wide !== written || indent.includes("\t"))) drawn.push(indented(wide).range(line.from, line.from + indent.length));
           // What is written under an item is indented to its mark, not to a task's box, and is drawn under the words all the same.
@@ -177,6 +199,9 @@ const look = EditorView.baseTheme({
   // pull has put to the right of the indent.
   ".md-item-indent": { display: "inline-block", whiteSpace: "pre", overflow: "hidden", verticalAlign: "bottom" },
   ".md-task-box": { display: "inline-block", width: `${BOX_EM}em`, whiteSpace: "pre" },
+  ".md-item-space": { display: "inline-block", whiteSpace: "pre" },
+  // The bullets plugin paints a bullet's dot over its mark. Here it is drawn in the column a task's box stands in.
+  ".cm-line.md-item-dotted .bullet-dot::before": { left: "var(--md-dot-at, 0)", right: "auto", width: `${BOX_EM}em` },
 });
 
 export const hangingLists: Extension = [hanging, look];

@@ -231,22 +231,36 @@ const startsOf = (page: Page, words: readonly string[]) =>
         range.setEnd(node!, start + 1);
         return range.getBoundingClientRect().left - zero;
       };
-      return { mark: at(text.search(/(?<=^[\s▾▸]*)[^\s▾▸]/)), words: at(text.indexOf(word)), height: line.getBoundingClientRect().height };
+      // Where a task's box is drawn, or a bullet's dot, whose box is as wide as a task's.
+      const box = line.querySelector("input[type=checkbox]");
+      const dot = line.querySelector(".bullet-dot");
+      const column = box ? box.getBoundingClientRect().left - zero : dot ? dot.getBoundingClientRect().left + parseFloat(getComputedStyle(dot, "::before").left) - zero : null;
+      return { mark: at(text.search(/(?<=^[\s▾▸]*)[^\s▾▸]/)), column, words: at(text.indexOf(word)), height: line.getBoundingClientRect().height };
     });
   }, words);
 
 test("each level of a list starts a step further in than the one above it, the same step for bullets, tasks, numbers and a mix of them, and a line written under an item's words starts under them", async ({ page }) => {
   await open(page, DEPTHS);
   const size = await editor(page).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  const step = 1.5 * size;
+  // A step is a task's box and the gap after it.
+  const step = (1.1 + 0.6) * size;
 
   for (const kind of ["Bullet", "Task", "Number", "Mixed"]) {
     const [one, two, three] = await startsOf(page, [`${kind} one`, `${kind} two`, `${kind} three`]);
     expect(Math.abs(one!.mark), `${kind} one's mark is at the edge of the text: ${one!.mark}`).toBeLessThanOrEqual(0.5);
     expect(Math.abs(two!.mark - step), `${kind} two's mark is one step in: ${two!.mark}, a step is ${step}`).toBeLessThanOrEqual(0.5);
     expect(Math.abs(three!.mark - 2 * step), `${kind} three's mark is two steps in: ${three!.mark}`).toBeLessThanOrEqual(0.5);
-    expect(two!.words, `${kind} two's words are right of ${kind} one's`).toBeGreaterThan(one!.words + step - 0.5);
+    // A level's dots and boxes stand in one column, and its words start where its children's dots and boxes do.
+    if (kind === "Bullet" || kind === "Task") {
+      expect(Math.abs(two!.column! - one!.words), `${kind} two's ${kind === "Task" ? "box" : "dot"} is at ${two!.column}, under one's words at ${one!.words}`).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(three!.column! - two!.words), `${kind} three's is under two's words`).toBeLessThanOrEqual(0.5);
+    }
   }
+  // A bullet's, a task's and a number's words start together at each level.
+  const ones = await startsOf(page, ["Bullet one", "Task one", "Number one"]);
+  const twos = await startsOf(page, ["Bullet two", "Task two", "Number two"]);
+  for (const level of [ones, twos]) for (const item of level) expect(Math.abs(item.words - level[0]!.words), `words at ${level.map((i) => i.words)}`).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(ones[0]!.column! - ones[1]!.column!), "a bullet's dot is in the column of a task's box").toBeLessThanOrEqual(0.5);
   const [item, under] = await startsOf(page, ["Mixed three", "written under mixed three"]);
   expect(Math.abs(under!.mark - item!.words), `a line under an item's words starts at ${under!.mark}, the words at ${item!.words}`).toBeLessThanOrEqual(0.5);
 
