@@ -1,3 +1,4 @@
+import type { Deletion } from "./erase.ts";
 import { newId } from "./ids.ts";
 import { draftsOfTheGone, trustOfTheGone } from "./pluginRecord.ts";
 import { NO_SUCH_WORKSPACE, OpError, type Invite, type Member, type Results, type Role } from "./protocol.ts";
@@ -8,6 +9,8 @@ export interface Asking {
   workspaceId: string;
   personId: string;
   now: number;
+  /** Where access this takes away is noted, to be kept outside the database once the operation is done, so a restore can't give it back. */
+  revoked?: Deletion[];
 }
 
 /*
@@ -88,27 +91,40 @@ export async function setRole(asking: Asking, memberId: string, role: Role): Pro
     orphaned(asking, { id: memberId }),
   ]);
   if (!changed!.meta.changes) throw await refusal(asking, "member.setRole", memberId);
+  noteRole(asking, memberId, role);
   const member = await loadMember(db, workspaceId, memberId);
   // Taken out between the two statements: the role was theirs for that moment.
   if (!member) throw new OpError("not_found", "No such member");
   return member;
 }
 
+/** What goes with a member once they are no longer one, each said only of someone who is gone: in the batch after the statement that takes them out. */
+export const removalOf = (asking: Asking, memberId: string): D1PreparedStatement[] => [
+  orphaned(asking, { id: memberId }),
+  ungranted(asking, memberId),
+  released(asking, memberId),
+  released(asking, memberId, "uploads"),
+  // Their drafts of plugins were theirs alone, so nobody is left to read them, and they are not waiting if the person is added again.
+  draftsOfTheGone(asking.db, asking.workspaceId, memberId),
+  // Nor is anything they turned on: added again, they decide again.
+  trustOfTheGone(asking.db, asking.workspaceId, memberId),
+];
+
+/** Notes a member's role as an admin set it: a restore to before an admin was demoted would make them one again. */
+const noteRole = ({ revoked, workspaceId, personId, now }: Asking, memberId: string, role: Role) => revoked?.push({ kind: "role", id: `${workspaceId}.${memberId}`, by: personId, role, at: now });
+
+/** Notes that `memberId` is out of the workspace, as `asking.personId` made them. */
+const noteGone = ({ revoked, workspaceId, personId, now }: Asking, memberId: string) => revoked?.push({ kind: "member", id: `${workspaceId}.${memberId}`, by: personId, at: now });
+
 export async function removeMember(asking: Asking, memberId: string): Promise<{ memberId: string }> {
   const { db, workspaceId, personId } = asking;
   const [removed] = await db.batch([
     // Leaving is `leave`'s, which first asks that nothing private of theirs is left with nobody.
     db.prepare(`DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?3 AND ?3 <> ?2 AND ${STILL_ADMIN} AND (role <> 'admin' OR ${ANOTHER_ADMIN})`).bind(workspaceId, personId, memberId),
-    orphaned(asking, { id: memberId }),
-    ungranted(asking, memberId),
-    released(asking, memberId),
-    released(asking, memberId, "uploads"),
-    // Their drafts of plugins were theirs alone, so nobody is left to read them, and they are not waiting if the person is added again.
-    draftsOfTheGone(db, workspaceId, memberId),
-    // Nor is anything they turned on: added again, they decide again.
-    trustOfTheGone(db, workspaceId, memberId),
+    ...removalOf(asking, memberId),
   ]);
   if (!removed!.meta.changes) throw await refusal(asking, "member.remove", memberId);
+  noteGone(asking, memberId);
   return { memberId };
 }
 
@@ -129,23 +145,28 @@ export async function signOut(asking: Asking, memberId: string, agents: boolean)
   const { db, workspaceId, personId, now } = asking;
   const own = memberId === personId;
   const sessions = own
-    ? db.prepare("UPDATE people SET sessions_ended = sessions_ended + 1 WHERE id = ?").bind(personId)
+    ? db.prepare("UPDATE people SET sessions_ended = sessions_ended + 1 WHERE id = ? RETURNING sessions_ended").bind(personId)
     : db
         .prepare(
           `UPDATE people SET sessions_ended = sessions_ended + 1, ended_by_admin_at = ?4 WHERE id = ?3 AND ${STILL_ADMIN}
-             AND EXISTS (SELECT 1 FROM members m WHERE m.workspace_id = ?1 AND m.person_id = ?3) AND (ended_by_admin_at IS NULL OR ended_by_admin_at <= ?4 - ?5)`,
+             AND EXISTS (SELECT 1 FROM members m WHERE m.workspace_id = ?1 AND m.person_id = ?3) AND (ended_by_admin_at IS NULL OR ended_by_admin_at <= ?4 - ?5)
+           RETURNING sessions_ended`,
         )
         .bind(workspaceId, personId, memberId, now, SIGN_OUT_EVERY_MS);
   const disconnected = own
-    ? db.prepare("UPDATE agents SET revoked_at = ?2 WHERE person_id = ?1 AND revoked_at IS NULL").bind(personId, now)
+    ? db.prepare("UPDATE agents SET revoked_at = ?2 WHERE person_id = ?1 AND revoked_at IS NULL RETURNING id").bind(personId, now)
     : db
         .prepare(
           `UPDATE agents SET revoked_at = ?4 WHERE person_id = ?3 AND revoked_at IS NULL AND (workspace_id IS NULL OR workspace_id = ?1) AND ${STILL_ADMIN}
-             AND EXISTS (SELECT 1 FROM people p WHERE p.id = ?3 AND p.ended_by_admin_at = ?4)`,
+             AND EXISTS (SELECT 1 FROM people p WHERE p.id = ?3 AND p.ended_by_admin_at = ?4)
+           RETURNING id`,
         )
         .bind(workspaceId, personId, memberId, now);
-  const [ended] = await db.batch(agents ? [sessions, disconnected] : [sessions]);
-  if (ended!.meta.changes) return { memberId };
+  const [ended, gone] = await db.batch<{ sessions_ended?: number; id?: string }>(agents ? [sessions, disconnected] : [sessions]);
+  if (ended!.meta.changes) {
+    asking.revoked?.push({ kind: "signout", id: memberId, n: ended!.results[0]!.sessions_ended!, at: now }, ...(gone?.results ?? []).map((agent) => ({ kind: "agent" as const, id: agent.id!, at: now })));
+    return { memberId };
+  }
   const refused = await refusal(asking, "member.signOut", memberId);
   throw refused.message === LAST_ADMIN ? new OpError("invalid", "They were signed out everywhere by an admin less than a day ago. Remove them to cut them off now.") : refused;
 }
@@ -174,6 +195,7 @@ export async function leave(asking: Asking): Promise<{ memberId: string }> {
     trustOfTheGone(db, workspaceId, personId),
   ]);
   if (!left!.meta.changes) throw await refusal(asking, "member.leave", personId, "member");
+  noteGone(asking, personId);
   return { memberId: personId };
 }
 
@@ -217,7 +239,10 @@ export async function invite(asking: Asking, email: string, role: Role): Promise
     orphaned(asking, { email }),
   ]);
   const member = changed!.results[0];
-  if (member) return { member: (await loadMember(db, workspaceId, member.id)) ?? (() => { throw new OpError("not_found", "No such member"); })(), invite: null };
+  if (member) {
+    noteRole(asking, member.id, role);
+    return { member: (await loadMember(db, workspaceId, member.id)) ?? (() => { throw new OpError("not_found", "No such member"); })(), invite: null };
+  }
   const pending = made!.results[0];
   if (pending) return { member: null, invite: toInvite((await db.prepare(`SELECT ${INVITE_COLUMNS} WHERE i.id = ?`).bind(pending.id).first<InviteRow>())!) };
   const theirs = await db.prepare("SELECT m.person_id FROM members m JOIN people p ON p.id = m.person_id WHERE m.workspace_id = ? AND p.email = ?").bind(workspaceId, email).first<{ person_id: string }>();

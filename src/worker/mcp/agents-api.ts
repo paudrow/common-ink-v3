@@ -1,6 +1,7 @@
 // Connecting, editing and disconnecting agents, from a signed-in member's session. The token is in the answer to
 // the connect call and nowhere else: only its hash is kept.
 import { connectAgent, disconnectAgent, editAgent, listAgents } from "../../core/agents.ts";
+import { remember } from "../../core/erase.ts";
 import { ConnectOptions, OpError, type OpErrorCode } from "../../core/protocol.ts";
 import { sessionOf } from "../auth.ts";
 import { MAX_FORM_BYTES, TooLarge, cappedJson } from "../body.ts";
@@ -27,7 +28,10 @@ export async function handleAgentsApi(req: Request, env: Env, url: URL): Promise
     if (req.headers.get("Origin") !== url.origin) return json({ error: "forbidden", message: "Agents are connected from Common Ink itself" }, 403);
     try {
       if (one && req.method === "DELETE") {
-        await disconnectAgent(env.DB, personId, one[1]!);
+        const now = Date.now();
+        await disconnectAgent(env.DB, personId, one[1]!, now);
+        // Kept outside the database too, so a restore of it doesn't connect the agent again.
+        await remember(env.FILES, [{ kind: "agent", id: one[1]!, at: now }]);
         return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
       }
       if (!req.headers.get("Content-Type")?.startsWith("application/json")) return json({ error: "invalid", message: "Send JSON" }, 400);

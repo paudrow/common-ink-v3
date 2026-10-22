@@ -1,6 +1,7 @@
 import { newId } from "./ids.ts";
 import { logLine } from "./logs.ts";
-import { NO_SUCH_WORKSPACE, OpError, type AccountDeletion, type WorkspaceRef } from "./protocol.ts";
+import { NO_SUCH_WORKSPACE, OpError, type AccountDeletion, type Role, type WorkspaceRef } from "./protocol.ts";
+import { removalOf } from "./membership.ts";
 import { finishRemoving, forgetRemoved, removalsOf } from "./purge.ts";
 import type { Sources } from "./sources.ts";
 
@@ -412,16 +413,27 @@ async function carryOut({ db, personId, now, sources, bucket, log = logLine }: A
 }
 
 /*
- * A restore of the database to a time before a deletion brings back what was deleted. Each deletion
- * is kept in the bucket, which a restore of the database doesn't touch, so it can be made again:
+ * A restore of the database to a time before a deletion brings back what was deleted, and a restore
+ * to a time before access was taken away gives it back. Each deletion, and each taking away, is kept
+ * in the bucket, which a restore of the database doesn't touch, so it can be made again:
  * scripts/redo-deletions.ts puts a request for that in the bucket and has the Worker carry it out
  * (docs/runbooks/restore.md).
  */
 
+/**
+ * Something done that a restore would undo. A deletion is of an account or a workspace. Access taken
+ * away is a member removed or leaving (`member`, its id the workspace's and the person's, `by` who took
+ * them out), a member's role set (`role`, as `member`, the last one kept), a grant or a link taken back
+ * (`grant`), an agent disconnected (`agent`), a person signed out everywhere (`signout`, `n` the count
+ * of sign-outs it made), or a clipper disconnected (`clipper`).
+ */
 export interface Deletion {
-  kind: "account" | "workspace";
+  kind: "account" | "workspace" | "member" | "role" | "grant" | "agent" | "signout" | "clipper";
   id: string;
   at: number;
+  by?: string;
+  n?: number;
+  role?: Role;
 }
 
 const DELETIONS = "deletions/";
@@ -429,12 +441,18 @@ const DELETIONS = "deletions/";
 const REDO_REQUESTS = "redo-deletions/";
 
 /** Keeps each deletion under its kind and id, so one kept twice is one, at the later time. */
-async function remember(bucket: R2Bucket | null, deletions: readonly Deletion[], log: (message: string) => void = logLine): Promise<void> {
-  if (!bucket) return;
+export async function remember(bucket: R2Bucket | null, deletions: readonly Deletion[], log: (message: string) => void = logLine): Promise<void> {
+  if (!bucket || !deletions.length) return;
   try {
-    await Promise.all(deletions.map((d) => bucket.put(`${DELETIONS}${d.kind}/${d.id}`, JSON.stringify(d), { customMetadata: { at: String(d.at) } })));
+    await Promise.all(
+      deletions.map((d) =>
+        bucket.put(`${DELETIONS}${d.kind}/${d.id}`, JSON.stringify(d), {
+          customMetadata: { at: String(d.at), ...(d.by === undefined ? {} : { by: d.by }), ...(d.n === undefined ? {} : { n: String(d.n) }), ...(d.role === undefined ? {} : { role: d.role }) },
+        }),
+      ),
+    );
   } catch (err) {
-    // The deletion has been made by now, so failing the request would tell the person it wasn't.
+    // It has been done by now, so failing the request would tell the person it wasn't.
     log(`Couldn't keep the record of a deletion, which a restore would then not make again: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -447,7 +465,14 @@ async function kept(bucket: R2Bucket): Promise<Deletion[]> {
     const page = await bucket.list({ prefix: DELETIONS, cursor, include: ["customMetadata"] });
     for (const { key, customMetadata } of page.objects) {
       const [kind, id] = key.slice(DELETIONS.length).split("/") as [Deletion["kind"], string];
-      found.push({ kind, id, at: Number(customMetadata?.at) });
+      found.push({
+        kind,
+        id,
+        at: Number(customMetadata?.at),
+        ...(customMetadata?.by ? { by: customMetadata.by } : {}),
+        ...(customMetadata?.n ? { n: Number(customMetadata.n) } : {}),
+        ...(customMetadata?.role ? { role: customMetadata.role as Role } : {}),
+      });
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -469,8 +494,8 @@ export async function pruneDeletions(bucket: R2Bucket, now: number): Promise<num
   return old.length;
 }
 
-/** What making a deletion again did: `gone`, it was gone already; `deleted`, it is gone now; `deleting`, it is cut off and the hourly run erases the rest; or why it was refused. */
-export type Redone = "gone" | "deleted" | "deleting" | `refused: ${string}`;
+/** What making a deletion again did: `gone`, it was gone already; `deleted`, it is gone now; `deleting`, it is cut off and the hourly run erases the rest; `revoked`, access is taken away again; or why it was refused. */
+export type Redone = "gone" | "deleted" | "deleting" | "revoked" | `refused: ${string}`;
 
 export interface Redoing {
   db: D1Database;
@@ -480,8 +505,44 @@ export interface Redoing {
   log?: (message: string) => void;
 }
 
+/** Takes access away again, as it was taken once. Each is a statement that changes nothing the second time, which answers `gone`. */
+async function redoRevocation(db: D1Database, { kind, id, at, by, n, role }: Deletion, now: number): Promise<Redone> {
+  const changed = (results: D1Result[]) => (results.some((r) => r.meta.changes > 0) ? "revoked" : "gone");
+  switch (kind) {
+    case "member": {
+      const [workspaceId, personId] = id.split(".") as [string, string];
+      const [removed, ...rest] = await db.batch([db.prepare("DELETE FROM members WHERE workspace_id = ? AND person_id = ?").bind(workspaceId, personId), ...removalOf({ db, workspaceId, personId: by ?? personId, now }, personId)]);
+      return changed([removed!, ...rest]);
+    }
+    case "role": {
+      const [workspaceId, personId] = id.split(".") as [string, string];
+      if (role !== "admin" && role !== "editor" && role !== "viewer") return `refused: no role in the record of ${id}`;
+      return changed([await db.prepare("UPDATE members SET role = ?3 WHERE workspace_id = ?1 AND person_id = ?2 AND role <> ?3").bind(workspaceId, personId, role).run()]);
+    }
+    case "grant":
+      return changed([await db.prepare("DELETE FROM grants WHERE id = ?").bind(id).run()]);
+    case "agent":
+      return changed(
+        await db.batch([
+          db.prepare("UPDATE agents SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(at, id),
+          db.prepare("DELETE FROM oauth_tokens WHERE agent_id = ?").bind(id),
+          db.prepare("DELETE FROM oauth_codes WHERE agent_id = ?").bind(id),
+        ]),
+      );
+    case "signout":
+      return changed([await db.prepare("UPDATE people SET sessions_ended = ?2 WHERE id = ?1 AND sessions_ended < ?2").bind(id, n ?? 0).run()]);
+    case "clipper":
+      return changed([await db.prepare("UPDATE clipper_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(at, id).run()]);
+    default:
+      // A record of a kind this version doesn't know, as one kept by a newer version would be: the rest are still made again.
+      return `refused: ${kind} is a kind of record this version of Common Ink doesn't make again`;
+  }
+}
+
 /** Makes a deletion again, with nobody asked: it was asked for once already. Run twice, the second time answers `gone`. */
-export async function redoDeletion({ db, bucket, sources, now, log = logLine }: Redoing, { kind, id }: Pick<Deletion, "kind" | "id">): Promise<Redone> {
+export async function redoDeletion({ db, bucket, sources, now, log = logLine }: Redoing, deletion: Pick<Deletion, "kind" | "id"> & Partial<Deletion>): Promise<Redone> {
+  const { kind, id } = deletion;
+  if (kind !== "account" && kind !== "workspace") return redoRevocation(db, { at: now, ...deletion }, now);
   if (kind === "account") {
     const plan = await accountDeletion(db, id).catch((err: unknown) => {
       if (err instanceof OpError && err.code === "not_found") return null;
@@ -522,14 +583,15 @@ export async function redoRequested(redoing: Redoing, name: string): Promise<{ k
     const request = await object.json<RedoRequest>();
     const ids = (list: unknown) => Array.isArray(list) && list.every((id) => typeof id === "string" && /^[a-z0-9]{12}$/.test(id));
     if (!ids(request.accounts) || !ids(request.workspaces) || !(request.since === null || Number.isFinite(request.since))) throw new OpError("invalid", "A request is { accounts, workspaces, since }: two lists of ids, and a time in milliseconds or null");
-    const wanted = [...request.accounts.map((id) => ({ kind: "account" as const, id })), ...request.workspaces.map((id) => ({ kind: "workspace" as const, id }))];
+    const wanted: (Pick<Deletion, "kind" | "id"> & Partial<Deletion>)[] = [...request.accounts.map((id) => ({ kind: "account" as const, id })), ...request.workspaces.map((id) => ({ kind: "workspace" as const, id }))];
     if (request.since !== null) wanted.push(...(await deletionsSince(redoing.bucket, request.since)));
     const seen = new Set<string>();
     const done = [];
-    for (const { kind, id } of wanted) {
+    for (const deletion of wanted) {
+      const { kind, id } = deletion;
       if (seen.has(`${kind}/${id}`)) continue;
       seen.add(`${kind}/${id}`);
-      done.push({ kind, id, redone: await redoDeletion(redoing, { kind, id }) });
+      done.push({ kind, id, redone: await redoDeletion(redoing, deletion) });
     }
     return done;
   } finally {

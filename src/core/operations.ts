@@ -14,7 +14,7 @@ import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
 import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, mentionsOn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
-import { accountDeletion, deleteAccount, deleteWorkspace } from "./erase.ts";
+import { accountDeletion, deleteAccount, deleteWorkspace, remember, type Deletion } from "./erase.ts";
 import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, signOut, type Asking } from "./membership.ts";
 import {
   Id,
@@ -155,6 +155,8 @@ export interface Context {
   sources: Sources;
   /** Where uploads' bytes are kept, and the bytes that came with this operation. */
   files: Files;
+  /** The access this operation takes away, kept in the bucket once it is done so that a restore of the database can't give it back. */
+  revoked: Deletion[];
 }
 
 type Access = "view" | "edit" | "manage";
@@ -225,8 +227,10 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   const shutOff = plugin !== null && "allowed" in plugin && plugin.allowed !== "all";
   // A guest, and whoever opens a link, is told no member's name; a shut-off plugin only with members.read.
   const namesMembers = standing.role !== null && (!shutOff || (plugin as { allowed: ReadonlySet<string> }).allowed.has("member.list"));
-  const ctx: Context = { db, actor, author, shutOff, namesMembers, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
-  return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
+  const ctx: Context = { db, actor, author, shutOff, namesMembers, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files, revoked: [] };
+  const result = (await handler.run(ctx, op as never)) as Results[T["type"]];
+  await remember(files.bucket ?? null, ctx.revoked);
+  return result;
 }
 
 /**
@@ -1561,7 +1565,7 @@ export async function restoring(ctx: Context, table: Kept, row: { id: string; fo
 /** Whose data sources an operation reads: the person asking, or the person an agent asks for. Never anyone an operation names. */
 const asker = (ctx: Context) => ({ db: ctx.db, sources: ctx.sources, personId: ctx.personId!, now: ctx.now });
 
-const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now });
+const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now, revoked: ctx.revoked });
 
 /** How far the person asking has read the changes in the workspace. */
 async function visit(ctx: Context): Promise<Visit> {

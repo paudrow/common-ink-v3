@@ -27,6 +27,8 @@ The reverse also happens. An upload made after the restore point keeps its bytes
 
 **Deletions.** A restore to a time before someone deleted their account or a workspace brings that account or workspace back, whole. The privacy policy promises that a deletion leaves the backups within 30 days, so after a production restore every deletion made after the restore point has to be made again. The Worker keeps a record of each deletion in the bucket, as an object `deletions/<account|workspace>/<id>` with the time it was made, and a restore of the database doesn't touch it. The hourly job removes a record 31 days after its deletion, when no restore can reach back before it. Step 8 of the incident procedure runs `scripts/redo-deletions.ts`, which makes each one again.
 
+**Access taken away.** A restore to a time before a member was removed or their role changed, a grant or a link was taken back, an agent or a clipper was disconnected, or someone was signed out everywhere would give that access back. Each of these is kept the same way, as `deletions/<member|role|grant|agent|signout|clipper>/<id>`, and the same run of `scripts/redo-deletions.ts --since` takes each away again (`revoked`, or `gone` where it was gone already). Some are not kept, and are worth telling admins to check: an invite taken back, a person's grant narrowed from edit to view, a link changed from public to signed-in, an agent's limits narrowed, an older clipper or OAuth connection replaced by a newer one, and an OAuth app's token revoked by the app without its agent being disconnected.
+
 **Everything that isn't the database.** Secrets, the Worker's code and the bucket's settings are not in D1. To go back to an earlier version of the Worker, use `npx wrangler rollback`.
 
 **Smaller losses that have their own way back.** Trash keeps a note or an upload for 30 days, and a note's history can revert any change. Use those before you think of Time Travel.
@@ -233,7 +235,7 @@ Use this when the whole database is wrong: a migration that damaged data, or a w
    npx wrangler d1 execute common-ink-v3 --remote --command "UPDATE uploads SET state = 'removing' WHERE id IN (SELECT value FROM json_each('<the printed list>'))"
    ```
 
-   Then make again every deletion of an account or a workspace made since the restore point. The script reads the record of deletions in the bucket, has the Worker delete each again, and prints what became of each id. Run it from the repository root, signed in with `npx wrangler login`. The Worker must be a version with `/redo-deletions` (this PR on): after a rollback to an older one, it answers 404.
+   Then make again every deletion of an account or a workspace, and take away again all the access taken away, since the restore point. The script reads the record in the bucket, has the Worker make each again, and prints what became of each id. Run it from the repository root, signed in with `npx wrangler login`. The Worker must be a version with `/redo-deletions` (this PR on): after a rollback to an older one, it answers 404.
 
    ```sh
    node scripts/redo-deletions.ts --since "$T"
