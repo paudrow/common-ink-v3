@@ -155,15 +155,18 @@ export async function removeUpload(db: D1Database, bucket: R2Bucket, id: string)
   return true;
 }
 
-/** As many uploads as one run removes, which is as many as the bucket deletes at once. What is left waits for the next run. */
+/** As many uploads as one run removes, in chunks the bucket deletes at once. What is left waits for the next run. */
 const CLEAR_UPLOADS = 1000;
+const CLEAR_CHUNK = 100;
+/** How many uploads of a failed chunk fail one after another before the rest of it is left for the next run. */
+const SINGLE_TRIES = 3;
 
 /**
  * Removes the uploads that have been in Trash for 30 days as of `now`, in every workspace, and
  * clears away the ones left pending or half removed by a request that never finished: one sent in
  * parts is cleared once nothing has been sent to it for a day, its parts aborted in the bucket. Run twice, or
- * again after stopping partway, it removes what is left and nothing else. When it fails, every
- * upload it was removing is left as it is, unread, for the next run.
+ * again after stopping partway, it removes what is left and nothing else. An upload it couldn't
+ * remove is left as it is, unread, for the next run.
  */
 export async function clearUploads(db: D1Database, bucket: R2Bucket, now: number, log: (message: string) => void = logLine): Promise<Purged> {
   await db.batch([
@@ -172,14 +175,39 @@ export async function clearUploads(db: D1Database, bucket: R2Bucket, now: number
     db.prepare("DELETE FROM upload_pass_uses WHERE hash IN (SELECT hash FROM upload_passes WHERE expires_at <= ?)").bind(now),
     db.prepare("DELETE FROM upload_passes WHERE expires_at <= ?").bind(now),
   ]);
-  const { results } = await db.prepare("SELECT id FROM uploads WHERE state = 'removing' ORDER BY id LIMIT ?").bind(CLEAR_UPLOADS + 1).all<{ id: string }>();
+  // Taken in turns, one from each workspace, then a second from each, so a workspace that left a great many waits
+  // behind no other.
+  const { results } = await db
+    .prepare("SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY workspace_id ORDER BY id) AS turn FROM uploads WHERE state = 'removing') ORDER BY turn, id LIMIT ?")
+    .bind(CLEAR_UPLOADS + 1)
+    .all<{ id: string }>();
   const ids = results.slice(0, CLEAR_UPLOADS).map((r) => r.id);
-  const more = results.length > CLEAR_UPLOADS;
-  try {
-    await finishRemoving(db, bucket, ids);
-    return { removed: ids.length, failed: [], more };
-  } catch (err) {
-    log(`Couldn't remove ${ids.length} uploads: ${err instanceof Error ? err.message : String(err)}`);
-    return { removed: 0, failed: ids, more };
+  const cleared: Purged = { removed: 0, failed: [], more: results.length > CLEAR_UPLOADS };
+  for (let at = 0; at < ids.length; at += CLEAR_CHUNK) {
+    const chunk = ids.slice(at, at + CLEAR_CHUNK);
+    try {
+      await finishRemoving(db, bucket, chunk);
+      cleared.removed += chunk.length;
+    } catch {
+      // One upload that won't go keeps none of the others: each is tried alone, and one that fails waits for the next run.
+      // Three failing in a row is the bucket or the run failing, not an upload, so the rest wait too rather than each failing in turn.
+      let inARow = 0;
+      for (const id of chunk) {
+        if (inARow >= SINGLE_TRIES) {
+          cleared.failed.push(id);
+          continue;
+        }
+        try {
+          await finishRemoving(db, bucket, [id]);
+          cleared.removed++;
+          inARow = 0;
+        } catch (err) {
+          cleared.failed.push(id);
+          inARow++;
+          log(`Couldn't remove upload ${id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
   }
+  return cleared;
 }

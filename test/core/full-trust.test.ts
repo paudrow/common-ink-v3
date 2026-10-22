@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { signIn } from "../../src/core/accounts.ts";
+import { acceptInvite, signIn } from "../../src/core/accounts.ts";
 import { authenticateAgent, connectAgent } from "../../src/core/agents.ts";
 import { agentActor, perform, type Actor } from "../../src/core/operations.ts";
 import { DRAFT_ASKS_FULL_TRUST, NOT_GRANTED, fullTrustOff, permitPlugin, trustPlugin } from "../../src/core/pluginRecord.ts";
@@ -382,8 +382,8 @@ describe("full trust runs for a member only with an admin's grant of that code a
     for (const gone of [eve, vera]) expect(await outcome(pluginOf(gone, id), { type: "note.read", id: shared })).toMatch(/^not_found: /);
     const email = async (who: Actor) => (await env.DB.prepare("SELECT email FROM people WHERE id = ?").bind(who.personId).first<{ email: string }>())!.email;
     for (const back of [eve, vera]) {
-      await perform(env.DB, ada, { type: "member.invite", email: await email(back), as: "editor" });
-      await signIn(env.DB, { email: await email(back), name: "Back Again" });
+      const { invite } = await perform(env.DB, ada, { type: "member.invite", email: await email(back), as: "editor" });
+      await acceptInvite(env.DB, back.personId, invite!.id);
       expect((await perform(env.DB, back, { type: "note.read", id: shared })).id, "they are a member again").toBe(shared);
       expect((await stateOf(back, id))!.on).toBe(false);
       expect(await outcome(pluginOf(back, id), { type: "note.read", id: shared })).toBe(refused);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import type { Me, MeHere } from "../core/protocol.ts";
-import { ApiError, getMe, onRefused, perform, session, signOut, workspaceOfInvite, workspaceOfNote } from "./api.ts";
+import type { Invitation, Me, MeHere } from "../core/protocol.ts";
+import { ApiError, getMe, inviteAt, joinInvite, onRefused, perform, session, signOut, workspaceOfNote, workspaceOfUpload } from "./api.ts";
 import { showing, targetOf, UNANSWERED, type Target } from "./leads.ts";
 import { useRoute, type Place } from "./router.ts";
 import { retryAfter } from "./retry.ts";
@@ -118,6 +118,38 @@ function NotInvited({ email, onContinue }: { email: string; onContinue: () => vo
   );
 }
 
+const ROLE_WORDS = { admin: "an admin", editor: "an editor", viewer: "a viewer" } as const;
+
+/** An invite's link, opened by the person it is for: they join only by saying so here. */
+function Invited({ inviteId, invitation, onJoined, onContinue }: { inviteId: string; invitation: Invitation; onJoined: () => Promise<void>; onContinue: () => void }) {
+  const [state, setState] = useState<"asking" | "joining" | "gone" | "failed">("asking");
+  const join = () => {
+    setState("joining");
+    joinInvite(inviteId).then(
+      (workspaceId) => (workspaceId ? onJoined() : setState("gone")),
+      () => setState("failed"),
+    );
+  };
+  return (
+    <main className="sign-in">
+      <img src="/favicon.svg" alt="" width={56} height={56} />
+      <h1>Join {invitation.workspace}?</h1>
+      <p>
+        {invitation.invitedBy} invited you as {ROLE_WORDS[invitation.role]}. As a member, its admins can see your email and sign you out, and your agents that reach every workspace
+        reach this one too.
+      </p>
+      {state === "gone" && <p role="alert">This invite no longer lets you in. It may have been taken back.</p>}
+      {state === "failed" && <p role="alert">Couldn't join just now. Try again.</p>}
+      <button type="button" className="button primary" disabled={state === "joining" || state === "gone"} onClick={join}>
+        Join {invitation.workspace}
+      </button>
+      <button type="button" className="link" onClick={onContinue}>
+        Not now
+      </button>
+    </main>
+  );
+}
+
 /** How long the workspace waits for the member's settings before it is drawn with the defaults. */
 const SETTINGS_WAIT_MS = 1500;
 
@@ -126,7 +158,7 @@ function SignedIn({ me, reload }: { me: MeHere; reload: () => Promise<void> }) {
   const [chosenId, choose] = useStored("ink.workspace", isString, me.workspaces[0]!.id);
   const { found, noteIsHere, askAgain } = useFound(me, targetOf(place));
   const shown = showing(place, found, me.workspaces, chosenId);
-  const workspaceId = shown.kind === "asking" || shown.kind === "not-invited" || shown.kind === "unchecked" ? null : shown.workspace.id;
+  const workspaceId = shown.kind === "asking" || shown.kind === "not-invited" || shown.kind === "invited" || shown.kind === "unchecked" ? null : shown.workspace.id;
   useEffect(() => {
     if (workspaceId) choose(workspaceId);
     if (shown.kind === "joined") navigate("/", { replace: true });
@@ -136,6 +168,7 @@ function SignedIn({ me, reload }: { me: MeHere; reload: () => Promise<void> }) {
   if (shown.kind === "workspace") settled.current = shown;
 
   if (shown.kind === "not-invited") return <NotInvited email={me.person.email} onContinue={() => navigate("/", { replace: true })} />;
+  if (shown.kind === "invited") return <Invited inviteId={shown.inviteId} invitation={shown.invitation} onJoined={reload} onContinue={() => navigate("/", { replace: true })} />;
   if (shown.kind === "unchecked")
     return (
       <div className="notice" role="alert">
@@ -157,7 +190,7 @@ function SignedIn({ me, reload }: { me: MeHere; reload: () => Promise<void> }) {
  */
 function useFound(me: Me, target: Target | null) {
   const memberships = me.workspaces.map((w) => w.id).join();
-  const kept = useRef({ memberships, found: new Map<string, string | null | typeof UNANSWERED>() });
+  const kept = useRef({ memberships, found: new Map<string, string | Invitation | null | typeof UNANSWERED>() });
   if (kept.current.memberships !== memberships) kept.current = { memberships, found: new Map() };
   const { found } = kept.current;
   const [, redraw] = useState(0);
@@ -168,7 +201,7 @@ function useFound(me: Me, target: Target | null) {
   useEffect(() => {
     if (!unknown) return;
     let live = true;
-    (unknown.kind === "note" ? workspaceOfNote : workspaceOfInvite)(unknown.id)
+    ({ note: workspaceOfNote, upload: workspaceOfUpload, invite: inviteAt }[unknown.kind] as (id: string) => Promise<string | Invitation | null>)(unknown.id)
       .catch((): typeof UNANSWERED => UNANSWERED)
       .then((workspaceId) => {
         if (!live) return;

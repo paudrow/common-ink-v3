@@ -38,11 +38,22 @@ describe("what an address shows", () => {
     expect(showing(NOTE, new Map([["aaaaaaaaaaaa", "left00000000"]]), BOTH, OWN.id), "a workspace they have since left").toEqual(nothing);
   });
 
+  it("shows an upload's address on the Uploads page of the workspace it is in, or of the chosen one when it is in none of theirs", () => {
+    const upload = at("/uploads/dddddddddddd");
+    expect(targetOf(upload)).toEqual({ kind: "upload", id: "dddddddddddd", key: "upload:dddddddddddd" });
+    expect(showing(upload, new Map(), BOTH, OWN.id), "shown where it nearly always is while its own is asked for").toEqual({ kind: "workspace", workspace: OWN, place: upload });
+    expect(showing(upload, new Map([["upload:dddddddddddd", TEAM.id]]), BOTH, OWN.id)).toEqual({ kind: "workspace", workspace: TEAM, place: upload });
+    expect(showing(upload, new Map([["upload:dddddddddddd", null]]), BOTH, OWN.id)).toEqual({ kind: "workspace", workspace: OWN, place: upload });
+  });
+
   it("leads the invited person from an invite's link to its workspace, and tells anyone else it isn't theirs", () => {
     expect(targetOf(INVITE)).toEqual({ kind: "invite", id: "bbbbbbbbbbbb", key: "invite:bbbbbbbbbbbb" });
     expect(showing(INVITE, new Map(), BOTH, OWN.id)).toEqual({ kind: "asking" });
     expect(showing(INVITE, new Map([["invite:bbbbbbbbbbbb", TEAM.id]]), BOTH, OWN.id)).toEqual({ kind: "joined", workspace: TEAM });
     expect(showing(INVITE, new Map([["invite:bbbbbbbbbbbb", null]]), BOTH, OWN.id)).toEqual({ kind: "not-invited" });
+    // One that waits for them to join is shown to them, to join or not.
+    const invitation = { workspace: "Team", role: "editor", invitedBy: "Ada Lovelace" } as const;
+    expect(showing(INVITE, new Map([["invite:bbbbbbbbbbbb", invitation]]), BOTH, OWN.id)).toEqual({ kind: "invited", inviteId: "bbbbbbbbbbbb", invitation });
     expect(showing(INVITE, new Map([["bbbbbbbbbbbb", TEAM.id]]), BOTH, OWN.id), "a note with the same id says nothing of the invite").toEqual({ kind: "asking" });
   });
 

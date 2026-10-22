@@ -232,7 +232,8 @@ export async function linkTo(ctx: Context, on: On, link: LinkKind | null): Promi
   sharing(ctx, item);
   const column = COLUMN[item.kind];
   if (link === null) {
-    await ctx.db.prepare(`DELETE FROM grants WHERE workspace_id = ? AND ${column} = ? AND kind <> 'person'`).bind(ctx.workspaceId, item.id).run();
+    const { results } = await ctx.db.prepare(`DELETE FROM grants WHERE workspace_id = ? AND ${column} = ? AND kind <> 'person' RETURNING id`).bind(ctx.workspaceId, item.id).all<{ id: string }>();
+    noteRevoked(ctx, results);
     return null;
   }
   const id = newId();
@@ -247,6 +248,9 @@ export async function linkTo(ctx: Context, on: On, link: LinkKind | null): Promi
     .first<{ id: string }>();
   return grantById(ctx, row?.id ?? (await refusedSince(ctx, on)));
 }
+
+/** Notes grants and links taken away, so a restore of the database doesn't give them back. */
+const noteRevoked = (ctx: Context, grants: readonly { id: string }[]) => ctx.revoked?.push(...grants.map(({ id }) => ({ kind: "grant" as const, id, at: ctx.now })));
 
 /** Revoking twice is refused the second time as for a grant that never was: nothing tells the two apart. */
 export async function revokeGrant(ctx: Context, id: string): Promise<{ id: string }> {
@@ -267,6 +271,7 @@ export async function revokeGrant(ctx: Context, id: string): Promise<{ id: strin
   sharing(ctx, item);
   if (row.role) narrowing(ctx, item);
   await ctx.db.prepare("DELETE FROM grants WHERE id = ?").bind(id).run();
+  noteRevoked(ctx, [{ id }]);
   return { id };
 }
 
@@ -290,11 +295,12 @@ async function makePrivate(ctx: Context, table: "notes" | "uploads", item: { id:
     ctx.db
       .prepare(
         `DELETE FROM grants WHERE ${COLUMN[word]} = ?1 AND (granted_by <> ?2 OR (kind = 'person' AND person_id IN (SELECT m.person_id FROM members m WHERE m.workspace_id = ?3)))
-         AND EXISTS (SELECT 1 FROM ${table} n WHERE n.id = ?1 AND n.private_owner = ?2)`,
+         AND EXISTS (SELECT 1 FROM ${table} n WHERE n.id = ?1 AND n.private_owner = ?2) RETURNING id`,
       )
       .bind(id, ctx.personId, ctx.workspaceId),
   ]);
   if (!updated!.meta.changes) throw new OpError("not_found", `No such ${word}`);
+  noteRevoked(ctx, removed!.results as { id: string }[]);
   return { id, private: makePrivate, removed: removed!.meta.changes };
 }
 

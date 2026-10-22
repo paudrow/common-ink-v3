@@ -2081,6 +2081,13 @@ export interface MeHere extends Me {
   setup: Setup;
 }
 
+/** What an invite's link tells the person it is for while it waits for them to accept it: where, as what, and from whom. */
+export interface Invitation {
+  workspace: string;
+  role: Role;
+  invitedBy: string;
+}
+
 /** `unavailable` when something outside Common Ink that the operation needs did not answer. */
 export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict" | "unavailable";
 

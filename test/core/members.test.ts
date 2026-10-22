@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { arrive, signIn, whoAmI, workspaceOfInvite, workspaceOfNote } from "../../src/core/accounts.ts";
+import { acceptInvite, arrive, invitation, signIn, whoAmI, workspaceOfInvite, workspaceOfNote } from "../../src/core/accounts.ts";
 import { invite as inviteAs, removeMember, revokeInvite, setRole } from "../../src/core/membership.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import type { OpInput, Role } from "../../src/core/protocol.ts";
@@ -14,7 +14,9 @@ const address = () => `${crypto.randomUUID()}@example.com`;
 const members = async (actor: Actor) => (await perform(env.DB, actor, { type: "member.list" })).map((m) => `${m.name}: ${m.role}`).sort();
 const invites = async (admin: Actor) => (await perform(env.DB, admin, { type: "invite.list" })).map((i) => `${i.email}: ${i.role}`);
 const roleOf = async (member: Actor) => (await whoAmI(env.DB, member.personId)).workspaces.find((w) => w.id === member.workspaceId)?.role ?? null;
-const invite = async (admin: Actor, email: string, as: Role) => (await perform(env.DB, admin, { type: "member.invite", email, as })).invite!;
+const invite = async (admin: Actor, email: string, as: Role, now = Date.now()) => (await perform(env.DB, admin, { type: "member.invite", email, as }, now)).invite!;
+/** A moment after now, so an invite made then is plainly made after an account made now. */
+const later = () => Date.now() + 1000;
 const at = (workspaceId: string, personId: string): Actor => ({ kind: "member", personId, workspaceId });
 
 const LAST_ADMIN = { code: "invalid", message: "A workspace needs an admin. Make someone else an admin first." };
@@ -39,19 +41,24 @@ describe("inviting", () => {
     });
   }
 
-  it("reaches a person who is already signed in the next time they open Common Ink, and not through their agent", async () => {
+  it("waits for a person who already has an account to accept it, through its link: nobody joins them to a workspace unasked", async () => {
     const ada = await newMember("Ada Lovelace");
     const email = address();
     const { personId } = await signIn(env.DB, { email, name: "Grace Hopper" });
-    await invite(ada, email, "editor");
+    const pending = await invite(ada, email, "editor", later());
 
-    expect((await whoAmI(env.DB, personId)).workspaces).toHaveLength(1);
-    expect(await invites(ada)).toEqual([`${email}: editor`]);
-
+    // Opening Common Ink takes nothing up: Grace is told of the invite only at its link, and is in Ada's workspace only once she joins.
     await arrive(env.DB, personId);
+    expect((await whoAmI(env.DB, personId)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
+    expect([await invites(ada), await workspaceOfInvite(env.DB, personId, pending.id)]).toEqual([[`${email}: editor`], null]);
+    expect(await invitation(env.DB, personId, pending.id)).toEqual({ workspace: "Ada's workspace", role: "editor", invitedBy: "Ada Lovelace" });
+    // Nobody else is told of it, or joins by it.
+    const mallory = await newMember("Mallory");
+    expect([await invitation(env.DB, mallory.personId, pending.id), await acceptInvite(env.DB, mallory.personId, pending.id)]).toEqual([null, null]);
 
+    expect(await acceptInvite(env.DB, personId, pending.id)).toBe(ada.workspaceId);
     expect((await whoAmI(env.DB, personId)).workspaces.map((w) => `${w.name}: ${w.role}`)).toEqual(["Grace's workspace: admin", "Ada's workspace: editor"]);
-    expect(await invites(ada)).toEqual([]);
+    expect([await invites(ada), await invitation(env.DB, personId, pending.id), await workspaceOfInvite(env.DB, personId, pending.id)]).toEqual([[], null, ada.workspaceId]);
   });
 
   it("matches the email a person signs in with, whatever its case, and no other spelling of it", async () => {
@@ -120,7 +127,8 @@ describe("inviting", () => {
 
     const again = await invite(ada, email, "viewer");
     expect(again.id).not.toBe(pending.id);
-    await arrive(env.DB, personId);
+    expect(await acceptInvite(env.DB, personId, pending.id)).toBeNull();
+    await acceptInvite(env.DB, personId, again.id);
     expect(await members(ada)).toEqual(["Ada Lovelace: admin", "Grace Hopper: viewer"]);
     await expect(perform(env.DB, ada, { type: "invite.revoke", id: again.id })).rejects.toMatchObject({ code: "invalid", message: "They have already joined. Remove them from the members instead." });
     expect(await members(ada)).toEqual(["Ada Lovelace: admin", "Grace Hopper: viewer"]);
@@ -208,9 +216,25 @@ describe("an invite stands only while whoever made it is still an admin", () => 
       const bob = await addMember(ada, "admin", "Bob Kahn");
       const email = address();
       const { personId } = await signIn(env.DB, { email, name: "Victor" });
+      const { id } = await invite(bob, email, "admin");
+
+      await Promise.all([perform(env.DB, ada, { type: "member.remove", memberId: bob.personId }), acceptInvite(env.DB, personId, id)]);
+
+      expect(await invites(ada)).toEqual([]);
+      const first = (await members(ada)).filter((m) => m.startsWith("Victor"));
+      await acceptInvite(env.DB, personId, id);
+      expect((await members(ada)).filter((m) => m.startsWith("Victor")), "a later arrival changes nothing").toEqual(first);
+    }
+  });
+
+  it("when the inviter's removal and a new person's first sign-in come at once: they are in only if they arrived first", async () => {
+    for (let round = 0; round < 10; round++) {
+      const ada = await newMember("Ada Lovelace");
+      const bob = await addMember(ada, "admin", "Bob Kahn");
+      const email = address();
       await invite(bob, email, "admin");
 
-      await Promise.all([perform(env.DB, ada, { type: "member.remove", memberId: bob.personId }), arrive(env.DB, personId)]);
+      const [, { personId }] = await Promise.all([perform(env.DB, ada, { type: "member.remove", memberId: bob.personId }), signIn(env.DB, { email, name: "Victor" })]);
 
       expect(await invites(ada)).toEqual([]);
       const first = (await members(ada)).filter((m) => m.startsWith("Victor"));
@@ -237,10 +261,10 @@ describe("inviting an email at the moment its person arrives", () => {
       const ada = await newMember("Ada Lovelace");
       const email = address();
       const { personId } = await signIn(env.DB, { email, name: "Grace Hopper" });
-      await invite(ada, email, "viewer");
+      const { id } = await invite(ada, email, "viewer");
 
-      const [answer] = await Promise.all([perform(env.DB, ada, { type: "member.invite", email, as: "editor" }), arrive(env.DB, personId)]);
-      await arrive(env.DB, personId);
+      const [answer] = await Promise.all([perform(env.DB, ada, { type: "member.invite", email, as: "editor" }), acceptInvite(env.DB, personId, id)]);
+      await acceptInvite(env.DB, personId, id);
 
       expect(await members(ada), `round ${round}`).toEqual(["Ada Lovelace: admin", "Grace Hopper: editor"]);
       expect(await invites(ada)).toEqual([]);
@@ -365,8 +389,8 @@ describe("roles", () => {
     expect(await perform(env.DB, ada, { type: "history.authors" })).toContainEqual({ kind: "member", personId: editor.personId, name: "Edith Clarke" });
 
     const email = (await whoAmI(env.DB, editor.personId)).person.email;
-    await perform(env.DB, ada, { type: "member.invite", email, as: "viewer" });
-    await arrive(env.DB, editor.personId);
+    const { id } = await invite(ada, email, "viewer");
+    await acceptInvite(env.DB, editor.personId, id);
     expect((await perform(env.DB, editor, { type: "settings.read" })).text, "their settings are there if they come back").toBe('{"core.theme":"dark"}');
   });
 
@@ -499,10 +523,8 @@ describe("a person in several workspaces", () => {
     const mary = await newMember("Mary Jackson");
     const email = (await whoAmI(env.DB, mary.personId)).person.email;
 
-    await perform(env.DB, grace, { type: "member.invite", email, as: "viewer" });
-    await arrive(env.DB, mary.personId, Date.now() + 1000);
-    await perform(env.DB, ada, { type: "member.invite", email, as: "editor" });
-    await arrive(env.DB, mary.personId, Date.now() + 2000);
+    await acceptInvite(env.DB, mary.personId, (await invite(grace, email, "viewer")).id, Date.now() + 1000);
+    await acceptInvite(env.DB, mary.personId, (await invite(ada, email, "editor")).id, Date.now() + 2000);
 
     expect((await whoAmI(env.DB, mary.personId)).workspaces.map((w) => `${w.name}: ${w.role}`)).toEqual(["Mary's workspace: admin", "Grace's workspace: viewer", "Ada's workspace: editor"]);
   });
@@ -550,7 +572,7 @@ describe("over HTTP, as a signed-in person", () => {
   };
   const op = (body: OpInput): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json", Origin: "https://ink.test" }, body: JSON.stringify(body) });
 
-  it("an invite takes effect when the invited person next opens Common Ink, and its link leads them and nobody else to the workspace", async () => {
+  it("an invite's link tells the invited person what it is, and they join by saying so from Common Ink itself; it tells anyone else nothing", async () => {
     const ada = await newMember("Ada Lovelace");
     const asAda = await session(ada.personId);
     const email = address();
@@ -558,12 +580,20 @@ describe("over HTTP, as a signed-in person", () => {
     const asGrace = await session(grace.personId);
     const asMallory = await session((await newMember("Mallory")).personId);
 
-    const made = await asAda(`/api/workspaces/${ada.workspaceId}/ops`, op({ type: "member.invite", email, as: "viewer" }));
-    expect(made.status).toBe(200);
-    const inviteId = (made.body as { invite: { id: string } }).invite.id;
+    const inviteId = (await invite(ada, email, "viewer", later())).id;
+    const join = { method: "POST", headers: { Origin: "https://ink.test" } };
 
-    expect(await asMallory(`/api/invites/${inviteId}`)).toEqual({ status: 404, body: { error: "not_found" } });
+    for (const asSomeoneElse of [asMallory, asAda]) {
+      expect(await asSomeoneElse(`/api/invites/${inviteId}`)).toEqual({ status: 404, body: { error: "not_found" } });
+      expect(await asSomeoneElse(`/api/invites/${inviteId}`, join)).toEqual({ status: 404, body: { error: "not_found" } });
+    }
     expect(await asMallory("/api/invites/aaaaaaaaaaaa")).toEqual({ status: 404, body: { error: "not_found" } });
+    expect(await asGrace(`/api/invites/${inviteId}`)).toEqual({ status: 200, body: { invite: { workspace: "Ada's workspace", role: "viewer", invitedBy: "Ada Lovelace" } } });
+    // Another site can send her browser to the link, but not join for her.
+    expect((await asGrace(`/api/invites/${inviteId}`, { method: "POST" })).status).toBe(403);
+    expect(((await asGrace("/api/me")).body as { workspaces: unknown[] }).workspaces).toHaveLength(1);
+
+    expect(await asGrace(`/api/invites/${inviteId}`, join)).toEqual({ status: 200, body: { workspaceId: ada.workspaceId } });
     expect(await asGrace(`/api/invites/${inviteId}`)).toEqual({ status: 200, body: { workspaceId: ada.workspaceId } });
     expect(((await asGrace("/api/me")).body as { workspaces: { name: string; role: Role }[] }).workspaces).toMatchObject([{ name: "Grace's workspace", role: "admin" }, { name: "Ada's workspace", role: "viewer" }]);
 
@@ -572,14 +602,14 @@ describe("over HTTP, as a signed-in person", () => {
     expect((await asGrace(`/api/workspaces/${ada.workspaceId}/ops`, op({ type: "member.list" }))).status).toBe(200);
   });
 
-  it("an invite made since they last looked is taken up by /api/me alone", async () => {
+  it("an invite made since they had an account isn't taken up by /api/me: it waits at its link", async () => {
     const ada = await newMember("Ada Lovelace");
     const email = address();
     const grace = await signIn(env.DB, { email, name: "Grace Hopper" });
     const asGrace = await session(grace.personId);
-    await invite(ada, email, "editor");
+    await invite(ada, email, "editor", later());
 
-    expect(((await asGrace("/api/me")).body as { workspaces: unknown[] }).workspaces).toHaveLength(2);
+    expect(((await asGrace("/api/me")).body as { workspaces: unknown[] }).workspaces).toHaveLength(1);
   });
 
   it("a note's address says which of the person's workspaces it is in, and the same of a note that isn't theirs as of one that doesn't exist", async () => {

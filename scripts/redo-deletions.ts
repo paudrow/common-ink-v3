@@ -6,7 +6,8 @@
 // It puts the request in the uploads bucket with wrangler, signed in as you, then asks the Worker at
 // --url (https://commonink.app) to carry it out and prints what became of each id. The request's name
 // is random, and the Worker carries out only a request it finds in the bucket, so no secret is needed.
-// Running it again is safe: an id already gone answers `gone`.
+// Running it again is safe: an id already gone answers `gone`. With --since it also takes away again the access taken
+// away since then (members removed, grants and links taken back, agents and clippers disconnected, sign-outs everywhere).
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";

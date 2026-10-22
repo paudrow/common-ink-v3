@@ -233,6 +233,18 @@ export function fileSiteResponse(req: Request, env: Env, url: URL): Promise<Resp
   })();
 }
 
+/**
+ * Where a member's browser is sent instead when another site asked it for a file or an export. The session rides
+ * along on a link followed from anywhere, and a download looks different from a refusal, so answering would tell that
+ * site whether its visitor can see the workspace. Everyone is sent to the same place in the app, which asks again
+ * from its own page. A token isn't sent by a browser, and a browser says where its own and typed requests come from.
+ */
+function fromElsewhere(req: Request, into: string): Response | null {
+  const site = req.headers.get("Sec-Fetch-Site");
+  if (!site || site === "same-origin" || site === "none" || bearerToken(req)) return null;
+  return new Response(null, { status: 303, headers: { Location: into, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+}
+
 /** Answers a request that is for an upload's bytes, in or out. Null for any other. */
 export async function handleFiles(req: Request, env: Env, url: URL): Promise<Response | null> {
   const sent = PART.exec(url.pathname);
@@ -240,12 +252,14 @@ export async function handleFiles(req: Request, env: Env, url: URL): Promise<Res
   const shared = SHARED_UPLOAD.exec(url.pathname);
   if (shared) return reads(req) ? sharedUpload(req, env, url, shared[1]!, shared[2]!) : json({ error: "method_not_allowed" }, 405, UNLISTED);
   const exporting = EXPORT.exec(url.pathname);
-  if (exporting) return exported(req, env, url, exporting[1]!);
+  if (exporting) return fromElsewhere(req, "/") ?? exported(req, env, url, exporting[1]!);
   const route = UPLOADS.exec(url.pathname);
   if (!route) return null;
   const [, workspaceId, id] = route;
   if (!id) return req.method === "POST" ? upload(req, env, url, workspaceId!) : json({ error: "method_not_allowed" }, 405, { Allow: "POST" });
   if (!reads(req)) return json({ error: "method_not_allowed" }, 405, { Allow: "GET, HEAD" });
+  const elsewhere = fromElsewhere(req, `/uploads/${id}`);
+  if (elsewhere) return elsewhere;
   const who = await asker(req, env, url, workspaceId!);
   if (who instanceof Response) return who;
   // The clipper sends files and never reads them: its token stands for the member, who can see far more than it clipped.

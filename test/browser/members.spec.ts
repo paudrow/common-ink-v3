@@ -221,6 +221,29 @@ test("an invite's link lets in only the invited email, and nobody once it is rev
   await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
 });
 
+test("someone who already has an account joins a workspace only by saying so at the invite's link", async ({ page, browser }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const grace = await (await browser.newContext({ baseURL: test.info().project.use.baseURL })).newPage();
+  await signInAsNewPerson(grace, "Grace Hopper");
+  const { invite: made } = await perform(page, { type: "member.invite", email: (await me(grace)).person.email, as: "editor" });
+
+  // Opening Common Ink takes nothing up.
+  await grace.reload();
+  await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
+  await grace.goto(`/invite/${made!.id}`);
+  const asked = grace.getByRole("main");
+  await expect(asked.getByRole("heading")).toHaveText("Join Ada's workspace?");
+  await expect(asked).toContainText("Ada Lovelace invited you as an editor.");
+  await asked.getByRole("button", { name: "Not now" }).click();
+  await expect(workspaceButton(grace)).toContainText("Grace's workspace");
+  expect((await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
+
+  await grace.goto(`/invite/${made!.id}`);
+  await grace.getByRole("button", { name: "Join Ada's workspace" }).click();
+  await expect(workspaceButton(grace)).toHaveText("Ada's workspaceEditor");
+  await expect(grace).toHaveURL(/\/$/);
+});
+
 test("an invite's link that can't be checked for a moment says so, not that it doesn't let you in, and Try again checks it", async ({ page, browser }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const email = newEmail();

@@ -376,3 +376,54 @@ describe("a PDF opened in a tab, from the site kept for files", () => {
     }
   });
 });
+
+describe("an upload or an export asked for by another site", () => {
+  const PDF = bytesOf("%PDF-1.7\n");
+  const sessionOf = async (personId: string) => `__Host-ink_session=${encodeURIComponent(await sign({ personId }, SECRET, 3600))}`;
+  /** What another site learns by sending the visitor's browser to `path`: the same answer whoever the visitor is, so it learns nothing. */
+  const fromElsewhere = async (path: string, cookie?: string) => {
+    const res = await send(path, { redirect: "manual", headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", ...(cookie ? { Cookie: cookie } : {}) } });
+    void res.body?.cancel();
+    return [res.status, res.headers.get("Location"), res.headers.get("Content-Disposition")];
+  };
+
+  it("is sent into the app, the same for a member, someone else and nobody, so it says nothing of who can see what", async () => {
+    const { ada, token, workspace } = await connected();
+    const pdf = await sent(workspace, token, "paper.pdf", PDF);
+    const stranger = await newMember("Sam Stranger");
+    for (const [path, into] of [
+      [`/api/workspaces/${workspace}/uploads/${pdf.id}`, `/uploads/${pdf.id}`],
+      [`/api/workspaces/${workspace}/export?notes=1`, "/"],
+    ] as const) {
+      const answers = [await fromElsewhere(path, await sessionOf(ada.personId)), await fromElsewhere(path, await sessionOf(stranger.personId)), await fromElsewhere(path)];
+      expect(answers, path).toEqual([[303, into, null], [303, into, null], [303, into, null]]);
+    }
+  });
+
+  it("is opened by the app in the workspace the upload is in, for whoever can see it, and for nobody else", async () => {
+    const { ada, token, workspace } = await connected();
+    const pdf = await sent(workspace, token, "paper.pdf", PDF);
+    const stranger = await newMember("Sam Stranger");
+    const lookup = async (personId: string, id = pdf.id) => {
+      const res = await send(`/api/uploads/${id}`, { headers: { Cookie: await sessionOf(personId) } });
+      return [res.status, await res.json()];
+    };
+    expect(await lookup(ada.personId)).toEqual([200, { workspaceId: workspace }]);
+    expect(await lookup(stranger.personId)).toEqual([404, { error: "not_found" }]);
+    expect(await lookup(ada.personId, "aaaaaaaaaaaa")).toEqual([404, { error: "not_found" }]);
+  });
+
+  it("is answered as ever from the app itself, from an address typed or bookmarked, and to a token", async () => {
+    const { ada, token, workspace } = await connected();
+    const pdf = await sent(workspace, token, "paper.pdf", PDF);
+    const cookie = await sessionOf(ada.personId);
+    for (const site of ["same-origin", "none"]) {
+      const res = await send(`/api/workspaces/${workspace}/uploads/${pdf.id}`, { headers: { Cookie: cookie, "Sec-Fetch-Site": site } });
+      expect([site, res.status, res.headers.get("Content-Disposition")?.split(";")[0]]).toEqual([site, 200, "attachment"]);
+      void res.body?.cancel();
+    }
+    const byToken = await get(workspace, token, pdf.id, { "Sec-Fetch-Site": "cross-site" });
+    expect(byToken.status).toBe(200);
+    void byToken.body?.cancel();
+  });
+});

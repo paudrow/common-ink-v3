@@ -1,5 +1,6 @@
 import { whoAmI } from "../core/accounts.ts";
 import { CLIPPER_DAYS, authenticateClipper, clipperExtensionIds, clipperRedirect, connectClipper, listClipperGrants, revokeClipperGrant } from "../core/clipper.ts";
+import { remember } from "../core/erase.ts";
 import { sessionOf, sessionPersonId } from "./auth.ts";
 import { MAX_FORM_BYTES, cappedBody } from "./body.ts";
 import { PAGE, written } from "./headers.ts";
@@ -50,13 +51,21 @@ export async function handleClipper(req: Request, env: Env, url: URL): Promise<R
   return new Response(null, { status: 302, headers: { Location: to.href, "Cache-Control": "no-store" } });
 }
 
+/** Ends a clipper grant, kept outside the database too, so a restore of it doesn't let the clipper in again. */
+async function revoked(env: Env, personId: string, grantId: string): Promise<boolean> {
+  const now = Date.now();
+  if (!(await revokeClipperGrant(env.DB, personId, grantId, now))) return false;
+  await remember(env.FILES, [{ kind: "clipper", id: grantId, at: now }]);
+  return true;
+}
+
 /** The clipper signing itself out: its own token, as a bearer, ends its grant. */
 async function revoke(req: Request, env: Env): Promise<Response> {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const token = bearerToken(req);
   const grant = token ? await authenticateClipper(env.DB, token) : null;
   if (!grant) return json({ error: "unauthorized", message: "Send the clipper's own token: Authorization: Bearer cink_…" }, 401);
-  await revokeClipperGrant(env.DB, grant.personId, grant.grantId);
+  await revoked(env, grant.personId, grant.grantId);
   return done();
 }
 
@@ -70,7 +79,7 @@ export async function handleClipperApi(req: Request, env: Env, url: URL): Promis
   if (req.method !== "DELETE") return json({ error: "method_not_allowed" }, 405);
   // The session cookie rides along on any request to us, so a revoke comes from Common Ink's own pages.
   if (req.headers.get("Origin") !== url.origin) return json({ error: "forbidden", message: "The clipper is revoked from Common Ink itself" }, 403);
-  return (await revokeClipperGrant(env.DB, personId, one[1]!)) ? done() : json({ error: "not_found", message: "No such clipper sign-in" }, 404);
+  return (await revoked(env, personId, one[1]!)) ? done() : json({ error: "not_found", message: "No such clipper sign-in" }, 404);
 }
 
 async function postedRedirect(req: Request): Promise<string | null> {

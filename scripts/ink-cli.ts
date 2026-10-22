@@ -45,7 +45,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   drafts                              your member's own drafts of plugins
   draft ID                            one of them, with its code
   draft-save ID --manifest TEXT --code TEXT --running true|false [--base-hash HASH|none]
-                                      keep your member's draft; running runs it for them alone
+                                      keep your member's draft, switched off: they switch it on
   draft-discard ID                    remove your member's draft for good
   notes [--folder ID] [--since TIME] [--tag NAME] [--archived true|only] [--limit N] [--after NEXT]
                                       the notes in a workspace, in one folder, with a tag, or changed since a time

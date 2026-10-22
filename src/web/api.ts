@@ -1,6 +1,6 @@
 import { partSpan, partsLeft, planParts } from "../core/parts.ts";
 import { tellFault } from "./faults.ts";
-import { NO_SUCH_WORKSPACE, type Agent, type ClipperGrantView, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type SendingUpload, type Shared, type Upload } from "../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, type Invitation, type Agent, type ClipperGrantView, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type SendingUpload, type Shared, type Upload } from "../core/protocol.ts";
 import { forgetAll } from "./stash.ts";
 
 export class ApiError extends Error {
@@ -65,8 +65,8 @@ export function onRefused(listener: () => void): () => void {
  * The workspace at the end of an address, among the member's own. Null only when the server says there
  * is nothing there for them. Anything else it answers, such as signed out or too many requests, throws.
  */
-const where = (path: string) =>
-  request<{ workspaceId: string }>(path).then(
+const where = (path: string, init?: RequestInit) =>
+  request<{ workspaceId: string }>(path, init).then(
     (found) => found.workspaceId,
     (err) => {
       if (err instanceof ApiError && err.code === "not_found") return null;
@@ -75,7 +75,19 @@ const where = (path: string) =>
   );
 
 export const workspaceOfNote = (noteId: string) => where(`/api/notes/${noteId}`);
-export const workspaceOfInvite = (inviteId: string) => where(`/api/invites/${inviteId}`);
+export const workspaceOfUpload = (uploadId: string) => where(`/api/uploads/${uploadId}`);
+/** Where an invite's link leads: the workspace once its person has joined, what the invite is while it waits for them, or null for nowhere. */
+export const inviteAt = (inviteId: string) =>
+  request<{ workspaceId: string } | { invite: Invitation }>(`/api/invites/${inviteId}`).then(
+    (found) => ("invite" in found ? found.invite : found.workspaceId),
+    (err) => {
+      if (err instanceof ApiError && err.code === "not_found") return null;
+      throw err;
+    },
+  );
+
+/** Joins the workspace an invite is for, as the person it is for. Null when it no longer waits for them. */
+export const joinInvite = (inviteId: string) => where(`/api/invites/${inviteId}`, { method: "POST" });
 
 export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<Results[T["type"]]> {
   const body = JSON.stringify(op);
