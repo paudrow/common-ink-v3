@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
+import { registerClient, startRequest } from "../../src/core/oauth.ts";
 import { perform } from "../../src/core/operations.ts";
 import { OpError } from "../../src/core/protocol.ts";
 import { sign } from "../../src/worker/session.ts";
@@ -104,6 +105,44 @@ describe("signing out everywhere", () => {
 
     await perform(env.DB, ada, { type: "member.signOut", memberId: ada.personId });
     expect([await tools(claude), await tools(cursor)]).toEqual([401, 401]);
+  });
+
+  it("leaves no agent or app connected by a request its session made in the moment before, so a stolen session can't outlast it", async () => {
+    const ada = await newMember();
+    const SECRET = "test-secret";
+    /** A session begun now, with how many times Ada has been signed out everywhere so far. */
+    const session = async () => {
+      const ended = (await env.DB.prepare("SELECT sessions_ended AS n FROM people WHERE id = ?").bind(ada.personId).first<{ n: number }>())!.n;
+      return `__Host-ink_session=${encodeURIComponent(await sign({ t: "session", personId: ada.personId, ended }, SECRET, 600))}`;
+    };
+    /** `env.DB`, where Ada is signed out everywhere just before the first statement `sql` matches: after the request's session was checked, before it writes. */
+    const racing = (sql: RegExp): D1Database => {
+      let raced = false;
+      const signOut = () => (raced ? null : ((raced = true), perform(env.DB, ada, { type: "member.signOut", memberId: ada.personId })));
+      return new Proxy(env.DB, {
+        get(db, key) {
+          const value = Reflect.get(db, key, db);
+          if (key !== "prepare") return typeof value === "function" ? value.bind(db) : value;
+          return (text: string) => {
+            const statement = db.prepare(text);
+            if (!sql.test(text)) return statement;
+            return { bind: (...args: unknown[]) => ({ first: async () => (await signOut(), statement.bind(...args).first()) }) };
+          };
+        },
+      });
+    };
+    const post = async (path: string, body: object, db: D1Database) =>
+      worker.fetch(new Request(`https://ink.test${path}`, { method: "POST", headers: { Cookie: await session(), Origin: "https://ink.test", "Content-Type": "application/json" }, body: JSON.stringify(body) }) as never, { ...env, SESSION_SECRET: SECRET, DB: db });
+    const live = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FROM agents WHERE person_id = ? AND revoked_at IS NULL").bind(ada.personId).first<{ n: number }>())!.n;
+
+    const agent = await post("/api/agents", { name: "Late" }, racing(/^SELECT COUNT\(\*\) AS n FROM agents/));
+    expect([agent.status, await live()]).toEqual([409, 0]);
+
+    // An OAuth app's consent, the same: the request is taken up just before its agent and code are written.
+    const client = await registerClient(env.DB, { client_name: "Chat", redirect_uris: ["https://chat.example/cb"] });
+    const requestId = await startRequest(env.DB, ada.personId, { clientId: client.id, redirectUri: "https://chat.example/cb", codeChallenge: "x".repeat(43), state: null, resource: null });
+    const consented = await post("/api/oauth/consent", { requestId }, racing(/^DELETE FROM oauth_requests/));
+    expect([consented.status, await live()]).toEqual([409, 0]);
   });
 
   it("lets an admin disconnect a member's agents that reach the workspace, and only those, only by signing them out", async () => {

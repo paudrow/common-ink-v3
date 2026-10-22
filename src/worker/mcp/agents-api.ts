@@ -2,7 +2,7 @@
 // the connect call and nowhere else: only its hash is kept.
 import { connectAgent, disconnectAgent, editAgent, listAgents } from "../../core/agents.ts";
 import { ConnectOptions, OpError, type OpErrorCode } from "../../core/protocol.ts";
-import { sessionPersonId } from "../auth.ts";
+import { sessionOf } from "../auth.ts";
 import { MAX_FORM_BYTES, TooLarge, cappedJson } from "../body.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
@@ -12,8 +12,9 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 const stripNull = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([key, v]) => v !== null || !Object.hasOwn(ConnectOptions.shape, key)));
 
 export async function handleAgentsApi(req: Request, env: Env, url: URL): Promise<Response> {
-  const personId = await sessionPersonId(req, env, url);
-  if (!personId) return json({ error: "signed_out" }, 401);
+  const session = await sessionOf(req, env, url);
+  if (!session) return json({ error: "signed_out" }, 401);
+  const { personId } = session;
 
   const one = /^\/api\/agents\/([a-z0-9]{12})$/.exec(url.pathname);
   const isList = url.pathname === "/api/agents";
@@ -42,7 +43,7 @@ export async function handleAgentsApi(req: Request, env: Env, url: URL): Promise
       if (typeof body !== "object" || body === null || Array.isArray(body)) return json({ error: "invalid", message: "Send a JSON object" }, 400);
       if (typeof body.name !== "string") return json({ error: "invalid", message: "Give the agent a name" }, 400);
       const { name, ...options } = body;
-      return json(await connectAgent(env.DB, personId, name, stripNull(options) as never), 201);
+      return json(await connectAgent(env.DB, personId, name, stripNull(options) as never, Date.now(), session.ended), 201);
     } catch (err) {
       if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
       throw err;
