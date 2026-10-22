@@ -1,6 +1,6 @@
 import { completionStatus, startCompletion } from "@codemirror/autocomplete";
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import { writtenMention, type Contact, type Member, type Plugin, type Source } from "../../plugin-api.ts";
+import { writtenMention, type CompletionItem, type Contact, type Member, type Plugin, type Source } from "../../plugin-api.ts";
 import { editorKey, redraw } from "../lib/live.ts";
 import { reask } from "../lib/reasking.ts";
 import { mentionDrawing, noteMentions, type OpenPerson } from "./drawing.ts";
@@ -65,6 +65,24 @@ export const mentions: Plugin = {
       return { ...people, members: new Map([[me.id, self], ...people.members]) };
     };
 
+    /** What the list after an `@` in the focused editor offers now, or null where no `@` is being typed. */
+    const offeredNow = () => {
+      const view = focused();
+      const typed = view ? afterAt(view) : null;
+      return view && typed !== null ? { view, items: offered(typed, known(), host.app().me.id, adding()) } : null;
+    };
+    /**
+     * Asks the list after an `@` again for people who have arrived. An open list is asked at once, and a shut one
+     * opens where `arrived` says that what it now offers first is what came.
+     */
+    const offerArrived = (arrived: (first: CompletionItem) => boolean) => {
+      const now = offeredNow();
+      if (!now) return;
+      if (completionStatus(now.view.state) === "active") return reask();
+      const first = now.items[0];
+      if (first && arrived(first)) startCompletion(now.view);
+    };
+
     let membersAt = 0;
     const readMembers = () => {
       membersAt = Date.now();
@@ -73,14 +91,20 @@ export const mentions: Plugin = {
       host.perform({ type: "member.list" }).then(
         (list) => {
           const was = JSON.stringify([...people.members.values()]);
+          // A list shut with Escape stays shut. Only one that offered nobody opens for the members.
+          const before = offeredNow()?.items.length;
           people = { ...people, members: new Map(list.map((m) => [m.personId, m])) };
           membersKnown = true;
           if (JSON.stringify(list) === was) return;
           for (const view of editors.values()) view.dispatch({ effects: redraw.of(null) });
-          reask();
+          offerArrived((first) => !before && first.tone === "accent");
         },
-        // Whoever reads a link's page is told nothing of who is in the workspace either.
-        () => void (membersKnown = true),
+        (err: { status?: unknown } | undefined) => {
+          const status = err?.status;
+          // A refusal, as a link's reader gets, means nobody to be told of. A fault is read again by the next @.
+          if (typeof status === "number" && status < 500 && status !== 408 && status !== 429) membersKnown = true;
+          else membersAt = 0;
+        },
       );
     };
     readMembers();
@@ -93,14 +117,8 @@ export const mentions: Plugin = {
           made = made.filter((m) => !contacts.some((c) => c.sourceId === m.sourceId && c.id === m.id));
           people = { ...people, contacts: [...contacts, ...made] };
           addTo = more ? null : addingTo(sources);
-          // The list after an `@` is asked again for the contacts: an open one at once, and one that isn't, where nothing else
-          // matched, where it now offers something before or instead of any member: a contact, or to create one.
-          const view = focused();
-          const typed = view ? afterAt(view) : null;
-          if (!view || typed === null) return;
-          if (completionStatus(view.state) === "active") return reask();
-          const first = offered(typed, known(), host.app().me.id, adding())[0];
-          if (first && (first.tone === "muted" || first.kind === "new")) startCompletion(view);
+          // Where nothing else matched, it now offers something before or instead of any member: a contact, or to create one.
+          offerArrived((first) => first.tone === "muted" || first.kind === "new");
         },
         // A reading that failed is read again by the next asking, not taken to be the contacts until they would be stale.
         () => {
