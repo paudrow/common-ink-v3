@@ -53,7 +53,7 @@ export function Senders({ host }: { host: PluginHost }) {
 
   if (!known && !problem) return null;
   return (
-    <section className="email-senders" aria-label="Your addresses">
+    <section className="sources email-senders" aria-label="Your addresses">
       <h2>Your addresses</h2>
       <p className="sources-none">Mail is kept only from these, and only when its domain vouches that it was sent from there (DMARC or DKIM). Mail from any other address is dropped, and its sender isn't told.</p>
       {known && (

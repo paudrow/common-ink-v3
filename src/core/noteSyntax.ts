@@ -91,6 +91,13 @@ export const NOTE_SYNTAX: readonly NoteSyntax[] = [
     example: "::contact{aaaaaaaaaaaa Ada Lovelace}",
   },
   {
+    name: "email",
+    kind: "embed",
+    called: "an email thread",
+    about: "An email thread, or one message in it, is the id refer_record answered, then a space, then a label. Anyone but the member whose email it is sees only the label. Write a subject, never what the mail says.",
+    example: "::email{aaaaaaaaaaaa Invoice for October}",
+  },
+  {
     name: "image",
     kind: "embed",
     called: "a picture",

@@ -74,7 +74,8 @@ async function connected(held: Held = {}, more: Partial<Env> = {}) {
   await keepTokens(env.DB, vault(KEY)!, ada.personId, "google", "ada@example.com", { accessToken: access, refreshToken: refresh, expiresAt, scopes }, T0);
   const sources = sourcesFor(configured(more), new URL("https://commonink.app/"), google.fetch, () => T0);
   const ask = <T extends OpInput>(op: T, actor: Actor = ada) => perform(env.DB, actor, op, T0, sources);
-  const states = async () => Object.fromEntries((await ask({ type: "source.list" })).sources.map((s) => [s.id, s.state]));
+  // Email is offered everywhere and comes from no Google account: these are Google's.
+  const states = async () => Object.fromEntries((await ask({ type: "source.list" })).sources.filter((s) => s.provider === "Google").map((s) => [s.id, s.state]));
   return { google, ada, ask, states, sources };
 }
 
@@ -131,7 +132,7 @@ describe("tokens at rest", () => {
 
   it("are not kept at all without a key, and Google's data sources aren't offered", async () => {
     const { ask } = await connected({}, { TOKEN_KEY: undefined });
-    expect((await ask({ type: "source.list" })).sources).toEqual([]);
+    expect((await ask({ type: "source.list" })).sources.map((s) => s.id)).toEqual(["email"]);
     expect(await refusal(ask({ type: "source.connect", id: "google-calendar" }))).toBe("not_found: No such data source");
   });
 });
@@ -588,7 +589,7 @@ describe("disconnecting", () => {
     const { google, ada, ask, sources } = await connected();
     const eve = await addMember(ada, "editor", "Eve");
     await keepTokens(env.DB, vault(KEY)!, eve.personId, "google", "eve@example.com", { accessToken: "at-eve", refreshToken: "rt-eve", expiresAt: T0 + 1000, scopes: ALL_SCOPES }, T0);
-    expect((await ask({ type: "source.disconnect", id: "google-contacts" })).sources.map((s) => [s.id, s.state, s.account])).toEqual([["google-calendar", "not_connected", null], ["google-contacts", "not_connected", null]]);
+    expect((await ask({ type: "source.disconnect", id: "google-contacts" })).sources.map((s) => [s.id, s.state, s.account])).toEqual([["google-calendar", "not_connected", null], ["google-contacts", "not_connected", null], ["email", "not_connected", null]]);
     expect(google.revoked).toEqual(["rt-1"]);
     expect(await connectionOf(env.DB, ada.personId, "google")).toBeNull();
     expect(await connectionOf(env.DB, eve.personId, "google")).not.toBeNull();
