@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 import { anotherPerson, dropFirst, join, perform, signInAsNewPerson, test } from "./helpers.ts";
+import { codeHashOf, install, openPlugins, runCommand, toast, turnOn } from "./third-party-helpers.ts";
 
 // Each read the app keeps, answered once with the 500 the built Worker gives a request it dropped, is
 // asked again the next time the app would ask for it anyway, and never taken for an answer meanwhile.
@@ -79,4 +80,28 @@ test("who a todo can be assigned to, unread once as Todos opens, is read again",
   await members.handled();
 
   await expect(todo.getByRole("button", { name: "Assign: nobody" })).toBeVisible({ timeout: 10_000 });
+});
+
+test("a running draft of a plugin, its drafts unread once, runs once the app reads again", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const greeter = { name: "Greeter", version: "1.0", description: "Says hello.", capabilities: [], commands: [{ id: "greet", title: "Greet" }] };
+  const id = await install(page, greeter, `ink.onCommand("greet", () => ink.notify("Hello from the plugin"));\n`);
+  const note = await perform(page, { type: "note.create", text: "# Plan" });
+  await page.goto(`/note/${note.id}`);
+  await openPlugins(page);
+  await turnOn(page, "Greeter");
+  const code = `ink.onCommand("greet", () => ink.notify("Hello from my draft"));\n`;
+  await perform(page, { type: "draft.save", id, manifest: JSON.stringify(greeter), code, baseHash: await codeHashOf(page, id), running: true });
+  const drafts = await dropFirst(page, "draft.list");
+
+  await page.goto(`/note/${note.id}`);
+  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("Plan");
+  await drafts.handled();
+  // What the app reads again every so often, it reads when the window comes back to the front.
+  await page.evaluate(() => dispatchEvent(new Event("focus")));
+
+  await expect(async () => {
+    await runCommand(page, "Greeter plugin: Greet");
+    await expect(toast(page)).toHaveText(/Hello from my draft/, { timeout: 1000 });
+  }).toPass({ timeout: 10_000 });
 });
