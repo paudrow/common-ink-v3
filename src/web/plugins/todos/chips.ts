@@ -216,35 +216,39 @@ function panel(el: HTMLElement, says: string, name: string, label: string, disab
 }
 
 /**
- * A chip that opens the popover the Todos page opens from the same chip. A pick there rewrites the line as
- * the member's edit, as `todo.set` would: skipping by `skipTodo`, the rest by `rewriteTodo`.
+ * The popover the Todos page opens from `chip`, for the todo `line` writes. A pick closes it and hands
+ * `rewriteLine` the line as `todo.set` would write it: skipped by `skipTodo`, the rest by `rewriteTodo`.
  */
-function opener(el: HTMLElement, says: string, chip: ChipKind, source: Source, named = says) {
-  panel(el, says, `${CHIP_NAMES[chip]}: ${named}`, pickerLabel(chip), source.readOnly, (close) => {
-    const line = source.line();
-    const read = line && parseTodo(line.text);
-    return createElement(ChipMenu, {
-      chip,
-      todo: { state: read?.state ?? "open", due: read?.due?.date ?? null, importance: read?.importance ?? 0, every: read?.every?.written ?? null },
-      now: today(),
-      onClose: close,
-      onPick(change) {
+export function chipMenu(chip: ChipKind, line: string | undefined, close: () => void, rewriteLine: (next: (line: string) => string) => void, onText?: () => void): ReactNode {
+  const read = line === undefined ? null : parseTodo(line);
+  return createElement(ChipMenu, {
+    chip,
+    todo: { state: read?.state ?? "open", due: read?.due?.date ?? null, importance: read?.importance ?? 0, every: read?.every?.written ?? null },
+    now: today(),
+    onClose: close,
+    onPick(change) {
+      close();
+      rewriteLine((text) => {
+        try {
+          return changeTodo(text, change, today()).line;
+        } catch {
+          // The line was written another way while the popover was open, and has no later time to skip to.
+          return text;
+        }
+      });
+    },
+    onText:
+      onText &&
+      (() => {
         close();
-        source.rewriteLine((text) => {
-          try {
-            return changeTodo(text, change, today()).line;
-          } catch {
-            // The line was written another way while the popover was open, and has no later time to skip to.
-            return text;
-          }
-        });
-      },
-      onText() {
-        close();
-        source.edit();
-      },
-    });
+        onText();
+      }),
   });
+}
+
+/** A chip that opens the popover the Todos page opens from the same chip, and writes what is picked there on its line as the member's edit. */
+function opener(el: HTMLElement, says: string, chip: ChipKind, source: Source, named = says) {
+  panel(el, says, `${CHIP_NAMES[chip]}: ${named}`, pickerLabel(chip), source.readOnly, (close) => chipMenu(chip, source.line()?.text, close, source.rewriteLine, () => source.edit()));
 }
 
 const importance: Chip<ImportanceMarks> = {
