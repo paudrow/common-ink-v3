@@ -12969,7 +12969,7 @@ button.crumb[aria-expanded="true"] {
 :root[data-night-shift] input[type="checkbox"]:not(.switch, .todo-box),
 :root[data-night-shift] input[type="radio"] {
   appearance: none;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--muted);
   border-radius: 3px;
   background: var(--bg-elev) center / 100% no-repeat;
 }
@@ -12991,6 +12991,15 @@ button.crumb[aria-expanded="true"] {
 
 :root[data-night-shift] :is(input[type="checkbox"], input[type="radio"]):disabled {
   opacity: 0.5;
+}
+
+/* On black a box is only seen as bright as quiet text: the faint ink the app gives a box is next to none. Only as strong as the app's own rule, so a checked, hovered or done box keeps its accent. */
+:where(:root[data-night-shift]) .todo-box {
+  border-color: var(--muted);
+}
+
+:where(:root[data-night-shift]) .todo-box:is([data-state="abandoned"], [data-state="backlog"]) {
+  border-color: var(--faint);
 }
 
 :root[data-night-shift] .todo-box:checked {
