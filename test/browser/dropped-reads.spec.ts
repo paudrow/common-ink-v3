@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import { anotherPerson, connectAgent, dropFirst, join, panelIcon, perform, signInAsNewPerson, test } from "./helpers.ts";
+import { anotherPerson, connectAgent, dropFirst, editOf, join, panelIcon, perform, signInAsNewPerson, test } from "./helpers.ts";
 import { codeHashOf, install, openPlugins, runCommand, toast, turnOn } from "./third-party-helpers.ts";
 
 // Each read the app keeps, answered once with the 500 the built Worker gives a request it dropped, is
@@ -123,4 +123,23 @@ test("whether someone else changed the open note, unread once, is read at the me
   await page.keyboard.type("!");
 
   await expect(panelIcon(page, "History")).toHaveAccessibleDescription("Changes you haven't seen");
+});
+
+test("which agents wrote anything, unread once, isn't said to be none, and is read when a note changes", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const claude = await connectAgent(page, "Claude");
+  await claude.tool("create_note", { text: "# From Claude" });
+  await page.goto("/folder/all");
+  await expect(editOf(page, "From Claude")).toBeVisible();
+  const authors = await dropFirst(page, "history.authors");
+
+  await page.getByRole("button", { name: "Ada's workspace" }).click();
+  await page.getByRole("menuitem", { name: "Agents" }).click();
+  const row = page.getByRole("list", { name: "Connected agents" }).getByRole("listitem");
+  await expect(row).toContainText("last used just now");
+  await authors.handled();
+  await expect(row.getByText("No changes in")).toHaveCount(0);
+
+  await perform(page, { type: "note.create", text: "# Mine" });
+  await expect(row.getByRole("button", { name: "See its changes" })).toBeVisible({ timeout: 10_000 });
 });
