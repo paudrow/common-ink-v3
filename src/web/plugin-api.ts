@@ -112,6 +112,8 @@ export { useOpenNote, type OpenNote } from "./openNotes.ts";
  * app's history, so Go back comes back to `from` before it leaves the note.
  */
 export { noteJump } from "./openNotes.ts";
+/** A CodeMirror annotation on the change an editor takes from the member's own undo or redo through the note's history, which comes back a moment after the key. */
+export { historyStepped } from "./openNotes.ts";
 
 /**
  * Dragging to the editor area. `draggableAs(what)` is the props that make an element drag a note, a

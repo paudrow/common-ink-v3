@@ -6,7 +6,7 @@ import { IN_TRASH } from "../core/lifecycle.ts";
 import { applyChanges, changesBetween } from "../core/text.ts";
 import { ApiError, getMe, perform, session } from "./api.ts";
 import { seen, tellFault } from "./faults.ts";
-import { mirrored } from "./openNotes.ts";
+import { historyStepped, mirrored } from "./openNotes.ts";
 import { forget, keep, kept, type Kept, type NoteWrite } from "./stash.ts";
 import { today } from "./time.ts";
 
@@ -193,7 +193,7 @@ export async function moveThroughHistory(workspaceId: string, op: HistoryOp, by:
   await sync?.commit();
   // A todo is completed on the member's own day, which the server can't know.
   const note: Written = await by(workspaceId, op.type === "todo.set" && op.on === undefined ? { ...op, on: today() } : op);
-  await sync?.take(note);
+  await sync?.take(note, op.type === "note.undo" || op.type === "note.redo");
   await settle(note);
   return note;
 }
@@ -511,7 +511,7 @@ export class NoteSync {
     keep({ key: this.key, workspaceId: this.workspaceId, personId, op, text, nextWriteId: this.nextWriteId, at: Date.now() });
   }
 
-  private apply(changes: ChangeSet) {
+  private apply(changes: ChangeSet, stepped = false) {
     if (changes.empty) return;
     if (this.closedDoc) {
       this.closedDoc = changes.apply(this.closedDoc);
@@ -526,7 +526,7 @@ export class NoteSync {
     const outer = this.copying;
     this.copying = changes.apply(first.state.doc);
     try {
-      this.views.forEach((view, i) => view.dispatch({ changes, filter: false, annotations: [fromServer.of(true), Transaction.addToHistory.of(false), ...(i ? [mirrored.of(true)] : [])] }));
+      this.views.forEach((view, i) => view.dispatch({ changes, filter: false, annotations: [fromServer.of(true), Transaction.addToHistory.of(false), ...(i ? [mirrored.of(true)] : []), ...(stepped ? [historyStepped.of(true)] : [])] }));
     } finally {
       this.copying = outer;
     }
@@ -559,8 +559,8 @@ export class NoteSync {
     return this.undidHere;
   }
 
-  /** Takes in a revision made elsewhere, such as an agent's edit or a revert. Typing not yet saved stays, moved to fit. */
-  async take(note: Note): Promise<void> {
+  /** Takes in a revision made elsewhere, such as an agent's edit or a revert, or the member's own undo or redo when `stepped`. Typing not yet saved stays, moved to fit. */
+  async take(note: Note, stepped = false): Promise<void> {
     while (this.inFlight) await this.inFlight;
     // A write still waiting on the server merges with what's there when it lands.
     if (note.revision <= this.revision || this.unacknowledged) return;
@@ -569,7 +569,7 @@ export class NoteSync {
     // Taken first, so a save started as the editors take the change is a write on this revision.
     this.revision = note.revision;
     this.savedText = note.text;
-    if (changes) this.apply(changes);
+    if (changes) this.apply(changes, stepped);
     if (this.dirty) this.schedule(PAUSE_MS);
   }
 
