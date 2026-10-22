@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import { dropFirst, perform, signInAsNewPerson, test } from "./helpers.ts";
+import { anotherPerson, dropFirst, join, perform, signInAsNewPerson, test } from "./helpers.ts";
 
 // Each read the app keeps, answered once with the 500 the built Worker gives a request it dropped, is
 // asked again the next time the app would ask for it anyway, and never taken for an answer meanwhile.
@@ -47,4 +47,36 @@ test("the Dashboard's pins, unread once, are read when a note comes", async ({ p
   await perform(page, { type: "note.create", text: "# New" });
 
   await expect(pinned.getByRole("list", { name: "Pinned notes" })).toContainText("Plan", { timeout: 20_000 });
+});
+
+test("who a todo can be assigned to, unread once when a note changes, stays who it was", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await join(await anotherPerson(page, "Grace Hopper"), page, "editor");
+  await perform(page, { type: "note.create", text: "# Chores\n\n- [ ] Wash\n- [ ] Dry" });
+  await page.goto("/todos");
+  const todos = page.getByRole("region", { name: "Todos" }).getByRole("list", { name: "Todos" }).getByRole("listitem");
+  await expect(todos.getByRole("button", { name: "Assign: nobody" })).toHaveCount(2);
+  const members = await dropFirst(page, "member.list");
+  const reread = page.waitForResponse((res) => res.url().endsWith("/ops") && (res.request().postDataJSON() as { includeArchived?: boolean }).includeArchived === true);
+
+  await todos.filter({ hasText: "Wash" }).getByRole("checkbox").click();
+  await reread;
+  await members.handled();
+
+  await expect(todos.filter({ hasText: "Dry" }).getByRole("button", { name: "Assign: nobody" })).toBeVisible({ timeout: 1 });
+});
+
+test("who a todo can be assigned to, unread once as Todos opens, is read again", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await join(await anotherPerson(page, "Grace Hopper"), page, "editor");
+  await perform(page, { type: "note.create", text: "# Chores\n\n- [ ] Wash" });
+  // Mentions reads the members as the app starts, and Todos reads them as it opens and again once the notes are read.
+  const members = await dropFirst(page, "member.list", 3);
+
+  await page.goto("/todos");
+  const todo = page.getByRole("region", { name: "Todos" }).getByRole("list", { name: "Todos" }).getByRole("listitem");
+  await expect(todo).toContainText("Wash");
+  await members.handled();
+
+  await expect(todo.getByRole("button", { name: "Assign: nobody" })).toBeVisible({ timeout: 10_000 });
 });
