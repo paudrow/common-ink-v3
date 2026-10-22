@@ -97,18 +97,28 @@ export async function loadUpload(ctx: Context, id: string, need: GrantLevel, tra
 
 const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 
+/**
+ * How many uploads in parts one person may have started and not finished, their agents and plugins with them. Each keeps
+ * parts apart in the bucket until it is finished or cleared away a day after nothing reaches it, and the hourly job
+ * clears so many a run for everyone, so without a bound one person could keep everyone's removals waiting.
+ */
+export const MAX_PENDING_PARTS = 100;
+
 /** Makes the row of an upload whose bytes are on their way: pending, so no one is told of it. A second with the same `writeId` is refused, as one sent at the same moment. */
 async function pend(ctx: Context, row: UploadRow, multipartId: string | null, writeId: string | undefined): Promise<void> {
   try {
-    await intoFolder(
+    // An upload in parts is written only while its person has room for one more, counted in the statement that writes it.
+    const { meta } = await intoFolder(
       ctx.db
         .prepare(
           `INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, created_at, created_by, uploaded_by, uploaded_by_kind, private_owner, state, multipart_id, touched_at, write_id)
-           VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11, ?6, ?12)`,
+           SELECT ?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11, ?6, ?12
+           WHERE ?11 IS NULL OR (SELECT COUNT(*) FROM uploads WHERE created_by = ?7 AND state = 'pending' AND multipart_id IS NOT NULL) < ?13`,
         )
-        .bind(row.id, ctx.workspaceId, row.folder_id, row.name, row.size, row.created_at, row.created_by, row.uploaded_by, row.uploaded_by_kind, row.private_owner, multipartId, writeId ?? null)
+        .bind(row.id, ctx.workspaceId, row.folder_id, row.name, row.size, row.created_at, row.created_by, row.uploaded_by, row.uploaded_by_kind, row.private_owner, multipartId, writeId ?? null, MAX_PENDING_PARTS)
         .run(),
     );
+    if (!meta.changes) throw new OpError("invalid", `You have ${MAX_PENDING_PARTS} uploads in parts not yet finished. Finish one with upload.finish (finish_upload), or let one go with upload.abort (abort_upload), before starting another`);
   } catch (err) {
     if (writeId && /UNIQUE/i.test(String(err))) throw new OpError("conflict", STILL_ARRIVING);
     throw err;

@@ -6,6 +6,7 @@ import { TRASH_MS } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
 import { OpError, PART_BYTES } from "../../src/core/protocol.ts";
 import { PENDING_MS, clearUploads } from "../../src/core/purge.ts";
+import { MAX_PENDING_PARTS } from "../../src/core/uploads.ts";
 import worker from "../../src/worker/index.ts";
 import { addMember, newMember } from "./members.ts";
 import { FILES, PNG, bytesFor, bytesOf, carrying, upload } from "./uploading.ts";
@@ -256,6 +257,51 @@ describe("an upload's life", () => {
     await expect(perform(env.DB, ada, { type: "upload.restore", id: gone.id })).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("is removed when due though another workspace has left more abandoned uploads than a run removes, and one that won't go holds up no other", async () => {
+    const ada = await newMember();
+    const bea = await newMember("Bea Other");
+    const due = await upload(bea, "due.png");
+    await perform(env.DB, bea, { type: "upload.trash", id: due.id }, T0);
+    // Ada's workspace has 1,500 uploads waiting to be removed, each with an id that comes before Bea's.
+    await env.DB.prepare(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1500)
+       INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, created_at, created_by, uploaded_by, uploaded_by_kind, state)
+       SELECT printf('0%011d', i), w.id, w.unsorted_folder_id, 'left.png', '', 1, ?2, ?3, ?3, 'member', 'removing' FROM n, workspaces w WHERE w.id = ?1`,
+    ).bind(ada.workspaceId, T0, ada.personId).run();
+    // And one of them the bucket won't delete.
+    const stuck = "000000000001";
+    const bucket = new Proxy(env.FILES, {
+      get(files, key) {
+        const value = Reflect.get(files, key, files);
+        if (key !== "delete") return typeof value === "function" ? value.bind(files) : value;
+        return async (keys: string | string[]) => ([keys].flat().includes(stuck) ? Promise.reject(new Error("The bucket won't")) : files.delete(keys));
+      },
+    });
+    const run = await clearUploads(env.DB, bucket, T0 + TRASH_MS, () => {});
+    expect([run.failed, run.more, await rowsOf(due.id), await inBucket(due.id)]).toEqual([[stuck], true, [], false]);
+    // A bucket that refuses everything costs a few tries a chunk, not one for every upload in it.
+    let deletes = 0;
+    const away = { delete: async () => (deletes++, Promise.reject(new Error("The bucket is away"))) } as unknown as R2Bucket;
+    const stopped = await clearUploads(env.DB, away, T0 + TRASH_MS, () => {});
+    // 502 are left: five chunks of 100 at one try and three alone each, and a chunk of 2 at one try and both alone.
+    expect([stopped.removed, stopped.failed.length, deletes]).toEqual([0, 502, 5 * (1 + 3) + (1 + 2)]);
+    // What is left goes in the runs after.
+    while ((await clearUploads(env.DB, env.FILES, T0 + TRASH_MS, () => {})).more);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM uploads WHERE state = 'removing'").first("n")).toBe(0);
+  });
+
+  it("refuses someone a 101st upload in parts while 100 are still unsent, and takes theirs again once one is cleared away", async () => {
+    const ada = await newMember();
+    const start = (now = T0) => perform(env.DB, ada, { type: "upload.start", name: "big.mov", size: PART_BYTES * 2 }, now, undefined, FILES);
+    for (let i = 0; i < MAX_PENDING_PARTS; i++) await start();
+    await expect(start()).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining(`${MAX_PENDING_PARTS} uploads in parts`) });
+    // An agent of theirs is them too.
+    const agent: Actor = { kind: "agent", agentId: (await connectAgent(env.DB, ada.personId, "Claude")).agent.id, personId: ada.personId, workspaceId: ada.workspaceId };
+    await expect(perform(env.DB, agent, { type: "upload.start", name: "big.mov", size: PART_BYTES * 2 }, T0, undefined, FILES)).rejects.toMatchObject({ code: "invalid" });
+    await clearUploads(env.DB, env.FILES, T0 + PENDING_MS, () => {});
+    expect((await start(T0 + PENDING_MS)).partCount).toBe(2);
+  });
+
   it("runs on the Worker's timer with the notes", async () => {
     const ada = await newMember();
     const { id } = await upload(ada, "due.png");
@@ -272,7 +318,7 @@ describe("an upload's life", () => {
     const failing = { delete: () => Promise.reject(new Error("the bucket is away")) } as unknown as R2Bucket;
     const said: string[] = [];
     expect(await clearUploads(env.DB, failing, T0 + TRASH_MS, (m) => said.push(m))).toEqual({ removed: 0, failed: [id], more: false });
-    expect(said).toEqual(["Couldn't remove 1 uploads: the bucket is away"]);
+    expect(said).toEqual([`Couldn't remove upload ${id}: the bucket is away`]);
     expect([await rowsOf(id), await inBucket(id)]).toEqual([["removing"], true]);
     await expect(perform(env.DB, ada, { type: "upload.read", id })).rejects.toMatchObject({ code: "not_found" });
     await expect(bytesFor(ada, id)).rejects.toMatchObject({ code: "not_found" });
