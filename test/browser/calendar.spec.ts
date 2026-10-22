@@ -686,3 +686,41 @@ test("New note about this event makes a note in the folder picked, last used fir
   await expect(page.getByRole("dialog", { name: "Event: Planning" }).getByRole("combobox")).toHaveValue(meetings.id);
   await eve.context().close();
 });
+
+test("the week says its events are loading until they are read, not empty, and a read that fails says so with Try again", async ({ page }) => {
+  await openWithSample(page);
+  const week = thisWeek();
+  const loading = calendar(page).locator(".cal-toolbar").getByRole("status");
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"event.list"')) await held;
+    await route.fallback();
+  });
+  await page.reload();
+  await expect(loading).toHaveText("Loading events…");
+  await expect(grid(page)).toHaveAttribute("aria-busy", "true");
+  await expect(card(page, week[0]!, "Planning")).toHaveCount(0);
+  release();
+  await expect(card(page, week[0]!, "Planning")).toBeVisible();
+  await expect(loading).toHaveText("");
+  await expect(grid(page)).toHaveAttribute("aria-busy", "false");
+
+  await page.unrouteAll();
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"event.list"')) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "unknown", message: "Broke" }) });
+    await route.fallback();
+  });
+  await page.reload();
+  const failed = calendar(page).getByRole("alert").filter({ hasText: "Your events couldn't be read" });
+  await expect(failed).toHaveText("Your events couldn't be read: BrokeTry again");
+  await expect(loading).toHaveText("");
+  // The week is not drawn as read, with nothing in it.
+  await expect(column(page, week[0]!)).not.toHaveAttribute("data-listed");
+  await expect(grid(page)).toHaveAttribute("aria-busy", "true");
+  await page.unrouteAll();
+  await failed.getByRole("button", { name: "Try again" }).click();
+  await expect(card(page, week[0]!, "Planning")).toBeVisible();
+  await expect(failed).toHaveCount(0);
+  await expect(grid(page)).toHaveAttribute("aria-busy", "false");
+});

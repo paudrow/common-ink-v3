@@ -9311,6 +9311,27 @@ button.todo-tag[aria-pressed="true"] {
   font-size: calc(13px * var(--text-scale));
 }
 
+/* Only a read that takes a moment says so, so a quick one flashes nothing. */
+.cal-loading:not(:empty) {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  animation: cal-loading 0.2s 0.3s both;
+}
+
+@keyframes cal-loading {
+  from {
+    opacity: 0;
+  }
+}
+
+.cal-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0;
+}
+
 .cal-nav,
 .cal-views {
   display: flex;
@@ -9704,6 +9725,13 @@ button.todo-tag[aria-pressed="true"] {
 
 .cal-col[data-today] {
   background-color: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+/* A day whose events aren't read yet is not drawn as a day with none: tinted once the read has taken a moment, as the loading words are, and clear at once when it is read. */
+.cal-col:not([data-listed]),
+.calendar-page[data-weekends] .cal-col[data-weekend]:not([data-listed]) {
+  background-color: color-mix(in srgb, var(--muted) 7%, transparent);
+  transition: background-color 0.2s 0.3s;
 }
 
 .calendar-page[data-weekends] .cal-col[data-weekend]:not([data-today]),
