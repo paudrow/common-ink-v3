@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceSummary } from "../../src/core/protocol.ts";
-import { showing, targetOf } from "../../src/web/leads.ts";
+import { showing, targetOf, UNANSWERED } from "../../src/web/leads.ts";
 import { routeOf, type Place } from "../../src/web/router.ts";
 
 const at = (path: string): Place => ({ path, query: "", state: null, route: routeOf(path) });
@@ -44,5 +44,12 @@ describe("what an address shows", () => {
     expect(showing(INVITE, new Map([["invite:bbbbbbbbbbbb", TEAM.id]]), BOTH, OWN.id)).toEqual({ kind: "joined", workspace: TEAM });
     expect(showing(INVITE, new Map([["invite:bbbbbbbbbbbb", null]]), BOTH, OWN.id)).toEqual({ kind: "not-invited" });
     expect(showing(INVITE, new Map([["bbbbbbbbbbbb", TEAM.id]]), BOTH, OWN.id), "a note with the same id says nothing of the invite").toEqual({ kind: "asking" });
+  });
+
+  it("says an invite couldn't be checked, and shows a note in the chosen workspace as it is, when the server couldn't answer", () => {
+    expect(showing(INVITE, new Map<string, typeof UNANSWERED>([["invite:bbbbbbbbbbbb", UNANSWERED]]), BOTH, OWN.id)).toEqual({ kind: "unchecked" });
+    const unanswered = new Map<string, typeof UNANSWERED>([["aaaaaaaaaaaa", UNANSWERED]]);
+    expect(showing(NOTE, unanswered, BOTH, OWN.id)).toEqual({ kind: "workspace", workspace: OWN, place: { path: "/note/plan-aaaaaaaaaaaa", query: "", state: null, route: { kind: "note", id: "aaaaaaaaaaaa" } } });
+    expect(showing(NOTE, unanswered, BOTH, TEAM.id)).toEqual({ kind: "workspace", workspace: TEAM, place: { path: "/note/plan-aaaaaaaaaaaa", query: "", state: null, route: { kind: "note", id: "aaaaaaaaaaaa" } } });
   });
 });

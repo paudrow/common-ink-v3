@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { Me, MeHere } from "../core/protocol.ts";
 import { ApiError, getMe, onRefused, perform, session, signOut, workspaceOfInvite, workspaceOfNote } from "./api.ts";
-import { showing, targetOf, type Target } from "./leads.ts";
+import { showing, targetOf, UNANSWERED, type Target } from "./leads.ts";
 import { useRoute, type Place } from "./router.ts";
 import { retryAfter } from "./retry.ts";
 import { createSettingsStore, type SettingsStore } from "./settingsStore.ts";
@@ -124,9 +124,9 @@ const SETTINGS_WAIT_MS = 1500;
 function SignedIn({ me, reload }: { me: MeHere; reload: () => Promise<void> }) {
   const [place, navigate] = useRoute();
   const [chosenId, choose] = useStored("ink.workspace", isString, me.workspaces[0]!.id);
-  const { found, noteIsHere } = useFound(me, targetOf(place), chosenId);
+  const { found, noteIsHere, askAgain } = useFound(me, targetOf(place));
   const shown = showing(place, found, me.workspaces, chosenId);
-  const workspaceId = shown.kind === "asking" || shown.kind === "not-invited" ? null : shown.workspace.id;
+  const workspaceId = shown.kind === "asking" || shown.kind === "not-invited" || shown.kind === "unchecked" ? null : shown.workspace.id;
   useEffect(() => {
     if (workspaceId) choose(workspaceId);
     if (shown.kind === "joined") navigate("/", { replace: true });
@@ -136,29 +136,40 @@ function SignedIn({ me, reload }: { me: MeHere; reload: () => Promise<void> }) {
   if (shown.kind === "workspace") settled.current = shown;
 
   if (shown.kind === "not-invited") return <NotInvited email={me.person.email} onContinue={() => navigate("/", { replace: true })} />;
+  if (shown.kind === "unchecked")
+    return (
+      <div className="notice" role="alert">
+        <p>Couldn't check this invite.</p>
+        <button type="button" className="button small" onClick={askAgain}>
+          Try again
+        </button>
+      </div>
+    );
   const showingNow = settled.current;
   if (shown.kind === "joined" || !showingNow) return null;
   return <InWorkspace me={me} at={showingNow} navigate={navigate} choose={choose} noteIsHere={noteIsHere} reload={reload} />;
 }
 
 /**
- * Where the addresses that name a note or an invite lead, asked of the server once each. What it is
- * told is good while the person's workspaces stay the same.
+ * Where the addresses that name a note or an invite lead, as the server answers. An answer is good
+ * while the person's workspaces stay the same. An address it couldn't answer is asked again when it is
+ * next opened, or on `askAgain`.
  */
-function useFound(me: Me, target: Target | null, chosenId: string) {
+function useFound(me: Me, target: Target | null) {
   const memberships = me.workspaces.map((w) => w.id).join();
-  const kept = useRef({ memberships, found: new Map<string, string | null>() });
+  const kept = useRef({ memberships, found: new Map<string, string | null | typeof UNANSWERED>() });
   if (kept.current.memberships !== memberships) kept.current = { memberships, found: new Map() };
   const { found } = kept.current;
   const [, redraw] = useState(0);
+  const [asked, askAgain] = useReducer((n: number) => n + 1, 0);
   const key = target?.key;
-  const unknown = target && !found.has(target.key) ? target : null;
+  const led = key === undefined ? undefined : found.get(key);
+  const unknown = target && (led === undefined || led === UNANSWERED) ? target : null;
   useEffect(() => {
     if (!unknown) return;
     let live = true;
     (unknown.kind === "note" ? workspaceOfNote : workspaceOfInvite)(unknown.id)
-      // With no answer, the chosen workspace is left to show what it can.
-      .catch(() => (unknown.kind === "note" ? chosenId : null))
+      .catch((): typeof UNANSWERED => UNANSWERED)
       .then((workspaceId) => {
         if (!live) return;
         found.set(unknown.key, workspaceId);
@@ -167,11 +178,11 @@ function useFound(me: Me, target: Target | null, chosenId: string) {
     return () => {
       live = false;
     };
-    // Asked once for each address: `unknown` is a new object on every render.
-  }, [key, found]);
+    // Asked when the address changes or on `askAgain`, not on every render: `unknown` is a new object each time.
+  }, [key, found, asked]);
   /** A note the workspace has just listed, loaded, or made is known without asking. It is recorded at once, so going to it next waits for nothing. */
   const noteIsHere = useCallback((noteId: string, workspaceId: string) => void kept.current.found.set(noteId, workspaceId), []);
-  return { found, noteIsHere };
+  return { found, noteIsHere, askAgain };
 }
 
 interface InWorkspaceProps {
