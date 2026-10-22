@@ -89,10 +89,10 @@ test("@ alone offers Today and Tomorrow under Dates, after the people and before
   await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nStarted ${tomorrow}`);
 
   await page.keyboard.type(" and @budg");
-  await expect(options(page)).toHaveText(["BudgetUnsorted"]);
+  await expect(options(page)).toHaveText(["BudgetUnsorted", "Create note “budg”New note in Unsorted", "Create folder “budg”New folder at the top", "Create tag #budgNew tag"]);
   await page.keyboard.press("Escape");
   await page.keyboard.type(" @tod");
-  await expect(options(page)).toHaveText([/^Today/, "Pick a date…Any day, from a calendar"]);
+  await expect(options(page)).toHaveText([/^Today/, "Pick a date…Any day, from a calendar", "Create note “tod”New note in Unsorted", "Create folder “tod”New folder at the top", "Create tag #todNew tag"]);
   await page.keyboard.press("Enter");
   await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nStarted ${tomorrow} and @budg ${today}`);
 });
@@ -100,7 +100,7 @@ test("@ alone offers Today and Tomorrow under Dates, after the people and before
 test("@tod offers Today, under Dates with the full date and how far it is, and writes today's date, drawn as it reads", async ({ page }) => {
   const { note, today } = await inNote(page);
   await page.keyboard.type("Started @tod");
-  await expect(options(page)).toHaveText([/^Today\w+day, \w+ \d{1,2}, \d{4}$/, "Pick a date…Any day, from a calendar"]);
+  await expect(options(page)).toHaveText([/^Today\w+day, \w+ \d{1,2}, \d{4}$/, "Pick a date…Any day, from a calendar", "Create note “tod”New note in Unsorted", "Create folder “tod”New folder at the top", "Create tag #todNew tag"]);
   await expect(options(page).first()).toHaveAttribute("aria-selected", "true");
   await expect(preview(page).locator("dt")).toHaveText(["Weekday", "From today"]);
   await expect(preview(page).locator("dd").nth(1)).toHaveText("Today");
@@ -133,7 +133,7 @@ test("@tomorrow 3pm writes the day and the time, and @next fri the Friday of nex
 test("Pick a date… opens a date field at the cursor and writes the day picked there, or nothing when it is closed", async ({ page }) => {
   const { note, today } = await inNote(page);
   await page.keyboard.type("Due @pick");
-  await expect(options(page)).toHaveText(["Pick a date…Any day, from a calendar"]);
+  await expect(options(page)).toHaveText(["Pick a date…Any day, from a calendar", "Create note “pick”New note in Unsorted", "Create folder “pick”New folder at the top", "Create tag #pickNew tag"]);
   await page.keyboard.press("Enter");
   const field = page.getByRole("dialog", { name: "Pick a date" }).getByLabel("Date");
   await expect(field).toBeFocused();
@@ -142,7 +142,7 @@ test("Pick a date… opens a date field at the cursor and writes the day picked 
   await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nDue 2027-03-04");
   await expect(dates(page)).toHaveText(["Thu, Mar 4, 2027"]);
   await page.keyboard.type(" or @date");
-  await expect(options(page)).toHaveText(["Pick a date…Any day, from a calendar"]);
+  await expect(options(page)).toHaveText(["Pick a date…Any day, from a calendar", "Create note “date”New note in Unsorted", "Create folder “date”New folder at the top", "Create tag #dateNew tag"]);
   await page.keyboard.press("Enter");
   await expect(field).toBeFocused();
   await page.keyboard.press("Escape");
@@ -151,8 +151,9 @@ test("Pick a date… opens a date field at the cursor and writes the day picked 
 
   // It starts empty, so today is a pick too, and a time typed before it is kept.
   await page.keyboard.type(" or @tomorrow 3pm");
-  await expect(options(page).last()).toHaveText("Pick a date…Any day at 3:00 PM, from a calendar");
-  await options(page).last().click();
+  const pick = options(page).filter({ hasText: "Pick a date…" });
+  await expect(pick).toHaveText("Pick a date…Any day at 3:00 PM, from a calendar");
+  await pick.click();
   await expect(field).toHaveValue("");
   await field.fill(today);
   await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nDue 2027-03-04 or @date or ${today} 15:00`);

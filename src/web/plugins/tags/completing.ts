@@ -22,3 +22,12 @@ export function tagItems(typed: string, tags: readonly ListedTag[]): CompletionI
   const items = found.map((tag): CompletionItem => ({ label: `#${tag.name}`, ...(tag.description && { description: tag.description }), insert: `#${tag.name}`, tone: "accent" }));
   return !typed || exact ? items : [...items, { kind: "new", label: `Create #${typed}`, description: "New tag", insert: `#${typed}` }];
 }
+
+/**
+ * What `@` offers of the tags: to create the tag typed after it, where it can be a tag's name and no
+ * tag is named that, ignoring case. Picked, it writes the tag in place of `@` and the name.
+ */
+export function tagAt(typed: string, tags: readonly ListedTag[]): CompletionItem[] {
+  if (!isTagName(typed) || tags.some((tag) => nameKey(tag.name) === nameKey(typed))) return [];
+  return [{ kind: "new", label: `Create tag #${typed}`, description: "New tag", insert: `#${typed}` }];
+}

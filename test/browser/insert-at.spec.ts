@@ -100,8 +100,8 @@ test("@ lists people, notes, uploads and events under a heading each, every one 
   await Promise.all(read);
 
   await page.keyboard.type("sam");
-  await expect(headings(page)).toHaveText(["People", "Notes", "Uploads", "Events"]);
-  await expect(options(page)).toHaveText(["Sam OkaforContact · Okafor Plumbing", "Sam's onboardingUnsorted", /^sam-portrait\.pngImage · \d+ bytes$/, ...Array.from({ length: 8 }, () => /^Lunch with Sam\w{3}, \w{3} \d{1,2}, \d{4} · \d{1,2}:\d{2}\s[AP]M · Personal$/)]);
+  await expect(headings(page)).toHaveText(["People", "Notes", "Uploads", "Events", "New"]);
+  await expect(options(page)).toHaveText(["Sam OkaforContact · Okafor Plumbing", "Sam's onboardingUnsorted", /^sam-portrait\.pngImage · \d+ bytes$/, ...Array.from({ length: 8 }, () => /^Lunch with Sam\w{3}, \w{3} \d{1,2}, \d{4} · \d{1,2}:\d{2}\s[AP]M · Personal$/), "Create note “sam”New note in Unsorted", "Create folder “sam”New folder at the top", "Create tag #samNew tag"]);
   await expect(options(page).first().locator(".cm-completionDescription")).toHaveText("Contact · Okafor Plumbing");
 
   // A contact has no preview: nothing of theirs but the name and organization is put on the page.
@@ -148,8 +148,8 @@ test("@ alone lists three people with me first, today and tomorrow, the three no
 
   // Typing narrows every kind.
   await page.keyboard.type("gar");
-  await expect(options(page)).toHaveText(["GardenUnsorted"]);
-  await expect(headings(page)).toHaveCount(0);
+  await expect(options(page)).toHaveText(["GardenUnsorted", "Create note “gar”New note in Unsorted", "Create folder “gar”New folder at the top", "Create tag #garNew tag"]);
+  await expect(headings(page)).toHaveText(["Notes", "New"]);
 });
 
 test("@ alone and Enter writes my mention before anything has been read, and what arrives joins the open list with the highlight kept", async ({ page }) => {
@@ -191,22 +191,22 @@ test("picking from @ writes what each kind's own way in writes: a mention, a lin
   await expect(options(page).first()).toHaveText("Ada LovelaceYou");
   await page.keyboard.press("Enter");
   await page.keyboard.type(" about @onboard");
-  await expect(options(page)).toHaveText(["Sam's onboardingUnsorted"]);
+  await expect(options(page)).toHaveText(["Sam's onboardingUnsorted", "Create note “onboard”New note in Unsorted", "Create folder “onboard”New folder at the top", "Create tag #onboardNew tag"]);
   await page.keyboard.press("Enter");
   await page.keyboard.type(" and @minutes");
-  await expect(options(page)).toHaveText([/^minutes\.txtFile · /]);
+  await expect(options(page)).toHaveText([/^minutes\.txtFile · /, "Create note “minutes”New note in Unsorted", "Create folder “minutes”New folder at the top", "Create tag #minutesNew tag"]);
   await page.keyboard.press("Enter");
   await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk @[[${adaId}|Ada Lovelace]] about [[${onboarding.id}]] and ::file{${minutes.id}}`);
 
   await page.keyboard.type(" at @lunch");
-  await expect(options(page)).toHaveCount(8);
+  await expect(options(page)).toHaveCount(11);
   await page.keyboard.press("Enter");
   await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`and ::file\\{${minutes.id}\\} at ::event\\{[a-z0-9]{12} Lunch with Sam\\}$`));
 
   // A picture goes on a line of its own, as a pasted one does, and the cursor on the line after it.
   await page.keyboard.press("Enter");
   await page.keyboard.type("@portrait");
-  await expect(options(page)).toHaveText([/^sam-portrait\.png/]);
+  await expect(options(page)).toHaveText([/^sam-portrait\.png/, "Create note “portrait”New note in Unsorted", "Create folder “portrait”New folder at the top", "Create tag #portraitNew tag"]);
   await page.keyboard.press("Enter");
   await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`Lunch with Sam\\}\\n::image\\{${portrait.id} 40x30\\}\\n$`));
   await page.keyboard.type("After.");

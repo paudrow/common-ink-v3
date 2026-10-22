@@ -13,6 +13,10 @@ const MOST_WORDS = 4;
 const plain = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 const wordsOf = (text: string) => plain(text).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
+const whole = (name: string) => name.trim().replace(/\s+/g, " ").normalize("NFC").toLowerCase();
+/** Whether two names are one as `@` compares whole names: one space between words, in one Unicode form, ignoring case. */
+export const sameName = (a: string, b: string) => whole(a) === whole(b);
+
 /** Whether what was typed after `@` can be the start of a name: a few words, with no bracket or bar. */
 export const namable = (typed: string) => !/[[\]|]/.test(typed) && typed.trim().split(/\s+/).length <= MOST_WORDS;
 

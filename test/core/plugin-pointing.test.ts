@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { folderTree } from "../../src/web/folders.ts";
 import type { ListedFolder } from "../../src/web/plugin-api.ts";
-import { foldersAt } from "../../src/web/plugins/links/folderPaths.ts";
+import { foldersAt, newFolderPath } from "../../src/web/plugins/links/folderPaths.ts";
 import { namable, pointed } from "../../src/web/plugins/lib/pointing.ts";
 
 const TITLES = ["Weekly planning", "Plan", "Road map", "Airplane notes", "Café plans", "older-harbour.png"];
@@ -54,5 +54,30 @@ describe("the folders @ finds", () => {
 
   it("every folder inside, for a path that ends in a slash", () => {
     expect(found("proj/")).toEqual(["Projects / Garden", "Projects / Garden / Beds"]);
+  });
+});
+
+describe("the folder @ offers to create", () => {
+  const listed = [
+    { id: "p", name: "Projects", parentId: null },
+    { id: "g", name: "Garden", parentId: "p" },
+  ] as ListedFolder[];
+  const folders = folderTree({ unsortedId: null, folders: listed });
+  const made = (typed: string) => {
+    const path = newFolderPath(typed, folders);
+    return path && [path.parts, path.there.map((f) => f.id)];
+  };
+
+  it("is a name, made at the top, or a path, whose parts there are used and the rest made inside them", () => {
+    expect(made("Compost")).toEqual([["Compost"], []]);
+    expect(made("projects/Beds")).toEqual([["projects", "Beds"], ["p"]]);
+    expect(made("Projects/garden/Beds")).toEqual([["Projects", "garden", "Beds"], ["p", "g"]]);
+    expect(made("Work/Plans")).toEqual([["Work", "Plans"], []]);
+    expect(made(" Seed   bank / Rare ")).toEqual([["Seed bank", "Rare"], []]);
+  });
+
+  it("is nothing where every part is there, ignoring case, or a part is no name", () => {
+    expect([made("projects"), made("Projects/GARDEN"), made("Projects/"), made("/x"), made("a//b"), made("!!"), made("")]).toEqual([null, null, null, null, null, null, null]);
+    expect(made("x".repeat(101))).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { nameKey, type ListedTag, type Plugin } from "../../plugin-api.ts";
 import { keeping } from "../noteList.tsx";
 import { tagCards } from "./card.tsx";
-import { tagItems } from "./completing.ts";
+import { tagAt, tagItems } from "./completing.ts";
 import { tagDrawing } from "./drawing.ts";
 import { ManageTags } from "./Manage.tsx";
 import { MANAGE_PATH, SETTINGS_ID, TAGS_PAGE, TAGS_PATH, tagOfPath, tagPath } from "./path.ts";
@@ -17,7 +17,7 @@ const MOST = 1000;
 
 /**
  * Tags. A `#tag` anywhere in a note tags the note, and typing `#` lists the tags to pick from, or
- * to create one. The sidebar lists the workspace's tags with how many notes have each, a tag's
+ * to create one, as `@` offers to create one too. The sidebar lists the workspace's tags with how many notes have each, a tag's
  * page is a folder's list of its notes, a tag in a note is drawn as one, and wherever a tag is
  * drawn, resting on it shows its card. Tags are managed in Settings.
  */
@@ -123,6 +123,9 @@ export const tags: Plugin = {
     host.commands.register({ id: "tags.manage", title: "Manage tags", aliases: ["describe tags", "rename tag", "delete tag"], run: () => host.app().go(MANAGE_PATH) });
     host.editorExtensions.register({ id: "tags", extension: tagDrawing((name) => host.app().go(tagPath(name)), cards) });
     host.completions.register({ id: "tags", trigger: "#", items: (typed) => tagItems(typed, listed ?? []) });
+    // After the others on `@`, so creating a tag is the last of what is new.
+    // Not before the tags are read, when any tag would seem new.
+    host.completions.register({ id: "tags.at", trigger: "@", order: 2, items: (typed) => (listed ? tagAt(typed, listed) : []) });
 
     return () => {
       cards.dispose();

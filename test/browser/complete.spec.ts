@@ -72,8 +72,8 @@ test("@ lists the folders under Folders, each with the folder it is in; picking 
   await open(page, note.id, "See");
 
   await page.keyboard.type(" @gard");
-  await expect(list(page).locator("completion-section")).toHaveText(["Notes", "Folders"]);
-  await expect(options(page)).toHaveText(["Garden diaryUnsorted", "Garden plansFolder", "Gardening notesFolder in Garden plans"]);
+  await expect(list(page).locator("completion-section")).toHaveText(["Notes", "Folders", "New"]);
+  await expect(options(page)).toHaveText(["Garden diaryUnsorted", "Garden plansFolder", "Gardening notesFolder in Garden plans", "Create note “gard”New note in Unsorted", "Create folder “gard”New folder at the top", "Create tag #gardNew tag"]);
   await page.keyboard.press("ArrowDown");
   await expect(highlighted(page)).toHaveText(/^Garden plans/);
   await page.keyboard.press("Enter");
@@ -95,4 +95,98 @@ test("@ lists the folders under Folders, each with the folder it is in; picking 
   await drawn.click();
   await expect(page).toHaveURL(new RegExp(`/folder/${garden.id}$`));
   await expect(page.getByRole("main", { name: "Editor" }).getByRole("heading", { level: 1 })).toHaveText("Vegetable beds");
+});
+
+test("@ offers last to create a note titled with what was typed, beside the note it is typed in; picked, the note is made and linked, and a note already so titled is offered instead", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const garden = await perform(page, { type: "folder.create", name: "Garden" });
+  await perform(page, { type: "note.create", text: "# Seed order", folderId: garden.id });
+  const note = await perform(page, { type: "note.create", text: "# Today\n\nSee", folderId: garden.id });
+  await open(page, note.id, "See");
+
+  await page.keyboard.type(" @seed order");
+  await expect(options(page)).toHaveText(["Seed orderGarden", "Create folder “seed order”New folder at the top"]);
+  await page.keyboard.type("s");
+  await expect(options(page)).toHaveText(["Create note “seed orders”New note in Garden", "Create folder “seed orders”New folder at the top"]);
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Tab");
+
+  await expect(page.getByRole("group", { name: "Notice" })).toContainText("Created note seed orders");
+  const drawn = editor(page).getByRole("link");
+  await expect(drawn).toHaveText("seed orders");
+  const made = (await perform(page, { type: "note.list", folderId: garden.id })).notes.find((n) => n.title === "seed orders")!;
+  expect((await perform(page, { type: "note.read", id: made.id })).text).toBe("# seed orders\n");
+  await expect.poll(() => text(page, note.id)).toBe(`# Today\n\nSee [[${made.id}]]`);
+  await drawn.click();
+  await expect(page).toHaveURL(new RegExp(`/note/seed-orders-${made.id}$`));
+});
+
+test("@ ends with what it can create of what was typed, a contact, a note, a folder and a tag in that order; picking the tag writes it, and a name someone has offers no contact", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "source.connect", id: "sample-contacts", back: "/contacts", edit: true });
+  const note = await perform(page, { type: "note.create", text: "# Today\n\nSee" });
+  await open(page, note.id, "See");
+
+  await page.keyboard.type(" @compost");
+  await expect(list(page).locator("completion-section")).toHaveCount(0);
+  await expect(options(page)).toHaveText(["Create contact “compost”New contact in Sample contacts", "Create note “compost”New note in Unsorted", "Create folder “compost”New folder at the top", "Create tag #compostNew tag"]);
+  await expect(highlighted(page)).toHaveCount(0);
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
+  await expect(highlighted(page)).toHaveText(/^Create tag #compost/);
+  await page.keyboard.press("Enter");
+  await expect.poll(() => text(page, note.id)).toBe("# Today\n\nSee #compost");
+  await expect(editor(page).locator(".md-tag")).toHaveText("#compost");
+
+  await page.keyboard.type(" and @sam okafor");
+  await expect(options(page)).toHaveText(["Sam OkaforContact · Okafor Plumbing", "Create note “sam okafor”New note in Unsorted", "Create folder “sam okafor”New folder at the top"]);
+});
+
+test("@ creates a folder of the name typed at the top, or of a path inside the folders of it that are there, and links it at once", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const projects = await perform(page, { type: "folder.create", name: "Projects" });
+  const note = await perform(page, { type: "note.create", text: "# Today\n\nSee" });
+  await open(page, note.id, "See");
+
+  await page.keyboard.type(" @projects/Garden/Beds");
+  const folder = options(page).filter({ hasText: "Create folder" });
+  await expect(folder).toHaveText("Create folder “projects/Garden/Beds”New folders in Projects");
+  await folder.click();
+  await expect(editor(page).getByRole("link")).toHaveText("Beds");
+  await expect(page.getByRole("group", { name: "Notice" })).toContainText("Created folder projects/Garden/Beds");
+  const garden = await perform(page, { type: "folder.find", path: "Projects/Garden" });
+  const beds = await perform(page, { type: "folder.find", path: "Projects/Garden/Beds" });
+  expect([garden.parentId, beds.parentId]).toEqual([projects.id, garden.id]);
+  await expect.poll(() => text(page, note.id)).toBe(`# Today\n\nSee [[folder:${beds.id}]]`);
+
+  await page.keyboard.type(" and @Compost");
+  await expect(options(page).filter({ hasText: "Create folder" })).toHaveText("Create folder “Compost”New folder at the top");
+  await page.keyboard.type(" heap");
+  await expect(options(page).filter({ hasText: "Create" })).toHaveText(["Create note “Compost heap”New note in Unsorted", "Create folder “Compost heap”New folder at the top"]);
+  await page.keyboard.press("Escape");
+  await page.keyboard.type(" @projects/garden");
+  await expect(options(page).filter({ hasText: "Create folder" })).toHaveCount(0);
+});
+
+test("picking Create note again while it is being made makes one note, and an archived note's title is taken too", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const old = await perform(page, { type: "note.create", text: "# Old plans" });
+  await perform(page, { type: "note.archive", id: old.id, archived: true });
+  const note = await perform(page, { type: "note.create", text: "# Today\n\nSee" });
+  await open(page, note.id, "See");
+  await page.route("**/api/workspaces/*/ops", async (route) => {
+    if (/"note\.create"/.test(route.request().postData() ?? "")) await new Promise((done) => setTimeout(done, 800));
+    await route.continue();
+  });
+
+  await page.keyboard.type(" @old plans");
+  await expect(list(page).getByText("Create note")).toHaveCount(0);
+  await page.keyboard.type(" @Compost");
+  await expect(options(page)).toHaveText(["Create note “Compost”New note in Unsorted", "Create folder “Compost”New folder at the top", "Create tag #CompostNew tag"]);
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(editor(page).getByRole("link")).toHaveText("Compost");
+  const titled = async () => (await perform(page, { type: "note.list" })).notes.filter((n) => n.title === "Compost").length;
+  await expect.poll(titled).toBe(1);
+  await page.waitForTimeout(1000);
+  expect(await titled()).toBe(1);
 });

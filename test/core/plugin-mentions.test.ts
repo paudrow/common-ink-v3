@@ -62,7 +62,7 @@ describe("what @ offers", () => {
   });
 });
 
-describe("what @ offers where it finds nobody", () => {
+describe("what @ offers where nobody is named what was typed", () => {
   /** Adding to the sample contacts, keeping each name it is asked to create. */
   const adding = (created: string[] = []): Adding => ({ into: "Sample contacts", create: async (name) => (created.push(name), `@[[${name}]]`) });
   const offeredNew = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId, adding()).map((item) => `${item.label} (${item.description}, ${item.kind})`);
@@ -72,10 +72,12 @@ describe("what @ offers where it finds nobody", () => {
     expect(offeredNew("  zelda   fitz ")).toEqual(["Create contact “zelda fitz” (New contact in Sample contacts, new)"]);
   });
 
-  it("is nothing new where anyone is found, a member or a contact, by the start of a word", () => {
-    expect(offeredNew("Grace")).toEqual(["Grace Hopper (Member, person)", "Grace Hopper (Contact, person)"]);
-    expect(offeredNew("plumb")).toEqual(["Sam Okafor (Contact · Okafor Plumbing, person)"]);
+  it("comes after everyone found, and is nothing new where a member or a contact is named that, ignoring case", () => {
+    expect(offeredNew("Grace")).toEqual(["Grace Hopper (Member, person)", "Grace Hopper (Contact, person)", "Create contact “Grace” (New contact in Sample contacts, new)"]);
+    expect(offeredNew("plumb")).toEqual(["Sam Okafor (Contact · Okafor Plumbing, person)", "Create contact “plumb” (New contact in Sample contacts, new)"]);
     expect(offeredNew("Zel")).toEqual(["Create contact “Zel” (New contact in Sample contacts, new)"]);
+    expect(offeredNew("grace hopper")).toEqual(["Grace Hopper (Member, person)", "Grace Hopper (Contact, person)"]);
+    expect(offeredNew("Sam Okafor")).toEqual(["Sam Okafor (Contact · Okafor Plumbing, person)"]);
   });
 
   it("is nothing where there is nowhere to add one, nothing typed, no letter, or no name", () => {

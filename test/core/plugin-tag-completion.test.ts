@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ListedTag } from "../../src/web/plugin-api.ts";
-import { tagItems } from "../../src/web/plugins/tags/completing.ts";
+import { tagAt, tagItems } from "../../src/web/plugins/tags/completing.ts";
 
 const TAGS: ListedTag[] = [
   { name: "reading", notes: 2 },
@@ -41,5 +41,16 @@ describe("what # offers", () => {
     expect(labels("work.")).toEqual([]);
     expect(labels("work)")).toEqual([]);
     expect(labels("")).not.toContain("Create #");
+  });
+});
+
+describe("what @ offers of the tags", () => {
+  it("is to create the tag typed, written as a tag", () => {
+    expect(tagAt("compost", TAGS)).toEqual([{ kind: "new", label: "Create tag #compost", description: "New tag", insert: "#compost" }]);
+    expect(tagAt("garden/beds", TAGS).map((item) => item.label)).toEqual(["Create tag #garden/beds"]);
+  });
+
+  it("is nothing for a tag that is there, ignoring case, nothing typed, or what can't be a tag's name", () => {
+    expect(["recipes", "WORK", "", "12", "Zelda Fitz", "a.b"].flatMap((typed) => tagAt(typed, TAGS))).toEqual([]);
   });
 });
