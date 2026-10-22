@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Embed, Plugin, PluginHost, SourceRecord } from "../../plugin-api.ts";
+import type { Embed, IconName, Plugin, PluginHost, SourceRecord } from "../../plugin-api.ts";
 import { openPopover } from "./Popover.tsx";
 
 /**
@@ -8,6 +8,30 @@ import { openPopover } from "./Popover.tsx";
  * nothing else of it, and nothing else is asked.
  */
 export type Read = { is: "live"; record: SourceRecord } | { is: "private" } | { is: "reconnect"; message: string } | { is: "failed"; message: string };
+
+/**
+ * Copies what a note writes to reference one of the member's records, made for them now, to be
+ * pasted into a note, and says so. `named` is how the notice names the record. Answers whether it
+ * was copied: a reference that couldn't be made is said, and nothing is copied.
+ */
+export async function copyReference(host: PluginHost, record: { sourceId: string; id: string }, named: string, icon: IconName): Promise<boolean> {
+  const app = host.app();
+  let text: string;
+  try {
+    text = (await host.perform({ type: "record.refer", sourceId: record.sourceId, id: record.id })).text;
+  } catch (err) {
+    app.notify({ message: (err as Error).message, icon });
+    return false;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    app.notify({ message: `Copied the reference to ${named}. Paste it into a note.`, icon });
+  } catch {
+    // A page served over plain http has no clipboard to write to, so the reference is shown to be copied by hand.
+    app.notify({ message: `The reference to ${named}, to copy into a note: ${text}`, icon });
+  }
+  return true;
+}
 
 /** How long a reading stands, so a note that is typed in doesn't ask again at each keystroke. */
 const KEPT_MS = 30_000;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon, type ContactCard, type ContactChange, type ContactLine, type LabelledField, type PluginHost, type Source } from "../../plugin-api.ts";
+import { copyReference } from "../lib/references.tsx";
 import { MONTH_NAMES, changeOf, draftOf, fieldsOf, labelChoices, typeOf, writtenLabel, type Draft } from "./fields.ts";
 
 /** The longest side of a picture as it is sent: enough for any place a contact's picture is drawn. */
@@ -285,16 +286,21 @@ export function ContactSection({ host, card, source, onSaved, onConnect }: Props
     <section className="person-contact" aria-label={`Your contact ${card.name}`}>
       <div className="person-contact-head">
         <p className="person-whose">From your contacts. Only you see this.</p>
-        {source?.writable && (
-          <button type="button" className="button small" onClick={() => setEditing(true)}>
-            Edit
+        <span className="person-contact-actions">
+          <button type="button" className="button small" onClick={() => void copyReference(host, card, card.name || "No name", "contacts")}>
+            Copy reference
           </button>
-        )}
-        {source?.reconnectToWrite && (
-          <button type="button" className="button small" onClick={() => onConnect(source)}>
-            Connect again to edit contacts
-          </button>
-        )}
+          {source?.writable && (
+            <button type="button" className="button small" onClick={() => setEditing(true)}>
+              Edit
+            </button>
+          )}
+          {source?.reconnectToWrite && (
+            <button type="button" className="button small" onClick={() => onConnect(source)}>
+              Connect again to edit contacts
+            </button>
+          )}
+        </span>
       </div>
       {source?.reconnectToWrite && <p className="person-whose">{source.name} is connected for reading only, so these can't be changed here yet.</p>}
       <dl className="person-fields">
