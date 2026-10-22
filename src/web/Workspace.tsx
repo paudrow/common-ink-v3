@@ -697,10 +697,16 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     // The member's own next change can't be someone else's, so there is nothing new to look for.
     if (last?.noteId === currentId && currentRevision === last.revision + 1 && byMe) return;
     let live = true;
-    perform(workspaceId, { type: "history.list", noteIds: [currentId], diffs: false, limit: 100 }).then(({ changes }) => {
-      const theirs = changes.find((c) => c.author.kind !== "member" || c.author.personId !== me.person.id);
-      if (live) setOthers({ noteId: currentId, revision: theirs?.revision ?? 0 });
-    });
+    perform(workspaceId, { type: "history.list", noteIds: [currentId], diffs: false, limit: 100 }).then(
+      ({ changes }) => {
+        const theirs = changes.find((c) => c.author.kind !== "member" || c.author.personId !== me.person.id);
+        if (live) setOthers({ noteId: currentId, revision: theirs?.revision ?? 0 });
+      },
+      // Unchecked, so the member's own next change looks again.
+      () => {
+        if (live) checked.current = null;
+      },
+    );
     return () => {
       live = false;
     };
