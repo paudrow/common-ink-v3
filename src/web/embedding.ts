@@ -160,10 +160,23 @@ class EmbedWidget extends WidgetType {
     this.fitOptions(frame, still, rewrite);
   }
 
-  /** Gives the card its settings button, or takes it away, to fit what the note says of the embed now. */
+  /**
+   * Gives the card its settings button, or takes it away, to fit what the note says of the embed now,
+   * and says what is wrong with its config: a red edge on the card, a line under a block's head, and a
+   * warning on the button. It is drawn all the same, as its own reading of the config allows.
+   */
   private fitOptions(frame: HTMLElement, still: () => Written | undefined, rewrite: (next: { config?: string; body?: string }) => void) {
     const { embed, written } = this;
     const settings = settingsOf(embed);
+    const problems = settings?.problems({ config: written.config, body: written.body }) ?? [];
+    const card = written.block ? frame.querySelector<HTMLElement>(".embed-card")! : frame;
+    card.classList.toggle("embed-invalid", problems.length > 0);
+    let said = card.querySelector<HTMLElement>(":scope > .embed-problems");
+    if (written.block && problems.length) {
+      said ??= card.insertBefore(document.createElement("p"), card.querySelector(".embed-head")?.nextSibling ?? null);
+      said.className = "embed-problems";
+      said.textContent = problems.join(" ");
+    } else said?.remove();
     const optionsFor = (now: Written | undefined): Options | null => (now && settings && !this.readOnly ? optionsOn(embed.title, settings, now, rewrite) : null);
     // What is drawn now is what the note says now. Where it is in the note can't be asked while the note is being drawn.
     fitSettingsButton(frame.querySelector<HTMLElement>(".embed-head") ?? frame, "embed-options", optionsFor(written), {

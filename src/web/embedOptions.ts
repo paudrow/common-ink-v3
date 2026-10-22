@@ -1,16 +1,26 @@
 import { dismissOn } from "./dismiss.ts";
 import { defaultOf, durationParts, durationWords, numberRule, shownValue, SWATCHES, valueOf } from "../core/embedOptions.ts";
-import { clearKey, isDuration, readConfig, schemaFor, setKey, settableKeys, type EmbedKey, type EmbedSchema } from "../core/embedSchema.ts";
+import { clearKey, isDuration, placeProblems, problemText, readConfig, removeWord, renameKey, schemaFor, setKey, settableKeys, type EmbedKey, type EmbedSchema, type Stray } from "../core/embedSchema.ts";
 import type { Embed, EmbedField, EmbedOptions } from "./plugin-api.ts";
 
 /** What an embed's settings panel shows, read again each time the note says something else of the embed. */
 export interface Options {
   title: string;
   fields: readonly EmbedField[];
+  /** Words no key takes, each a row to remove or rename. */
+  strays: readonly Stray[];
+  /** What is wrong with what the note writes, each a sentence: said on the embed and its settings button. */
+  problems: readonly string[];
+  /** What of that has no field or row of its own, shown above the fields. */
+  loose: readonly string[];
   /** Sets a field. A string is why the value wasn't taken. */
   set(id: string, value: string): string | void;
   /** Takes a field out of what the note writes. A string is why it can't be. */
   clear(id: string): string | void;
+  /** Takes a stray word out of what the note writes, where it is. */
+  remove(stray: Stray): string | void;
+  /** Gives a key=value word the key it was likely meant to have, keeping its value. */
+  rename(from: string, to: string): string | void;
 }
 
 const GAP = 4;
@@ -70,6 +80,7 @@ function durationOf(field: EmbedField, set: SetField, said: Said, clear: (id: st
   group.className = "embed-option-duration";
   group.setAttribute("role", "group");
   group.setAttribute("aria-labelledby", name.id);
+  group.dataset.control = field.id;
   const inputs = PARTS.map(({ name, unit, max }) => {
     const part = group.appendChild(document.createElement("label"));
     part.className = "embed-option-part";
@@ -90,9 +101,10 @@ function durationOf(field: EmbedField, set: SetField, said: Said, clear: (id: st
     clearTimeout(stepped);
     const parts = inputs.map((input, n) => Math.min(PARTS[n]!.max, Math.max(0, Math.floor(Number(input.value) || 0))));
     inputs.forEach((input, n) => (input.value = String(parts[n])));
-    if (inputs.every((input) => input.value === input.dataset.was)) return;
     const [h, m, s] = parts as [number, number, number];
     const seconds = (h * 60 + m) * 60 + s;
+    // The same duration again is set only where the note has it wrong, as out of its place, which setting it puts right.
+    if (inputs.every((input) => input.value === input.dataset.was) && (!seconds || group.getAttribute("aria-invalid") !== "true")) return;
     if (!seconds) said(`${field.label} can't be zero.`);
     if (!seconds || set(field.id, durationWords(seconds))) asWritten();
   };
@@ -138,14 +150,28 @@ function durationOf(field: EmbedField, set: SetField, said: Said, clear: (id: st
   return row;
 }
 
-/** One field's elements. They ask for the options as they are when used, so they stay good while the note changes under them. */
+/**
+ * One field's elements, with a line under it for what is wrong with what the note writes for it.
+ * They ask for the options as they are when used, so they stay good while the note changes under them.
+ */
 function fieldOf(field: EmbedField, set: SetField, said: Said, clear: (id: string) => void): HTMLElement {
+  const row = controlOf(field, set, said, clear);
+  const error = row.appendChild(document.createElement("p"));
+  error.className = "embed-option-error embed-option-field-error";
+  error.id = `embed-option-${++made}-error`;
+  error.dataset.error = field.id;
+  error.hidden = true;
+  return row;
+}
+
+function controlOf(field: EmbedField, set: SetField, said: Said, clear: (id: string) => void): HTMLElement {
   if (field.kind === "duration") return durationOf(field, set, said, clear);
   if (field.kind === "choice") {
     const group = document.createElement("div");
     group.className = "embed-option";
     group.setAttribute("role", "radiogroup");
     group.setAttribute("aria-label", field.label);
+    group.dataset.control = field.id;
     const label = group.appendChild(document.createElement("span"));
     label.className = "embed-option-label";
     label.textContent = field.label;
@@ -179,6 +205,7 @@ function fieldOf(field: EmbedField, set: SetField, said: Said, clear: (id: strin
   input.id = name.htmlFor = `embed-option-${++made}`;
   input.type = "text";
   input.dataset.field = field.id;
+  input.dataset.control = field.id;
   input.spellcheck = false;
   if (field.placeholder) input.placeholder = field.placeholder;
   /** `data-was` is the value the note has, so what is typed is set once, however the keyboard leaves the field. */
@@ -197,13 +224,38 @@ function fieldOf(field: EmbedField, set: SetField, said: Said, clear: (id: strin
     hint.className = "embed-option-hint";
     hint.id = `${input.id}-hint`;
     hint.textContent = field.hint;
-    input.setAttribute("aria-describedby", hint.id);
+    input.dataset.hint = hint.id;
   }
   return row;
 }
 
+/** A row for a word no key takes: what it is, and a button that takes it out, and one that renames it to the key it was likely meant to be. */
+function strayOf(stray: Stray, said: Said, read: () => Options | null): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "embed-option embed-option-stray";
+  row.setAttribute("role", "group");
+  const text = row.appendChild(document.createElement("span"));
+  text.className = "embed-option-stray-text";
+  text.id = `embed-option-${++made}`;
+  text.textContent = stray.text;
+  row.setAttribute("aria-labelledby", text.id);
+  const actions = row.appendChild(document.createElement("span"));
+  actions.className = "embed-option-choices";
+  const action = (label: string, run: () => string | void) => {
+    const button = actions.appendChild(document.createElement("button"));
+    button.type = "button";
+    button.className = "embed-option-choice";
+    button.textContent = label;
+    button.addEventListener("click", () => said(run()));
+  };
+  const { rename } = stray;
+  if (rename) action(`Rename to ${rename.to}`, () => read()?.rename(rename.from, rename.to));
+  action("Remove", () => read()?.remove(stray));
+  return row;
+}
+
 /** What says which elements a panel needs. While it is the same, the elements stay and only their values change. */
-const shapeOf = (fields: readonly EmbedField[]) => JSON.stringify(fields.map((f) => [f.id, f.kind, f.label, f.written === undefined, f.kind === "choice" ? f.choices : f.kind === "text" ? [f.placeholder, f.hint] : []]));
+const shapeOf = ({ fields, strays }: Options) => JSON.stringify([fields.map((f) => [f.id, f.kind, f.label, f.written === undefined, f.kind === "choice" ? f.choices : f.kind === "text" ? [f.placeholder, f.hint] : []]), strays]);
 
 /**
  * Shows the options in the panel. The elements are made once for a set of fields and then only
@@ -211,7 +263,7 @@ const shapeOf = (fields: readonly EmbedField[]) => JSON.stringify(fields.map((f)
  * another one changes the note.
  */
 function fill(panel: HTMLElement, options: Options, read: () => Options | null) {
-  const shape = shapeOf(options.fields);
+  const shape = shapeOf(options);
   if (panel.dataset.shape !== shape) {
     panel.dataset.shape = shape;
     const error = document.createElement("p");
@@ -228,12 +280,39 @@ function fill(panel: HTMLElement, options: Options, read: () => Options | null) 
       return why;
     };
     const clear = (id: string) => said(read()?.clear(id));
-    panel.replaceChildren(...options.fields.map((field) => fieldOf(field, set, said, clear)), error);
+    const wrong = document.createElement("div");
+    wrong.className = "embed-option-problems";
+    panel.replaceChildren(wrong, ...options.fields.map((field) => fieldOf(field, set, said, clear)), ...options.strays.map((stray) => strayOf(stray, said, read)), error);
   }
+  const wrong = panel.querySelector<HTMLElement>(".embed-option-problems")!;
+  if (wrong.textContent !== options.loose.join("")) {
+    wrong.replaceChildren(
+      ...options.loose.map((problem) => {
+        const line = document.createElement("p");
+        line.className = "embed-option-error";
+        line.textContent = problem;
+        return line;
+      }),
+    );
+  }
+  wrong.hidden = !options.loose.length;
   panel.setAttribute("aria-label", `Settings for ${options.title}`);
   for (const field of options.fields) {
     const clear = panel.querySelector<HTMLElement>(`[data-clear="${CSS.escape(field.id)}"]`);
     if (clear) clear.hidden = !field.written;
+    const error = panel.querySelector<HTMLElement>(`[data-error="${CSS.escape(field.id)}"]`)!;
+    error.textContent = field.error ?? "";
+    error.hidden = !field.error;
+    for (const control of panel.querySelectorAll<HTMLElement>(`[data-control="${CSS.escape(field.id)}"]`)) {
+      if (field.error) control.setAttribute("aria-invalid", "true");
+      else control.removeAttribute("aria-invalid");
+      // What is wrong takes the hint's place, as it most often says the same.
+      const hint = control.dataset.hint ? document.getElementById(control.dataset.hint) : null;
+      if (hint) hint.hidden = !!field.error;
+      const describedBy = (field.error ? [error.id] : [control.dataset.hint]).filter(Boolean).join(" ");
+      if (describedBy) control.setAttribute("aria-describedby", describedBy);
+      else control.removeAttribute("aria-describedby");
+    }
     for (const el of panel.querySelectorAll<HTMLElement>("[data-field]")) {
       if (field.kind === "choice" && el.dataset.field?.startsWith(`${field.id}=`)) el.setAttribute("aria-checked", String(el.dataset.field === `${field.id}=${field.value}`));
       if (field.kind === "duration" && el.dataset.field === field.id && el instanceof HTMLInputElement) {
@@ -302,10 +381,10 @@ export function toggleOptions(anchor: HTMLElement, under: HTMLElement, read: () 
   panel.querySelector<HTMLElement>("input, button")?.focus();
 }
 
-/** Shows `options`, which are what the note says now, in the options open from `anchor`, if any are, and closes them if the embed has none left. */
+/** Shows `options`, which are what the note says now, in the settings open from `anchor`, if any are, and closes them if the embed has nothing left to show. */
 export function refreshOptions(anchor: HTMLElement, options: Options | null): void {
   if (shown?.anchor !== anchor) return;
-  if (!options || !options.fields.length) return shown.close();
+  if (!options || (!options.fields.length && !options.problems.length)) return shown.close();
   fill(shown.panel, options, shown.read);
   shown.place();
 }
@@ -324,8 +403,9 @@ const opening = new WeakMap<HTMLElement, { under: () => HTMLElement; read: () =>
  */
 export function fitSettingsButton(parent: HTMLElement, className: string, options: Options | null, open: { under: () => HTMLElement; read: () => Options | null }): void {
   let button = parent.querySelector<HTMLButtonElement>(":scope > .embed-options");
-  if (!options?.fields.length) {
+  if (!options?.fields.length && !options?.problems.length) {
     if (button) closeOptions(button);
+    if (button) markProblems(button, "", []);
     button?.remove();
     return;
   }
@@ -339,8 +419,7 @@ export function fitSettingsButton(parent: HTMLElement, className: string, option
     made.addEventListener("click", () => toggleOptions(made, opening.get(made)!.under(), () => opening.get(made)?.read() ?? null));
   }
   opening.set(button, open);
-  button.title = `Settings for ${options.title}`;
-  button.setAttribute("aria-label", button.title);
+  markProblems(button, `Settings for ${options.title}`, options.problems);
   refreshOptions(button, options);
 }
 
@@ -376,8 +455,10 @@ function fieldFor(key: EmbedKey, text: string | undefined): EmbedField {
 
 /** A field for each key of a schema a member sets, in its order, and one for its rest. */
 function schemaFields(schema: EmbedSchema, config: string): EmbedField[] {
-  const { values } = readConfig(schema, config);
-  const fields = settableKeys(schema).map((key) => fieldFor(key, values[key.id]));
+  const reading = readConfig(schema, config);
+  const { values } = reading;
+  const { byKey } = placeProblems(schema, reading);
+  const fields = settableKeys(schema).map((key): EmbedField => ({ ...fieldFor(key, values[key.id]), ...(byKey[key.id] && { error: byKey[key.id] }) }));
   if (schema.rest) fields.push({ id: schema.rest.id, label: schema.rest.label, kind: "text", value: values[schema.rest.id] ?? "", written: values[schema.rest.id] !== undefined });
   return fields;
 }
@@ -387,8 +468,14 @@ type Note = { config: string; body: string };
 /** What a member sets of an embed: each key its schema says its config takes, then the fields of the embed's own. */
 export interface Settings {
   fields(written: Note): readonly EmbedField[];
+  /** What is wrong with the config, against the embed's schema. */
+  problems(written: Note): string[];
+  /** Where the panel shows each of those: under a field (in `fields`), as a row of its own, or above the fields. */
+  placing(written: Note): { strays: Stray[]; loose: string[] };
   set(written: Note, id: string, value: string): { config?: string; body?: string } | string;
   clear(written: Note, id: string): { config?: string } | string;
+  remove(written: Note, stray: Stray): { config: string };
+  rename(written: Note, from: string, to: string): { config: string } | string;
 }
 
 /** An embed's settings, or none for one with no schema and no fields of its own. Options declared as data are its schema. */
@@ -407,6 +494,13 @@ export function settingsOf(embed: Pick<Embed, "name" | "options">): Settings | u
   };
   return {
     fields: (written) => [...(schema ? schemaFields(schema, written.config) : []), ...ownFields(written)],
+    problems: (written) => (schema ? readConfig(schema, written.config).problems.map((p) => problemText(schema, p)) : []),
+    placing: (written) => {
+      const { strays, rest } = schema ? placeProblems(schema, readConfig(schema, written.config)) : { strays: [], rest: [] };
+      return { strays, loose: rest };
+    },
+    remove: (written, { word, at }) => ({ config: removeWord(written.config, word, at) }),
+    rename: (written, from, to) => (schema ? renameKey(schema, written.config, from, to) : `No setting ${to}.`),
     set: (written, id, value) => (ofSchema(id) ? setKey(schema!, written.config, id, value) : own ? own.set(written, id, value) : `No setting ${id}.`),
     clear: (written, id) => (ofSchema(id) ? clearKey(schema!, written.config, id) : `No setting ${id}.`),
   };
@@ -424,5 +518,38 @@ export function optionsOn(title: string, settings: Settings, now: Note, rewrite:
       return err instanceof Error ? err.message : String(err);
     }
   };
-  return { title, fields: settings.fields(written), set: (id, value) => apply(() => settings.set(written, id, value)), clear: (id) => apply(() => settings.clear(written, id)) };
+  return {
+    title,
+    fields: settings.fields(written),
+    problems: settings.problems(written),
+    ...settings.placing(written),
+    set: (id, value) => apply(() => settings.set(written, id, value)),
+    clear: (id) => apply(() => settings.clear(written, id)),
+    remove: (stray) => apply(() => settings.remove(written, stray)),
+    rename: (from, to) => apply(() => settings.rename(written, from, to)),
+  };
+}
+
+/**
+ * Names a settings button, and puts a warning beside it for what is wrong with its embed, or takes
+ * the warning away. The button says what is wrong to a screen reader, and the warning on hover; a
+ * press on the warning opens the settings, which say it too.
+ */
+function markProblems(button: HTMLElement, title: string, problems: readonly string[]): void {
+  button.setAttribute("aria-label", title);
+  button.title = title;
+  let mark = button.parentElement!.querySelector<HTMLElement>(":scope > .embed-warning");
+  if (!problems.length) {
+    button.removeAttribute("aria-description");
+    mark?.remove();
+    return;
+  }
+  button.setAttribute("aria-description", problems.join(" "));
+  if (!mark) {
+    mark = button.parentElement!.insertBefore(document.createElement("span"), button);
+    mark.className = button.classList.contains("embed-options-corner") ? "embed-warning embed-warning-corner" : "embed-warning";
+    mark.setAttribute("aria-hidden", "true");
+    mark.addEventListener("click", () => button.click());
+  }
+  mark.title = problems.join(" ");
 }

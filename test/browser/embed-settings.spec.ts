@@ -238,3 +238,150 @@ test("a short HTML block shows its whole Run button while it asks, and is as tal
   await expect(room.locator("iframe")).toBeVisible();
   await expect.poll(async () => Math.round((await room.boundingBox())!.height)).toBe(40);
 });
+
+test("an embed with a key wrong is drawn all the same, edged in red, and says which key and what was likely meant", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.setViewportSize({ width: 1280, height: 1200 });
+  const photo = await send(page, "harbour.png", png(400, 300));
+  const note = await open(page, `# Wrong\n\n:::html{heigth=400}\n<p>Hi</p>\n:::\n\nTea ::timer{5m colour=red} now.\n\n::image{${photo.id} 400x300 huge}\n\nlast\n`);
+
+  // A block says so under its head.
+  const block = editor(page).locator(".embed-card.embed-invalid:has(.embed-head)");
+  await expect(block.locator(".embed-problems")).toHaveText("Unknown key heigth. Did you mean height?");
+  await expect(page.locator('.embed-below[data-embed="html"]')).toHaveClass(/embed-invalid/);
+
+  // An inline embed adds no words to its line: a warning beside its settings button, which is still itself and says what is wrong.
+  await expect(editor(page).locator(".cm-line", { hasText: "Tea" })).not.toContainText("Unknown key");
+  const card = editor(page).locator('.embed-card:has([data-embed="timer"])');
+  const timer = card.getByRole("button", { name: "Settings for Timer" });
+  await expect(card.locator(".embed-warning")).toBeVisible();
+  await expect(card.locator(".embed-warning")).toHaveAttribute("title", "Unknown key colour.");
+  await expect(timer).toBeVisible();
+  await expect(timer).toHaveAttribute("aria-description", "Unknown key colour.");
+  const [mark, button] = [(await card.locator(".embed-warning").boundingBox())!, (await timer.boundingBox())!];
+  expect(mark.x + mark.width).toBeLessThanOrEqual(button.x);
+  await timer.click();
+  const panel = page.getByRole("dialog", { name: "Settings for Timer" });
+  await expect(panel.getByRole("group", { name: "Unknown key colour" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  // A press on the warning opens the same settings.
+  await card.locator(".embed-warning").click();
+  await expect(panel.getByRole("group", { name: "Unknown key colour" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // A picture says so in its corner, seen without the pointer on it.
+  const picture = page.locator('.embed-below[data-embed="image"]');
+  await expect(picture).toHaveClass(/embed-invalid/);
+  const corner = picture.getByRole("button", { name: /^Settings for / });
+  await expect(corner).toHaveAttribute("aria-description", '"huge" isn\'t anything this embed takes.');
+  await expect.poll(() => corner.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+  await expect(picture.locator(".embed-warning-corner")).toBeVisible();
+  const [warned, settings, crop] = [(await picture.locator(".embed-warning-corner").boundingBox())!, (await corner.boundingBox())!, (await picture.getByRole("button", { name: /^Crop / }).boundingBox())!];
+  const apart = (a: typeof crop, b: typeof crop) => a.x >= b.x + b.width || b.x >= a.x + a.width || a.y >= b.y + b.height || b.y >= a.y + a.height;
+  expect([apart(warned, settings), apart(warned, crop), apart(settings, crop)]).toEqual([true, true, true]);
+
+  // Put right in the note, it is a plain embed again.
+  const text = await noteText(page, note.id);
+  await perform(page, { type: "note.write", id: note.id, baseRevision: (await perform(page, { type: "note.read", id: note.id })).revision, text: text.replace("heigth", "height").replace(" colour=red", "").replace(" huge", "") });
+  await expect(editor(page).locator(".embed-invalid")).toHaveCount(0);
+  await expect(page.locator(".embed-below.embed-invalid")).toHaveCount(0);
+  await expect(card.locator(".embed-warning")).toHaveCount(0);
+  await expect(timer).not.toHaveAttribute("aria-description", /./);
+  await expect(editor(page).getByRole("button", { name: "Timer, 5:00 left" })).toBeVisible();
+});
+
+test("a picture typed with no upload's id says so in a room of its own with its settings button, once the cursor is off its line", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await open(page, "# Wrong\n\nabove\n\nlast\n");
+  await editor(page).locator(".cm-line", { hasText: "above" }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("::image{abc}");
+  await expect.poll(() => noteText(page, note.id)).toContain("\n::image{abc}\n");
+  const room = page.locator('.embed-below[data-embed="image"]');
+  await expect(room).toBeHidden();
+
+  await page.keyboard.press("ArrowUp");
+  const said = "Upload: An upload's id: 12 lowercase letters and digits.";
+  await expect(room.locator(".embed-problems")).toHaveText(said);
+  await expect(room).toHaveClass(/embed-invalid/);
+  const button = room.getByRole("button", { name: /^Settings for / });
+  await expect(button).toHaveAttribute("aria-description", said);
+  await expect(room.locator(".embed-warning-corner")).toBeVisible();
+  await button.click();
+  const upload = page.getByRole("dialog", { name: /^Settings for / }).getByRole("textbox", { name: "Upload" });
+  await expect(upload).toHaveAttribute("aria-invalid", "true");
+  await expect(upload).toHaveAccessibleDescription(/An upload's id: 12 lowercase letters and digits\./);
+});
+
+test("a problem is put right from the settings: an unknown key renamed or removed, a word no key takes removed, a bad value fixed, and a needed key marked", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await open(page, "# Fix\n\n:::html{heigth=200}\n<p>Hi</p>\n:::\n\nTea ::timer{5m colour=red foo} now.\n\nNothing ::timer{} yet.\n\nlast\n");
+
+  // An unknown key with one close to it is renamed, keeping its value.
+  await editor(page).getByRole("button", { name: "Settings for HTML" }).click();
+  const html = page.getByRole("dialog", { name: "Settings for HTML" });
+  const heigth = html.getByRole("group", { name: "Unknown key heigth" });
+  await heigth.getByRole("button", { name: "Rename to height" }).click();
+  await expect.poll(() => noteText(page, note.id)).toContain(":::html{height=200}\n<p>Hi</p>");
+  await expect(heigth).toHaveCount(0);
+  const height = html.getByRole("textbox", { name: "Height" });
+  await expect(height).toHaveValue("200");
+
+  // A bad value is said under its field until it is fixed.
+  await perform(page, { type: "note.write", id: note.id, baseRevision: (await perform(page, { type: "note.read", id: note.id })).revision, text: (await noteText(page, note.id)).replace("height=200", "height=5000") });
+  await expect(height).toHaveValue("5000");
+  await expect(height).toHaveAttribute("aria-invalid", "true");
+  await expect(height).toHaveAccessibleDescription(/A whole number from 40 to 2000\./);
+  await expect(html.locator(".embed-option-field-error")).toHaveText("A whole number from 40 to 2000.");
+  await height.fill("480");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => noteText(page, note.id)).toContain(":::html{height=480}");
+  await expect(height).not.toHaveAttribute("aria-invalid", "true");
+  await expect(html.locator(".embed-option-field-error")).toBeHidden();
+  await page.keyboard.press("Escape");
+
+  // An unknown key with nothing close, and a word no key takes, are each removed.
+  await editor(page).getByRole("button", { name: "Settings for Timer" }).first().click();
+  const timer = page.getByRole("dialog", { name: "Settings for Timer" });
+  await expect(timer.getByRole("group", { name: "Unknown key colour" }).getByRole("button")).toHaveText(["Remove"]);
+  await timer.getByRole("group", { name: "Unknown key colour" }).getByRole("button", { name: "Remove" }).click();
+  await expect.poll(() => noteText(page, note.id)).toContain("Tea ::timer{5m foo} now.");
+  await timer.getByRole("group", { name: 'Unknown word "foo"' }).getByRole("button", { name: "Remove" }).click();
+  await expect.poll(() => noteText(page, note.id)).toContain("Tea ::timer{5m} now.");
+  await expect(timer.locator(".embed-option-stray")).toHaveCount(0);
+  await expect(timer.locator(".embed-option-problems")).toBeHidden();
+  await page.keyboard.press("Escape");
+
+  // A key the embed needs is marked where it is set.
+  await editor(page).getByRole("button", { name: "Settings for Timer" }).nth(1).click();
+  const needed = page.getByRole("dialog", { name: "Settings for Timer" }).getByRole("group", { name: "Length" });
+  await expect(needed).toHaveAttribute("aria-invalid", "true");
+  await expect(needed).toHaveAccessibleDescription("Needed.");
+  await needed.getByRole("spinbutton", { name: "Minutes" }).focus();
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => noteText(page, note.id)).toContain("Nothing ::timer{1m} yet.");
+  await expect(needed).not.toHaveAttribute("aria-invalid", "true");
+});
+
+test("a length out of its place is put back by setting it again, and a wrong word with no field, or a second length, is a row whose Remove takes out that word where it is", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await open(page, "# Fix\n\nTea ::timer{at=1m 5m} now.\n\nLap ::timer{5m since=garbage 5m} here.\n\nlast\n");
+  const panel = page.getByRole("dialog", { name: "Settings for Timer" });
+
+  await editor(page).getByRole("button", { name: "Settings for Timer" }).first().click();
+  const length = panel.getByRole("group", { name: "Length" });
+  await expect(length).toHaveAccessibleDescription("Write it before the key=value settings.");
+  await length.getByRole("spinbutton", { name: "Minutes" }).focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => noteText(page, note.id)).toContain("Tea ::timer{5m at=1m} now.");
+  await expect(length).not.toHaveAttribute("aria-invalid", "true");
+  await page.keyboard.press("Escape");
+
+  await editor(page).getByRole("button", { name: "Settings for Timer" }).nth(1).click();
+  await panel.getByRole("group", { name: 'Unknown word "5m"' }).getByRole("button", { name: "Remove" }).click();
+  await expect.poll(() => noteText(page, note.id)).toContain("Lap ::timer{5m since=garbage} here.");
+  await panel.getByRole("group", { name: "Running since: An instant" }).getByRole("button", { name: "Remove" }).click();
+  await expect.poll(() => noteText(page, note.id)).toContain("Lap ::timer{5m} here.");
+  await expect(panel.locator(".embed-option-stray")).toHaveCount(0);
+});

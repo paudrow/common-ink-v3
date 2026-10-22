@@ -744,10 +744,14 @@ export interface EmbedOptions {
  * and its value is the duration as written, as `1h30m`. `written` says whether the note writes it, for one
  * the host can take out of the note: a Clear button beside it is shown while it does.
  */
-export type EmbedField =
+export type EmbedField = (
   | { id: string; label: string; kind: "text"; value: string; placeholder?: string; hint?: string; written?: boolean }
   | { id: string; label: string; kind: "choice"; value: string; choices: readonly { value: string; label: string; swatch?: Swatch | "" }[]; written?: boolean }
-  | { id: string; label: string; kind: "duration"; value: string; written?: boolean };
+  | { id: string; label: string; kind: "duration"; value: string; written?: boolean }
+) & {
+  /** What is wrong with what the note writes for it, shown under it. */
+  error?: string;
+};
 
 /** An embed's options declared as data, which the host reads from and writes into its config as `key=value` words. */
 export { SWATCHES, type DeclaredOption, type OptionValue, type Swatch } from "../core/embedOptions.ts";

@@ -2311,6 +2311,94 @@ button.link:hover {
   right: 46px;
 }
 
+/* An embed whose config has a key wrong: a red edge, and its settings button a warning that says what is wrong. It is drawn all the same. */
+.embed-card.embed-invalid,
+.embed-below.embed-invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
+}
+
+.embed-problems {
+  margin: 4px 12px 0;
+  color: var(--danger);
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+}
+
+.embed-warning {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+/* A warning sign, drawn here and not written in the mark, so it adds no text to its line. */
+.embed-warning::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* In a block's head, the warning and the settings button are together at its right. */
+.embed-head > .embed-warning {
+  margin-left: auto;
+}
+
+/* Beside the settings button in the corner of what is all below its line, seen without the pointer on it, as that button is then too. */
+.embed-warning.embed-warning-corner {
+  position: absolute;
+  top: 8px;
+  right: 46px;
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--danger);
+  border-radius: 6px;
+  background: var(--danger);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  color: #fff;
+}
+
+.embed-below.embed-invalid > .embed-options-corner {
+  opacity: 1;
+}
+
+.embed-below:has(> .embed-warning-corner) :is(.upload-crop, .upload-edit) {
+  right: 84px;
+}
+
+/* A room that says what is wrong with an embed that has nothing else to draw: one line of it, beside its settings button. */
+.embed-below-wrong > .embed-below-drawn {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding-inline: 12px 82px;
+}
+
+.embed-below-wrong .embed-problems {
+  margin: 0;
+  font-family: var(--prose);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.embed-below-wrong > .embed-options-corner {
+  top: 2px;
+  right: 2px;
+}
+
+.embed-below-wrong > .embed-warning-corner {
+  top: 2px;
+  right: 40px;
+}
+
 /* A block's lines, shown above its card while the cursor is in them, drawn as an inline embed's text is. */
 .cm-line.embed-source-line {
   font: calc(12.5px * var(--text-scale))/1.6 var(--mono);
@@ -2455,6 +2543,27 @@ button.link:hover {
 
 .embed-option-error {
   margin: 0;
+  color: var(--danger);
+  font-size: calc(12px * var(--text-scale));
+}
+
+/* What is wrong with a field, under it. */
+.embed-option-field-error {
+  grid-column: 2;
+}
+
+.embed-option-field-error[hidden],
+.embed-option-hint[hidden] {
+  display: none;
+}
+
+.embed-option input[aria-invalid="true"],
+.embed-option [aria-invalid="true"] input {
+  border-color: var(--danger);
+}
+
+/* A word no key takes: what it is, then what can be done with it. */
+.embed-option-stray-text {
   color: var(--danger);
   font-size: calc(12px * var(--text-scale));
 }

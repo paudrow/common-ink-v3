@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearKey, EMBED_SCHEMAS, isDuration, keysText, problemText, readConfig, schemaFor, setKey, settableKeys, type EmbedSchema } from "../../src/core/embedSchema.ts";
+import { clearKey, EMBED_SCHEMAS, isDuration, keysText, placeProblems, problemText, readConfig, removeWord, renameKey, schemaFor, setKey, settableKeys, type EmbedSchema } from "../../src/core/embedSchema.ts";
 import { withCrop, withShare, withUpload, writtenUpload } from "../../src/core/uploadRefs.ts";
 import { inlineIn } from "../../src/core/embedSyntax.ts";
 import { writeClock } from "../../src/web/plugins/lib/clock.ts";
@@ -33,6 +33,18 @@ describe("reading an embed's config against its schema", () => {
     expect(problems(KANBAN, "x")).toEqual(['"x" isn\'t anything this embed takes.']);
   });
 
+  it("says where a bare word must go for the embed's own reader to find it", () => {
+    expect(problems(TIMER, "at=3s 5m")).toEqual(["Length: Write it before the key=value settings."]);
+    expect(problems(IMAGE, `${ID} crop=1,2,3,4 640x480`)).toEqual(["Size: Write it before the key=value settings."]);
+    expect(problems(IMAGE, `crop=1,2,3,4 ${ID} 640x480`)).toEqual(["Upload: Write it before the key=value settings.", "Size: Write it before the key=value settings."]);
+    expect(problems(IMAGE, ` ${ID} 640x480 `)).toEqual(["Upload: Write it first, with no space before it."]);
+    expect(problems(IMAGE, `${ID} 640x480 `)).toEqual([]);
+  });
+
+  it("says a bare key written as key=value is written as its value alone", () => {
+    expect(problems(IMAGE, `${ID} size=640x480`)).toEqual(["size is written as its value alone, not as size=. The room kept for it, like 640x480."]);
+  });
+
   it("leaves a declared schema's other words to the plugin", () => {
     const poll = schemaFor("x-poll", [{ type: "number", id: "votes", label: "Votes", default: 1, min: 1, max: 5, step: 1 }])!;
     expect(problems(poll, "size=big anything votes=2")).toEqual([]);
@@ -53,6 +65,14 @@ describe("setting and clearing an embed's keys", () => {
     expect(setKey(IMAGE, `${ID} crop=1,2,3,4`, "size", "640x480")).toEqual({ config: `${ID} 640x480 crop=1,2,3,4` });
     expect(setKey(DRAWING, "800x450", "upload", ID)).toEqual({ config: `${ID} 800x450` });
     expect(setKey(DRAWING, "", "width", "50%")).toEqual({ config: "50%" });
+  });
+
+  it("writes a bare key written out of its place where it belongs, before the key=value words, set to the same value or another", () => {
+    const since = "since=2026-10-10T12:00:00.000Z";
+    expect(setKey(TIMER, `${since} 5m`, "length", "6m")).toEqual({ config: `6m ${since}` });
+    expect(setKey(TIMER, `${since} 5m`, "length", "5m")).toEqual({ config: `5m ${since}` });
+    expect(setKey(IMAGE, `crop=1,2,3,4 ${ID}`, "upload", ID)).toEqual({ config: `${ID} crop=1,2,3,4` });
+    expect(setKey(IMAGE, ` ${ID} 640x480`, "upload", ID)).toEqual({ config: `${ID} 640x480` });
   });
 
   it("writes a key=value key at the end, unquoted for a word key, and none for the default", () => {
@@ -162,5 +182,46 @@ describe("the settings panel's keys", () => {
       const [h, m, s] = durationParts(written)!;
       expect(durationWords((h * 60 + m) * 60 + s)).toBe(written);
     }
+  });
+});
+
+describe("putting a problem right from the settings panel", () => {
+  const placed = (schema: EmbedSchema, config: string) => placeProblems(schema, readConfig(schema, config));
+
+  it("shows a bad value, a word out of place and a needed key under the key's field, and a stray word or a wrong key with no field as a row", () => {
+    expect(placed(HTML, "height=5000")).toEqual({ byKey: { height: "A whole number from 40 to 2000." }, strays: [], rest: [] });
+    expect(placed(TIMER, "")).toEqual({ byKey: { length: "Needed." }, strays: [], rest: [] });
+    expect(placed(IMAGE, `${ID} crop=1,2,3,4 medium`).byKey).toEqual({ width: "Write it before the key=value settings." });
+    expect(placed(IMAGE, ` ${ID}`).byKey).toEqual({ upload: "Write it first, with no space before it." });
+    expect(placed(HTML, "heigth=200 colour=red")).toEqual({
+      byKey: {},
+      strays: [
+        { word: "heigth=200", at: { from: 0, to: 10 }, text: "Unknown key heigth", rename: { from: "heigth", to: "height" } },
+        { word: "colour=red", at: { from: 11, to: 21 }, text: "Unknown key colour" },
+      ],
+      rest: [],
+    });
+    expect(placed(TIMER, "5m foo").strays).toEqual([{ word: "foo", at: { from: 3, to: 6 }, text: 'Unknown word "foo"' }]);
+    // What has no field, as a size the app measures or a word a clock's own controls write, is a row to remove.
+    expect(placed(IMAGE, `${ID} crop=1,2,3,4 640x480`)).toEqual({ byKey: {}, strays: [{ word: "640x480", at: { from: 26, to: 33 }, text: "Size: Write it before the key=value settings." }], rest: [] });
+    expect(placed(TIMER, "5m since=garbage")).toEqual({ byKey: {}, strays: [{ word: "since=garbage", at: { from: 3, to: 16 }, text: "Running since: An instant, like 2026-10-16T09:30:00.000Z." }], rest: [] });
+  });
+
+  it("removes the one word where it is, and the space before it, and keeps every other byte", () => {
+    expect(removeWord("5m  colour=red\tfoo", "colour=red", { from: 4, to: 14 })).toBe("5m\tfoo");
+    expect(removeWord("foo 5m", "foo", { from: 0, to: 3 })).toBe("5m");
+    expect(removeWord("5m foo foo", "foo", { from: 7, to: 10 })).toBe("5m foo");
+    // The second 5m is the extra one, and the first the timer's length.
+    const extra = placed(TIMER, "5m foo=1 5m").strays.find((s) => s.word === "5m")!;
+    expect(removeWord("5m foo=1 5m", extra.word, extra.at)).toBe("5m foo=1");
+    // A config that changed under the panel is left as it is.
+    expect(removeWord("6m", "5m", { from: 0, to: 2 })).toBe("6m");
+  });
+
+  it("renames a key=value word's key and keeps its value and every other byte", () => {
+    expect(renameKey(HTML, "heigth=200", "heigth", "height")).toEqual({ config: "height=200" });
+    expect(renameKey(IMAGE, `${ID}  640x480 crp="1,2,3,4"`, "crp", "crop")).toEqual({ config: `${ID}  640x480 crop="1,2,3,4"` });
+    expect(renameKey(HTML, "heigth=200", "heigth", "width")).toBe("No setting width.");
+    expect(renameKey(HTML, "height=200", "heigth", "height")).toBe("No key heigth is written.");
   });
 });
