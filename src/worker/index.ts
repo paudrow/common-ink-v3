@@ -21,6 +21,7 @@ import { redirectFor } from "./hosts.ts";
 import { addressOf, limitByAddress, overLimit, tokenKey } from "./limits.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 import { handleClientFault, opName, report, reportOf, told, traceOf, type Report, type Trace } from "./report.ts";
+import { handleEmail, logged, mailAddress } from "./mail.ts";
 import { siteResponse } from "./site/index.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
@@ -165,6 +166,11 @@ async function route(req: Request, env: Env, url: URL, trace: Trace, tell: (repo
   if (fileSite) return fileSite;
   if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
   if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
+  // Where dev sign-in is on, a raw message posted by someone signed in goes through what Email Routing's would: see docs/email.md.
+  if (url.pathname === "/dev/email" && req.method === "POST" && devSignIn(env, url) && (await sessionPersonId(req, env, url))) {
+    const raw = await req.arrayBuffer();
+    return json(await handleEmail({ to: mailAddress(env), raw: new Response(raw).body!, rawSize: raw.byteLength }, env));
+  }
   if (url.pathname === "/clipper/connect" || url.pathname === "/clipper/revoke") return handleClipper(req, env, url);
   // Making deletions again after a restore, as asked by scripts/redo-deletions.ts. The address names a request it put in the bucket, so only someone who can write there can ask.
   const redo = /^\/redo-deletions\/([0-9a-f]{64})$/.exec(url.pathname);
@@ -221,6 +227,14 @@ export default {
     const fault = reportOf(trace, answer.status);
     if (fault) tell(fault);
     return secured(crossOrigin(answer, req, url), url, env);
+  },
+  // Mail to notes@, from Cloudflare Email Routing. Nothing is ever rejected or answered, so a sender learns nothing of who has an account here.
+  async email(message, env, ctx) {
+    try {
+      console.log(logged(await handleEmail(message, env)));
+    } catch (err) {
+      report(env, (sent) => ctx.waitUntil(sent), { source: "job", route: "email", requestId: null, op: "mail.receive", status: null, ...told(err) });
+    }
   },
   // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env, ctx) {

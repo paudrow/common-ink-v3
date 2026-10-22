@@ -2,6 +2,8 @@ import type { DataSource, Sources } from "../../core/sources.ts";
 import { devSignIn } from "../auth.ts";
 import { vault } from "../vault.ts";
 import { google } from "./google.ts";
+import { mailAddress } from "../mail.ts";
+import { mail } from "./mail.ts";
 import { sample } from "./sample.ts";
 
 /** Where some data sources come from: an account a person connects, which they are all agreed to through. */
@@ -24,6 +26,7 @@ export function sourcesFor(env: Env, url: URL, outbound: typeof fetch = (input, 
   const providers: Provider[] = [
     ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && sealed ? [google({ db: env.DB, config: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }, vault: sealed, outbound, now })] : []),
     ...(devSignIn(env, url) ? [sample(env.DB, now)] : []),
+    mail(env.DB, mailAddress(env), now),
   ];
   const owner = (sourceId: string) => providers.find((p) => p.owns(sourceId));
   return {

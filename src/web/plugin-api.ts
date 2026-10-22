@@ -252,7 +252,7 @@ export type KeptFromPerform =
  * the member hasn't seen. The workspace's record of its plugins is theirs alone too: `plugin.list`,
  * and `plugin.frame`, which opens a frame that may reach the network.
  */
-export type OwnOnly = `source.${string}` | `event.${string}` | `contact.${string}` | `record.${string}` | `upload.${string}` | `pin.${string}` | `visit.${string}` | `plugin.${string}`;
+export type OwnOnly = `source.${string}` | `event.${string}` | `contact.${string}` | `email.${string}` | `record.${string}` | `upload.${string}` | `pin.${string}` | `visit.${string}` | `plugin.${string}`;
 
 /** What a grant is on: one note, one folder or one upload. An upload has no link of its own. */
 export type SharedItem = { noteId: string } | { folderId: string } | { uploadId: string };

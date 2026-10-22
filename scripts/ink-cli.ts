@@ -175,7 +175,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       what that would do to each note the author changed, with nothing written
   undo ID                             take back your latest change to a note
   redo ID                             revert your latest undo, so what it undid stands again
-  sources                             your member's data sources: their calendar and contacts, and whether each is connected
+  sources                             your member's data sources: their calendar, contacts and email, and whether each is connected
   events --from TIME --to TIME [--timezone ZONE]
                                       your member's calendar events in a span of time
   event-update SOURCE EVENT --etag ETAG [--title TEXT] [--location TEXT] [--description TEXT]
@@ -185,6 +185,9 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
             [--location TEXT] [--description TEXT]
                                       add an event to one of the calendars events lists
   contacts [QUERY]                    your member's contacts, or those matching every word
+  email [QUERY] [--before TIME] [--limit N]
+                                      your member's email threads, latest first, or those with a message matching every word
+  thread ID                           an email thread with every message in it, by its id or one of its messages'
   person WHO [--limit N]              a person's page: the member they are, your member's contacts that are
                                       them, their open todos, and the lines that mention them
   refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
@@ -930,6 +933,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "contacts":
         tool = "list_contacts";
         args = id === undefined ? {} : { query: id };
+        break;
+      case "email":
+        tool = "list_email";
+        args = { ...(id === undefined ? {} : { query: id }), ...given({ before: ["before", time], limit: ["limit", integer] }) };
+        break;
+      case "thread":
+        tool = "read_email_thread";
+        args = { sourceId: "email", id: need("a thread's or a message's id") };
         break;
       case "person":
         tool = "read_person";

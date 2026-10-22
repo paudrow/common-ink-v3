@@ -216,7 +216,7 @@ function keptFromPerform(type: string): string | null {
 
 /** Why a plugin that isn't Common Ink's own is refused an operation, or null when it isn't. The type `OwnOnly` says the same. */
 const ownOnly = (type: string): string | null =>
-  /^(source|event|contact|record)\./.test(type)
+  /^(source|event|contact|email|record)\./.test(type)
     ? "a member's data sources are theirs, and are read only by Common Ink's own plugins"
     : type.startsWith("upload.")
       ? "a workspace's uploads are read and changed only by Common Ink's own plugins"

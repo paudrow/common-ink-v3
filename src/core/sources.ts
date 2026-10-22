@@ -1,7 +1,7 @@
 import { inOrder, widened, within, type Span } from "./events.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -60,7 +60,30 @@ export interface ContactsSource {
   changes?: ContactChanges;
 }
 
-export type DataSource = CalendarSource | ContactsSource;
+/**
+ * The mail a person sent, copied or forwarded to `address`, kept for them. It is read-only: nothing
+ * here changes a message, and nothing is sent anywhere. Its senders are the addresses it recognizes
+ * the person by, which are theirs to add and remove whether or not it is connected.
+ */
+export interface MailSource {
+  kind: "email";
+  info: Described;
+  /** Where mail is sent to be kept, such as notes@commonink.app. */
+  address: string;
+  list(ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; more: boolean }>;
+  /** The thread an id names: a thread's, or one of its messages'. */
+  thread(id: string): Promise<MailThreadRead | null>;
+  /** Whether an id is one message's, which a reference then points at within its thread. */
+  isMessage(id: string): Promise<boolean>;
+  senders: {
+    list(): Promise<MailSender[]>;
+    /** Answers the code mail from the address carries to verify it. */
+    add(address: string): Promise<string>;
+    remove(address: string): Promise<void>;
+  };
+}
+
+export type DataSource = CalendarSource | ContactsSource | MailSource;
 
 /** Where data sources come from. Each call answers for one person, from what that person connected. */
 export interface Sources {
@@ -103,7 +126,7 @@ const NO_SUCH_SOURCE = "No such data source";
 const NO_SUCH_RECORD = "No such record";
 
 /** What a reference is written as, by the kind of data source its record is in. */
-const RECORD = { calendar: "event", contacts: "contact" } as const satisfies Record<SourceKind, SourceRecord["kind"]>;
+const RECORD = { calendar: "event", contacts: "contact", email: "email" } as const satisfies Record<SourceKind, SourceRecord["kind"]>;
 
 interface Asker {
   db: D1Database;
@@ -113,7 +136,7 @@ interface Asker {
   now: number;
 }
 
-const describe = (source: DataSource, state = source.info.state): Source => ({ ...source.info, state, kind: source.kind, writable: (source.kind === "calendar" ? source.update : source.changes) !== undefined });
+const describe = (source: DataSource, state = source.info.state): Source => ({ ...source.info, state, kind: source.kind, writable: (source.kind === "calendar" ? source.update : source.kind === "contacts" ? source.changes : undefined) !== undefined });
 
 const reconnect = (source: DataSource) => new OpError("conflict", `Reconnect ${source.info.name} first`);
 
@@ -370,6 +393,10 @@ const labelled = (label: string) => label.replace(/[{}[\]`\s]+/g, " ").replace(/
 export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) => `::${kind}{${[ref, labelled(label)].filter(Boolean).join(" ")}}`;
 
 async function recordOf(source: DataSource, ref: string, id: string): Promise<SourceRecord | null> {
+  if (source.kind === "email") {
+    const thread = await source.thread(id);
+    return thread && { kind: "email", ref, thread, messageId: (await source.isMessage(id)) ? id : null };
+  }
   if (source.kind === "calendar") {
     const event = await source.get(id);
     return event && { kind: "event", ref, event: { ...event, editable: event.editable && source.update !== undefined } };
@@ -398,7 +425,7 @@ export async function refer(asker: Asker, sourceId: string, id: string): Promise
     )
     .bind(newId(), asker.personId, sourceId, id, asker.now)
     .first<{ id: string }>();
-  const label = record.kind === "event" ? record.event.title : record.contact.name;
+  const label = record.kind === "event" ? record.event.title : record.kind === "contact" ? record.contact.name : (record.thread.messages.find((m) => m.id === record.messageId)?.subject ?? record.thread.subject);
   return { ref: row!.id, kind: RECORD[source.kind], text: writtenReference(RECORD[source.kind], row!.id, label) };
 }
 
@@ -454,4 +481,40 @@ export async function readRecord(asker: Asker, ref: string): Promise<SourceRecor
     if (err instanceof OpError) throw err;
     return failed(source, err);
   }
+}
+
+/** The asker's email data source, connected or not, for what is theirs either way: the addresses it knows them by. */
+async function mailOf(asker: Asker): Promise<MailSource> {
+  const source = (await asker.sources.of(asker.personId)).find((s): s is MailSource => s.kind === "email");
+  if (!source) throw new OpError("not_found", "Email isn't set up on this Common Ink");
+  return source;
+}
+
+/** A page of the asker's email threads, latest first. With email not connected there are none, and `sources` says so. */
+export async function listMail(asker: Asker, ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; sources: Source[]; more: boolean; address: string | null }> {
+  const { sources, read } = await readEach<MailSource, { threads: MailThread[]; more: boolean; address: string }>(asker, "email", async (source) => ({ ...(await source.list(ask)), address: source.address }));
+  const address = read[0]?.address ?? (await mailOf(asker).then((s) => s.address, () => null));
+  return { threads: read.flatMap((r) => r.threads), sources, more: read.some((r) => r.more), address };
+}
+
+export async function readMail(asker: Asker, sourceId: string, id: string): Promise<MailThreadRead> {
+  const source = await sourceOf(asker, sourceId, "email");
+  const thread = await source.thread(id);
+  if (!thread) throw new OpError("not_found", "No such thread");
+  return thread;
+}
+
+export async function mailSenders(asker: Asker): Promise<{ address: string | null; senders: MailSender[] }> {
+  const source = await mailOf(asker);
+  return { address: source.address, senders: await source.senders.list() };
+}
+
+export async function addMailSender(asker: Asker, address: string): Promise<{ address: string | null; senders: MailSender[]; code: string }> {
+  const code = await (await mailOf(asker)).senders.add(address);
+  return { ...(await mailSenders(asker)), code };
+}
+
+export async function removeMailSender(asker: Asker, address: string): Promise<{ address: string | null; senders: MailSender[] }> {
+  await (await mailOf(asker)).senders.remove(address);
+  return mailSenders(asker);
 }

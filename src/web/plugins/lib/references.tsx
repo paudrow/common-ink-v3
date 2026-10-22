@@ -104,7 +104,7 @@ export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, tit
           if (read.is === "private") return chip("private", label, `Only the member who referenced this ${kind} sees its details`);
           if (read.is === "reconnect") return chip("stale", label, `${read.message} to see this ${kind} as it is now`);
           if (read.is === "failed") return chip("stale", label, `This ${kind} couldn't be read: ${read.message}`);
-          if (read.record.kind !== kind) return chip("stale", label, `This is a reference to ${read.record.kind === "event" ? "an event" : "a contact"}`);
+          if (read.record.kind !== kind) return chip("stale", label, `This is a reference to ${read.record.kind === "event" ? "an event" : read.record.kind === "contact" ? "a contact" : "an email"}`);
           const record = read.record as Extract<SourceRecord, { kind: K }>;
           const { text, title: said } = shown(record);
           chip("live", text, said, record);
@@ -133,5 +133,6 @@ export const labelledReferences: Plugin = {
   activate(host) {
     host.embeds.register(referenceEmbed({ kind: "event", title: "Event", hint: "", ...NOTHING }));
     host.embeds.register(referenceEmbed({ kind: "contact", title: "Contact", hint: "", ...NOTHING }));
+    host.embeds.register(referenceEmbed({ kind: "email", title: "Email", hint: "", ...NOTHING }));
   },
 };

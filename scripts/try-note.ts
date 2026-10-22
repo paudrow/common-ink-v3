@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { isNoteId, linksIn, retargeted } from "../src/core/links.ts";
 import { allPages } from "../src/core/allPages.ts";
-import type { CalendarEvent, Contact, Reference, Source, Upload } from "../src/core/protocol.ts";
+import type { CalendarEvent, Contact, MailThread, Reference, Source, Upload } from "../src/core/protocol.ts";
 import { namedReferences } from "../src/core/references.ts";
 import { writtenUpload } from "../src/core/uploadRefs.ts";
 import { HEAD_BYTES, typeOf } from "../src/core/filetypes.ts";
@@ -80,7 +80,9 @@ async function referring(written: string): Promise<string> {
   const from = Math.floor(Date.now() / DAY) * DAY;
   const { events } = await op<{ events: CalendarEvent[] }>({ type: "event.list", from, to: from + 7 * DAY, timeZone: "UTC" });
   const { contacts } = await op<{ contacts: Contact[] }>({ type: "contact.list" });
-  const records = { event: events.filter((e) => sample({ id: e.sourceId })).map((e) => ({ ...e, name: e.title })), contact: contacts.filter((c) => sample({ id: c.sourceId })) };
+  // A thread is named by its subject, among the threads kept for whoever runs this.
+  const threads = sources.some((s) => s.kind === "email" && s.state === "connected") ? (await op<{ threads: MailThread[] }>({ type: "email.list", limit: 100 })).threads : [];
+  const records = { event: events.filter((e) => sample({ id: e.sourceId })).map((e) => ({ ...e, name: e.title })), contact: contacts.filter((c) => sample({ id: c.sourceId })), email: threads.map((t) => ({ ...t, name: t.subject })) };
   let out = "";
   let at = 0;
   for (const { kind, name, from: start, to } of named) {
