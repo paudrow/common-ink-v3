@@ -92,7 +92,8 @@ const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
   id: "task",
   find(line, offset) {
     const todo = parseTodo(line, offset);
-    return todo ? [{ ...todo.box, state: todo.state }] : [];
+    // A box is drawn once the space after it is typed: a todo is `- [ ] words`, and a box drawn before it invites words right after `]`.
+    return todo && todo.box.to < offset + line.length ? [{ ...todo.box, state: todo.state }] : [];
   },
   draw(el, token, source) {
     const { host, noteId, onCompleted, onRecurred } = context;

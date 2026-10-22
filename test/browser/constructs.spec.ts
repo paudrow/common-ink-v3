@@ -411,6 +411,58 @@ for (const face of ["the app's face", "a face with a wide X"] as const) {
   });
 }
 
+test("a task's words start one gap after its box however many spaces follow it, as a bullet's start after its dot, and its box written out shows the space after its ]", async ({ page }) => {
+  await open(page, "# Spaces\n\n- [ ] One space\n- [ ]   Three spaces\n- [x]\tA tab\n- Bullet words\n- [ ]\n- [ ]no space\n\nLast words.");
+  const size = await editor(page).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  /** The left edge of `word` on its line, and the right edge of the `]` before it. */
+  const edges = (word: string) =>
+    page.evaluate((word) => {
+      const line = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes(word))!;
+      const edge = (find: (text: string) => number, side: "left" | "right") => {
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const at = find(node.textContent!);
+          if (at < 0 || (node.parentElement && getComputedStyle(node.parentElement).opacity === "0")) continue;
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + 1);
+          return range.getBoundingClientRect()[side];
+        }
+        return null;
+      };
+      return { words: edge((text) => text.indexOf(word), "left")!, bracket: edge((text) => text.indexOf("]"), "right") };
+    }, word);
+
+  const one = await edges("One space");
+  for (const word of ["Three spaces", "A tab", "Bullet words"]) expect(Math.abs((await edges(word)).words - one.words), `${word} starts with One space`).toBeLessThanOrEqual(0.5);
+
+  // With the cursor on the box it is written out where it was drawn, `[ ]` and the space after it, and the words stay put.
+  const line = editor(page).locator(".cm-line").filter({ hasText: "One space" });
+  await line.getByText("One space").click();
+  await page.keyboard.press("Home");
+  for (let n = 0; n < 3; n++) await page.keyboard.press("ArrowRight");
+  await expect(line.getByRole("checkbox")).toHaveCount(0);
+  const written = await edges("One space");
+  expect(Math.abs(written.words - one.words), "the words with the box written out").toBeLessThanOrEqual(0.5);
+  expect(written.words - written.bracket!, `the ] ends at ${written.bracket}, the words start at ${written.words}`).toBeGreaterThanOrEqual(0.25 * size);
+
+  // A todo is `- [ ] words`: `- [ ]no space` is a bullet that says `[ ]`, and a box with nothing after it is drawn once its space is typed.
+  await expect(editor(page).locator(".cm-line").filter({ hasText: "no space" }).getByRole("checkbox")).toHaveCount(0);
+  await expect(editor(page).locator(".cm-line").filter({ hasText: "no space" })).toHaveText("- [ ]no space");
+  const empty = editor(page).locator(".cm-line").nth(6);
+  await expect(empty.getByRole("checkbox")).toHaveCount(0);
+  await expect(empty.locator(".bullet-dot")).toHaveCount(1);
+  await empty.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" ");
+  await page.keyboard.press("ArrowUp");
+  await expect(empty.getByRole("checkbox")).toHaveCount(1);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await page.keyboard.type("Typed words");
+  expect(Math.abs((await edges("Typed words")).words - one.words), "typed words start with the others").toBeLessThanOrEqual(0.5);
+});
+
 test("a formula in a line sits on the line's baseline where KaTeX itself puts it, and the line is no taller", async ({ page }) => {
   // A column wide enough for the line of formulas to be one row in a monospaced font too, so its baseline is the formulas'.
   await open(page, "# Inline $\\frac{a}{b}$ head\n\nA fraction $\\frac{a}{b}$ and a square $x^2$ and a sum $\\sum_{i=1}^{n} i$ and $a \\neq b$ and $x \\notin S$ in words.\n\nLast words.", { "core.editorReadingWidth": 1100 });

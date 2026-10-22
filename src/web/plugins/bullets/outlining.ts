@@ -143,8 +143,8 @@ const clickingFolded = EditorState.transactionFilter.of((tr) => {
 const dot = Decoration.mark({ class: "bullet-dot" });
 /** A task's box is its mark enough: its bullet's mark keeps its room and is painted as nothing. Only where the box is drawn, which is at the start of a line. */
 const blank = Decoration.mark({ class: "bullet-blank" });
-/** A line that starts with a bullet and a task's box, whatever mark the box holds. */
-const TASK = new RegExp(`^\\s*[-*+]\\s+${BOX_PATTERN}(?=\\s|$)`);
+/** A line that starts with a bullet and a task's box, whatever mark the box holds, and the space after it: a box with none yet is drawn as written. */
+const TASK = new RegExp(`^\\s*[-*+]\\s+${BOX_PATTERN}[ \\t]`);
 
 /** A dot for each bullet's mark, or nothing on a task's, except the mark the cursor is on. */
 const bullets = drawnInView((view) => {

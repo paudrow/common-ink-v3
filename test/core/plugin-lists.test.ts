@@ -10,6 +10,8 @@ test("what stands before a list item's words is its indent, its mark, the space 
   expect(leadIn("    - words")).toBe("    - ");
   expect(leadIn("\t- [ ] words")).toBe("\t- [ ] ");
   expect(leadIn("- [x] words")).toBe("- [x] ");
+  expect(leadIn("- [ ]")).toBe("- ");
+  expect(leadIn("- [ ]words")).toBe("- ");
   expect(leadIn("- [X]  words")).toBe("- [X]  ");
   // A box with no space after it is the item's first word, as the checkbox's own rule has it.
   expect(leadIn("- [ ]words")).toBe("- ");
