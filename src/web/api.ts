@@ -61,7 +61,10 @@ export function onRefused(listener: () => void): () => void {
   return () => void refused.delete(listener);
 }
 
-/** The workspace at the end of an address, among the member's own. Null when there is nothing there for them. */
+/**
+ * The workspace at the end of an address, among the member's own. Null only when the server says there
+ * is nothing there for them. Anything else it answers, such as signed out or too many requests, throws.
+ */
 const where = (path: string) =>
   request<{ workspaceId: string }>(path).then(
     (found) => found.workspaceId,
