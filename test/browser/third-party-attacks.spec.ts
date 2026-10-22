@@ -19,6 +19,7 @@ type Attacks = {
   others(): { count: number; found: string[] };
   forge(): string;
   forged(): { sent: number; heardOnForged: string[] };
+  press(chord: string): Promise<string>;
   atWindow(): string[];
   blocked(): string[];
 };
@@ -340,6 +341,16 @@ test("a plugin's frame can't take the keyboard from the note, wherever it is dra
 
   await openPlugins(page);
   await expect(pluginRow(page, "Hostile").getByRole("alert")).toHaveText("Its frame for commands was stopped: it tried to take the keyboard");
+});
+
+test("a plugin's frame that doesn't hold the keyboard can't run the app's keys, so it changes nothing as the member", async ({ page, baseURL }) => {
+  const { admin, note } = await withHostile(page, baseURL!);
+  const frame = await background(page);
+  // Archiving the open note and undoing are keys the app keeps when a frame holds the keyboard. The hidden frame holds none, so neither is pressed.
+  for (const chord of ["mod+shift+e", "mod+z"]) await attack(frame, "press", chord);
+  await page.waitForTimeout(1500);
+  const after = await perform(admin, { type: "note.read", id: note.id });
+  expect([after.state, after.revision]).toEqual(["live", 1]);
 });
 
 test("every write a plugin manages is recorded as the plugin's, whatever it puts beside the operation", async ({ page, baseURL }) => {

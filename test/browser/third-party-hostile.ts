@@ -63,6 +63,8 @@ function hostile(APP: string) {
 
   w.attacks = {
     heard: () => heard.length,
+    /** Says a key was pressed in the frame, though none was. */
+    press: (chord: string) => raw({ v: 1, key: chord }, 300),
     atWindow: () => atWindow,
     blocked: () => blocked,
 

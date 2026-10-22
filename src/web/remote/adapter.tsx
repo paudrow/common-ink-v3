@@ -225,6 +225,10 @@ export function adapt(installed: InstalledPlugin, reach: Reach): Plugin {
             case "fit":
               return void fitted?.(decision.width);
             case "key": {
+              // A chord is the frame's word that a key was pressed in it, and its code can say so at any time. It is taken
+              // only while one of this box's frames holds the keyboard, which the frame guard lets it do only after the member reached it.
+              const active = document.activeElement;
+              if (!(active instanceof HTMLIFrameElement && box.contains(active))) return;
               const command = frameKeys().commandId(decision.chord);
               if (command) host.commands.run(command);
               return;
