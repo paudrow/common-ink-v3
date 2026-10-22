@@ -102,7 +102,11 @@ export const mentions: Plugin = {
           const first = offered(typed, known(), host.app().me.id, adding())[0];
           if (first && (first.tone === "muted" || first.kind === "new")) startCompletion(view);
         },
-        () => void (people = { ...people, contacts: people.contacts ?? [] }),
+        // A reading that failed is read again by the next asking, not taken to be the contacts until they would be stale.
+        () => {
+          contactsAt = 0;
+          people = { ...people, contacts: people.contacts ?? [] };
+        },
       );
     };
 
