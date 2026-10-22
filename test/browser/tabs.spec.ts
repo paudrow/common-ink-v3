@@ -946,17 +946,20 @@ test("Split right on a note's only tab shows the note in both groups: what is ty
   const { alpha, first, second } = await splitAlpha(page);
   const before = (await perform(page, { type: "note.history", id: alpha.id })).length;
 
+  // Each put in at once: typed a key at a time, a busy runner can pause a second between two keys, and that is a save of its own.
+  // Typing the moment the cursor moves is the next test's.
   await second.click();
   await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type(" Typed in the second.");
+  await page.keyboard.insertText(" Typed in the second.");
   await expect(first).toContainText("About Alpha. Typed in the second.");
   await first.click();
   await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type(" And the first.");
+  await page.keyboard.insertText(" And the first.");
   await expect(second).toContainText("Typed in the second. And the first.");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: alpha.id })).text).toBe("# Alpha\n\nAbout Alpha. Typed in the second. And the first.");
   // Each pause is one change, whichever editor it was typed in: nothing is written twice.
-  expect((await perform(page, { type: "note.history", id: alpha.id })).length - before).toBeLessThanOrEqual(2);
+  const history = await perform(page, { type: "note.history", id: alpha.id });
+  expect(history.length - before, `revision, lines added and removed: ${JSON.stringify(history.map((c) => [c.revision, c.added, c.removed]))}`).toBeLessThanOrEqual(2);
 
   // Changes made elsewhere reach both, and what keeps places in the note hears each once: twice, a place past the end breaks it.
   const crashes: string[] = [];
