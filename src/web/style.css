@@ -8985,8 +8985,180 @@ button.todo-tag[aria-pressed="true"] {
   overflow-y: auto;
 }
 
-.contacts-page {
+.contacts-page,
+.email-page {
   max-width: 46rem;
+}
+
+/* Email: the threads kept from notes@, one thread's messages, and the addresses mail is kept from. */
+.email-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.email-page h1 {
+  margin: 0;
+  font-size: calc(22px * var(--text-scale));
+}
+
+.email-how,
+.email-none {
+  margin: 0;
+  color: var(--muted);
+}
+
+.email-search,
+.email-add input {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.email-threads > li {
+  display: block;
+}
+
+.email-thread {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.email-subject {
+  font-weight: 600;
+}
+
+.email-count,
+.email-when,
+.email-address,
+.email-via {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.email-from {
+  grid-column: 1;
+}
+
+.email-snippet {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-thread-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.email-thread-head h1 {
+  flex: 1;
+}
+
+.email-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.email-message {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg-elev);
+}
+
+.email-message[data-focused] {
+  border-color: var(--accent);
+}
+
+.email-message-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.email-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.email-fields dd {
+  margin: 0;
+}
+
+.email-comment {
+  border-left: 3px solid var(--line-strong);
+  padding-left: 8px;
+  color: var(--muted);
+}
+
+.email-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.email-html {
+  width: 100%;
+  height: 28rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.email-attachments {
+  margin: 8px 0 0;
+  padding-left: 1.25rem;
+}
+
+.email-message-foot {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.email-code {
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.email-code-value code {
+  font-size: calc(18px * var(--text-scale));
+  letter-spacing: 0.08em;
+}
+
+.email-add {
+  display: flex;
+  gap: 8px;
+}
+
+.email-add input {
+  flex: 1;
 }
 
 /* v1's frame: the page itself never scrolls; in Week and Day only the hours do, under a header that stays put. */

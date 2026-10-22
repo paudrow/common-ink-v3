@@ -7,6 +7,7 @@ import { codeBlocks } from "./code/index.ts";
 import { folders } from "./folders.tsx";
 import { commandPalette } from "./commandPalette.tsx";
 import { contacts } from "./contacts/index.tsx";
+import { email } from "./email/index.tsx";
 import { daily } from "./daily/index.tsx";
 import { dashboard } from "./dashboard/index.tsx";
 import { dates } from "./dates/index.tsx";
@@ -75,6 +76,7 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [html, "html/index.ts"],
   [calendar, "calendar/index.tsx"],
   [contacts, "contacts/index.tsx"],
+  [email, "email/index.tsx"],
   [gfm, "gfm/index.ts"],
   [todos, "todos/index.tsx"],
   [daily, "daily/index.tsx"],
