@@ -324,6 +324,20 @@ describe("a PDF opened in a tab, from the site kept for files", () => {
     expect((await at(address)).status).toBe(404);
   });
 
+  it("lapses with the member's sessions: signed out everywhere, or taken off the list, the address opens nothing", async () => {
+    const { ada, pdf, tab } = await opened();
+    const address = (await tab(pdf.id)).headers.get("Location")!;
+    expect((await at(address)).status).toBe(200);
+    await perform(env.DB, ada, { type: "member.signOut", memberId: ada.personId, agents: false });
+    expect((await at(address)).status).toBe(404);
+
+    const grace = await opened();
+    const onList = { FILE_ORIGIN: FILES, GOOGLE_CLIENT_ID: "client-id", ALLOWED_EMAILS: (await whoAmI(env.DB, grace.ada.personId)).person.email };
+    const minted = (await at(`https://ink.test/api/workspaces/${grace.workspace}/uploads/${grace.pdf.id}?open=tab`, { headers: { Cookie: grace.cookie } }, onList)).headers.get("Location")!;
+    expect((await at(minted, {}, onList)).status).toBe(200);
+    expect((await at(minted, {}, { ...onList, ALLOWED_EMAILS: "someone@example.com" })).status).toBe(404);
+  });
+
   it("can't be taken for a session, nor a session for it", async () => {
     const { pdf, tab, cookie } = await opened();
     const address = (await tab(pdf.id)).headers.get("Location")!;
