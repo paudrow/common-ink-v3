@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import { anotherPerson, dropFirst, join, perform, signInAsNewPerson, test } from "./helpers.ts";
+import { anotherPerson, connectAgent, dropFirst, join, panelIcon, perform, signInAsNewPerson, test } from "./helpers.ts";
 import { codeHashOf, install, openPlugins, runCommand, toast, turnOn } from "./third-party-helpers.ts";
 
 // Each read the app keeps, answered once with the 500 the built Worker gives a request it dropped, is
@@ -104,4 +104,23 @@ test("a running draft of a plugin, its drafts unread once, runs once the app rea
     await runCommand(page, "Greeter plugin: Greet");
     await expect(toast(page)).toHaveText(/Hello from my draft/, { timeout: 1000 });
   }).toPass({ timeout: 10_000 });
+});
+
+test("whether someone else changed the open note, unread once, is read at the member's next save", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const claude = await connectAgent(page, "Claude");
+  const note = await perform(page, { type: "note.create", text: "# Plan" });
+  await claude.tool("write_note", { id: note.id, baseRevision: 1, text: "# Plan\n\nClaude's step" });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 2, text: "# Plan\n\nClaude's step\n\nAda's word" });
+  const checks = await dropFirst(page, "history.list");
+
+  await page.goto(`/note/${note.id}`);
+  const editor = page.getByRole("textbox", { name: "Note text" });
+  await expect(editor).toContainText("Ada's word");
+  await expect.poll(() => checks.dropped).toBe(1);
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("!");
+
+  await expect(panelIcon(page, "History")).toHaveAccessibleDescription("Changes you haven't seen");
 });
