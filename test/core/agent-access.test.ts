@@ -136,7 +136,8 @@ const refusedTo = async (run: () => Promise<unknown>) => {
   }
 };
 
-describe("an agent's access is its member's", () => {
+// Each role's test asks every operation, as its agent and as its member, so it grows with each operation added and has outgrown the default five seconds on CI.
+describe("an agent's access is its member's", { timeout: 30_000 }, () => {
   const REFUSED: Record<Role, ToolOp[]> = {
     admin: [],
     editor: ["links.rebuild", "todos.rebuild", "folder.delete", "plugin.install", "plugin.uninstall", "plugin.permit"],
