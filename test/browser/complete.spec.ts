@@ -190,3 +190,39 @@ test("picking Create note again while it is being made makes one note, and an ar
   await page.waitForTimeout(1000);
   expect(await titled()).toBe(1);
 });
+
+test("the list stays while nothing fits the word being typed, saying so or offering to create it, so taking letters back finds what fit again; a space after a word that fits nothing closes it", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "note.create", text: "# Garden diary" });
+  await perform(page, { type: "note.create", text: "# Seeds\n\n#garden" });
+  const note = await perform(page, { type: "note.create", text: "# Today\n\nSee" });
+  await open(page, note.id, "See");
+
+  await page.keyboard.type(" [[Gard");
+  await expect(options(page)).toHaveText(["Garden diaryUnsorted"]);
+  await page.keyboard.type("zz");
+  await expect(options(page)).toHaveText(["No matches"]);
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await expect(options(page)).toHaveText(["Garden diaryUnsorted"]);
+  await page.keyboard.type("q ");
+  await expect(list(page)).toBeHidden();
+  // Enter with nothing to pick is a new line.
+  await page.keyboard.type("and [[");
+  await expect(options(page)).toHaveCount(3);
+  await page.keyboard.type("qq");
+  await expect(options(page)).toHaveText(["No matches"]);
+  await page.keyboard.press("Enter");
+  await expect(list(page)).toBeHidden();
+  await expect.poll(() => text(page, note.id)).toBe("# Today\n\nSee [[Gardq and [[qq\n");
+
+  await page.keyboard.type("#gard");
+  await expect(options(page)).toHaveText(["#garden", "Create #gardNew tag"]);
+  await page.keyboard.type("x");
+  await expect(options(page)).toHaveText(["Create #gardxNew tag"]);
+  await page.keyboard.press("Backspace");
+  await expect(options(page).first()).toHaveText("#garden");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => text(page, note.id)).toBe("# Today\n\nSee [[Gardq and [[qq\n#garden");
+});

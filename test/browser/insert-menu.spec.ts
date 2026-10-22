@@ -88,7 +88,7 @@ test(":: lists the embeds alone, filters them by what follows, and writes what /
   await expect(headings(page)).toHaveCount(0);
   await page.keyboard.type("con");
   await settled(page);
-  await expect(list(page)).toHaveCount(0);
+  await expect(options(page)).toHaveText(["No matches"]);
   for (let i = 0; i < 3; i++) await page.keyboard.press("Backspace");
   for (const [typed, shows] of [["vid", /^Upload a video/], ["file", /^Upload a file/]] as const) {
     await page.keyboard.type(typed);
@@ -117,7 +117,7 @@ test("an embed typed by hand past :: is left as typed, and neither a written one
   // An event or a contact is in no menu, as `@` finds them, and is still written by hand.
   await page.keyboard.type("::eve", { delay: 20 });
   await settled(page);
-  await expect(list(page)).toHaveCount(0);
+  await expect(options(page)).toHaveText(["No matches"]);
   await page.keyboard.type("nt{", { delay: 20 });
   await settled(page);
   await expect(list(page)).toHaveCount(0);

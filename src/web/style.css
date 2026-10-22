@@ -5593,6 +5593,10 @@ kbd {
   color: var(--muted);
 }
 
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-none .cm-completionLabel {
+  color: var(--faint);
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .avatar {
     background: hsl(var(--hue) 35% 24%);

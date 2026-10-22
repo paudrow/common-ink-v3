@@ -1,4 +1,4 @@
-import { acceptCompletion, autocompletion, currentCompletions, selectedCompletionIndex, setSelectedCompletion, type Completion as Option, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, closeCompletion, currentCompletions, selectedCompletionIndex, setSelectedCompletion, type Completion as Option, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
 import { Prec, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
@@ -11,6 +11,13 @@ type Items = readonly CompletionItem[];
 type Described = Option & { description?: string; kind?: string };
 
 /**
+ * What the list shows while nothing fits the word being typed, so it stays where it was: a key that
+ * takes a letter back finds the list there to fill again. It is never highlighted of itself, and
+ * picked it closes the list.
+ */
+const NOTHING: Described = { label: "No matches", type: "none", apply: (view) => void closeCompletion(view) };
+
+/**
  * Opens the list at the cursor while the member types after a completion's trigger, in the editor
  * of note `noteId`. Every completion whose trigger fits is asked, and their items share the one list,
  * grouped by kind and otherwise in the order of the completions. One that throws offers nothing, and
@@ -19,6 +26,8 @@ type Described = Option & { description?: string; kind?: string };
 export function completing(given: readonly Completion[], noteId: string, onFail: (completion: Completion, error: unknown) => void): Extension {
   if (!given.length) return [];
   const completions = [...given].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  /** Where the list last offered something: where it started, and where the cursor was. */
+  let fit: { from: number; to: number } | null = null;
 
   /** Where a completion's trigger starts and what it offers for what was typed after it, or null when the cursor isn't after its trigger. */
   const ask = (completion: Completion, context: CompletionContext): { completion: Completion; from: number; items: Items | Promise<Items> } | null => {
@@ -49,7 +58,14 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
       const offered = answers.flatMap((items, i) => items.map((item) => ({ item, completion: asked[i]!.completion, after: asked[i]!.from - from })));
       // The completions have already chosen and ordered what fits, and unfiltered items keep the order they are given in, which grouping by kind keeps within each kind.
       const options = grouped(offered, (o) => o.item.kind).map(({ item: o, group }) => optionFor(o.completion, o.item, o.after, group));
-      return options.length ? { from, to: context.pos, filter: false, update, options } : null;
+      if (options.length) {
+        fit = { from, to: context.pos };
+        return { from, to: context.pos, filter: false, update, options };
+      }
+      // Letters typed on from where something last fit keep the list, saying nothing does. A space or a mark after them closes it: that is prose, or syntax written by hand.
+      // So does a prose trigger after other words, as in "yes /no", where the member is as likely writing as asking.
+      const still = fit?.from === from && context.pos > fit.to && /^[\p{L}\p{N}]+$/u.test(context.state.sliceDoc(fit.to, context.pos)) && entersAt(context.state);
+      return still ? { from, to: context.pos, filter: false, update, options: [NOTHING] } : null;
     };
     const answers = asked.map((a) => a.items);
     // Answered at once when every completion answers at once, so the list is right by the member's next key.
@@ -107,9 +123,11 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
       return typed === null || startsLine(before, typed, completion.trigger);
     });
   };
-  // Tab picks what is highlighted, or the first item when nothing is.
+  // Tab picks what is highlighted, or the first item when nothing is. A list with nothing in it to pick leaves Tab to the note.
   const pick = (view: EditorView) => {
-    if (currentCompletions(view.state).length && selectedCompletionIndex(view.state) === null) view.dispatch({ effects: setSelectedCompletion(0) });
+    const shown = currentCompletions(view.state);
+    if (shown[0] === NOTHING) return false;
+    if (shown.length && selectedCompletionIndex(view.state) === null) view.dispatch({ effects: setSelectedCompletion(0) });
     return acceptCompletion(view);
   };
   // No delays: a member who types `/timer` and Enter without a pause means the timer.
@@ -126,7 +144,7 @@ export function completing(given: readonly Completion[], noteId: string, onFail:
     }),
     EditorView.updateListener.of(({ view, state }) => {
       const first: Described | undefined = currentCompletions(state)[0];
-      if (first && !waits(first.kind) && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
+      if (first && first !== NOTHING && !waits(first.kind) && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
     }),
     // With no list open Tab is whatever it is elsewhere in a note.
     Prec.highest(keymap.of([{ key: "Tab", run: pick }])),
