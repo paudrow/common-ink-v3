@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import type { GrantAccess, Note } from "../core/protocol.ts";
 import { ApiError, perform, session } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
+import { listKeys } from "./listEnter.ts";
 import { completing } from "./completing.ts";
 import { dismissing } from "./dismiss.ts";
 import { embedding, embedsAre } from "./embedding.ts";
@@ -193,7 +194,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               keymap.of(defaultKeymap),
               noteTabs,
               // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
-              markdown({ base: markdownLanguage }),
+              markdown({ base: markdownLanguage, addKeymap: false }),
+              listKeys,
               noteHighlighting,
               embedding(noteId),
               embedded.of(embedsAre(embedsNow.current)),

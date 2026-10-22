@@ -130,3 +130,40 @@ test("the keyboard shortcuts say Tab indents in a note and how to leave it", asy
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toContainText("In a note, Tab indents and Shift+Tab outdents. To leave the note from the keyboard, press Esc and then Tab.");
 });
+
+test("Enter on a todo starts the next one directly below, and Enter on an empty one ends the list, never with a blank line", async ({ page }) => {
+  const note = await open(page, "# Chores\n\n- [ ] sweep");
+
+  await clickLine(page, "sweep");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("mop");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => read(page, note.id)).toBe("# Chores\n\n- [ ] sweep\n- [ ] mop\n- [ ] ");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Done.");
+  await expect.poll(() => read(page, note.id)).toBe("# Chores\n\n- [ ] sweep\n- [ ] mop\nDone.");
+});
+
+test("Enter on the second todo of a list, with nothing in it yet, ends the list instead of putting a blank line above it", async ({ page }) => {
+  const note = await open(page, "# Chores\n\n- [ ] sweep");
+
+  await clickLine(page, "sweep");
+  await keys(page, "Enter", "Enter");
+  await page.keyboard.type("Done.");
+  await expect.poll(() => read(page, note.id)).toBe("# Chores\n\n- [ ] sweep\nDone.");
+});
+
+test("Enter in a list written with blank lines between its items adds the next item directly below", async ({ page }) => {
+  const note = await open(page, "# Mixed\n\n- [ ] one\n\n- [ ] two\n\n- three\n\n- four\n\n> - quoted\n>\n> - again");
+
+  await clickLine(page, "two");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("between");
+  await clickLine(page, "four");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("five");
+  await clickLine(page, "again");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("more");
+  await expect.poll(() => read(page, note.id)).toBe("# Mixed\n\n- [ ] one\n\n- [ ] two\n- [ ] between\n\n- three\n\n- four\n- five\n\n> - quoted\n>\n> - again\n> - more");
+});
