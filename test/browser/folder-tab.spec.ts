@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import { editOf, folderRow, listedNotes, noteCard, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, showPanel, signInAsNewPerson, test } from "./helpers.ts";
+import { editOf, folderRow, listedNotes, noteCard, openAllNotes, openFolder, ownPlugin, panelIcons, perform, pinPanel, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 const tabs = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group).getByRole("tab");
 const tab = (page: Page, title: string) => tabs(page).filter({ hasText: new RegExp(`^${title}$`) });
@@ -52,7 +52,7 @@ test("there is one italic preview tab: the next thing opened takes its place, a 
     expect(slanted.indexOf(true)).toBe(previewAt);
   };
 
-  await folderRow(page, "Projects").click();
+  await openFolder(page, "Projects");
   await shows(["Projects"], 0);
   await expect(tab(page, "Projects")).toHaveAttribute("data-kind", "folder");
   await expect(tab(page, "Projects").locator("svg").first()).toBeVisible();
@@ -62,7 +62,7 @@ test("there is one italic preview tab: the next thing opened takes its place, a 
   await expect(listedNotes(page)).toHaveText(["Plan"]);
 
   // Another folder from the tree takes the preview's place.
-  await folderRow(page, "Journal").click();
+  await openFolder(page, "Journal");
   await shows(["Journal"], 0);
   await expect(page).toHaveURL(new RegExp(`/folder/${journal.id}$`));
 
@@ -72,14 +72,14 @@ test("there is one italic preview tab: the next thing opened takes its place, a 
   await expect(folderRow(page, "Journal")).toHaveAttribute("aria-selected", "true");
 
   // A folder from the tree takes the note's place.
-  await folderRow(page, "Projects").click();
+  await openFolder(page, "Projects");
   await shows(["Projects"], 0);
   await editOf(page, "Plan").click();
   await shows(["Plan"], 0);
   await expect(folderRow(page, "Projects")).toHaveAttribute("aria-selected", "true");
 
   // A double click on a folder takes the preview's place and keeps the list, and a note looked at from it opens beside it.
-  await folderRow(page, "Journal").dblclick();
+  await openFolder(page, "Journal", "dblclick");
   await shows(["Journal"], -1);
   await editOf(page, "Monday").click();
   await shows(["Journal", "Monday"], 1);
@@ -102,7 +102,7 @@ test("a folder's tab has an address that Back, Forward, a reload and a link all 
   await expect(page).toHaveURL(/\/folder\/all$/);
   await expect(heading(page)).toHaveText("All notes");
   await expect(listedNotes(page)).toHaveText(["Monday", "Plan"]);
-  await folderRow(page, "Projects").dblclick();
+  await openFolder(page, "Projects", "dblclick");
   await expect(page).toHaveURL(new RegExp(`/folder/${projects.id}$`));
   await editOf(page, "Plan").click();
   await expect(page).toHaveURL(new RegExp(`/note/plan-${plan.id}$`));
@@ -145,7 +145,7 @@ test("a folder's tab has an address that Back, Forward, a reload and a link all 
 test("a folder's tab splits and moves between groups like a note's", async ({ page }) => {
   await withFolders(page);
   const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
-  await folderRow(page, "Projects").dblclick();
+  await openFolder(page, "Projects", "dblclick");
   await editOf(page, "Plan").click();
   await expect(tabs(page)).toHaveText(["Projects", "Plan"]);
 
@@ -183,7 +183,7 @@ test("a folder's tab splits and moves between groups like a note's", async ({ pa
 
 test("a card draws its note to be read, which nothing in it changes, and Edit opens the note with the cursor in it", async ({ page }) => {
   const { plan } = await withFolders(page);
-  await folderRow(page, "Projects").click();
+  await openFolder(page, "Projects");
   const card = noteCard(page, "Plan");
   await expect(card.locator(".card-details")).toContainText("Ada Lovelace");
 
@@ -212,7 +212,7 @@ test("a card draws its note to be read, which nothing in it changes, and Edit op
   await expect(page.getByRole("status")).toHaveText("Saved");
 
   // Coming back to the list finds the card with the note as it is now.
-  await folderRow(page, "Projects").click();
+  await openFolder(page, "Projects");
   await expect(card.locator(".cm-line").filter({ hasText: "and paper" })).toBeVisible();
   await expect(card.getByRole("checkbox")).toHaveCount(2);
 });
@@ -221,7 +221,7 @@ test("a card beside its note's editor is only a reading of it: what follows the 
   await withFolders(page);
   const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
   const words = ownPlugin(page, "Word count").locator("body");
-  await folderRow(page, "Projects").dblclick();
+  await openFolder(page, "Projects", "dblclick");
   await editOf(page, "Plan").click();
   await tab(page, "Projects").dragTo(group(1), { targetPosition: { x: 40, y: 300 } });
   await group(2).getByRole("textbox", { name: "Note text" }).click();
@@ -416,7 +416,7 @@ test("a new note goes in the folder whose list is in front, or the open note's f
   await expect(folderRow(page, "Unsorted")).toHaveAccessibleDescription("1");
   await expect(folderRow(page, "Unsorted")).toHaveAttribute("aria-selected", "true");
 
-  await folderRow(page, "Journal").click();
+  await openFolder(page, "Journal");
   await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(editor(page)).toBeFocused();
   await expect(folderRow(page, "Journal")).toHaveAccessibleDescription("2");
@@ -437,7 +437,7 @@ test("with the note list off a folder's notes are listed by title, and with tabs
 
   await expect(folderRow(page, "Projects")).toBeVisible();
   await run(page, "Disable plugin: Note list");
-  await folderRow(page, "Projects").click();
+  await openFolder(page, "Projects");
   await expect(tabs(page)).toHaveText(["Projects"]);
   const plain = page.getByRole("region", { name: "Projects" });
   await expect(plain.getByRole("link")).toHaveText(["Plan"]);
@@ -449,7 +449,7 @@ test("with the note list off a folder's notes are listed by title, and with tabs
 
   await run(page, "Disable plugin: Tabs and splits");
   await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(0);
-  await folderRow(page, "Projects").click();
+  await openFolder(page, "Projects");
   await expect(page).toHaveURL(new RegExp(`/folder/${projects.id}$`));
   await expect(heading(page)).toHaveText("Projects");
   await editOf(page, "Plan").click();
@@ -470,7 +470,7 @@ test("the inspector follows the tab in front: a note's Info, a folder tab's Info
   await withFolders(page);
   await pinPanel(page, "Info");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await folderRow(page, "Projects").dblclick();
+  await openFolder(page, "Projects", "dblclick");
   await editOf(page, "Plan").click();
   await run(page, "Keep tab open");
   await run(page, "Go to Calendar");
