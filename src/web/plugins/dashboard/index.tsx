@@ -13,7 +13,7 @@ import { membersStamp } from "./today.ts";
  */
 function PinMark({ pins, note }: { pins: Pins; note: NoteSummary }) {
   const ids = useSyncExternalStore(pins.subscribe, pins.ids);
-  useEffect(() => pins.want(), [pins]);
+  useEffect(() => pins.want(), [pins, note.id]);
   if (note.state !== "live") return null;
   const pinned = ids?.includes(note.id) ?? false;
   const label = pinned ? "Unpin from dashboard" : "Pin to dashboard";
@@ -57,7 +57,8 @@ export const dashboard: Plugin = {
       const notes = host.app().notes;
       if (!notes) return;
       const now = membersStamp(notes);
-      if (members !== null && now !== members && pins.ids() !== null) pins.read();
+      // Read even while no pins were read yet, so a list that failed to read recovers.
+      if (members !== null && now !== members) pins.read();
       members = now;
     });
   },
