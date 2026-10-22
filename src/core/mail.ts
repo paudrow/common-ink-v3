@@ -1,4 +1,4 @@
-import PostalMime, { addressParser, type Address, type Email } from "postal-mime";
+import PostalMime, { addressParser, decodeWords, type Address, type Email } from "postal-mime";
 import type { MailAddress, MailAttachment } from "./protocol.ts";
 
 /*
@@ -13,6 +13,8 @@ export const MAX_RAW_BYTES = 10 * 1024 * 1024;
 export const MAX_TEXT = 200_000;
 export const MAX_HTML = 500_000;
 const MAX_ADDRESSES = 100;
+/** The most ids one header gives a message. */
+export const MAX_IDS = 80;
 
 /** A message as it is kept, before it has a thread or an id of its own. */
 export interface Incoming {
@@ -45,7 +47,8 @@ export const domainOf = (address: string) => address.slice(address.lastIndexOf("
 export function idsIn(header: string | undefined | null): string[] {
   if (!header) return [];
   const bracketed = [...header.matchAll(/<([^<>\s]{1,500})>/g)].map((m) => m[1]!);
-  if (bracketed.length) return [...new Set(bracketed)].slice(0, 100);
+  // The newest are last, and what a thread is found by: few enough that one query holds them all (D1 binds at most 100).
+  if (bracketed.length) return [...new Set(bracketed)].slice(-MAX_IDS);
   const bare = header.trim();
   return bare && !/\s/.test(bare) && bare.length <= 500 ? [bare] : [];
 }
@@ -151,6 +154,24 @@ export async function inlineForward(text: string, outer: Pick<Incoming, "sentAt"
   };
 }
 
+/**
+ * A message's headers alone, read from its raw start without its body, and the From address they
+ * name: what is checked before anything costly is done with what anyone on the internet can send.
+ */
+export function headerBlock(raw: string | ArrayBuffer | Uint8Array): { headers: Read["headers"]; from: string } {
+  const start = typeof raw === "string" ? raw.slice(0, 256 * 1024) : new TextDecoder().decode((raw instanceof Uint8Array ? raw : new Uint8Array(raw)).subarray(0, 256 * 1024));
+  const end = start.search(/\r?\n\r?\n/);
+  const block = (end < 0 ? start : start.slice(0, end)).replace(/\r?\n[ \t]+/g, " ");
+  const headers = block.split(/\r?\n/).flatMap((line) => {
+    const at = line.indexOf(":");
+    return at > 0 ? [{ key: line.slice(0, at).trim().toLowerCase(), value: line.slice(at + 1).trim() }] : [];
+  });
+  const froms = headers.filter((h) => h.key === "from");
+  // Two From headers say two things, and neither is taken.
+  const from = froms.length === 1 ? (mailboxes(addressParser(decodeWords(froms[0]!.value)))[0]?.address ?? "") : "";
+  return { headers, from };
+}
+
 /** Reads a message as it reached notes@, and the message it forwards, attached whole or written into its text. */
 export async function readMessage(raw: string | ArrayBuffer | Uint8Array): Promise<Read> {
   const email = await PostalMime.parse(raw, { rfc822Attachments: true, maxNestingDepth: 50, maxPartCount: 500 });
@@ -173,7 +194,8 @@ interface Result {
 
 /** An Authentication-Results header's value: who wrote it, and what it found. Parenthesized comments are dropped. */
 export function authResults(value: string): { authserv: string; results: Result[] } {
-  let plain = value;
+  // A quoted string, such as a reason=, may hold the sender's words: none of it is read, so none of it can end a result.
+  let plain = value.replace(/"(?:[^"\\]|\\.)*"/g, '""');
   for (let before = ""; before !== plain; ) {
     before = plain;
     plain = plain.replace(/\([^()]*\)/g, " ");
@@ -188,8 +210,11 @@ export function authResults(value: string): { authserv: string; results: Result[
   return { authserv: authserv.split(/\s+/)[0]!.toLowerCase(), results };
 }
 
-/** Whether DKIM's signing domain is aligned with the From domain, relaxed: the same domain, or one inside the other. A bare top-level domain never is. */
-export const aligned = (signer: string, domain: string) => signer.includes(".") && (signer === domain || domain.endsWith(`.${signer}`) || signer.endsWith(`.${domain}`));
+/** A domain everyone registers under, such as `co.uk`: no signer of that alone is aligned with anything. Short of the public suffix list, the common shapes of one. */
+const SHARED = /^([a-z]+|(co|com|org|net|ac|gov|edu|ne|or|go|gob|nic)\.[a-z]{2})$/;
+
+/** Whether DKIM's signing domain is aligned with the From domain, relaxed: the same domain, or one inside the other, never a domain everyone registers under. */
+export const aligned = (signer: string, domain: string) => !SHARED.test(signer) && (signer === domain || domain.endsWith(`.${signer}`) || (signer.endsWith(`.${domain}`) && !SHARED.test(domain)));
 
 /**
  * Whether the domain of the From address vouched for this message, as the receiving server found
@@ -213,8 +238,12 @@ export function vouched(headers: Read["headers"], from: string, authserv: string
   return { ok: false, why: "no aligned DMARC or DKIM pass" };
 }
 
-/** Elements dropped with everything in them: what runs, loads, asks for input or is not to be read. */
-const DROPPED = new Set(["script", "style", "iframe", "frame", "frameset", "object", "embed", "applet", "form", "input", "button", "select", "textarea", "option", "link", "meta", "base", "title", "head", "svg", "math", "template", "noscript", "audio", "video", "source", "track", "canvas", "portal", "dialog", "picture"]);
+/**
+ * Elements dropped with everything in them: what runs, loads, asks for input or is not to be read.
+ * The ones whose content is read as raw text (xmp, noembed, noframes, plaintext, listing) are here
+ * too: no element inside them is ever seen, so taking the tag away would let what is in them out.
+ */
+const DROPPED = new Set(["xmp", "noembed", "noframes", "plaintext", "listing", "script", "style", "iframe", "frame", "frameset", "object", "embed", "applet", "form", "input", "button", "select", "textarea", "option", "link", "meta", "base", "title", "head", "svg", "math", "template", "noscript", "audio", "video", "source", "track", "canvas", "portal", "dialog", "picture"]);
 /** Elements kept, with only the attributes `KEPT_ATTRIBUTES` names. Any other is taken away and what is in it kept. */
 const KEPT = new Set([
   ..."a abbr b blockquote br caption center cite code col colgroup dd del div dl dt em font h1 h2 h3 h4 h5 h6 hr i img ins kbd li mark ol p pre q s small span strike strong sub sup table tbody td tfoot th thead tr u ul".split(" "),

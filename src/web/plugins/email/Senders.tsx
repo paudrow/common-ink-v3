@@ -86,7 +86,7 @@ export function Senders({ host }: { host: PluginHost }) {
           <p className="email-code-value">
             <code>{code.code}</code>
           </p>
-          <p className="sources-none">The code is shown only now. The message that carries it verifies the address and isn't kept.</p>
+          <p className="sources-none">The code is shown only now. The message that carries it links the address to your account, so send it only from an address that is yours, and never send a code someone else gives you. That message isn't kept.</p>
         </div>
       )}
       <form className="email-add" onSubmit={(e) => void submit(e)}>

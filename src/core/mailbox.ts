@@ -1,5 +1,5 @@
 import { newId } from "./ids.ts";
-import { MAX_RAW_BYTES, answers, bareSubject, normalAddress, readMessage, vouched, type Incoming } from "./mail.ts";
+import { MAX_RAW_BYTES, answers, bareSubject, headerBlock, normalAddress, readMessage, vouched, type Incoming } from "./mail.ts";
 import { OpError, type MailAddress, type MailMessage, type MailSender, type MailThread, type MailThreadRead } from "./protocol.ts";
 
 /*
@@ -45,7 +45,7 @@ const codesIn = (text: string) => [...text.toUpperCase().matchAll(/\b([A-Z2-9]{4
 /** The person an address is: whoever signs in with it, or else whoever added it and verified it. */
 export async function personOf(db: D1Database, address: string): Promise<string | null> {
   const row = await db
-    .prepare("SELECT id FROM people WHERE email = ?1 UNION ALL SELECT person_id AS id FROM mail_senders WHERE address = ?1 AND verified_at IS NOT NULL LIMIT 1")
+    .prepare("SELECT id, 0 AS rank FROM people WHERE email = ?1 UNION ALL SELECT person_id AS id, 1 AS rank FROM mail_senders WHERE address = ?1 AND verified_at IS NOT NULL ORDER BY rank LIMIT 1")
     .bind(normalAddress(address))
     .first<{ id: string }>();
   return row?.id ?? null;
@@ -177,7 +177,15 @@ const likes = (query: string | undefined) =>
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 10)
-    .map((w) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    // D1 takes a LIKE pattern of at most 50 bytes, so a long word is looked for by its start.
+    .map((w) => {
+      let kept = "";
+      for (const c of w.replace(/[\\%_]/g, (special) => `\\${special}`)) {
+        if (new TextEncoder().encode(kept + c).length > 40) break;
+        kept += c;
+      }
+      return `%${kept.endsWith("\\") && !kept.endsWith("\\\\") ? kept.slice(0, -1) : kept}%`;
+    });
 
 /** A page of the person's threads, latest first, each with a message holding every word of `query`. */
 export async function listThreads(db: D1Database, personId: string, sourceId: string, ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; more: boolean }> {
@@ -186,7 +194,7 @@ export async function listThreads(db: D1Database, personId: string, sourceId: st
   const { results } = await db
     .prepare(
       `SELECT t.id, t.subject FROM mail_threads t WHERE t.person_id = ?1 AND t.merged_into IS NULL AND (?2 IS NULL OR t.last_at < ?2)
-       ${words.length ? `AND EXISTS (SELECT 1 FROM mail_messages m WHERE m.thread_id = t.id AND ${words.map((_, i) => `${haystack} LIKE ?${i + 4} ESCAPE '\\'`).join(" AND ")})` : ""}
+       AND EXISTS (SELECT 1 FROM mail_messages m WHERE m.thread_id = t.id${words.length ? ` AND ${words.map((_, i) => `${haystack} LIKE ?${i + 4} ESCAPE '\\'`).join(" AND ")}` : ""})
        ORDER BY t.last_at DESC, t.id LIMIT ?3`,
     )
     .bind(personId, ask.before ?? null, ask.limit + 1, ...words)
@@ -237,7 +245,8 @@ async function threadFor(db: D1Database, personId: string, m: Incoming, sentAt: 
     )
     .bind(personId, ...ids)
     .all<{ thread_id: string; began: number | null }>();
-  const [keep, ...others] = results.map((r) => r.thread_id);
+  // At most so many are merged at once, so each statement's ids fit in what D1 binds; the rest are merged by the next message that names them.
+  const [keep, ...others] = results.map((r) => r.thread_id).slice(0, 40);
   if (keep) {
     if (others.length) {
       const list = others.map(() => "?").join(",");
@@ -332,16 +341,20 @@ export type Received =
 export async function receive(db: D1Database, raw: string | ArrayBuffer | Uint8Array, opts: { authserv: string; now: number }): Promise<Received> {
   const size = typeof raw === "string" ? raw.length : raw.byteLength;
   if (size > MAX_RAW_BYTES) return { dropped: "too_large" };
+  // Its headers are checked before its body is read: what fails costs next to nothing.
+  const head = headerBlock(raw);
+  const sender = head.from;
+  if (!sender) return { dropped: "unreadable" };
+  const vouch = vouched(head.headers, sender, opts.authserv);
+  if (!vouch.ok) return { dropped: "unauthenticated", why: vouch.why };
   let read;
   try {
     read = await readMessage(raw);
   } catch {
     return { dropped: "unreadable" };
   }
-  const sender = read.outer.from.address;
-  if (!sender) return { dropped: "unreadable" };
-  const vouch = vouched(read.headers, sender, opts.authserv);
-  if (!vouch.ok) return { dropped: "unauthenticated", why: vouch.why };
+  // The address checked is the address kept: a message the two readings disagree on is neither's.
+  if (read.outer.from.address !== sender) return { dropped: "unreadable" };
   if (await verifyFrom(db, sender, `${read.outer.subject}\n${read.outer.text.slice(0, 500)}`, opts.now)) return { verified: sender };
   const personId = await personOf(db, sender);
   if (!personId) return { dropped: "unknown" };

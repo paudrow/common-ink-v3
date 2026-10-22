@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { connectAgent } from "../../src/core/agents.ts";
-import { aligned, authResults, bareSubject, htmlText, idsIn, inlineForward, readMessage, sanitizeHtml, vouched } from "../../src/core/mail.ts";
+import { aligned, authResults, bareSubject, headerBlock, htmlText, idsIn, inlineForward, readMessage, sanitizeHtml, vouched } from "../../src/core/mail.ts";
 import { PER_SENDER_HOUR, personOf, receive } from "../../src/core/mailbox.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type OpInput } from "../../src/core/protocol.ts";
@@ -116,6 +116,26 @@ describe("reading a message", () => {
     expect(clean).toContain("kept words");
   });
 
+  it("drops what an element read as raw text holds, which no tag inside it is seen in", async () => {
+    for (const tag of ["xmp", "noembed", "noframes", "plaintext", "listing"]) {
+      const clean = await sanitizeHtml(`<p>Before</p><${tag}><img src="https://t.example/p.png"><meta http-equiv="refresh" content="0;url=https://evil.example"></${tag}><p>After</p>`);
+      expect(clean, tag).not.toMatch(/t\.example|evil\.example|<img|<meta/);
+    }
+  });
+
+  it("keeps the newest ids of a long References, few enough to look them up at once", async () => {
+    const refs = Array.from({ length: 150 }, (_, n) => `<r${n}@x>`).join(" ");
+    expect(idsIn(refs)).toHaveLength(80);
+    expect(idsIn(refs).at(-1)).toBe("r149@x");
+  });
+
+  it("reads a message's From and Authentication-Results from its headers alone", () => {
+    const head = headerBlock(mail({ from: "Ada <Ada@Example.com>" }));
+    expect(head.from).toBe("ada@example.com");
+    expect(head.headers[0]!.key).toBe("authentication-results");
+    expect(headerBlock(`From: a@example.com\r\nFrom: b@example.com\r\n\r\nTwo.`).from).toBe("");
+  });
+
   it("reads the words of a message that came as HTML alone", async () => {
     const read = await readMessage(mail({ from: "ada@example.com", html: "<p>First &amp; foremost</p><p>Second<br>line</p><script>no()</script>" }));
     expect(read.outer.text).toBe("First & foremost\nSecond\nline");
@@ -172,6 +192,14 @@ describe("whether the sender's domain vouched for a message", () => {
     expect(vouched(headers(`${AUTHSERV}; dkim=pass header.d=example.com`), "ada@team.example.com", AUTHSERV).ok).toBe(true);
     expect(vouched(headers(`${AUTHSERV}; dkim=pass header.d=sendgrid.net`), "ada@example.com", AUTHSERV).ok).toBe(false);
     expect(aligned("com", "example.com")).toBe(false);
+    expect(aligned("co.uk", "victim.co.uk")).toBe(false);
+    expect(aligned("victim.co.uk", "victim.co.uk")).toBe(true);
+  });
+
+  it("reads nothing a quoted string holds, so a sender's words can't add a result", () => {
+    const forged = `${AUTHSERV}; dkim=fail reason="bad; dkim=pass header.d=example.com" header.d=evil.example`;
+    expect(authResults(forged).results.map((r) => `${r.method}=${r.result}`)).toEqual(["dkim=fail"]);
+    expect(vouched(headers(forged), "ada@example.com", AUTHSERV).ok).toBe(false);
   });
 
   it("refuses SPF alone, a failed DMARC, and no results at all", () => {
@@ -346,6 +374,16 @@ describe("threads", () => {
     expect((await threads(actor, "invoice")).map((t) => t.subject)).toEqual(["Invoice October"]);
     expect((await threads(actor, "tuesday noon")).map((t) => t.subject)).toEqual(["Lunch"]);
     expect(await threads(actor, "100%_")).toEqual([]);
+    // A word longer than D1 takes in a pattern is looked for by its start.
+    expect((await threads(actor, "Tuesdayatnoonandthenagainonwednesdayafterlunch")).map((t) => t.subject)).toEqual([]);
+    expect((await threads(actor, "ééééééééééééééééééééééééééééééé")).map((t) => t.subject)).toEqual([]);
+  });
+
+  it("threads a message with a References too long to bind at once", async () => {
+    const { actor, email } = await connected();
+    await got({ from: email, subject: "Long", id: "r149@x", date: new Date(T0 - HOUR).toUTCString() });
+    await got({ from: email, subject: "Re: Long", references: Array.from({ length: 150 }, (_, n) => `<r${n}@x>`).join(" ") });
+    expect((await threads(actor)).map((t) => [t.subject, t.count])).toEqual([["Long", 2]]);
   });
 });
 

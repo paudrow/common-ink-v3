@@ -57,10 +57,11 @@ test("mail sent to notes@ is kept as a thread for its sender alone, drawn safely
   await expect(page.locator(".email-text")).toHaveText("The plans are attached in spirit.");
   await page.getByRole("button", { name: "Show formatted" }).click();
   const frame = page.locator("iframe.email-html");
-  await expect(frame).toHaveAttribute("sandbox", "");
+  await expect(frame).toHaveAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
   const html = await frame.getAttribute("srcdoc");
   expect(html).toContain("<b>plans</b>");
-  expect(html).not.toMatch(/script|onclick|track\.example/);
+  expect(html).toContain("default-src 'none'; img-src data:");
+  expect(html).not.toMatch(/<script|onclick|track\.example/);
   expect(await page.evaluate(() => (window as unknown as { stolen?: number }).stolen)).toBeUndefined();
 
   // A reference in a note draws the thread for Ada.

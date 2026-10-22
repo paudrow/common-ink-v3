@@ -8,6 +8,9 @@ export const EMAIL_PATH = "/email";
 type Listing = { status: "reading" } | { status: "listed"; threads: readonly MailThread[]; more: boolean } | { status: "failed"; message: string };
 type Reading = { status: "reading" } | { status: "read"; thread: MailThreadRead } | { status: "failed"; message: string };
 
+/** What a message's HTML may load in its frame: nothing from anywhere, but the pictures inside it. */
+const FRAME_POLICY = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'">`;
+
 const when = (time: number) => new Date(time).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const who = (a: MailAddress) => a.name || a.address;
 const whoAll = (list: readonly MailAddress[]) => list.map((a) => (a.name ? `${a.name} <${a.address}>` : a.address)).join(", ");
@@ -83,6 +86,9 @@ function ThreadList({ host, asked, open, onSources }: { host: PluginHost; asked:
   const [query, setQuery] = useState("");
   const [listing, setListing] = useState<Listing>({ status: "reading" });
   const [before, setBefore] = useState<number | undefined>(undefined);
+
+  // Connecting or disconnecting lists from the start again.
+  useEffect(() => setBefore(undefined), [asked]);
 
   useEffect(() => {
     const wait = setTimeout(() => setQuery(typed.trim()), 250);
@@ -223,8 +229,9 @@ function Message({ host, message, focused }: { host: PluginHost; message: MailMe
       </dl>
       {message.comment && <p className="email-comment">{message.comment}</p>}
       {formatted && message.html ? (
-        // The HTML was sanitized when it arrived, and runs nothing here either: the frame allows no script, no form and no page of its own.
-        <iframe className="email-html" title={`${message.subject} as formatted`} sandbox="" referrerPolicy="no-referrer" srcDoc={message.html} />
+        // The HTML was sanitized when it arrived, and runs nothing here either: the frame allows no script and no form, its policy loads nothing
+        // but pictures carried in the message, and its links open a tab of their own, as the sanitizing wrote each one.
+        <iframe className="email-html" title={`${message.subject} as formatted`} sandbox="allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" srcDoc={`${FRAME_POLICY}${message.html}`} />
       ) : (
         <div className="email-text">{message.text}</div>
       )}
