@@ -194,9 +194,9 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
       app.go(`${app.path}${query}`, { replace: true });
     }, SETTLED_MS);
     return () => clearTimeout(timer);
-    // Only when what is on show changes.
+    // Only when what is on show changes, which includes whether today is: that comes a render after a grid opens, once it knows how many days fit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, anchor]);
+  }, [view, anchor, todayShown]);
 
   // A window too narrow for the whole week opens on today rather than on days before it.
   useEffect(() => {
