@@ -932,9 +932,13 @@ test("an HTML body being written runs nothing at each key: what was written runs
   await page.waitForTimeout(300);
   expect(asked(), "nothing ran while the body was written").toHaveLength(1);
   await expect(framed.getByText("first")).toBeVisible();
+  // The loop is finished (`i` becomes `i++`) before the cursor leaves: the frame and the app share a process here, so a loop that ran would stop the page answering.
+  for (let n = " }</script><p>second</p>".length; n > 0; n--) await page.keyboard.press("ArrowLeft");
+  await page.keyboard.type("++");
   await page.keyboard.press("ControlOrMeta+Home");
   await expect(page.locator(".cm-line").filter({ hasText: "while (i < 3)" })).toHaveCount(0);
-  await expect.poll(() => asked().length).toBe(2);
+  await expect(framed.getByText("second")).toBeVisible();
+  expect(asked()).toHaveLength(2);
 });
 
 test("an HTML embed in a pane is run only once its room is in sight in that pane, not because it is inside the window", async ({ page }) => {
