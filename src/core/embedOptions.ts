@@ -1,8 +1,8 @@
 /**
  * An embed's options declared as data: what each is called, what it holds, and what it is when the
  * note says nothing of it. The host reads and writes them as `key=value` words in the embed's config
- * (`::x-poll{question="Lunch?" votes=3}`), and draws them beneath the embed, so a plugin that declares
- * them writes no code for either. Words of the config that are no option's are left as they are.
+ * (`::x-poll{question="Lunch?" votes=3}`) through `embedSchema.ts`, and draws them beneath the embed,
+ * so a plugin that declares them writes no code for either.
  */
 
 /** The colours an embed can ask for by name. Each is drawn to suit the theme, light or dark, as `--swatch` on an element with `data-colour`. */
@@ -20,27 +20,25 @@ export type DeclaredOption =
 
 export type OptionValue = string | number | boolean;
 
-/** One word of a config: `key=value`, `key="two words"`, or anything else, kept as it is. */
-type Word = { key: string | null; value: string; raw: string };
-
-const WORD = /([a-z][a-zA-Z0-9-]*)=(?:"([^"]*)"|(\S*))|\S+/g;
-
-function wordsOf(config: string): Word[] {
-  return [...config.matchAll(WORD)].map((m) => (m[1] ? { key: m[1], value: m[2] ?? m[3] ?? "", raw: m[0] } : { key: null, value: m[0], raw: m[0] }));
-}
-
-/** How a value is written: bare where it is one word of plain characters, quoted otherwise. */
-const written = (id: string, value: string) => (/^[\w.:/+-]+$/.test(value) ? `${id}=${value}` : `${id}="${value}"`);
-
 const DURATION = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
+
+/** Seconds in a duration written `25m`, `1h30m`, `90s`, or a bare number of minutes, however long. Null for anything else or nothing. */
+function writtenSeconds(text: string): number | null {
+  const t = text.trim();
+  const m = /^\d+$/.test(t) ? [t, undefined, t, undefined] : t ? DURATION.exec(t) : null;
+  return m ? Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0) : null;
+}
 
 /** Seconds in a duration written `25m`, `1h30m`, `90s`, or a bare number of minutes. Null for anything else, nothing, or past 100 hours. */
 export function secondsIn(text: string): number | null {
-  const t = text.trim();
-  const m = /^\d+$/.test(t) ? [t, undefined, t, undefined] : t ? DURATION.exec(t) : null;
-  if (!m) return null;
-  const seconds = Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
-  return seconds > 0 && seconds <= 100 * 3600 ? seconds : null;
+  const seconds = writtenSeconds(text);
+  return seconds !== null && seconds > 0 && seconds <= 100 * 3600 ? seconds : null;
+}
+
+/** The hours, minutes and seconds of a duration written `1h30m`, `90s` or `25`, as a duration field shows them, however many hours a timer's own length has. Null for what isn't one. */
+export function durationParts(text: string): [hours: number, minutes: number, seconds: number] | null {
+  const seconds = writtenSeconds(text);
+  return seconds === null ? null : [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60];
 }
 
 /** A duration in the words it is written in: `1h30m`, `4m30s`, `25m`. */
@@ -108,44 +106,8 @@ export function defaultOf(option: DeclaredOption): OptionValue {
   return option.type === "choice" ? (option.default ?? option.values[0] ?? "") : option.default;
 }
 
-/** Each option's value as the config says it: its last word for the option, or the default where there is none or it can't be taken. */
-export function optionValues(options: readonly DeclaredOption[], config: string): Record<string, OptionValue> {
-  const words = wordsOf(config);
-  return Object.fromEntries(
-    options.map((option) => {
-      const word = words.findLast((w) => w.key === option.id);
-      const read = word ? valueOf(option, option.type === "number" ? withinRange(option, word.value) : word.value) : null;
-      return [option.id, read && "value" in read ? read.value : defaultOf(option)];
-    }),
-  );
-}
-
-/** A number written past either end of its option's range, as by hand, is read as that end. Only a value typed in the field is refused for it. */
-function withinRange(option: Extract<DeclaredOption, { type: "number" }>, text: string): string {
-  const n = text.trim() === "" ? NaN : Number(text);
-  if (!Number.isFinite(n)) return text;
-  return String(Math.min(Math.max(n, option.min ?? -Infinity), option.max ?? Infinity));
-}
-
 /** A value as a field shows it and as it is typed back. */
 export function shownValue(option: DeclaredOption, value: OptionValue): string {
   if (option.type === "toggle") return value ? "on" : "off";
   return String(value);
-}
-
-/**
- * The config with option `id` set to what `text` says, or why it can't be. Every word the config has
- * for the option is taken out, and one is written at the end unless the value is the option's
- * default, so a config says only what differs. Every other word stays where it was.
- */
-export function setOption(options: readonly DeclaredOption[], config: string, id: string, text: string): { config: string } | string {
-  const option = options.find((o) => o.id === id);
-  if (!option) return `No option ${id}.`;
-  // An emptied number or duration is its default again.
-  const read = text.trim() === "" && (option.type === "number" || option.type === "duration") ? { value: defaultOf(option), words: "" } : valueOf(option, text);
-  if ("refused" in read) return read.refused;
-  const kept = wordsOf(config).filter((w) => w.key !== id).map((w) => w.raw);
-  const fallback = defaultOf(option);
-  const same = read.value === fallback || (option.type === "colour" && read.value === "" && fallback === "");
-  return { config: [...kept, ...(same ? [] : [written(id, read.words)])].join(" ") };
 }

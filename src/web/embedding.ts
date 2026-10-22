@@ -2,10 +2,10 @@ import { syntaxTree } from "@codemirror/language";
 import { Annotation, EditorState, Facet, Prec, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { aloneIn, aloneOn, boxOf, keptBelow } from "./below.ts";
-import { closeOptions, declared, refreshOptions, toggleOptions, type Options } from "./embedOptions.ts";
-import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "./embedSyntax.ts";
+import { closeOptions, fitSettingsButton, optionsOn, settingsOf, type Options } from "./embedOptions.ts";
+import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "../core/embedSyntax.ts";
 import { following } from "./following.ts";
-import type { AddressEmbed, Drawn, Embed, EmbedOptions, Embedded } from "./plugin-api.ts";
+import type { AddressEmbed, Drawn, Embed, Embedded } from "./plugin-api.ts";
 import { isReading } from "./readOnly.ts";
 
 type ByName = ReadonlyMap<string, Embed>;
@@ -33,12 +33,6 @@ function writtenAt(view: EditorView, el: HTMLElement, block: boolean): Written |
   const line = view.state.doc.lineAt(pos);
   return inlineIn(line.text, line.from).find((w) => w.from === pos);
 }
-
-/** An embed's options as the host works them: declared ones are read and written by the host, as `id=value` words of the config. */
-const optionsFrom = (embed: Embed): EmbedOptions | undefined => (Array.isArray(embed.options) ? declared(embed.options) : (embed.options as EmbedOptions | undefined));
-
-/** How each options button reads its embed's options now. */
-const optionsOf = new WeakMap<HTMLElement, () => Options | null>();
 
 /** The element an embed draws in, inside the card the host draws around it. */
 const drawingIn = (frame: HTMLElement) => frame.querySelector<HTMLElement>(".embed")!;
@@ -166,51 +160,16 @@ class EmbedWidget extends WidgetType {
     this.fitOptions(frame, still, rewrite);
   }
 
-  /** Gives the card its options button, or takes it away, to fit what the note says of the embed now. */
+  /** Gives the card its settings button, or takes it away, to fit what the note says of the embed now. */
   private fitOptions(frame: HTMLElement, still: () => Written | undefined, rewrite: (next: { config?: string; body?: string }) => void) {
     const { embed, written } = this;
-    const fieldsOf = (now: Written) => {
-      try {
-        return optionsFrom(embed)?.fields({ config: now.config, body: now.body }) ?? [];
-      } catch {
-        return [];
-      }
-    };
-    let button = optionsIn(frame);
-    if (this.readOnly || !fieldsOf(written).length) {
-      if (button) closeOptions(button);
-      button?.remove();
-      return;
-    }
-    if (!button) {
-      const made = (button = (frame.querySelector(".embed-head") ?? frame).appendChild(document.createElement("button")));
-      made.type = "button";
-      made.className = "embed-options";
-      made.setAttribute("aria-haspopup", "dialog");
-      made.setAttribute("aria-expanded", "false");
-      made.addEventListener("click", () => toggleOptions(made, roomOf(frame) ?? frame.querySelector<HTMLElement>(".embed-card") ?? frame, () => optionsOf.get(made)?.() ?? null));
-    }
-    button.title = `Options for ${embed.title}`;
-    button.setAttribute("aria-label", button.title);
-    const optionsFor = (now: Written | undefined): Options | null =>
-      now
-        ? {
-            title: embed.title,
-            fields: fieldsOf(now),
-            set(id, value) {
-              try {
-                const next = optionsFrom(embed)!.set({ config: now.config, body: now.body }, id, value);
-                if (typeof next === "string") return next;
-                rewrite(next);
-              } catch (err) {
-                return err instanceof Error ? err.message : String(err);
-              }
-            },
-          }
-        : null;
-    optionsOf.set(button, () => optionsFor(still()));
+    const settings = settingsOf(embed);
+    const optionsFor = (now: Written | undefined): Options | null => (now && settings && !this.readOnly ? optionsOn(embed.title, settings, now, rewrite) : null);
     // What is drawn now is what the note says now. Where it is in the note can't be asked while the note is being drawn.
-    refreshOptions(button, optionsFor(written));
+    fitSettingsButton(frame.querySelector<HTMLElement>(".embed-head") ?? frame, "embed-options", optionsFor(written), {
+      under: () => roomOf(frame) ?? frame.querySelector<HTMLElement>(".embed-card") ?? frame,
+      read: () => optionsFor(still()),
+    });
   }
 
   override destroy(frame: HTMLElement) {
@@ -252,48 +211,23 @@ const used = StateField.define<boolean>({
 /** With the cursor on it, an embed is shown as it is written, so it can be changed, as the markup around it is. */
 const cursorOn = (state: EditorState, { from, to }: Pick<Written, "from" | "to">) => state.field(used) && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 
-/**
- * Room at the top of a line for the embeds on it that are shown as written: the same text, unseen,
- * in the rows it takes at the line's width. The text itself is laid over these rows.
- */
-class SourceRows extends WidgetType {
-  constructor(private readonly rows: string) {
-    super();
-  }
-  override eq(other: SourceRows) {
-    return other.rows === this.rows;
-  }
-  override toDOM() {
-    const el = document.createElement("span");
-    el.className = "embed-source-rows";
-    // Drawn from this and not written in the line, so the line reads as it did.
-    el.dataset.rows = this.rows;
-    return el;
-  }
-  override updateDOM(el: HTMLElement) {
-    el.dataset.rows = this.rows;
-    return true;
-  }
-}
-
 const unseen = Decoration.replace({});
 const asText = Decoration.mark({ class: "embed-written" });
+/** A drawn embed's text, shown after its drawing while the cursor is on it. */
+const asSource = Decoration.mark({ class: "embed-source" });
 /** A line that is one such embed and nothing else is only as tall as its text as written. */
 const alone = Decoration.line({ class: "embed-alone" });
 
 /**
  * An inline embed's drawing is a widget of its own before the embed's text, and the text is hidden
- * after it. With the cursor on the embed its text is shown in rows of its own above the line, and
- * the drawing stays the element it was, doing what it was doing, lower by those rows and no more.
- * The rows are made by {@link SourceRows} at the start of the line, and each embed's text is laid
- * over its own, under the rows of the embeds before it on the line, which it is told of.
+ * after it. With the cursor on the embed its text is shown where it is written, after the drawing,
+ * which stays the element it was, doing what it was doing.
  */
 function inlineDrawn(view: EditorView): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const { state } = view;
   const byName = state.facet(registered);
   const drawnBlocks = drawnBy(state, state.field(blocks).all);
-  const shown = new Map<number, string[]>();
   for (const { from, to } of view.visibleRanges) {
     for (const written of inlineIn(state.sliceDoc(from, to), from)) {
       const embed = byName.get(written.name);
@@ -309,17 +243,9 @@ function inlineDrawn(view: EditorView): DecorationSet {
       }
       if (!drawing(embed)) continue;
       ranges.push(Decoration.widget({ widget: widgetFor(state, embed, written), side: -1 }).range(written.from));
-      if (!cursorOn(state, written)) {
-        ranges.push(unseen.range(written.from, written.to));
-        continue;
-      }
-      const line = state.doc.lineAt(written.from).from;
-      const above = shown.get(line) ?? [];
-      ranges.push(Decoration.mark({ class: "embed-source", attributes: { "data-above": above.join("\n") } }).range(written.from, written.to));
-      shown.set(line, [...above, state.sliceDoc(written.from, written.to)]);
+      ranges.push((cursorOn(state, written) ? asSource : unseen).range(written.from, written.to));
     }
   }
-  for (const [line, rows] of shown) ranges.push(Decoration.line({ class: "embed-sourced" }).range(line), Decoration.widget({ widget: new SourceRows(rows.join("\n")), side: -2 }).range(line));
   return Decoration.set(ranges, true);
 }
 

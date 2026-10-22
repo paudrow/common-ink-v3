@@ -2276,33 +2276,52 @@ button.link:hover {
   outline-offset: 1px;
 }
 
-/*
- * An inline embed as the note writes it, shown while the cursor is on it in rows of its own at the
- * top of its line. The rows are made by an unseen copy of the text, and the text is laid over them,
- * under the rows of any embed before it on the line, which it is told of in `data-above`. Both wrap
- * the same way at the same width, so the rows are as tall as the text needs at any width and in any font.
- */
-.cm-line.embed-sourced {
-  position: relative;
+/* The settings of what is all below its line, as an uploaded picture, laid over its top right corner and seen as its crop button is. */
+.embed-options.embed-options-corner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid rgb(255 255 255 / 0.9);
+  border-radius: 6px;
+  background: rgb(30 30 36 / 0.7);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.12s;
 }
 
-.embed-source-rows,
-.embed-source,
+.embed-below:hover > .embed-options-corner,
+.embed-options-corner:focus-visible,
+.embed-options-corner[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.embed-options-corner:hover,
+.embed-options-corner:focus-visible,
+.embed-options-corner[aria-expanded="true"] {
+  border-color: var(--accent);
+  outline: none;
+  background: var(--accent);
+  color: #fff;
+}
+
+.embed-below:has(> .embed-options-corner) :is(.upload-crop, .upload-edit) {
+  right: 46px;
+}
+
+/* A block's lines, shown above its card while the cursor is in them, drawn as an inline embed's text is. */
 .cm-line.embed-source-line {
   font: calc(12.5px * var(--text-scale))/1.6 var(--mono);
   letter-spacing: 0;
   text-indent: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-/* A block's lines, shown above its card while the cursor is in them, are drawn as an inline embed's text is. */
-.cm-line.embed-source-line {
   color: var(--accent);
 }
 
-/* Whatever the text would be drawn as in the note, a heading or bold, as written it is all one size, the size its rows were made for. */
-.embed-source *,
+/* Whatever the text would be drawn as in the note, a heading or bold, as written it is all one size. */
 .cm-line.embed-source-line * {
   font: inherit !important;
   color: inherit !important;
@@ -2310,33 +2329,13 @@ button.link:hover {
   text-decoration: none;
 }
 
-.embed-source-rows {
-  display: block;
-  visibility: hidden;
-}
-
-.embed-source-rows::before {
-  content: attr(data-rows);
-}
-
+/*
+ * An embed as written, where it is written, while the cursor is on it: after its drawing, or, for one
+ * that is all below its line, in place of nothing, so its line is as tall with it as with nothing. A
+ * line with nothing else on it, shown only with the cursor on it, is as tall as that text.
+ */
+.embed-written,
 .embed-source {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  box-sizing: border-box;
-  padding: inherit;
-  color: var(--accent);
-}
-
-.embed-source::before {
-  content: attr(data-above);
-  display: block;
-  visibility: hidden;
-}
-
-/* An embed that is all below its line, as written, where it is written: its line is as tall with it as with nothing. A line with nothing else on it, shown only with the cursor on it, is as tall as that text. */
-.embed-written {
   color: var(--accent);
   font-family: var(--mono);
   font-size: calc(12.5px * var(--text-scale));
@@ -2346,7 +2345,10 @@ button.link:hover {
   font-size: calc(12.5px * var(--text-scale));
 }
 
-.embed-written * {
+/* Whatever the text would be drawn as in the note, a heading or bold, as written it is all one size. */
+.embed-written *,
+.embed-source * {
+  font: inherit !important;
   color: inherit !important;
   text-decoration: none !important;
 }
@@ -2367,6 +2369,37 @@ button.link:hover {
   grid-template-columns: minmax(5rem, 110px) minmax(0, 1fr);
   align-items: center;
   gap: 3px 12px;
+}
+
+/* Takes the setting out of the note, shown only while the note writes it. Its column is kept while it is hidden, so every field in a panel is as wide. */
+.embed-options-panel:has(.embed-option-clear) .embed-option {
+  grid-template-columns: minmax(5rem, 110px) minmax(0, 1fr) 24px;
+}
+
+.embed-option-clear[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
+.embed-option-clear {
+  grid-column: 3;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(16px * var(--text-scale));
+  line-height: 1;
+  cursor: pointer;
+}
+
+.embed-option-clear:hover,
+.embed-option-clear:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .embed-option-hint {
@@ -2390,6 +2423,29 @@ button.link:hover {
 .embed-option input:focus-visible {
   border-color: var(--accent);
   outline: none;
+}
+
+/* A duration: hours, minutes and seconds side by side, each a number with its unit after it. */
+.embed-option-duration {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.embed-option-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.embed-option-part input {
+  box-sizing: border-box;
+  width: 3.6em;
+  padding-inline: 6px 2px;
+  font-size: calc(14px * var(--text-scale));
+  font-variant-numeric: tabular-nums;
 }
 
 .embed-option-hint {
@@ -13235,7 +13291,7 @@ button.crumb[aria-expanded="true"] {
   background: rgb(0 0 0 / 0.7);
 }
 
-:root[data-night-shift] :is(.upload-crop, .upload-edit):not(:hover, :focus-visible) {
+:root[data-night-shift] :is(.upload-crop, .upload-edit, .embed-options-corner):not(:hover, :focus-visible, [aria-expanded="true"]) {
   border-color: var(--ink);
   background: rgb(0 0 0 / 0.7);
   color: var(--ink);

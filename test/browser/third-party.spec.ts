@@ -479,9 +479,11 @@ ink.root.append(said, button);`;
   await expect.poll(said).toBe('{"question":"","votes":1,"open":true,"show":"bars"}');
 
   await onLine(page, 2);
-  await editor(page).getByRole("button", { name: "Options for Poll plugin: Poll" }).click();
-  const panel = page.getByRole("dialog", { name: "Options for Poll plugin: Poll" });
-  await expect(panel.getByRole("textbox", { name: "Votes each" })).toHaveValue("1");
+  await editor(page).getByRole("button", { name: "Settings for Poll plugin: Poll" }).click();
+  const panel = page.getByRole("dialog", { name: "Settings for Poll plugin: Poll" });
+  // What the config doesn't write shows its default, unwritten.
+  await expect(panel.getByRole("textbox", { name: "Votes each" })).toHaveValue("");
+  await expect(panel.getByRole("textbox", { name: "Votes each" })).toHaveAttribute("placeholder", "1");
   // Beneath the frame's room, as wide as it.
   const [room, box] = [(await page.locator('.embed-below[data-embed="x-poll"]').boundingBox())!, (await panel.boundingBox())!];
   expect(Math.abs(box.width - room.width)).toBeLessThanOrEqual(1);
@@ -497,9 +499,12 @@ ink.root.append(said, button);`;
   await panel.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "dots" }).click();
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("::x-poll{size=big votes=3 open=off show=dots}");
   await expect.poll(said).toBe('{"question":"","votes":3,"open":false,"show":"dots"}');
-  // Back to the default is no word at all.
+  // Back to the default is no word at all, and so is a cleared one.
   await panel.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "bars" }).click();
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("::x-poll{size=big votes=3 open=off}");
+  await panel.getByRole("button", { name: "Clear Votes each" }).click();
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("::x-poll{size=big open=off}");
+  await expect(panel.getByRole("button", { name: "Clear Votes each" })).toHaveCount(0);
 
   // The kit draws the plugin's button as the app's primary one, and the frame changes theme with the app.
   const look = async () => (await frameFor(page, "embed", "poll")).evaluate(() => ({ scheme: (window as unknown as { ink: { scheme: string } }).ink.scheme, bg: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(), button: getComputedStyle(document.querySelector("button")!).backgroundColor }));

@@ -382,7 +382,7 @@ test("moving through a note in a preview tab leaves it a preview, and an edit ke
   await expect.poll(() => italic(page)).toEqual([false]);
 });
 
-test("the cursor moves across an embed, which stays drawn and is shown as written above its line while the cursor is on it", async ({ page }) => {
+test("the cursor moves across an embed, which stays drawn and is shown as written after it in its line while the cursor is on it", async ({ page }) => {
   const [note] = await withVim(page, "# Laps\nTime ::stopwatch{} here\nend");
   await page.goto(`/note/${note!.id}`);
   await expect(statusLine(page)).toHaveText("--NORMAL--");
@@ -400,8 +400,10 @@ test("the cursor moves across an embed, which stays drawn and is shown as writte
   await page.keyboard.press("w");
   await expect(written).toHaveText("::stopwatch{}");
   await expect(page.locator(".cm-fat-cursor")).toHaveText(":");
-  // The cursor is drawn where the text is: in the row above the stopwatch.
-  expect((await page.locator(".cm-fat-cursor").boundingBox())!.y).toBeLessThan((await watch.boundingBox())!.y);
+  // The cursor is drawn where the text is: after the stopwatch, on its row.
+  const [cursor, card] = [(await page.locator(".cm-fat-cursor").boundingBox())!, (await page.locator(".embed-card").boundingBox())!];
+  expect(cursor.x).toBeGreaterThanOrEqual(card.x + card.width);
+  expect(cursor.y).toBeLessThan(card.y + card.height);
   expect(await watch.evaluate((el, was) => el === was, drawn)).toBe(true);
   await page.keyboard.press("$");
   await expect(written).toHaveCount(0);

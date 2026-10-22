@@ -1,4 +1,5 @@
 import { STATES_WRITTEN } from "./boxes.ts";
+import { EMBED_SCHEMAS, keysText } from "./embedSchema.ts";
 
 /**
  * What a note can hold besides plain paragraphs, and a short example of each. `note_syntax` says
@@ -101,7 +102,7 @@ export const NOTE_SYNTAX: readonly NoteSyntax[] = [
     name: "image",
     kind: "embed",
     called: "a picture",
-    about: "A picture is an upload's id, from list_uploads or from the line upload_file answered, then the room to keep for it as WIDTHxHEIGHT. small, medium or large after that, or a whole percent such as 42%, sets how much of the note's column it takes, and anything else is the whole column. crop=X,Y,WIDTH,HEIGHT after that draws only that part of the picture, in the pixels of WIDTHxHEIGHT from its top left corner, and the file itself is never changed; a video is not cropped. The upload's name is never in the note. The embed is on a line of its own. place_upload it before writing it into a note someone else can read.",
+    about: "A picture is an upload's id, from list_uploads or from the line upload_file answered, then the room to keep for it as WIDTHxHEIGHT. small, medium or large after that, or a whole percent such as 42%, sets how much of the note's column it takes, and without one it is the whole column. crop=X,Y,WIDTH,HEIGHT after that draws only that part of the picture, in the pixels of WIDTHxHEIGHT from its top left corner, and the file itself is never changed; a video is not cropped. The upload's name is never in the note. The embed is on a line of its own. place_upload it before writing it into a note someone else can read.",
     example: "::image{u2p9l4d8a3c7 640x480}",
   },
   {
@@ -184,5 +185,8 @@ $$`,
 /** What note_syntax's description names, so an agent sees each one before calling it. */
 export const syntaxDescription = () => `What a note can hold besides plain paragraphs, each with an example in the answer: ${NOTE_SYNTAX.map((row) => row.called).join(", ")}.`;
 
+/** An embed's keys, from its schema, under what the row says of it. */
+const keysOf = (row: NoteSyntax) => (row.kind === "embed" && Object.hasOwn(EMBED_SCHEMAS, row.name) ? `\n${keysText(EMBED_SCHEMAS[row.name]!)}` : "");
+
 /** What note_syntax answers, and what ink note-syntax prints. */
-export const syntaxText = () => NOTE_SYNTAX.map((row) => `${row.called}\n${row.about}\n\n${row.example}`).join("\n\n");
+export const syntaxText = () => NOTE_SYNTAX.map((row) => `${row.called}\n${row.about}${keysOf(row)}\n\n${row.example}`).join("\n\n");

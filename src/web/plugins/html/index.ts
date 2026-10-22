@@ -1,7 +1,7 @@
 import { sandboxed, type Plugin } from "../../plugin-api.ts";
 import { arriving } from "../lib/arriving.ts";
 import { lettering, outline, sketch } from "../lib/sketch.ts";
-import { HTML_OPTIONS, heightIn } from "./config.ts";
+import { heightIn } from "./config.ts";
 import { runningIn } from "./running.ts";
 
 const START = `<p>Hello from <b>HTML</b>.</p>
@@ -66,13 +66,12 @@ export const html: Plugin = {
       starts: { body: START },
       description: "A page of your own HTML, run in a frame shut off from the app",
       preview: { image: sketch(outline(10, 8, 180, 68, 5) + `<rect x="10" y="8" width="180" height="14" rx="5" opacity="0.18"/><circle cx="20" cy="15" r="2.5"/><circle cx="29" cy="15" r="2.5"/><circle cx="38" cy="15" r="2.5"/>` + lettering(70, 58, 26, "&lt;/&gt;", 'font-family="ui-monospace, monospace" font-weight="600"')) },
-      options: HTML_OPTIONS,
-      // All of it is below: the card the host draws has the name and the options, and the frame is the card's body.
+      // All of it is below: the card the host draws has the name and the settings, and the frame is the card's body.
       render() {},
       below: {
         box: ({ config }) => ({ height: heightIn(config) }),
         // Drawn the first time its room is on screen, and again when the HTML changes, which then runs, or asks, again.
-        render(into, { body }) {
+        render(into, { body, config, resize }) {
           const asks = () => host.settings.get<string>("run") !== "automatically";
           /** Asked because this HTML runs in another page, or did when that page stopped answering. */
           const elsewhere = ran.elsewhere(body);
@@ -81,7 +80,27 @@ export const html: Plugin = {
           let halt: (() => void) | null = null;
           let button: HTMLButtonElement | null = null;
           const why = () => (elsewhere ? `${ELSEWHERE} ${reach(sites)}` : `Written in this note. ${reach(sites)}`);
-          const say = () => button?.querySelector(".media-load-from")?.replaceChildren(why());
+          /**
+           * While it asks, the room is tall enough for the Run button and the line under it, however
+           * short `height` is. Once it runs, it is `height` again. The room keeps the last height it
+           * was given through a change to `height`, so it is given one each time.
+           */
+          const fit = () => {
+            let needs = 0;
+            if (button) {
+              button.style.height = "auto";
+              needs = Math.ceil(button.getBoundingClientRect().height) + ASKING_MARGIN;
+              button.style.height = "";
+            }
+            resize(Math.max(heightIn(config), needs));
+          };
+          const say = () => {
+            button?.querySelector(".media-load-from")?.replaceChildren(why());
+            fit();
+          };
+          // The button's line wraps by the room's width, which it may not have yet when it is drawn, and which changes with the window.
+          const sized = new ResizeObserver(() => button && fit());
+          sized.observe(into);
           saying.add(say);
           /** Takes away the placeholder an embed that runs by itself holds its room with while the workspace is asked what it may reach. */
           let holding: (() => void) | null = null;
@@ -94,6 +113,7 @@ export const html: Plugin = {
             release();
             button?.remove();
             button = null;
+            fit();
             const made = sandboxed(body, {
               title: "HTML embed",
               grant,
@@ -128,6 +148,7 @@ export const html: Plugin = {
             });
             into.append(button);
             release();
+            fit();
           };
           /**
            * Runs it with the reach `said`: none, or the sites an admin listed, which need a grant, good once,
@@ -186,6 +207,7 @@ export const html: Plugin = {
           following.add(follow);
           return () => {
             live = false;
+            sized.disconnect();
             saying.delete(say);
             following.delete(follow);
             halt?.();
@@ -196,6 +218,9 @@ export const html: Plugin = {
     return () => ran.stop();
   },
 };
+
+/** Room above and below the Run button and its line, in pixels, when the room is made taller to show them. */
+const ASKING_MARGIN = 24;
 
 const ELSEWHERE = "It was running when a page with it stopped answering, or it runs in another tab now.";
 

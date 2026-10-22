@@ -52,13 +52,12 @@ const place = async (page: Page, selector: string) => {
 /** A box as it is laid out, unrounded: the browser lays out in 64ths of a pixel, which add up exactly, so two of these can be added and compared. */
 const boxOf = async (locator: Locator) => (await locator.first().boundingBox())!;
 const lower = (box: { x: number; y: number; width: number; height: number }, by: number) => ({ ...box, y: box.y + by });
-/** An inline embed's text as written, shown above its line, and the rows made for it there. */
+/** An inline embed's text as written, shown in its line after its drawing while the cursor is on it. */
 const source = (page: Page) => editor(page).locator(".embed-source");
-const sourceRows = (page: Page) => editor(page).locator(".embed-source-rows");
 /** Measures are taken once the fonts are in, as a font that arrives later would move what was measured. */
 const fonts = (page: Page) => page.evaluate(() => document.fonts.ready.then(() => undefined));
 
-test("a running stopwatch is the same element, still counting, with the cursor on it, through it, and typing around it: its text is shown in a row above its line, and it is lower by that row and no more", async ({ page }) => {
+test("a running stopwatch is the same element, still counting, with the cursor on it, through it, and typing around it: its text is shown in its line after it, and it doesn't move", async ({ page }) => {
   const note = await open(page, "# Laps\n\nbefore\nLap ::stopwatch{} here.\nafter\n");
   await fonts(page);
   await editor(page).getByRole("button", { name: "Start stopwatch" }).click();
@@ -66,8 +65,8 @@ test("a running stopwatch is the same element, still counting, with the cursor o
   await expect.poll(() => seconds(page, /^Stopwatch, /)).toBeGreaterThanOrEqual(1);
   await mark(page);
   const card = editor(page).locator(".embed-card");
-  const off = { before: await boxOf(line(page, "before")), line: await boxOf(line(page, "Lap")), card: await boxOf(card), after: await boxOf(line(page, "after")) };
-  const now = async () => ({ before: await boxOf(line(page, "before")), line: await boxOf(line(page, "Lap")), card: await boxOf(card), after: await boxOf(line(page, "after")) });
+  const off = { before: await boxOf(line(page, "before")), card: await boxOf(card) };
+  const now = async () => ({ before: await boxOf(line(page, "before")), card: await boxOf(card) });
 
   await line(page, "Lap").click({ position: { x: 2, y: 5 } });
   const started = Date.now();
@@ -77,34 +76,36 @@ test("a running stopwatch is the same element, still counting, with the cursor o
   for (let i = 0; i < written.length; i++) {
     await page.keyboard.press("ArrowRight");
     await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
-    const rows = (await source(page).count()) ? (await boxOf(sourceRows(page))).height : 0;
-    if (rows) shown++;
-    // The rows of its text are all that is added: the card and the line after are lower by them, and nothing is anywhere else.
-    await expect.poll(() => now()).toEqual({ before: off.before, line: { ...off.line, height: off.line.height + rows }, card: lower(off.card, rows), after: lower(off.after, rows) });
+    if (await source(page).count()) shown++;
+    // Its text comes and goes after it, and nothing above it, nor the card itself, moves.
+    await expect.poll(() => now()).toEqual(off);
   }
   // The cursor was on the embed from its first character to its last, and on nothing before or after.
   expect(shown).toBe(written.indexOf("}") - written.indexOf("::") + 2);
   await expect(source(page)).toHaveCount(0);
   await expect(line(page, "Lap")).not.toContainText("::stopwatch");
-  await expect.poll(() => now()).toEqual(off);
 
   await page.keyboard.press("ArrowLeft");
   for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowLeft");
-  // With the cursor in it, the embed is shown as the note writes it, above the line and from the line's left edge, over the rows made for it, and the card is under it.
+  // With the cursor in it, the embed is shown as the note writes it, in its line right after the card, on the card's row.
   await expect(source(page)).toHaveText(/^::stopwatch\{since=[^}]+\}$/);
-  const [text, rows, on] = [await boxOf(source(page)), await boxOf(sourceRows(page)), await now()];
-  expect(rows.height).toBeGreaterThan(10);
-  expect({ y: text.y, height: text.height }).toEqual({ y: off.line.y, height: rows.height });
-  expect(text.y + text.height).toBeLessThanOrEqual(on.card.y);
-  expect(on).toEqual({ before: off.before, line: { ...off.line, height: off.line.height + rows.height }, card: lower(off.card, rows.height), after: lower(off.after, rows.height) });
+  await expect(line(page, "Lap")).toContainText(/::stopwatch\{since=[^}]+\} here\.$/);
+  // Where it starts: a text that wraps has a box for each of its rows.
+  const text = await source(page).evaluate((el) => (({ x, y, height }) => ({ x, y, height }))(el.getClientRects()[0]!));
+  expect(text.x).toBeGreaterThanOrEqual(off.card.x + off.card.width);
+  expect(text.y).toBeLessThan(off.card.y + off.card.height);
+  expect(text.y + text.height).toBeGreaterThan(off.card.y);
+  expect(await now()).toEqual(off);
 
-  await page.keyboard.press("ArrowUp");
-  await page.keyboard.type(" typed above");
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.type(" typed below");
-  await page.keyboard.press("ArrowUp");
+  // Its line may wrap now, so the lines around it are gone to directly.
+  await line(page, "before").click();
   await page.keyboard.press("End");
+  await page.keyboard.type(" typed above");
+  await line(page, "after").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" typed below");
+  await page.keyboard.press("Home");
+  await page.keyboard.press("ArrowLeft");
   await page.keyboard.type(" And on its own line.");
   await expect.poll(() => read(page, note.id)).toMatch(/before typed above\nLap ::stopwatch\{since=[^}]+\} here\. And on its own line\.\nafter typed below\n/);
   await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
@@ -120,26 +121,26 @@ test("a running stopwatch is the same element, still counting, with the cursor o
   await expect.poll(() => seconds(page, /^Stopwatch, /)).toBeGreaterThan(later);
 });
 
-test("an embed's text takes as many rows above its line as it needs at the width there is, two embeds on a line each have their own, and a press on a button of the embed leaves them where they are", async ({ page }) => {
+test("two embeds on a line each show their text after themselves, with nothing above the line, and a press on a button of the embed leaves it where it is", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const since = new Date(Date.now() - 65_000).toISOString();
   await open(page, `# Rows\n\nbefore\nTea ::timer{25m since=${since}} ::stopwatch{at=1m5s}\nafter\n`);
   await fonts(page);
   const cards = editor(page).locator(".embed-card");
-  const off = { line: await boxOf(line(page, "Tea")), timer: await boxOf(cards.nth(0)), stopwatch: await boxOf(cards.nth(1)), after: await boxOf(line(page, "after")) };
+  const off = { before: await boxOf(line(page, "before")), timer: await boxOf(cards.nth(0)) };
+  await mark(page);
 
-  // Every embed the selection touches is shown: the first one's text over the first rows, the second one's under it.
+  // Every embed the selection touches is shown, each right after its own card.
   await line(page, "Tea").click({ position: { x: 2, y: 5 } });
   await page.keyboard.press("Shift+End");
   await expect(source(page)).toHaveText([`::timer{25m since=${since}}`, "::stopwatch{at=1m5s}"]);
-  const wide = await boxOf(sourceRows(page));
-  const [first, second] = [await boxOf(source(page).nth(0)), await boxOf(source(page).nth(1))];
-  expect(first.height).toBeLessThan(second.height);
-  expect(first.y + first.height).toBeLessThan(second.y + second.height);
-  expect(second.y + second.height).toBe(wide.y + wide.height);
-  expect({ timer: await boxOf(cards.nth(0)), stopwatch: await boxOf(cards.nth(1)), after: await boxOf(line(page, "after")) }).toEqual({ timer: lower(off.timer, wide.height), stopwatch: lower(off.stopwatch, wide.height), after: lower(off.after, wide.height) });
+  const order = () => line(page, "Tea").evaluate((el) => [...el.querySelectorAll(".embed-frame, .embed-source")].map((one) => (one.matches(".embed-source") ? one.textContent!.split("{")[0] : one.querySelector<HTMLElement>(".embed")!.dataset.embed)));
+  expect(await order()).toEqual(["timer", "::timer", "stopwatch", "::stopwatch"]);
+  expect((await boxOf(source(page))).y).toBeGreaterThanOrEqual(off.before.y + off.before.height);
+  expect({ before: await boxOf(line(page, "before")), timer: await boxOf(cards.nth(0)) }).toEqual(off);
+  await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
 
-  // A press on the clock's own button takes the keyboard out of the text. The rows stay, so the button is still under the pointer when it is let go.
+  // A press on the clock's own button takes the keyboard out of the text, which stays, so the button is still under the pointer when it is let go.
   await line(page, "before").click({ position: { x: 2, y: 5 } });
   await expect(source(page)).toHaveCount(0);
   await page.keyboard.press("ArrowDown");
@@ -150,17 +151,41 @@ test("an embed's text takes as many rows above its line as it needs at the width
   await expect(editor(page).getByRole("button", { name: "Start timer" })).toBeFocused();
   await expect(source(page)).toHaveText(/^::timer\{25m at=\d+m\d+s\}$/);
   await expect.poll(() => boxOf(cards.nth(0))).toEqual(shown);
+});
 
-  // In a narrow window the same text takes more rows, and the rows are still exactly what it takes.
-  await page.keyboard.press("ControlOrMeta+z");
-  await editor(page).focus();
-  await expect(source(page)).toHaveText([`::timer{25m since=${since}}`]);
-  const one = (await boxOf(sourceRows(page))).height;
-  await page.setViewportSize({ width: 300, height: 900 });
-  await expect.poll(async () => (await boxOf(sourceRows(page))).height).toBeGreaterThan(one);
-  const [text, rows] = [await boxOf(source(page)), await boxOf(sourceRows(page))];
-  expect({ y: text.y, height: text.height }).toEqual({ y: rows.y, height: rows.height });
-  expect(text.y + text.height).toBeLessThanOrEqual((await boxOf(cards.nth(0))).y);
+test("an inline timer's settings open right below the row it is on, and leave that row and the drawing as they are", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await open(page, "# Tea\n\nbefore\nSteep ::timer{5m} now, then pour.\nafter\n");
+  await fonts(page);
+  await mark(page);
+  await line(page, "Steep").click({ position: { x: 2, y: 5 } });
+  for (let i = 0; i < 7; i++) await page.keyboard.press("ArrowRight");
+  await expect(source(page)).toHaveText("::timer{5m}");
+  const row = await boxOf(line(page, "Steep"));
+  await editor(page).getByRole("button", { name: "Settings for Timer" }).click();
+  const panel = page.getByRole("dialog", { name: "Settings for Timer" });
+  await expect(panel).toBeVisible();
+  const box = await boxOf(panel);
+  expect(box.y).toBeGreaterThanOrEqual(row.y + row.height);
+  expect(box.y - (row.y + row.height)).toBeLessThan(10);
+  await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
+});
+
+test("an inline timer's settings open below its whole line where the line wraps, as it does with the cursor on a running timer", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const words = Array.from({ length: 24 }, (_, i) => `leaf${i}`).join(" ");
+  await open(page, `# Tea\n\nbefore\nSteep ::timer{5m} ${words}.\nafter\n`);
+  await fonts(page);
+  await editor(page).getByRole("button", { name: "Start timer" }).click();
+  await line(page, "Steep").click({ position: { x: 2, y: 5 } });
+  for (let i = 0; i < 7; i++) await page.keyboard.press("ArrowRight");
+  await expect(source(page)).toHaveText(/^::timer\{5m since=/);
+  const [row, card] = [await boxOf(line(page, "Steep")), await boxOf(editor(page).locator(".embed-card"))];
+  expect(row.y + row.height, "the line wraps onto a row below the card's").toBeGreaterThan(card.y + card.height * 1.5);
+  await editor(page).getByRole("button", { name: "Settings for Timer" }).click();
+  const box = await boxOf(page.getByRole("dialog", { name: "Settings for Timer" }));
+  expect(box.y).toBeGreaterThanOrEqual(row.y + row.height);
+  expect(box.x).toBe(card.x);
 });
 
 test("a running stopwatch scrolled far out of sight and back shows the time that went by, and is still counting", async ({ page }) => {
@@ -211,34 +236,31 @@ test("a stopwatch and a timer say what their buttons do, and each button does it
   await expect(line(page, "Lap")).toHaveText("Lap 0:00 and tea 5:00 here.");
 });
 
-test("an embed's one options button, in its card, opens its options beneath the card, and setting one rewrites the embed as the member's change, where it stands", async ({ page }) => {
+test("an embed's one settings button, in its card, opens its settings beneath the card, and setting one rewrites the embed as the member's change, where it stands", async ({ page }) => {
   const note = await open(page, "# Options\n\nTea ::timer{5m} and lap ::stopwatch{} here.\n\nlast\n");
   await mark(page);
   const at = await place(page, ".embed");
 
-  // One options button, in the embed's own card, and its options open beneath the card from its left edge.
+  // One settings button, in the embed's own card, and its settings open beneath the card's line, which wraps here, from the card's left edge.
   const card = editor(page).locator('.embed-card:has([data-embed="timer"])');
   await expect(card.getByRole("button")).toHaveCount(4);
-  await card.getByRole("button", { name: "Options for Timer" }).click();
-  const options = page.getByRole("dialog", { name: "Options for Timer" });
-  await expect(options.getByRole("textbox", { name: "Length" })).toBeFocused();
-  const [under, panel] = [await boxOf(card), await boxOf(options)];
-  expect(panel.y).toBeGreaterThanOrEqual(under.y + under.height);
-  expect(panel.y - (under.y + under.height)).toBeLessThan(8);
+  await card.getByRole("button", { name: "Settings for Timer" }).click();
+  const options = page.getByRole("dialog", { name: "Settings for Timer" });
+  await expect(options.getByRole("spinbutton", { name: "Hours" })).toBeFocused();
+  const [under, row, panel] = [await boxOf(card), await boxOf(line(page, "Tea")), await boxOf(options)];
+  expect(panel.y).toBeGreaterThanOrEqual(row.y + row.height);
+  expect(panel.y - (row.y + row.height)).toBeLessThan(12);
   expect(panel.x).toBe(under.x);
-  // Only what can be set is in them.
+  // Only its config is in them: its length, which it needs and so has nothing to clear. What Start and Stop write stays on the timer.
   await expect(options.getByRole("button")).toHaveCount(0);
-  await expect(options.getByRole("textbox")).toHaveCount(1);
-  await expect(options.getByRole("textbox", { name: "Length" })).toHaveValue("5m");
-  await page.keyboard.type("x");
-  await page.keyboard.press("Enter");
-  await expect(options.getByRole("alert")).toHaveText("Write it like 25m, 1h30m or 90s.");
-  await expect.poll(() => read(page, note.id)).toContain("::timer{5m}");
-  await options.getByRole("textbox", { name: "Length" }).fill("25m");
+  await expect(options.getByRole("textbox")).toHaveCount(0);
+  await expect(options.getByRole("spinbutton")).toHaveCount(3);
+  await expect(options.getByRole("spinbutton", { name: "Minutes" })).toHaveValue("5");
+  await options.getByRole("spinbutton", { name: "Minutes" }).fill("25");
   await page.keyboard.press("Enter");
   await expect(editor(page).getByRole("button", { name: "Timer, 25:00 left" })).toBeVisible();
   await expect.poll(() => read(page, note.id)).toContain("Tea ::timer{25m} and");
-  await expect(options.getByRole("textbox", { name: "Length" })).toHaveValue("25m");
+  await expect(options.getByRole("spinbutton", { name: "Minutes" })).toHaveValue("25");
   await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
   // A longer time is wider. It starts where it did and is as tall.
   const now = await place(page, ".embed");
@@ -247,18 +269,18 @@ test("an embed's one options button, in its card, opens its options beneath the 
 
   await page.keyboard.press("Escape");
   await expect(options).toHaveCount(0);
-  await expect(editor(page).getByRole("button", { name: "Options for Timer" })).toBeFocused();
+  await expect(editor(page).getByRole("button", { name: "Settings for Timer" })).toBeFocused();
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => read(page, note.id)).toContain("Tea ::timer{5m} and");
 
-  await editor(page).getByRole("button", { name: "Options for Stopwatch" }).click();
-  await page.getByRole("dialog", { name: "Options for Stopwatch" }).getByRole("textbox", { name: "Time so far" }).fill("1m5s");
+  await editor(page).getByRole("button", { name: "Settings for Stopwatch" }).click();
+  await page.getByRole("dialog", { name: "Settings for Stopwatch" }).getByRole("textbox", { name: "Time so far" }).fill("1m5s");
   await page.keyboard.press("Enter");
   await expect(editor(page).getByRole("button", { name: "Stopwatch, 1:05" })).toBeVisible();
   await expect.poll(() => read(page, note.id)).toContain("::stopwatch{at=1m5s}");
 
-  // Nothing offers the embed "as markdown": the cursor is put in it instead, here by a press on its card's own edge, and it is shown as written above its line.
+  // Nothing offers the embed "as markdown": the cursor is put in it instead, here by a press on its card's own edge, and it is shown as written in its line.
   await page.keyboard.press("Escape");
   await expect(page.getByText("Edit as markdown")).toHaveCount(0);
   const stopwatch = editor(page).locator('.embed-card:has([data-embed="stopwatch"])');
@@ -458,8 +480,8 @@ test("a column is given a colour from the board, which its heading keeps as mark
   await page.emulateMedia({ colorScheme: "light" });
 
   // The board's options set it too, and take it away.
-  await editor(page).getByRole("button", { name: "Options for Kanban board" }).click();
-  const options = page.getByRole("dialog", { name: "Options for Kanban board" });
+  await editor(page).getByRole("button", { name: "Settings for Kanban board" }).click();
+  const options = page.getByRole("dialog", { name: "Settings for Kanban board" });
   await expect(options.getByRole("radiogroup", { name: "Doing colour" }).getByRole("radio", { name: "Blue" })).toHaveAttribute("aria-checked", "true");
   // They are beneath the board's card, from its left edge.
   const [under, panel] = [await boxOf(editor(page).locator(".embed-frame-block .embed-card")), await boxOf(options)];
@@ -495,9 +517,9 @@ test("a key that jumps past a board doesn't go into it, a press on a card puts t
   await expect(column(page, "To do").getByRole("listitem")).toHaveText(["write", "review twice"]);
   await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
 
-  // Each board is a card with its name. Only the one with columns, which have colours to set, has an options button.
+  // Each board is a card with its name. Only the one with columns, which have colours to set, has a settings button.
   await expect(editor(page).locator(".embed-head")).toHaveCount(2);
-  await expect(editor(page).getByRole("button", { name: "Options for Kanban board" })).toHaveCount(1);
+  await expect(editor(page).getByRole("button", { name: "Settings for Kanban board" })).toHaveCount(1);
 });
 
 test("with vim on and typing, Escape closes an embed's open options and leaves insert mode alone, and the next Escape is vim's", async ({ page }) => {
@@ -511,8 +533,8 @@ test("with vim on and typing, Escape closes an embed's open options and leaves i
   await page.keyboard.press("i");
   await expect(mode).toHaveText("--INSERT--");
 
-  await editor(page).getByRole("button", { name: "Options for Timer" }).click();
-  const options = page.getByRole("dialog", { name: "Options for Timer" });
+  await editor(page).getByRole("button", { name: "Settings for Timer" }).click();
+  const options = page.getByRole("dialog", { name: "Settings for Timer" });
   await expect(options).toBeVisible();
   await editor(page).focus();
   await expect(mode).toHaveText("--INSERT--");
@@ -552,7 +574,7 @@ test("a note that starts with an embed opens with it drawn, the first press on t
   await expect.poll(() => read(page, note.id)).toContain("::stopwatch{at=5s} below the board");
 });
 
-test("an embed's text in a heading is the size its rows were made for, and a long board's options open inside the window", async ({ page }) => {
+test("an embed's text in a heading is one small size, and a long board's options open inside the window", async ({ page }) => {
   const cards = Array.from({ length: 40 }, (_, i) => `- card ${i}`).join("\n");
   await open(page, `# Big ::stopwatch{at=1m5s} tail\n\nwords\n\n:::kanban{}\n## To do\n${cards}\n:::\n`);
   await fonts(page);
@@ -560,17 +582,16 @@ test("an embed's text in a heading is the size its rows were made for, and a lon
   await page.keyboard.press("ControlOrMeta+Home");
   for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowRight");
   await expect(source(page)).toHaveText("::stopwatch{at=1m5s}");
-  const [text, rows, plain] = [await boxOf(source(page)), await boxOf(sourceRows(page)), await boxOf(line(page, "words"))];
-  expect({ y: text.y, height: text.height }).toEqual({ y: rows.y, height: rows.height });
-  expect(rows.height).toBeLessThan(plain.height);
+  const [text, plain] = [await boxOf(source(page)), await boxOf(line(page, "words"))];
+  expect(text.height).toBeLessThan(plain.height);
   await expect.poll(() => source(page).evaluate((el) => [...el.querySelectorAll("*")].map((child) => getComputedStyle(child).fontSize))).toEqual(await source(page).evaluate((el) => [...el.querySelectorAll("*")].map(() => getComputedStyle(el).fontSize)));
 
   // The board is taller than the window, so its foot is out of sight: its options are under their button.
-  await editor(page).getByRole("button", { name: "Options for Kanban board" }).click();
-  const options = page.getByRole("dialog", { name: "Options for Kanban board" });
+  await editor(page).getByRole("button", { name: "Settings for Kanban board" }).click();
+  const options = page.getByRole("dialog", { name: "Settings for Kanban board" });
   await expect(options.getByRole("radiogroup", { name: "To do colour" })).toBeVisible();
   await expect(options).toBeInViewport({ ratio: 1 });
-  const [panel, button] = [await boxOf(options), await boxOf(editor(page).getByRole("button", { name: "Options for Kanban board" }))];
+  const [panel, button] = [await boxOf(options), await boxOf(editor(page).getByRole("button", { name: "Settings for Kanban board" }))];
   expect(panel.y).toBeGreaterThanOrEqual(button.y + button.height);
   expect(panel.y - (button.y + button.height)).toBeLessThan(8);
 });
@@ -614,7 +635,6 @@ test("a press on an embed at the very top of a note nobody has put the cursor in
 
   await expect.poll(() => read(page, note.id)).toMatch(/^::timer\{5m since=/);
   await expect(source(page)).toHaveCount(0);
-  await expect(sourceRows(page)).toHaveCount(0);
   await expect(editor(page).getByRole("button", { name: "Pause timer" })).toBeVisible();
   expect({ card: await boxOf(card), after: await boxOf(line(page, "After")) }).toEqual(before);
 });

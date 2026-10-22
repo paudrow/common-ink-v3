@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { optionValues } from "../../core/embedOptions.ts";
+import { optionValues } from "../../core/embedSchema.ts";
 import type { InstalledPlugin } from "../../core/plugins.ts";
 import type { Op } from "../../core/protocol.ts";
 import { ApiError } from "../api.ts";

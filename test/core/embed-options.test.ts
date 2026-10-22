@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { optionValues, setOption, type DeclaredOption } from "../../src/core/embedOptions.ts";
+import type { DeclaredOption } from "../../src/core/embedOptions.ts";
+import { optionValues, setKey } from "../../src/core/embedSchema.ts";
 import { Manifest } from "../../src/core/plugins.ts";
 
 const POLL: readonly DeclaredOption[] = [
@@ -11,6 +12,9 @@ const POLL: readonly DeclaredOption[] = [
   { type: "duration", id: "for", label: "Open for", default: "1h" },
   { type: "date", id: "until", label: "Until", default: "" },
 ];
+
+/** Options a plugin declares are its embed's schema, whose other words are the plugin's own. */
+const set = (options: readonly DeclaredOption[], config: string, id: string, text: string) => setKey({ keys: options, open: true }, config, id, text);
 
 describe("an embed's declared options", () => {
   it("are read from the config's words, each as its type takes it, and as the default otherwise", () => {
@@ -32,27 +36,28 @@ describe("an embed's declared options", () => {
   });
 
   it("are written as one word each at the end, the default as none, and every other word stays where it was", () => {
-    expect(setOption(POLL, "size=big votes=2", "votes", "3")).toEqual({ config: "size=big votes=3" });
-    expect(setOption(POLL, "votes=2 size=big", "votes", "1")).toEqual({ config: "size=big" });
-    expect(setOption(POLL, "", "question", "Lunch where?")).toEqual({ config: 'question="Lunch where?"' });
-    expect(setOption(POLL, "", "open", "off")).toEqual({ config: "open=off" });
-    expect(setOption(POLL, "tint=red", "tint", "")).toEqual({ config: "" });
-    expect(setOption(POLL, "", "for", "90")).toEqual({ config: "for=1h30m" });
-    expect(setOption(POLL, "", "until", "2026-10-31")).toEqual({ config: "until=2026-10-31" });
+    expect(set(POLL, "size=big votes=2", "votes", "3")).toEqual({ config: "size=big votes=3" });
+    expect(set(POLL, "votes=2 size=big", "votes", "1")).toEqual({ config: "size=big" });
+    expect(set(POLL, "", "question", "Lunch where?")).toEqual({ config: 'question="Lunch where?"' });
+    expect(set(POLL, "", "open", "off")).toEqual({ config: "open=off" });
+    expect(set(POLL, "tint=red", "tint", "")).toEqual({ config: "" });
+    expect(set(POLL, "", "for", "90")).toEqual({ config: "for=1h30m" });
+    expect(set(POLL, "", "until", "2026-10-31")).toEqual({ config: "until=2026-10-31" });
     // An emptied number or duration is its default again.
-    expect(setOption(POLL, "votes=3 for=2h", "votes", "")).toEqual({ config: "for=2h" });
-    expect(setOption(POLL, "for=2h", "for", " ")).toEqual({ config: "" });
+    expect(set(POLL, "votes=3 for=2h", "votes", "")).toEqual({ config: "for=2h" });
+    expect(set(POLL, "for=2h", "for", " ")).toEqual({ config: "" });
+    expect(set(POLL, "a  votes=2\tb", "votes", "4")).toEqual({ config: "a\tb votes=4" });
   });
 
   it("refuse a value their type can't take, saying what it takes", () => {
-    expect(setOption(POLL, "", "votes", "6")).toBe("A whole number from 1 to 5.");
-    expect(setOption(POLL, "", "votes", "2.5")).toBe("A whole number from 1 to 5.");
-    expect(setOption(POLL, "", "question", 'say "hi"')).toBe("Quotes, braces and line breaks can't be in it.");
-    expect(setOption(POLL, "", "question", "a}b")).toBe("Quotes, braces and line breaks can't be in it.");
-    expect(setOption(POLL, "", "show", "pie")).toBe("One of bars, dots.");
-    expect(setOption(POLL, "", "for", "soon")).toBe("Write it like 25m, 1h30m or 90s.");
-    expect(setOption(POLL, "", "until", "2026-02-30")).toBe("A day written like 2026-10-16.");
-    expect(setOption(POLL, "", "nope", "1")).toBe("No option nope.");
+    expect(set(POLL, "", "votes", "6")).toBe("A whole number from 1 to 5.");
+    expect(set(POLL, "", "votes", "2.5")).toBe("A whole number from 1 to 5.");
+    expect(set(POLL, "", "question", 'say "hi"')).toBe("Quotes, braces and line breaks can't be in it.");
+    expect(set(POLL, "", "question", "a}b")).toBe("Quotes, braces and line breaks can't be in it.");
+    expect(set(POLL, "", "show", "pie")).toBe("One of bars, dots.");
+    expect(set(POLL, "", "for", "soon")).toBe("Write it like 25m, 1h30m or 90s.");
+    expect(set(POLL, "", "until", "2026-02-30")).toBe("A day written like 2026-10-16.");
+    expect(set(POLL, "", "nope", "1")).toBe("No setting nope.");
   });
 });
 

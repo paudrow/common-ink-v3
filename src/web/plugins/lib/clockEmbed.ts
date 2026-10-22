@@ -12,26 +12,21 @@ const KINDS = {
 
 const HOW = "Write it like 25m, 1h30m or 90s.";
 
-/** What a member sets from a clock's options: a timer's length, and how long a stopwatch has run. */
-export function clockOptions(kind: keyof typeof KINDS): EmbedOptions {
-  return {
-    fields({ config }) {
-      const clock = readClock(config, kind);
-      if (!clock) return [];
-      if (clock.length !== null) return [{ id: "length", label: "Length", kind: "text", value: clock.length, hint: HOW }];
-      return [{ id: "time", label: "Time so far", kind: "text", value: durationText(elapsedOf(clock.run, Date.now())), hint: HOW }];
-    },
-    set({ config }, id, value) {
-      const clock = readClock(config, kind);
-      const length = durationOf(value.trim());
-      if (!clock || length === null || (id === "length" && !length)) return HOW;
-      if (id === "length") return { config: writeClock({ ...clock, length: value.trim() }) };
-      // A running stopwatch runs on from the time it is set to.
-      const run = clock.run.is === "running" ? ({ is: "running", since: Date.now() - length } as const) : length ? ({ is: "stopped", elapsed: length } as const) : ({ is: "idle" } as const);
-      return { config: writeClock({ ...clock, run }) };
-    },
-  };
-}
+/** How long a stopwatch has run, set from its settings. A timer's length is a key of its config, which the host sets. */
+export const stopwatchOptions: EmbedOptions = {
+  fields({ config }) {
+    const clock = readClock(config, "stopwatch");
+    return clock ? [{ id: "time", label: "Time so far", kind: "text", value: durationText(elapsedOf(clock.run, Date.now())), hint: HOW }] : [];
+  },
+  set({ config }, id, value) {
+    const clock = readClock(config, "stopwatch");
+    const length = durationOf(value.trim());
+    if (!clock || length === null || id !== "time") return HOW;
+    // A running stopwatch runs on from the time it is set to.
+    const run = clock.run.is === "running" ? ({ is: "running", since: Date.now() - length } as const) : length ? ({ is: "stopped", elapsed: length } as const) : ({ is: "idle" } as const);
+    return { config: writeClock({ ...clock, run }) };
+  },
+};
 
 /**
  * A stopwatch or a timer drawn in a note: its time, a button that starts and stops it, and one that

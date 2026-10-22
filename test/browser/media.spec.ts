@@ -352,7 +352,7 @@ test("an HTML embed is picked from the insert menu, runs by itself in its room w
   await expect(below(page, "html").locator("iframe")).not.toHaveAttribute("sandbox");
   // The card has the block's name and its options, and no button of its own to show the block as written: the cursor does that.
   await expect(editor(page).locator(".embed-joined").getByRole("button")).toHaveCount(1);
-  await expect(editor(page).getByRole("button", { name: "Options for HTML" })).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "Settings for HTML" })).toBeVisible();
 
   // The block as written, with a counter in it. Its body changed, so what was running is gone and the new body runs.
   await goTo(page, 6);

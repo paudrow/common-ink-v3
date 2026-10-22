@@ -2,7 +2,8 @@ import { syntaxTree } from "@codemirror/language";
 import { EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { keep } from "./belowIdentity.ts";
-import { inlineIn, rewriteOf, type Written } from "./embedSyntax.ts";
+import { inlineIn, rewriteOf, type Written } from "../core/embedSyntax.ts";
+import { closeOptions, fitSettingsButton, optionsOn, settingsOf, type Options } from "./embedOptions.ts";
 import { guardFrames } from "./frameGuard.ts";
 import type { AddressEmbed, Below, BelowBox, BelowDrawn, BelowEmbedded, Embed } from "./plugin-api.ts";
 
@@ -195,6 +196,13 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
   });
 }
 
+/**
+ * Whether what is kept here opens its settings from a button in its own corner: an embed with nothing
+ * of it drawn in its line, as an uploaded picture. A block's, and one drawn in its line, open from its card.
+ */
+const cornered = (shown: Shown): shown is Shown & { embed: Embed & { below: Below } } =>
+  !shown.bare && !shown.written.block && !("claims" in shown.embed) && (!shown.embed.render || (shown.alone && !!shown.embed.below.alone));
+
 /** Whether the cursor is in what the note writes for an embed, or at its edge. */
 const within = (state: EditorState, written: Written) => state.selection.ranges.some((r) => r.from <= written.to && r.to >= written.from);
 
@@ -300,6 +308,8 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     made: BelowDrawn;
     unguard: () => void;
     place?: Place;
+    /** What the note said of it, and whether it could be changed, when its settings button was last fitted to that. */
+    fitted?: string;
   }
 
   const layer = ViewPlugin.fromClass(
@@ -331,6 +341,8 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
       }
 
       drop(id: number, live: Live) {
+        const button = live.el.querySelector<HTMLElement>(":scope > .embed-options");
+        if (button) closeOptions(button);
         this.stop(live);
         live.unguard();
         live.el.remove();
@@ -390,11 +402,18 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           // With no room, as inside something else that is drawn, it is kept and not shown.
           live.el.style.visibility = place ? "" : "hidden";
           live.el.classList.toggle("embed-below-on", shown.alone && aloneOn(view.state, shown.from, view.state.field(field).reading.written));
-          if (!place) continue;
           const was = live.place;
-          if (was && was.left === place.left && was.top === place.top && was.width === place.width && was.height === place.height) continue;
-          live.place = { left: place.left, top: place.top, width: place.width, height: place.height };
-          Object.assign(live.el.style, { left: `${place.left}px`, top: `${place.top}px`, width: `${place.width}px`, height: `${place.height}px` });
+          const moved = !!place && !(was && was.left === place.left && was.top === place.top && was.width === place.width && was.height === place.height);
+          if (place && moved) {
+            live.place = { left: place.left, top: place.top, width: place.width, height: place.height };
+            Object.assign(live.el.style, { left: `${place.left}px`, top: `${place.top}px`, width: `${place.width}px`, height: `${place.height}px` });
+          }
+          // Once it is where it now is, so settings open beneath it are put beneath where it is.
+          const fitted = `${shown.source}\n${view.state.readOnly}`;
+          if (live.fitted !== fitted || moved) {
+            live.fitted = fitted;
+            this.fitSettings(live, shown, view);
+          }
         }
       }
 
@@ -441,6 +460,23 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
         } finally {
           drawing = false;
         }
+      }
+
+      /** The settings of what is kept, as the note writes it now, which set and clear by rewriting it there: for one whose settings open from its corner, while the note can be changed. */
+      optionsOf(now: Shown | undefined, view: EditorView, settings = now && settingsOf(now.embed)): Options | null {
+        if (!now || !settings || !cornered(now) || view.state.readOnly) return null;
+        return optionsOn(now.embed.title, settings, now.written, (next) => {
+          const changes = rewriteOf(now.written, next);
+          if (changes.length) view.dispatch({ changes, userEvent: "input.embed" });
+        });
+      }
+
+      /** Gives what is kept its settings button in its corner, or takes it away, to fit what the note says of it now. */
+      fitSettings(live: Live, shown: Shown, view: EditorView) {
+        fitSettingsButton(live.el, "embed-options embed-options-corner", this.optionsOf(shown, view), {
+          under: () => live.el,
+          read: () => this.optionsOf(view.state.field(field, false)?.shown.find((s) => s.id === shown.id), view),
+        });
       }
 
       /** A frame in it took the keyboard from the member: it is stopped, and says so, until the member asks for it again. */
