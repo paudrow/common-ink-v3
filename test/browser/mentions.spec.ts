@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, join, me, perform, pinPanel, signInAsNewPerson, test, visitor } from "./helpers.ts";
+import { anotherPerson, connectAgent, dropFirst, join, me, perform, pinPanel, signInAsNewPerson, test, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -120,6 +120,70 @@ test("contacts that couldn't be read are read again by the next letter typed aft
   await page.keyboard.type("d");
   await expect(options(page)).toHaveText(["Ada LovelaceYou", "Ada LovelaceContact · Analytical Engines"]);
   expect(contactLists).toHaveLength(2);
+});
+
+test("members that couldn't be read as the app started are read again by the next @, and offered with my contacts", async ({ page }) => {
+  await team(page);
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\n" });
+  const members = await dropFirst(page, "member.list");
+  await open(page, note.id, "Plan");
+  await members.handled();
+
+  await page.keyboard.type("Ask @gr");
+
+  await expect(options(page)).toHaveText(["Grace HopperMember", "Grace HopperContact · Navy"]);
+});
+
+test("members that couldn't be read are offered by the next letter after @, where nobody else is", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const grace = await anotherPerson(page, "Grace Hopper");
+  await join(grace, page, "editor");
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\n" });
+  // Every reading of the members fails until the @ has read the contacts, of which there are none.
+  let dropping = true;
+  await page.route("**/api/workspaces/*/ops", (route) => {
+    if (!dropping || (route.request().postDataJSON() as { type?: string }).type !== "member.list") return route.fallback();
+    return route.fulfill({ status: 500, contentType: "text/plain", body: "Error: Network connection lost." });
+  });
+  await open(page, note.id, "Plan");
+  const contacts = page.waitForEvent("requestfinished", (request) => request.postDataJSON()?.type === "contact.list");
+  await page.keyboard.type("Ask @");
+  await contacts;
+  await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+  await expect(options(page)).toHaveText(["Ada LovelaceYou"]);
+  dropping = false;
+
+  await page.keyboard.type("gr");
+
+  await expect(options(page)).toHaveText(["Grace HopperMember"]);
+});
+
+test("an @ list shut with Escape stays shut when the members arrive", async ({ page }) => {
+  await team(page);
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\n" });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/workspaces/*/ops", async (route) => {
+    if ((route.request().postDataJSON() as { type?: string }).type === "member.list") await held;
+    return route.fallback();
+  });
+  await open(page, note.id, "Plan");
+  const contacts = page.waitForResponse((response) => response.request().postDataJSON()?.type === "contact.list");
+  await page.keyboard.type("Ask @");
+  await contacts;
+  await expect(options(page).first()).toHaveText("Ada LovelaceYou");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+
+  const members = page.waitForResponse((response) => response.request().postDataJSON()?.type === "member.list");
+  release();
+  await members;
+  // Time for a list asked to open again to be drawn.
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+
+  await page.keyboard.type("gr");
+  await expect(options(page)).toHaveText(["Grace HopperMember", "Grace HopperContact · Navy"]);
 });
 
 test("@ opens nothing inside an address or a word, and a handle that is typed and left is text", async ({ page }) => {
