@@ -236,6 +236,7 @@ for (const width of [1600, 1100]) {
     await page.keyboard.press("Home");
     const [first, last] = [LAYOUT.indexOf("- [ ] !! First"), LAYOUT.indexOf("\n\nBelow words.")];
     const stops = new Set<string>();
+    const near = (by: number) => by <= 1;
     for (let at = first; at <= last; at++) {
       if (at > first) await page.keyboard.press("ArrowRight");
       const on = TOKENS.filter((t) => t.from <= at && at <= t.to);
@@ -243,25 +244,30 @@ for (const width of [1600, 1100]) {
       expect(on.length, `the cursor is never on two tokens: ${when}`).toBeLessThanOrEqual(1);
       on.forEach((t) => stops.add(`${t.kind} ${t.from}`));
       const rest = TOKENS.filter((t) => !on.includes(t));
-      await expect.poll(async () => (await drawnIn(page)).chips.map((c) => [c.kind, c.text]), `the chips drawn ${when}`).toEqual(rest.map((t) => [t.kind, t.text]));
-      const now = await drawnIn(page);
-
-      // Every chip still drawn is where it was, and the token shown as written is where its chip was, as wide as it was.
-      for (const chip of now.chips) {
-        const was = drawn.chips[TOKENS.indexOf(rest[now.chips.indexOf(chip)]!)]!;
-        expect(Math.abs(chip.x - was.x) + Math.abs(chip.width - was.width), `the ${chip.kind} chip "${chip.text}" ${when}`).toBeLessThanOrEqual(1);
-      }
+      let now!: Awaited<ReturnType<typeof drawnIn>>;
+      await expect.poll(async () => (now = await drawnIn(page)).chips.map((c) => [c.kind, c.text]), `the chips drawn ${when}`).toEqual(rest.map((t) => [t.kind, t.text]));
       const token = on.find((t) => t.kind !== "task");
       expect(now.written.map((w) => w.text), `what is kept in one piece ${when}`).toEqual(token ? [token.text] : []);
-      if (token) {
-        const was = drawn.chips[TOKENS.indexOf(token)]!;
-        expect(Math.abs(now.written[0]!.x - was.x), `where "${token.text}" is written ${when}`).toBeLessThanOrEqual(1);
-        expect(Math.abs(now.written[0]!.width - was.width), `how wide "${token.text}" is written ${when}`).toBeLessThanOrEqual(1);
-      }
+
+      // Every chip still drawn is where it was, the token shown as written is where its chip was and as wide as it was, and nothing else moves.
+      // They are listed for one expect a step: measured, each expect in a test took longer than the one before it, and an expect for each made the walk take minutes in CI.
       const placed = await places(page, MEASURED);
-      for (const [measured, was] of Object.entries(before)) {
-        for (const side of ["x", "y", "top", "height"] as const) expect(Math.abs(placed[measured]![side] - was[side]), `${side} of "${measured}" ${when}: ${was[side]} -> ${placed[measured]![side]}`).toBeLessThanOrEqual(1);
-      }
+      const moved = [
+        ...now.chips.flatMap((chip, n) => {
+          const was = drawn.chips[TOKENS.indexOf(rest[n]!)]!;
+          return near(Math.abs(chip.x - was.x) + Math.abs(chip.width - was.width)) ? [] : [`the ${chip.kind} chip "${chip.text}": x ${was.x} -> ${chip.x}, width ${was.width} -> ${chip.width}`];
+        }),
+        ...(token
+          ? (["x", "width"] as const).flatMap((side) => {
+              const was = drawn.chips[TOKENS.indexOf(token)]![side];
+              return near(Math.abs(now.written[0]![side] - was)) ? [] : [`${side} of "${token.text}" as written: ${was} -> ${now.written[0]![side]}`];
+            })
+          : []),
+        ...Object.entries(before).flatMap(([measured, was]) =>
+          (["x", "y", "top", "height"] as const).flatMap((side) => (near(Math.abs(placed[measured]![side] - was[side])) ? [] : [`${side} of "${measured}": ${was[side]} -> ${placed[measured]![side]}`])),
+        ),
+      ];
+      expect(moved, `what moved ${when}`).toEqual([]);
     }
     // The walk went over every token there is, and ended on the last todo's line.
     expect(stops.size).toBe(TOKENS.length);
