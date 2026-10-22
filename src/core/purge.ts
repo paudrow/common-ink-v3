@@ -26,6 +26,7 @@ export const removalsOf = (notes: string): string[] => [
   `DELETE FROM daily_notes WHERE note_id IN ${notes}`,
   `DELETE FROM pins WHERE note_id IN ${notes}`,
   `DELETE FROM grants WHERE note_id IN ${notes}`,
+  `DELETE FROM note_holds WHERE note_id IN ${notes}`,
   `DELETE FROM changes WHERE note_id IN ${notes}`,
   `DELETE FROM notes WHERE id IN ${notes}`,
 ];

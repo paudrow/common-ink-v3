@@ -6,6 +6,7 @@ import { sealLinksWith, sealOldLinks } from "../core/linkSeal.ts";
 import { sweep } from "../core/oauth.ts";
 import { eraseWorkspaces, pruneDeletions, redoRequested } from "../core/erase.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
+import { sweepUnwritten } from "../core/discard.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
 import { MAX_OP_BYTES, TooLarge, cappedJson } from "./body.ts";
@@ -249,7 +250,7 @@ export default {
       report(env, (sent) => ctx.waitUntil(sent), { source: "job", route: "email", requestId: null, op: "mail.receive", status: null, ...told(err) });
     }
   },
-  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
+  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, notes nobody wrote in that were left a day ago, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env, ctx) {
     const broke = (what: string, err: unknown) => report(env, (sent) => ctx.waitUntil(sent), { source: "job", route: "cron", requestId: null, op: what, status: null, ...told(err) });
     keyLinks(env);
@@ -268,6 +269,12 @@ export default {
       return broke("clearUploads", err);
     }
     if (uploads.removed || uploads.failed.length) console.log(`Removed ${uploads.removed} uploads${uploads.failed.length ? `, and couldn't remove ${uploads.failed.length}` : ""}${uploads.more ? ", with more waiting" : ""}`);
+    try {
+      const swept = await sweepUnwritten(env.DB, controller.scheduledTime);
+      if (swept.removed || swept.failed.length) console.log(`Removed ${swept.removed} notes nobody wrote in${swept.failed.length ? `, and couldn't remove ${swept.failed.length}` : ""}${swept.more ? ", with more waiting" : ""}`);
+    } catch (err) {
+      broke("sweepUnwritten", err);
+    }
     try {
       const sealed = await sealOldLinks(env.DB);
       if (sealed) console.log(`Sealed ${sealed} links kept from before links were sealed`);

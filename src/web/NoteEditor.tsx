@@ -16,6 +16,7 @@ import { readOnly } from "./readOnly.ts";
 import { noteTabs } from "./tabbing.ts";
 import { fontLoaded } from "./noteFont.ts";
 import { inEditorOf, openNote } from "./openNotes.ts";
+import { holdingOpen } from "./holding.ts";
 import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, worthRetrying, type SaveState } from "./sync.ts";
 
@@ -207,6 +208,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               placeholder("# Title"),
               sync.extension,
               openNote(noteId),
+              holdingOpen(workspaceId, noteId),
               EditorView.updateListener.of((u) => {
                 if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();
               }),

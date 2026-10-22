@@ -39,7 +39,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 18. As a member, I want to archive the open note in one action, so that notes I no longer need disappear from ordinary views without being lost.
 19. As a member, I want links to an archived note to still open it, so that old references keep working.
 20. As a member, I want to unarchive a note, so that I can bring it back into ordinary views.
-21. As a member, I want deleting a note to move it to Trash for 30 days, so that I can recover from mistakes. A note I made that never had words is discarded without going to Trash, and an admin or the note's maker can remove a trashed note for good before its 30 days.
+21. As a member, I want deleting a note to move it to Trash for 30 days, so that I can recover from mistakes. A note nobody ever wrote in is discarded without going to Trash once nobody has it open, and an admin or the note's maker can remove a trashed note for good before its 30 days.
 22. As a member, I want to restore a note from Trash to its original folder, or to Unsorted when that folder is gone, so that recovery puts it back where it was.
 23. As a member, I want a link to a note that is gone to read "Unavailable note", the same as one I can't see, so that I understand why it doesn't open without being told a note once existed.
 24. As a member, I want to move a note to another folder I can edit, so that I can reorganize.

@@ -423,7 +423,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
   "record.notes": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   // Every note here was made with words, so whoever is let through is refused it for that: see test/core/discard.test.ts.
-  "note.discard": { on: "note", needs: "E", trashed: "refused", members: true, args: (id) => ({ id }) },
+  "note.discard": { on: "note", needs: "E", trashed: "refused", members: true, args: (id) => ({ id, holder: "page:matrix" }) },
+  "note.hold": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, holder: "page:matrix" }) },
   // The record of plugins is every member's to read and an admin's to change. Each change is asked of a plugin that isn't there, so the record the plugin actors are held to stays as the world made it.
   "plugin.list": { on: "workspace", who: MEMBERS, args: () => ({}) },
   "plugin.read": { on: "workspace", who: MEMBERS, args: (w) => ({ id: w.plugins["their plugin, permitted nothing"] }) },

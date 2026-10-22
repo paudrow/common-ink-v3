@@ -80,7 +80,8 @@ import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, contactCards,
 import { referencesIn } from "./references.ts";
 import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { linkHash } from "./linkSeal.ts";
-import { applyChanges, changesBetween } from "./text.ts";
+import { applyChanges, blank, changesBetween } from "./text.ts";
+import { HOLD_MS, discard, hold, neverWritten } from "./discard.ts";
 import { ruleLabel } from "./recurrence.ts";
 import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, nameKey, parseTodo, renamedTag, renamedTags, rolledForward, tagsAdded, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
 
@@ -394,9 +395,11 @@ const sameAuthor = (a: AuthorRef, b: AuthorRef) => a.kind === b.kind && a.id ===
 const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx.author.kind, id: authorId(ctx) });
 
 const NO_SUCH_NOTE = "No such note";
-const NOT_DISCARDED = "Only a note you made that has never had anything in it but spaces or a lone # is discarded. Move it to Trash instead.";
-/** Whether a note's text says nothing: spaces and line breaks, and at most the mark of a title. */
-export const blank = (text: string) => /^#?$/.test(text.trim());
+const NOT_DISCARDED = "Only a note nobody ever wrote in, with never anything in it but spaces or a lone #, is discarded. Move it to Trash instead.";
+/** An agent that makes, reads or writes a note with nothing in it holds it as an open editor does, so the member leaving it doesn't discard it from under the agent. */
+const heldByAgent = async (ctx: Context, noteId: string, text: string) => {
+  if (ctx.author.kind === "agent" && blank(text)) await hold(ctx.db, noteId, `agent:${ctx.author.agentId}`, ctx.now);
+};
 const NO_SUCH_FOLDER = "No such folder";
 
 /** The folder bound as ?4 and every folder under it, for a listing narrowed to a folder. */
@@ -1877,6 +1880,7 @@ async function commitNote(ctx: Context, op: { id: string; baseRevision: number; 
     const next = await record(ctx, row, changes, op.baseRevision, { writeId: op.writeId });
     return next && toNote(ctx, next);
   });
+  await heldByAgent(ctx, written.id, written.text);
   return linked(written, unresolved);
 }
 
@@ -1921,6 +1925,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         )
         .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed);
       await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text), { writeId: op.writeId }), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
+      await heldByAgent(ctx, id, text);
       return linked(toNote(ctx, row), unresolved);
     },
   },
@@ -1930,6 +1935,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       const row = await loadNote(ctx, op.id, "view", "opens");
       if (op.revision !== undefined && op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
+      await heldByAgent(ctx, row.id, row.text);
       const note = op.revision === undefined || op.revision === row.revision ? toNote(ctx, row) : toNote(ctx, row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
       // Reading notes is not reading uploads: a plugin is told nothing of the ones a note refers to. Its mentions are as written, by `membersMeant`.
       return { ...note, links: await linksOf(ctx, note.text, "any"), mentions: await mentionsOf(ctx, note.text), uploads: ctx.shutOff ? [] : await referred(ctx, note.text, "any") };
@@ -2672,30 +2678,28 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     },
   },
 
-  // A note the member made and left with nothing in it is not kept, not even in Trash. Only the member's own app does it, as they leave the note: see NOT_FOR_AGENTS.
+  // A note nobody wrote in is not kept once it is left, not even in Trash. Only the member's own app does it, as they leave the note: see NOT_FOR_AGENTS.
   "note.discard": {
     needs: "edit",
     by: "member",
     members: true,
     async run(ctx, op) {
       const row = await loadNote(ctx, op.id, "edit", "refused");
-      const made = await ctx.db.prepare("SELECT created_by_kind FROM notes WHERE id = ?").bind(row.id).first<{ created_by_kind: string | null }>();
-      if (made?.created_by_kind !== "member" || row.created_by !== ctx.personId) throw new OpError("invalid", NOT_DISCARDED);
-      const { results } = await ctx.db.prepare("SELECT diff, author_kind, author_id FROM changes WHERE note_id = ? ORDER BY revision").bind(row.id).all<{ diff: string; author_kind: string; author_id: string }>();
-      if (results.length !== row.revision) throw new OpError("invalid", NOT_DISCARDED);
-      let text = "";
-      for (const change of results) {
-        text = applyChanges(ChangeSet.fromJSON(JSON.parse(change.diff)), text);
-        if (change.author_kind !== "member" || change.author_id !== ctx.personId || !blank(text)) throw new OpError("invalid", NOT_DISCARDED);
-      }
-      // Put in Trash at no time at all, which nothing else is, so the removal below takes this note as it is now, or nothing if it was written to since it was read.
-      const done = await ctx.db.batch([
-        ctx.db.prepare("UPDATE notes SET state = 'trashed', state_at = 0 WHERE id = ? AND revision = ? AND state != 'trashed'").bind(row.id, row.revision),
-        ...removing(ctx.db, row.id, 0),
-      ]);
-      // The first statement is the one that says whether the note was still as it was read; the rest do nothing unless it did.
-      if (!done[0]!.meta.changes) throw new OpError("conflict", "The note was written to as it was being discarded, so it is kept");
+      if (!(await neverWritten(ctx.db, row))) throw new OpError("invalid", NOT_DISCARDED);
+      if (!(await discard(ctx.db, row, ctx.now - HOLD_MS, op.holder ?? null))) throw new OpError("conflict", "The note is open somewhere else, or was written to as it was being discarded, so it is kept");
       await forgetRemoved(ctx.db);
+      return { id: row.id };
+    },
+  },
+
+  // Only the member's own app says which notes it has open: an agent's holds come of what it does with a note. See NOT_FOR_AGENTS.
+  "note.hold": {
+    needs: "view",
+    by: "member",
+    changes: true,
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "view", "opens");
+      await hold(ctx.db, row.id, op.holder, ctx.now);
       return { id: row.id };
     },
   },

@@ -21,6 +21,8 @@ export const MAX_SETTINGS_LENGTH = 100_000;
 export const MAX_AGENTS_FILE_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
+/** A page of the app, as it names itself when it holds a note open. An agent's holds are the server's to make. */
+const Holder = z.string().regex(/^page:[\w-]{1,64}$/, "not a page");
 /** A tag's name, with or without its `#`. */
 const TagName = z
   .string()
@@ -341,7 +343,17 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note.restore"), id: Id }),
   /** Removes a note in Trash now, with its history, instead of after its 30 days. Nothing brings it back. */
   z.object({ type: z.literal("note.purge"), id: Id }),
-  z.object({ type: z.literal("note.discard"), id: Id }),
+  /**
+   * Removes, outside Trash and with its history, a note nobody ever wrote in, as the member's app
+   * leaves it: `holder` is the page leaving it, which lets go of it first. It is refused for any other
+   * note, and kept as a conflict while anything else holds it open (see note.hold).
+   */
+  z.object({ type: z.literal("note.discard"), id: Id, holder: Holder.optional() }),
+  /**
+   * Says that the page `holder` has the note open in an editor now, which keeps it from being
+   * discarded for the next ten minutes. The app says it again every few minutes while the note is blank.
+   */
+  z.object({ type: z.literal("note.hold"), id: Id, holder: Holder }),
   /** The notes in Trash that the asker can see, latest trashed first. Pass the answer's `next` as `after` for the page after. */
   z.object({ type: z.literal("trash.list"), limit: Limit(100, 500), after: After }),
   /**
@@ -1678,6 +1690,7 @@ export interface Results {
   "note.restore": Note & { folderGone: boolean };
   "note.purge": { id: string };
   "note.discard": { id: string };
+  "note.hold": { id: string };
   "trash.list": { notes: TrashedNote[]; next: string | null };
   /** `indexing` is true while some notes are still to be read into the index, as after a deploy: the answer may lack them, and asking again reads more. */
   "tag.list": { tags: ListedTag[]; next: string | null; indexing: boolean };
