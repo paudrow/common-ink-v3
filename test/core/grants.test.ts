@@ -367,6 +367,37 @@ describe("a private note", () => {
     return { ada, eve, ed, team, open, secret };
   }
 
+  it("keeps no link or grant that another member made in the moment it became private", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve Editor");
+    const ed = await addMember(ada, "editor", "Ed Editor");
+    const outside = await newPerson(ada, "Olive Outside");
+    const diary = await note(eve, "# Diary");
+    /** `env.DB`, where Eve makes her note private just before a grant is written: after Ed was found to be allowed to share it. */
+    const racing = new Proxy(env.DB, {
+      get(db, key) {
+        const value = Reflect.get(db, key, db);
+        if (key !== "prepare") return typeof value === "function" ? value.bind(db) : value;
+        return (sql: string) => {
+          const statement = db.prepare(sql);
+          if (!sql.trimStart().startsWith("INSERT INTO grants")) return statement;
+          return { bind: (...args: unknown[]) => ({ first: async () => (await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: true }), statement.bind(...args).first()) }) };
+        };
+      },
+    });
+    const grantsOn = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FROM grants WHERE note_id = ?").bind(diary.id).first<{ n: number }>())!.n;
+
+    for (const op of [
+      { type: "grant.link", noteId: diary.id, link: "public" },
+      { type: "grant.set", noteId: diary.id, email: outside.email, access: "view" },
+    ] as const) {
+      await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: false });
+      // To Ed the note is now Eve's private one, so it is refused as one that isn't there.
+      await expect(perform(racing as D1Database, ed, op), op.type).rejects.toMatchObject({ code: "not_found" });
+      expect([op.type, await grantsOn()]).toEqual([op.type, 0]);
+    }
+  });
+
   it("is hidden from every other member, admins too, everywhere a note shows", async () => {
     const { ada, eve, ed, team, open, secret } = await withSecret();
     const zed = await connectAgent(env.DB, eve.personId, "Zed");

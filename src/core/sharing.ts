@@ -176,6 +176,20 @@ async function noteSharing(ctx: Context, note: NoteRow): Promise<NonNullable<Sha
 }
 
 /**
+ * The condition a grant's INSERT carries that the item it is on (?3) has not become someone else's private note or
+ * upload since it was read: making one private takes off what others put on it, so a grant written in the moment
+ * after would stay live where its maker can no longer see it. `maker` is the parameter holding who makes it.
+ */
+const stillShared = (item: Item, maker: string) =>
+  item.kind === "folder" ? "1" : `NOT EXISTS (SELECT 1 FROM ${item.kind === "note" ? "notes" : "uploads"} WHERE id = ?3 AND private_owner IS NOT NULL AND private_owner <> ${maker})`;
+
+/** Why a grant whose INSERT wrote nothing was refused: the item, read again, is no longer one the asker may share. */
+async function refusedSince(ctx: Context, on: On): Promise<never> {
+  sharing(ctx, await itemOf(ctx, on));
+  throw new OpError("conflict", "That changed as you shared it. Try again");
+}
+
+/**
  * `to` names who the grant is for one way: by the email they sign in with, or as a member of the
  * workspace by their id. A member named by id is granted by the email the workspace already holds,
  * which whoever named them is not told.
@@ -199,13 +213,13 @@ export async function setGrant(ctx: Context, on: On, to: { email?: string; membe
   const row = await ctx.db
     .prepare(
       `INSERT INTO grants (id, workspace_id, ${column}, kind, email, person_id, access, granted_by, created_at, named)
-       VALUES (?1, ?2, ?3, 'person', ?4, (SELECT id FROM people WHERE email = ?4), ?5, ?6, ?7, ?8)
+       SELECT ?1, ?2, ?3, 'person', ?4, (SELECT id FROM people WHERE email = ?4), ?5, ?6, ?7, ?8 WHERE ${stillShared(item, "?6")}
        ON CONFLICT (${column}, email) WHERE kind = 'person' AND ${column} IS NOT NULL DO UPDATE SET access = excluded.access, granted_by = excluded.granted_by, named = excluded.named
        RETURNING id`,
     )
     .bind(newId(), ctx.workspaceId, item.id, email, access, ctx.personId, ctx.now, to.memberId === undefined ? 0 : 1)
     .first<{ id: string }>();
-  return grantById(ctx, row!.id);
+  return grantById(ctx, row?.id ?? (await refusedSince(ctx, on)));
 }
 
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -225,13 +239,13 @@ export async function linkTo(ctx: Context, on: On, link: LinkKind | null): Promi
   const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const row = await ctx.db
     .prepare(
-      `INSERT INTO grants (id, workspace_id, ${column}, kind, token, token_hash, access, granted_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'view', ?7, ?8)
+      `INSERT INTO grants (id, workspace_id, ${column}, kind, token, token_hash, access, granted_by, created_at) SELECT ?1, ?2, ?3, ?4, ?5, ?6, 'view', ?7, ?8 WHERE ${stillShared(item, "?7")}
        ON CONFLICT (${column}) WHERE kind <> 'person' AND ${column} IS NOT NULL DO UPDATE SET kind = excluded.kind
        RETURNING id`,
     )
     .bind(id, ctx.workspaceId, item.id, link, await sealedLink(id, token), await linkHash(token), ctx.personId, ctx.now)
     .first<{ id: string }>();
-  return grantById(ctx, row!.id);
+  return grantById(ctx, row?.id ?? (await refusedSince(ctx, on)));
 }
 
 /** Revoking twice is refused the second time as for a grant that never was: nothing tells the two apart. */
