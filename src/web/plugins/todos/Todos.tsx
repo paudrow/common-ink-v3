@@ -1032,18 +1032,30 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
   const [people, setPeople] = useState<readonly Mentioned[]>([]);
   useEffect(() => {
     let stale = false;
-    const members = host.perform({ type: "member.list" }).then((list) => list.map((m): Mentioned => ({ id: m.personId, name: m.name, member: true })), () => []);
-    const assigned = host.perform({ type: "todo.filters", includeArchived: true }).then((filters) => filters.assignees, () => []);
-    void Promise.all([members, assigned]).then(([m, a]) => {
-      if (stale) return;
-      const all = new Map<string, Mentioned>();
-      for (const person of [...m, ...a]) if (!all.has(mentionKey({ target: whoOf(person) }))) all.set(mentionKey({ target: whoOf(person) }), person);
-      setPeople([...all.values()].sort((x, y) => Number(y.member) - Number(x.member) || x.name.localeCompare(y.name, undefined, { sensitivity: "base" })));
-    });
+    let again: ReturnType<typeof setTimeout> | undefined;
+    // A refusal, such as a guest's, means nobody to list. A fault leaves who was listed, and they are asked for again as the list is.
+    const nobodyIfRefused = (err: unknown) => {
+      if (fault(err)) throw err;
+      return [];
+    };
+    const members = host.perform({ type: "member.list" }).then((list) => list.map((m): Mentioned => ({ id: m.personId, name: m.name, member: true })), nobodyIfRefused);
+    const assigned = host.perform({ type: "todo.filters", includeArchived: true }).then((filters) => filters.assignees, nobodyIfRefused);
+    void Promise.all([members, assigned]).then(
+      ([m, a]) => {
+        if (stale) return;
+        const all = new Map<string, Mentioned>();
+        for (const person of [...m, ...a]) if (!all.has(mentionKey({ target: whoOf(person) }))) all.set(mentionKey({ target: whoOf(person) }), person);
+        setPeople([...all.values()].sort((x, y) => Number(y.member) - Number(x.member) || x.name.localeCompare(y.name, undefined, { sensitivity: "base" })));
+      },
+      () => {
+        if (!stale) again = setTimeout(() => setAsked((n) => n + 1), AGAIN_MS);
+      },
+    );
     return () => {
       stale = true;
+      clearTimeout(again);
     };
-  }, [host, version]);
+  }, [host, version, asked]);
 
   const completions = useCallback(
     (todo: ListedTodo) => host.perform({ type: "todo.history", id: todo.noteId, revision: sending.current.revisions.get(keyOf(todo)) ?? todo.revision, line: todo.line, text: todo.text }).then((history) => history.completions),

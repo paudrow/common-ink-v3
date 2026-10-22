@@ -37,10 +37,8 @@ export function pinsOf(host: PluginHost): Pins {
         if (at !== changes) return read();
         say(notes.map((note) => note.id));
       },
-      () => {
-        reading = false;
-        if (ids === null) say([]);
-      },
+      // A reading that failed leaves what was read, or none, so the next note opened asks again.
+      () => void (reading = false),
     );
   };
 

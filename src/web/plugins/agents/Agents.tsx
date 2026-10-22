@@ -211,7 +211,7 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
   const now = useNow();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   /** The agents that have changed a note in this workspace. */
-  const [wrote, setWrote] = useState<ReadonlySet<string>>(new Set());
+  const [wrote, setWrote] = useState<ReadonlySet<string> | null>(null);
   const [fresh, setFresh] = useState<{ agent: Agent; token: string } | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -356,7 +356,7 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
         {agent.app === null ? <code>{agent.tokenPrefix}…</code> : `connected by OAuth from ${agent.app}, a name the app gave itself and nobody checked`} · reaches {reach(agent)} · connected {ago(agent.createdAt, now)} · {agent.lastUsedAt === null ? "never used" : `last used ${ago(agent.lastUsedAt, now)}`} · {ends(agent)}
       </p>
       <div className="agent-actions">
-        {wrote.has(agent.id) ? (
+        {wrote === null ? null : wrote.has(agent.id) ? (
           <>
             {onShowChanges && (
               <button type="button" className="button small" onClick={() => onShowChanges(agent)}>

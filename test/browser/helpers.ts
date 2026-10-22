@@ -1,4 +1,4 @@
-import { test as base, expect, type Frame, type Locator, type Page } from "@playwright/test";
+import { test as base, expect, type Frame, type Locator, type Page, type Request } from "@playwright/test";
 import type { Me, OpInput, Results, Role } from "../../src/core/protocol.ts";
 
 /** Playwright's `test`, which closes at the end of each test every browser context it opened beside its own: another person's, a visitor's. */
@@ -54,6 +54,34 @@ export function perform<T extends OpInput>(page: Page, op: T, workspaceId?: stri
     },
     { body: op as OpInput, workspaceId },
   ) as Promise<Results[T["type"]]>;
+}
+
+/**
+ * Answers the first `times` operations of `type` the page sends as the built Worker answers a request it
+ * dropped: a 500 whose body is miniflare's own words, not the Worker's JSON. The rest go through. `dropped` counts those answered so.
+ * `handled` resolves once the page has had the last of those answers and drawn two frames since, so what it made of them is on the page.
+ */
+export async function dropFirst(page: Page, type: string, times = 1) {
+  const answers = new Set<Request>();
+  let had!: () => void;
+  const answered = new Promise<void>((resolve) => (had = resolve));
+  page.on("requestfinished", (request) => {
+    if (answers.delete(request) && !answers.size && sent.dropped >= times) had();
+  });
+  const sent = {
+    dropped: 0,
+    handled: async () => {
+      await answered;
+      await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+    },
+  };
+  await page.route("**/api/workspaces/*/ops", (route) => {
+    if (sent.dropped >= times || (route.request().postDataJSON() as { type?: string }).type !== type) return route.fallback();
+    sent.dropped++;
+    answers.add(route.request());
+    return route.fulfill({ status: 500, contentType: "text/plain", body: "Error: Network connection lost." });
+  });
+  return sent;
 }
 
 /** A new person signed in in a browser of their own, beside whoever `page` is. */

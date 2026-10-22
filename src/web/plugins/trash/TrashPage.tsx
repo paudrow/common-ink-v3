@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ago, useNow, type PluginHost, type TrashedNote, type TrashedUpload, type ViewProps } from "../../plugin-api.ts";
+import { reasonOf } from "../lib/FoundNote.tsx";
 import { lifecycle, mayPurge, restoredMessage } from "../lib/lifecycle.ts";
 import { ShowMore, usePaged } from "../lib/paged.tsx";
 import { daysLeft, leftLabel } from "./days.ts";
@@ -15,7 +16,9 @@ const MOST = 500;
 export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   const now = useNow();
   const [asked, setAsked] = useState(0);
-  const [files, setFiles] = useState<TrashedUpload[]>([]);
+  const [files, setFiles] = useState<TrashedUpload[] | null>(null);
+  /** Why the files couldn't be read, until they are. */
+  const [filesUnread, setFilesUnread] = useState<string | null>(null);
   const { restoring, purge } = lifecycle(host);
   // Read again whenever the app learns that Trash changed, here or anywhere else.
   const known = app.trashed.map((n) => n.id).sort().join(",");
@@ -25,19 +28,30 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
     (note) => note.id,
     { of: "trash", again: `${known}/${asked}`, page: PAGE, most: MOST },
   );
-  const { rows: listed, problem: unread } = paged;
+  const { rows: listed } = paged;
+  const unread = paged.problem ?? filesUnread;
 
   useEffect(() => {
     let live = true;
     host.perform({ type: "upload.trashed" }).then(
-      (uploads) => live && setFiles(uploads),
-      // A guest is told nothing of the workspace's files.
-      () => live && setFiles([]),
+      (uploads) => {
+        if (!live) return;
+        setFiles(uploads);
+        setFilesUnread(null);
+      },
+      (err: { status?: unknown } | null) => {
+        if (!live) return;
+        // A guest is told nothing of the workspace's files. A fault says nothing of them, and leaves what was read.
+        if (typeof err?.status === "number" && err.status < 500) {
+          setFiles([]);
+          setFilesUnread(null);
+        } else setFilesUnread(reasonOf(err));
+      },
     );
     return () => {
       live = false;
     };
-  }, [host, asked]);
+  }, [host, asked, known]);
 
   /** Tells the app what a file is now, so each note that shows it follows. */
   const restoreFile = (file: TrashedUpload) =>
@@ -66,7 +80,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
           {unread}
         </p>
       )}
-      {listed && !listed.length && !files.length && <p className="trash-none">Trash is empty.</p>}
+      {listed && !listed.length && files?.length === 0 && <p className="trash-none">Trash is empty.</p>}
       {listed && listed.length > 0 && (
         <ul className="trash-list" aria-label="Notes in Trash">
           {listed.map((note) => {
@@ -114,7 +128,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
         </ul>
       )}
       <ShowMore paged={paged} />
-      {files.length > 0 && (
+      {files && files.length > 0 && (
         <>
           <h2 className="trash-part">Files</h2>
           <ul className="trash-list" aria-label="Files in Trash">
