@@ -210,6 +210,21 @@ test("Today, the arrows and the keys glide the days to the same places a scroll 
   await expect(calendar(page).getByRole("button", { name: "Week", exact: true }), "the view is remembered").toHaveAttribute("aria-pressed", "true");
 });
 
+test("back on Week from Day, this week with today in it is the bare address again", async ({ page }) => {
+  // A Wednesday: on a Monday, Day's one day is the week's first and today alike.
+  const week = thisWeek();
+  await page.clock.setFixedTime(Date.parse(`${week[2]}T16:00:00Z`));
+  await openWithSample(page);
+  await page.keyboard.press("d");
+  await expect.poll(() => daysInView(page)).toEqual([week[2]]);
+  await page.keyboard.press("j");
+  await expect.poll(() => daysInView(page)).toEqual([week[3]]);
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?view=day&day=${week[3]}$`));
+  await page.keyboard.press("w");
+  await expect.poll(() => daysInView(page)).toEqual(week);
+  await expect(page).toHaveURL(/\/calendar$/);
+});
+
 test("a drag on empty grid draws a draft on the quarter hour with its times, and its release opens the form, which adds nothing until Save", async ({ page }) => {
   await openWithSample(page);
   const tuesday = thisWeek()[1]!;
