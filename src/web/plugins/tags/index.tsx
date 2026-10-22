@@ -1,6 +1,7 @@
 import { nameKey, type ListedTag, type Plugin } from "../../plugin-api.ts";
 import { keeping } from "../noteList.tsx";
 import { tagCards } from "./card.tsx";
+import { tagItems } from "./completing.ts";
 import { tagDrawing } from "./drawing.ts";
 import { ManageTags } from "./Manage.tsx";
 import { MANAGE_PATH, SETTINGS_ID, TAGS_PAGE, TAGS_PATH, tagOfPath, tagPath } from "./path.ts";
@@ -15,14 +16,15 @@ const PAGE = 200;
 const MOST = 1000;
 
 /**
- * Tags. A `#tag` anywhere in a note tags the note. The sidebar lists the workspace's tags with how
- * many notes have each, a tag's page is a folder's list of its notes, a tag in a note is drawn as
- * one, and wherever a tag is drawn, resting on it shows its card. Tags are managed in Settings.
+ * Tags. A `#tag` anywhere in a note tags the note, and typing `#` lists the tags to pick from, or
+ * to create one. The sidebar lists the workspace's tags with how many notes have each, a tag's
+ * page is a folder's list of its notes, a tag in a note is drawn as one, and wherever a tag is
+ * drawn, resting on it shows its card. Tags are managed in Settings.
  */
 export const tags: Plugin = {
   id: "tags",
   name: "Tags",
-  description: "A #tag in a note tags it: the sidebar lists every tag, each has a page of its notes, and Settings has every tag to describe, rename and delete.",
+  description: "A #tag in a note tags it, and # lists the tags as you type: the sidebar lists every tag, each has a page of its notes, and Settings has every tag to describe, rename and delete.",
   icon: "tag",
   activate(host) {
     let listed: readonly ListedTag[] | null = null;
@@ -120,6 +122,7 @@ export const tags: Plugin = {
     host.views.register("settings", { id: SETTINGS_ID, label: "Tags", component: ({ app }) => <ManageTags host={host} app={app} store={store} /> });
     host.commands.register({ id: "tags.manage", title: "Manage tags", aliases: ["describe tags", "rename tag", "delete tag"], run: () => host.app().go(MANAGE_PATH) });
     host.editorExtensions.register({ id: "tags", extension: tagDrawing((name) => host.app().go(tagPath(name)), cards) });
+    host.completions.register({ id: "tags", trigger: "#", items: (typed) => tagItems(typed, listed ?? []) });
 
     return () => {
       cards.dispose();
