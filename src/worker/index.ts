@@ -1,4 +1,4 @@
-import { acceptInvite, arrive, invitation, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
+import { acceptInvite, arrive, invitation, whoAmI, workspaceOfInvite, workspaceOfNote, workspaceOfUpload } from "../core/accounts.ts";
 import { perform, trustedCode, type Actor, type Visitor } from "../core/operations.ts";
 import { redeemFrame } from "../core/pluginRecord.ts";
 import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../core/protocol.ts";
@@ -78,10 +78,10 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
   }
 
   // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
-  const lookup = /^\/api\/(notes|invites)\/([a-z0-9]{12})$/.exec(url.pathname);
+  const lookup = /^\/api\/(notes|uploads|invites)\/([a-z0-9]{12})$/.exec(url.pathname);
   if (lookup && req.method === "GET") {
-    if (lookup[1] === "notes") {
-      const workspaceId = await workspaceOfNote(env.DB, personId, lookup[2]!);
+    if (lookup[1] !== "invites") {
+      const workspaceId = await (lookup[1] === "notes" ? workspaceOfNote : workspaceOfUpload)(env.DB, personId, lookup[2]!);
       return workspaceId ? json({ workspaceId }) : json({ error: "not_found" }, 404);
     }
     // An invite's link leads its person into the workspace once they have joined, and until then says what the invite is.

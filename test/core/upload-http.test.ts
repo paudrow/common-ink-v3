@@ -400,6 +400,19 @@ describe("an upload or an export asked for by another site", () => {
     }
   });
 
+  it("is opened by the app in the workspace the upload is in, for whoever can see it, and for nobody else", async () => {
+    const { ada, token, workspace } = await connected();
+    const pdf = await sent(workspace, token, "paper.pdf", PDF);
+    const stranger = await newMember("Sam Stranger");
+    const lookup = async (personId: string, id = pdf.id) => {
+      const res = await send(`/api/uploads/${id}`, { headers: { Cookie: await sessionOf(personId) } });
+      return [res.status, await res.json()];
+    };
+    expect(await lookup(ada.personId)).toEqual([200, { workspaceId: workspace }]);
+    expect(await lookup(stranger.personId)).toEqual([404, { error: "not_found" }]);
+    expect(await lookup(ada.personId, "aaaaaaaaaaaa")).toEqual([404, { error: "not_found" }]);
+  });
+
   it("is answered as ever from the app itself, from an address typed or bookmarked, and to a token", async () => {
     const { ada, token, workspace } = await connected();
     const pdf = await sent(workspace, token, "paper.pdf", PDF);

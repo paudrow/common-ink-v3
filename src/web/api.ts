@@ -75,6 +75,7 @@ const where = (path: string, init?: RequestInit) =>
   );
 
 export const workspaceOfNote = (noteId: string) => where(`/api/notes/${noteId}`);
+export const workspaceOfUpload = (uploadId: string) => where(`/api/uploads/${uploadId}`);
 /** Where an invite's link leads: the workspace once its person has joined, what the invite is while it waits for them, or null for nowhere. */
 export const inviteAt = (inviteId: string) =>
   request<{ workspaceId: string } | { invite: Invitation }>(`/api/invites/${inviteId}`).then(

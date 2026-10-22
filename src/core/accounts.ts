@@ -173,6 +173,17 @@ export async function workspaceOfNote(db: D1Database, personId: string, noteId: 
   return standing && allows(itemLevel(standing.sight, note), "view") ? note.workspace_id : null;
 }
 
+/** The workspace an upload is in, among the person's own, as for a note: null for one they can't see, or that isn't there. */
+export async function workspaceOfUpload(db: D1Database, personId: string, uploadId: string): Promise<string | null> {
+  const upload = await db
+    .prepare("SELECT id, workspace_id, folder_id, private_owner FROM uploads WHERE id = ? AND state IN ('live', 'archived', 'trashed')")
+    .bind(uploadId)
+    .first<{ id: string; workspace_id: string; folder_id: string; private_owner: string | null }>();
+  if (!upload) return null;
+  const standing = await standingIn(db, personId, upload.workspace_id);
+  return standing && allows(itemLevel(standing.sight, upload), "view") ? upload.workspace_id : null;
+}
+
 /**
  * The workspace an invite's link leads to, for the person the invite made a member and nobody else.
  * Null says nothing about whether there is such an invite, or whose it is.

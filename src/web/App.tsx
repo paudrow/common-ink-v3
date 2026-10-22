@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { Invitation, Me, MeHere } from "../core/protocol.ts";
-import { ApiError, getMe, inviteAt, joinInvite, onRefused, perform, session, signOut, workspaceOfNote } from "./api.ts";
+import { ApiError, getMe, inviteAt, joinInvite, onRefused, perform, session, signOut, workspaceOfNote, workspaceOfUpload } from "./api.ts";
 import { showing, targetOf, UNANSWERED, type Target } from "./leads.ts";
 import { useRoute, type Place } from "./router.ts";
 import { retryAfter } from "./retry.ts";
@@ -201,7 +201,7 @@ function useFound(me: Me, target: Target | null) {
   useEffect(() => {
     if (!unknown) return;
     let live = true;
-    (unknown.kind === "note" ? workspaceOfNote : inviteAt)(unknown.id)
+    ({ note: workspaceOfNote, upload: workspaceOfUpload, invite: inviteAt }[unknown.kind] as (id: string) => Promise<string | Invitation | null>)(unknown.id)
       .catch((): typeof UNANSWERED => UNANSWERED)
       .then((workspaceId) => {
         if (!live) return;

@@ -1,9 +1,9 @@
 import type { Invitation, WorkspaceSummary } from "../core/protocol.ts";
 import type { Place } from "./router.ts";
 
-/** Something an address names that is in one workspace: a note, or the invite a shared link ends in. */
+/** Something an address names that is in one workspace: a note, an upload on the Uploads page, or the invite a shared link ends in. */
 export interface Target {
-  kind: "note" | "invite";
+  kind: "note" | "upload" | "invite";
   id: string;
   /** What `Found` knows it by. */
   key: string;
@@ -30,11 +30,14 @@ export type Showing =
   | { kind: "unchecked" };
 
 const INVITE = /^\/invite\/([a-z0-9]{12})$/;
+const UPLOAD = /^\/uploads\/([a-z0-9]{12})$/;
 
 export function targetOf(place: Place): Target | null {
   if (place.route.kind === "note") return { kind: "note", id: place.route.id, key: place.route.id };
   const invite = INVITE.exec(place.path)?.[1];
-  return invite ? { kind: "invite", id: invite, key: `invite:${invite}` } : null;
+  if (invite) return { kind: "invite", id: invite, key: `invite:${invite}` };
+  const upload = UPLOAD.exec(place.path)?.[1];
+  return upload ? { kind: "upload", id: upload, key: `upload:${upload}` } : null;
 }
 
 /**
@@ -48,11 +51,16 @@ export function showing(place: Place, found: Found, workspaces: readonly Workspa
   const target = targetOf(place);
   if (!target) return { kind: "workspace", workspace: chosen, place };
   const led = found.get(target.key);
+  // An upload's address is shown in the chosen workspace while its own is asked for: nearly always it is there, and a
+  // page left waiting would stand in the history for the upload's. It moves to its workspace if the answer is another.
+  if (target.kind === "upload" && (led === undefined || led === UNANSWERED)) return { kind: "workspace", workspace: chosen, place };
   if (led === undefined) return { kind: "asking" };
   // With no answer, the chosen workspace is left to show what it can of a note.
   if (led === UNANSWERED) return target.kind === "invite" ? { kind: "unchecked" } : { kind: "workspace", workspace: chosen, place };
   if (led !== null && typeof led === "object") return target.kind === "invite" ? { kind: "invited", inviteId: target.id, invitation: led } : { kind: "workspace", workspace: chosen, place };
   const workspace = workspaces.find((w) => w.id === led);
   if (target.kind === "invite") return workspace ? { kind: "joined", workspace } : { kind: "not-invited" };
+  // An upload is on the Uploads page of its workspace, or of the chosen one, which says it isn't there.
+  if (target.kind === "upload") return { kind: "workspace", workspace: workspace ?? chosen, place };
   return workspace ? { kind: "workspace", workspace, place } : { kind: "workspace", workspace: chosen, place: { ...place, route: { kind: "page", path: place.path } } };
 }
