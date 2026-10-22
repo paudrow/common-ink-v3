@@ -20,7 +20,15 @@ test("the page tells the Worker of an error nothing caught, the same one once an
   await expect.poll(() => sent.length).toBe(1);
   expect(sent[0]).toEqual({ status: 204, body: { route: "/", name: "TypeError", message: "first", stack: expect.stringContaining("TypeError: first") } });
 
+  let answerTheFirst!: () => void;
+  const held = new Promise<void>((resolve) => (answerTheFirst = resolve));
+  await page.route("**/api/faults", async (route) => {
+    if ((route.request().postDataJSON() as { message: string }).message === "another 0") await held;
+    await route.continue();
+  });
   await thrown(Array.from({ length: 15 }, (_, i) => `another ${i}`));
+  await expect.poll(() => sent.length).toBe(9);
+  answerTheFirst();
   await expect.poll(() => sent.length).toBe(10);
   await page.waitForTimeout(300);
   expect(sent.map(({ body }) => body.message)).toEqual(["first", ...Array.from({ length: 9 }, (_, i) => `another ${i}`)]);
