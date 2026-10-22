@@ -20,6 +20,7 @@ test("the page tells the Worker of an error nothing caught, the same one once an
   await expect.poll(() => sent.length).toBe(1);
   expect(sent[0]).toEqual({ status: 204, body: { route: "/", name: "TypeError", message: "first", stack: expect.stringContaining("TypeError: first") } });
 
+  // The page sends them at once, so the Worker may answer them in any order: here the first of them is answered last.
   let answerTheFirst!: () => void;
   const held = new Promise<void>((resolve) => (answerTheFirst = resolve));
   await page.route("**/api/faults", async (route) => {
@@ -31,7 +32,7 @@ test("the page tells the Worker of an error nothing caught, the same one once an
   answerTheFirst();
   await expect.poll(() => sent.length).toBe(10);
   await page.waitForTimeout(300);
-  expect(sent.map(({ body }) => body.message)).toEqual(["first", ...Array.from({ length: 9 }, (_, i) => `another ${i}`)]);
+  expect(sent.map(({ body }) => body.message).sort()).toEqual([...Array.from({ length: 9 }, (_, i) => `another ${i}`), "first"]);
 });
 
 test("the page tells of an operation answered with a fault the Worker didn't make, by its type and status, and leaves the Worker's own to the Worker", async ({ page }) => {
