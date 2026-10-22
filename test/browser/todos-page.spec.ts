@@ -61,3 +61,35 @@ test("the state choices under the bar write is: into it, and show what the bar a
   await page.keyboard.press("ArrowRight");
   await expect(bar(page)).toHaveValue("is:backlog");
 });
+
+test("the builder under the bar is as wide as the page's column, past the Sort menu at the end of the bar's line", async ({ page }) => {
+  await aNoteOfEveryState(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await todosPage(page).getByRole("button", { name: "Advanced" }).click();
+  const builder = (await todosPage(page).getByRole("group", { name: "Advanced filter" }).boundingBox())!;
+  const heading = (await todosPage(page).getByRole("heading", { name: "Todos" }).boundingBox())!;
+  // The builder has a Sort of its own, before the bar's.
+  const sort = (await todosPage(page).getByRole("combobox", { name: "Sort" }).last().boundingBox())!;
+  const field = (await bar(page).boundingBox())!;
+  // From where the heading starts to where the Sort menu ends, with the menu still beside the bar and above the builder.
+  expect(Math.round(builder.x)).toBe(Math.round(heading.x));
+  expect(Math.round(builder.x + builder.width)).toBe(Math.round(sort.x + sort.width));
+  expect(sort.y).toBeLessThan(field.y + field.height);
+  expect(sort.y + sort.height).toBeLessThan(builder.y);
+});
+
+test("in a phone's width the Sort menu goes under the bar and the state choices stay on one line", async ({ page }) => {
+  await aNoteOfEveryState(page);
+  await page.setViewportSize({ width: 380, height: 800 });
+  // Focus, so the page has the whole window, as a member with a window this narrow would have it.
+  await bar(page).focus();
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeHidden();
+  const field = (await bar(page).boundingBox())!;
+  // The builder has a Sort of its own, before the bar's.
+  const sort = (await todosPage(page).getByRole("combobox", { name: "Sort" }).last().boundingBox())!;
+  expect(sort.y).toBeGreaterThanOrEqual(field.y + field.height);
+  const tops = await states(page).locator("label").evaluateAll((labels) => labels.map((label) => Math.round(label.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

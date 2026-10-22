@@ -6932,6 +6932,7 @@ button.diff-fold:hover {
   /* Less room at the sides in a narrow column, which is the todos' room. */
   padding: 2rem clamp(12px, 5%, 2rem) 3rem;
   overflow-y: auto;
+  container: todos-page / inline-size;
 }
 
 .todos-page h1 {
@@ -6939,23 +6940,52 @@ button.diff-fold:hover {
   font-size: calc(22px * var(--text-scale));
 }
 
-/* The query bar and, at the end of its line, the order, which is the query's sort: said as a menu. */
+/*
+ * The query bar and, at the end of its line, the order, which is the query's sort: said as a menu.
+ * The bar's own parts are laid out here, so what is under its line, the builder above all, is as wide
+ * as the list and not cut short by the menu. In a narrow column the menu goes under the line.
+ */
 .todo-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px 14px;
+  container-type: inline-size;
 }
 
 .todo-tools > .query-bar {
-  flex: 1 1 18rem;
-  min-width: 0;
+  display: contents;
 }
 
-/* Which todos by their state, on its own line under the bar. */
+.todo-tools .query-line {
+  grid-area: 1 / 1;
+}
+
+.todo-tools .todo-sort {
+  grid-area: 1 / 2;
+}
+
+.todo-tools .query-bar > :not(.query-line) {
+  grid-column: 1 / -1;
+}
+
+@container (width < 26rem) {
+  .todo-tools .todo-sort {
+    grid-area: auto / 1 / auto / -1;
+  }
+}
+
+/* Which todos by their state, on its own line under the bar: one line in a phone's width, and two only where even that is too narrow. */
 .todos-page > .todo-state-choices {
   align-self: flex-start;
   flex-wrap: wrap;
+  max-width: 100%;
+}
+
+@container todos-page (width < 26rem) {
+  .todo-state-choices span {
+    padding-inline: 7px;
+  }
 }
 
 .todo-sort {
