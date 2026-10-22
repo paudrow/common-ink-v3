@@ -215,13 +215,30 @@ describe("a draft is its author's own copy", () => {
     await expect(saveDraft({ db: env.DB, workspaceId: ada.workspaceId, personId: vera.personId, now: 1 } as never, { type: "draft.save", id: other, manifest: "{}", code: "", running: false })).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("runs only once its member switches it on: an agent saves it, and leaves it off, so nothing it wrote runs as the member after it is gone", async () => {
+    const { ada, eve } = await team();
+    const id = await install(ada, [READ, WRITE]);
+    for (const capability of ["notes.read", "notes.write"] as const) await grant(ada, id, capability);
+    const claude = await connectAgent(env.DB, eve.personId, "Claude");
+    const agent = agentActor((await authenticateAgent(env.DB, claude.token))!, eve.workspaceId);
+    const save = (by: Actor, running: boolean, code = "agent-code") => outcome(by, { type: "draft.save", id, manifest: manifest([READ, WRITE]), code, running });
+    const write = () => outcome(pluginOf(eve, id, true), { type: "note.create", text: "# Written by the draft" });
+    const running = async () => (await perform(env.DB, eve, { type: "draft.list" })).drafts.map((d) => d.running);
+
+    expect(await save(agent, true)).toBe("invalid: An agent saves a draft, and its member switches it on in the app");
+    expect([await save(agent, false), await running(), await write()]).toEqual(["done", [false], `forbidden: ${NO_DRAFT_RUNNING}`]);
+    // Switched on by Eve, it runs. Saved again by the agent, it is off again until she switches it on.
+    expect([await save(eve, true), await write()]).toEqual(["done", "done"]);
+    expect([await save(agent, false, "changed by the agent"), await running(), await write()]).toEqual(["done", [false], `forbidden: ${NO_DRAFT_RUNNING}`]);
+  });
+
   it("is its author's agent's as it is its author's, read-only if its token is; an agent limited to folders, and anyone else's agent, is told nothing of it", async () => {
     const { ada, eve } = await team();
     const id = await install(ada, [READ]);
     await perform(env.DB, eve, { type: "draft.save", id, manifest: manifest([READ], "zebra-draft-name"), code: "zebra-draft-marker", running: true });
     const folder = (await perform(env.DB, eve, { type: "folder.create", name: "Inside" })).id;
     const reads: OpInput[] = [{ type: "draft.list" }, { type: "draft.read", id }];
-    const writes: OpInput[] = [{ type: "draft.save", id, manifest: manifest([READ], "zebra-draft-name"), code: "zebra-draft-marker", running: true }];
+    const writes: OpInput[] = [{ type: "draft.save", id, manifest: manifest([READ], "zebra-draft-name"), code: "zebra-draft-marker", running: false }];
     const kinds = {
       unlimited: [{}, "done", "done"],
       "read-only": [{ readOnly: true }, "done", "forbidden: A read-only token can't draft.save"],

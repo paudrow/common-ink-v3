@@ -138,7 +138,7 @@ describe("an agent makes and manages plugins in its member's role", () => {
     await perform(env.DB, eds, { type: "plugin.request", id, capability: "notes.read" });
     expect((await perform(env.DB, ada, { type: "plugin.list" })).plugins.find((p) => p.id === id)!.permissions[0]!.requests.map((r) => r.by.id)).toEqual([ed.personId]);
 
-    await perform(env.DB, eds, { type: "draft.save", id, manifest: MANIFEST, code: "edsDraft()", baseHash, running: true });
+    await perform(env.DB, eds, { type: "draft.save", id, manifest: MANIFEST, code: "edsDraft()", baseHash, running: false });
     await perform(env.DB, vera, { type: "draft.save", id, manifest: MANIFEST, code: "verasDraft()", baseHash, running: true });
     // It is Ed's, as if Ed had saved it, and Vera's is hers: neither agent nor member reads the other's.
     expect((await perform(env.DB, ed, { type: "draft.read", id })).code).toBe("edsDraft()");
@@ -146,7 +146,8 @@ describe("an agent makes and manages plugins in its member's role", () => {
     expect((await perform(env.DB, eds, { type: "draft.read", id })).code).toBe("edsDraft()");
     expect((await perform(env.DB, await agentOf(vera, "Veras"), { type: "draft.read", id })).code).toBe("verasDraft()");
 
-    // What Ed's agent kept runs for Ed and for nobody else: Ada has no draft, so a plugin acting for her as one is refused.
+    // What Ed's agent kept runs once Ed switches it on, for Ed and for nobody else: Ada has no draft, so a plugin acting for her as one is refused.
+    await perform(env.DB, ed, { type: "draft.save", id, manifest: MANIFEST, code: "edsDraft()", baseHash, running: true });
     const asDraft = (member: Actor): Actor => ({ kind: "plugin", pluginId: id, personId: member.personId, workspaceId: member.workspaceId, draft: true });
     expect(await outcome(perform(env.DB, asDraft(ada), { type: "note.list" }))).toBe("forbidden: You have no draft of that plugin that is running");
     expect(await outcome(perform(env.DB, asDraft(ed), { type: "plugin.list" }))).toBe("forbidden: Word Tally isn't permitted to plugin.list");

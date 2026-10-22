@@ -1166,7 +1166,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "save_draft",
-    description: `Keeps your member's draft of a plugin as given, making it if there is none. running makes it run in the original's place for your member alone, in their browser, shut off from the app and with what the original is permitted and never more; a draft that asks for full trust never runs. baseHash is the original's codeHash when the copy was made. ${DRAFT_WORDS}`,
+    description: `Keeps your member's draft of a plugin as given, making it if there is none. A running draft runs in the original's place for your member alone, in their browser, shut off from the app and with what the original is permitted and never more; a draft that asks for full trust never runs. Only your member switches a draft on, in the app: pass running false, and your save leaves the draft off until they do. baseHash is the original's codeHash when the copy was made. ${DRAFT_WORDS}`,
     inputSchema: object({ pluginId: draftId, manifest, code, baseHash: { type: ["string", "null"], description: "The original's codeHash when the copy was made, or null" }, running: { type: "boolean" } }, ["pluginId", "manifest", "code", "running"]),
     renames: { pluginId: "id" },
     op: "draft.save",

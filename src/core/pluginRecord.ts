@@ -505,6 +505,7 @@ export async function listDrafts(ctx: Context): Promise<{ drafts: DraftSummary[]
 }
 
 const NO_DRAFT = "You have no draft of that plugin";
+export const AGENT_DRAFTS_OFF = "An agent saves a draft, and its member switches it on in the app";
 
 export async function readDraft(ctx: Context, id: string): Promise<Draft> {
   const row = await ctx.db.prepare(`SELECT plugin_id, manifest, code, code_hash, base_hash, running, updated_at FROM plugin_drafts WHERE ${MINE} AND plugin_id = ?`).bind(ctx.workspaceId, ctx.personId, id).first<DraftRow>();
@@ -517,6 +518,9 @@ export async function readDraft(ctx: Context, id: string): Promise<Draft> {
  * since it is being written. To run, it has to be one, and one that doesn't ask for full trust.
  */
 export async function saveDraft(ctx: Context, op: Extract<Op, { type: "draft.save" }>): Promise<DraftSummary> {
+  // A running draft is code that runs as the member, with what the plugin it stands in for was allowed. That is the
+  // member's to choose, and outlives any agent: an agent's save leaves the draft off until they switch it on.
+  if (op.running && ctx.author.kind === "agent") throw new OpError("invalid", AGENT_DRAFTS_OFF);
   const own = ownSandboxed(op.id) !== null;
   if (!own && !(await installed(ctx.db, ctx.workspaceId, op.id))) throw new OpError("not_found", NO_SUCH_PLUGIN);
   if (op.manifest.length > MAX_PLUGIN_MANIFEST) throw new OpError("invalid", `A manifest is at most ${MAX_PLUGIN_MANIFEST} characters`);
