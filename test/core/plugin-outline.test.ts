@@ -69,12 +69,40 @@ describe("moving a bullet", () => {
     expect(edit(OUTLINE, "- go", (l, n) => move(l, n, -1))).toBe(["# Trip", "", "- pack", "  - socks", "    - wool", "  - maps", "- go", "", "- book", "  - train", "", "After."].join("\n"));
   });
 
-  it("stays among its own siblings: the first doesn't move up, the last doesn't move down, and neither leaves its parent", () => {
+  it("goes nowhere past the first or last of a list under nothing, or past a parent with nothing beside it", () => {
     expect(edit(OUTLINE, "- pack", (l, n) => move(l, n, -1))).toBeNull();
     expect(edit(OUTLINE, "- go", (l, n) => move(l, n, 1))).toBeNull();
     expect(edit(OUTLINE, "- socks", (l, n) => move(l, n, -1))).toBeNull();
-    expect(edit(OUTLINE, "- maps", (l, n) => move(l, n, 1))).toBeNull();
-    expect(edit(OUTLINE, "- train", (l, n) => move(l, n, 1))).toBeNull();
+  });
+
+  it("past the end of its list goes into the list beside it at its depth, with what is under it", () => {
+    expect(edit(OUTLINE, "- maps", (l, n) => move(l, n, 1))).toBe(["# Trip", "", "- pack", "  - socks", "    - wool", "- book", "  - maps", "  - train", "", "- go", "", "After."].join("\n"));
+    expect(edit(OUTLINE, "- train", (l, n) => move(l, n, -1))).toBe(["# Trip", "", "- pack", "  - socks", "    - wool", "  - maps", "  - train", "- book", "", "- go", "", "After."].join("\n"));
+    expect(edit(OUTLINE, "- train", (l, n) => move(l, n, 1))).toBe(["# Trip", "", "- pack", "  - socks", "    - wool", "  - maps", "- book", "", "- go", "  - train", "", "After."].join("\n"));
+    expect(edit(OUTLINE, "- socks", (l, n) => move(l, n, 1))).toBe(["# Trip", "", "- pack", "  - maps", "  - socks", "    - wool", "- book", "  - train", "", "- go", "", "After."].join("\n"));
+  });
+
+  it("into a list beside it takes that list's indent and numbers, and the list it left is numbered again", () => {
+    const text = ["1. one", "   1. a", "   2. b", "2. two", "   1. c"].join("\n");
+
+    expect(edit(text, "1. c", (l, n) => move(l, n, -1))).toBe(["1. one", "   1. a", "   2. b", "   3. c", "2. two"].join("\n"));
+    expect(edit(text, "2. b", (l, n) => move(l, n, 1))).toBe(["1. one", "   1. a", "2. two", "   1. b", "   2. c"].join("\n"));
+    expect(edit("- a\n- b\n  - under b", "- under b", (l, n) => move(l, n, -1))).toBe("- a\n  - under b\n- b");
+  });
+
+  it("into a list beside it keeps the start each list had, and its 1., 1., 1.", () => {
+    const up = (text: string, says: string) => edit(text, says, (l, n) => move(l, n, -1));
+    const down = (text: string, says: string) => edit(text, says, (l, n) => move(l, n, 1));
+
+    expect(up("- a\n5. b\n   1. c", "1. c")).toBe("- a\n  1. c\n5. b");
+    expect(down("1. p\n   1. z\n2. q\n   3. x\n   4. y", "1. z")).toBe("1. p\n2. q\n   3. z\n   4. x\n   5. y");
+    expect(up("1. p\n2. q\n   3. x\n   4. y", "3. x")).toBe("1. p\n   3. x\n2. q\n   3. y");
+    expect(down("1. p\n   1. a\n   1. b\n   1. c\n2. q\n   1. z", "1. c")).toBe("1. p\n   1. a\n   1. b\n2. q\n   1. c\n   1. z");
+  });
+
+  it("into a list beside it and back leaves the note as it was", () => {
+    const there = edit(OUTLINE, "- maps", (l, n) => move(l, n, 1))!;
+    expect(edit(there, "- maps", (l, n) => move(l, n, -1))).toBe(OUTLINE);
   });
 
   it("says where each line it moved has gone, so the cursor and the folds go with them", () => {
@@ -82,6 +110,8 @@ describe("moving a bullet", () => {
 
     expect([2, 3, 4, 5, 6, 7].map(made.after)).toEqual([4, 5, 6, 7, 2, 3]);
     expect(move(linesOf(OUTLINE), lineOf(OUTLINE, "- go"), -1)!.after(9)).toBe(6);
+    // Into the list beside it: maps goes under book, which comes up a line.
+    expect([5, 6, 7].map(move(linesOf(OUTLINE), lineOf(OUTLINE, "- maps"), 1)!.after)).toEqual([6, 5, 7]);
   });
 });
 
