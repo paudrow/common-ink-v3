@@ -1,4 +1,5 @@
 import { ALL_NOTES, SHARED_WITH_ME, nameKey, parseQuery, printQuery, queryNames, type NoteSummary, type QueryNode, type SearchMatch, type SortKey } from "../plugin-api.ts";
+import { without } from "./lib/queryTerms.ts";
 
 export const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -61,24 +62,6 @@ export const LIVES = [
 export type Life = (typeof LIVES)[number]["id"];
 
 const STATE_WORDS = new Set(["open", "archived", "trashed"]);
-
-/** A query with every filter `drop` names taken out, so a new choice replaces the last. */
-function without(node: QueryNode | null, drop: (filter: Extract<QueryNode, { kind: "filter" }>) => boolean): QueryNode | null {
-  if (!node) return null;
-  if (node.kind === "text") return node;
-  if (node.kind === "filter") return drop(node) ? null : node;
-  if (node.kind === "not") {
-    const of = without(node.of, drop);
-    return of ? { kind: "not", of } : null;
-  }
-  const of = node.of.flatMap((child) => {
-    const next = without(child, drop);
-    return next ? [next] : [];
-  });
-  if (of.length === 0) return null;
-  if (of.length === 1) return of[0]!;
-  return { kind: node.kind, of };
-}
 
 /** A query with every `is:open`, `is:archived` and `is:trashed` taken out. */
 const withoutState = (node: QueryNode | null) => without(node, (f) => f.key === "is" && STATE_WORDS.has(f.value));

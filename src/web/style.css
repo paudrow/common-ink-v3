@@ -6952,6 +6952,12 @@ button.diff-fold:hover {
   min-width: 0;
 }
 
+/* Which todos by their state, on its own line under the bar. */
+.todos-page > .todo-state-choices {
+  align-self: flex-start;
+  flex-wrap: wrap;
+}
+
 .todo-sort {
   display: flex;
   align-items: center;
