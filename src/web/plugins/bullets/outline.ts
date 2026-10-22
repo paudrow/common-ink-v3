@@ -81,7 +81,7 @@ function after(lines: Lines, item: Item): Item | null {
 }
 
 /** The item this one is under. */
-function parentOf(lines: Lines, item: Item): Item | null {
+export function parentOf(lines: Lines, item: Item): Item | null {
   for (let n = item.line - 1; n >= 0; n--) {
     const line = lines.at(n);
     if (blank(line) || indentOf(line) >= item.indent) continue;
