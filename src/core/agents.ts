@@ -111,12 +111,17 @@ export interface AgentToken {
   clientId?: string;
 }
 
+export const SIGNED_OUT_MEANWHILE = "You were signed out everywhere as this was being connected. Sign in again to connect it";
+
 /**
  * Checks what a member asks of a new agent, as connecting one does, and gives the statement that
  * makes it. Nothing is written until the statement is run. Consenting to an OAuth app makes its
- * agent here too, so it can't be given more than the Agents page could give.
+ * agent here too, so it can't be given more than the Agents page could give. `ended` is how many
+ * times the person had been signed out everywhere when the session that asks began: the statement
+ * writes nothing once that no longer holds, so a session ended as it runs leaves no agent behind,
+ * as `connectClipper` leaves no grant.
  */
-export async function prepareAgent(db: D1Database, personId: string, rawName: string, input: ConnectOptions, how: AgentToken, now: number): Promise<{ id: string; insert: D1PreparedStatement }> {
+export async function prepareAgent(db: D1Database, personId: string, rawName: string, input: ConnectOptions, how: AgentToken, now: number, ended?: number): Promise<{ id: string; insert: D1PreparedStatement }> {
   const parsed = ConnectOptions.safeParse(input);
   if (!parsed.success) throw new OpError("invalid", z.prettifyError(parsed.error));
   const options = parsed.data;
@@ -127,16 +132,19 @@ export async function prepareAgent(db: D1Database, personId: string, rawName: st
   const folders = options.folderIds ? await folderLimit(db, personId, options.workspaceId, options.folderIds) : null;
   const id = newId();
   const insert = db
-    .prepare("INSERT INTO agents (id, person_id, name, token_prefix, token_hash, created_at, expires_at, workspace_id, read_only, folder_ids, client_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, personId, name, how.tokenPrefix, how.tokenHash, now, endOf(options.expiresInDays, now), options.workspaceId ?? null, options.readOnly ? 1 : 0, folders, how.clientId ?? null);
+    .prepare(
+      `INSERT INTO agents (id, person_id, name, token_prefix, token_hash, created_at, expires_at, workspace_id, read_only, folder_ids, client_id)
+       SELECT ?1, id, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM people WHERE id = ?11 AND (?12 IS NULL OR sessions_ended = ?12)`,
+    )
+    .bind(id, name, how.tokenPrefix, how.tokenHash, now, endOf(options.expiresInDays, now), options.workspaceId ?? null, options.readOnly ? 1 : 0, folders, how.clientId ?? null, personId, ended ?? null);
   return { id, insert };
 }
 
 /** Connects an agent for `personId`. The returned token is the only time it can be seen. */
-export async function connectAgent(db: D1Database, personId: string, rawName: string, input: ConnectOptions = {}, now = Date.now()): Promise<{ agent: Agent; token: string }> {
+export async function connectAgent(db: D1Database, personId: string, rawName: string, input: ConnectOptions = {}, now = Date.now(), ended?: number): Promise<{ agent: Agent; token: string }> {
   const token = TOKEN_PREFIX + b64url(crypto.getRandomValues(new Uint8Array(32)));
-  const { id, insert } = await prepareAgent(db, personId, rawName, input, { tokenPrefix: token.slice(0, TOKEN_PREFIX.length + 4), tokenHash: await hashToken(token) }, now);
-  await insert.run();
+  const { id, insert } = await prepareAgent(db, personId, rawName, input, { tokenPrefix: token.slice(0, TOKEN_PREFIX.length + 4), tokenHash: await hashToken(token) }, now, ended);
+  if (!(await insert.run()).meta.changes) throw new OpError("conflict", SIGNED_OUT_MEANWHILE);
   const row = await db.prepare(`SELECT ${COLUMNS} FROM agents WHERE id = ?`).bind(id).first<AgentRow>();
   return { agent: toAgent(row!), token };
 }

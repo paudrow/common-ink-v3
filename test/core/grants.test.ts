@@ -74,6 +74,20 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     expect((await read(ada, plan.id)).text).toBe("# Plan\n\nStep one");
   });
 
+  it("can't confirm a member's name by searching for what they wrote: a name is answered as if nobody had it, and @me is still them", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const plan = await note(ada, "# Plan\n\nlaunchword");
+    const vic = await newPerson(ada, "Vic Viewer");
+    await share(ada, { noteId: plan.id }, vic.email, "view");
+    const found = (query: string) =>
+      perform(env.DB, vic.actor, { type: "search", query }).then(
+        (r) => r.results.map((x) => x.note.id),
+        (err: Error) => err.message.replace(/"[^"]*"/, "NAME"),
+      );
+    for (const filter of ["editor", "author"]) expect([filter, await found(`${filter}:"Ada Lovelace" launchword`)]).toEqual([filter, await found(`${filter}:"Nobody Atall" launchword`)]);
+    expect(await found("editor:@me launchword")).toEqual([]);
+  });
+
   it("with edit on a folder changes its notes, sees their history, and makes notes and folders in it, and only there", async () => {
     const ada = await newMember("Ada Lovelace");
     const shared = await folder(ada, "Shared");
@@ -352,6 +366,37 @@ describe("a private note", () => {
     await perform(env.DB, eve, { type: "note.setPrivate", id: secret.id, private: true });
     return { ada, eve, ed, team, open, secret };
   }
+
+  it("keeps no link or grant that another member made in the moment it became private", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve Editor");
+    const ed = await addMember(ada, "editor", "Ed Editor");
+    const outside = await newPerson(ada, "Olive Outside");
+    const diary = await note(eve, "# Diary");
+    /** `env.DB`, where Eve makes her note private just before a grant is written: after Ed was found to be allowed to share it. */
+    const racing = new Proxy(env.DB, {
+      get(db, key) {
+        const value = Reflect.get(db, key, db);
+        if (key !== "prepare") return typeof value === "function" ? value.bind(db) : value;
+        return (sql: string) => {
+          const statement = db.prepare(sql);
+          if (!sql.trimStart().startsWith("INSERT INTO grants")) return statement;
+          return { bind: (...args: unknown[]) => ({ first: async () => (await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: true }), statement.bind(...args).first()) }) };
+        };
+      },
+    });
+    const grantsOn = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FROM grants WHERE note_id = ?").bind(diary.id).first<{ n: number }>())!.n;
+
+    for (const op of [
+      { type: "grant.link", noteId: diary.id, link: "public" },
+      { type: "grant.set", noteId: diary.id, email: outside.email, access: "view" },
+    ] as const) {
+      await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: false });
+      // To Ed the note is now Eve's private one, so it is refused as one that isn't there.
+      await expect(perform(racing as D1Database, ed, op), op.type).rejects.toMatchObject({ code: "not_found" });
+      expect([op.type, await grantsOn()]).toEqual([op.type, 0]);
+    }
+  });
 
   it("is hidden from every other member, admins too, everywhere a note shows", async () => {
     const { ada, eve, ed, team, open, secret } = await withSecret();

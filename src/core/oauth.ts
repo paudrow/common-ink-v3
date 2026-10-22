@@ -10,7 +10,7 @@
 //
 // Codes and tokens are 256 random bits kept only as SHA-256 hashes, as an agent's token is. Nothing here
 // logs one, and an error never quotes one.
-import { ACCESS_PREFIX, b64url, hashToken, prepareAgent } from "./agents.ts";
+import { ACCESS_PREFIX, SIGNED_OUT_MEANWHILE, b64url, hashToken, prepareAgent } from "./agents.ts";
 import { newId } from "./ids.ts";
 import { MAX_AGENT_NAME, OpError, type ConnectOptions } from "./protocol.ts";
 
@@ -342,7 +342,7 @@ export interface Consent {
  * started it and is answered once. Nothing is made if any option is refused, and the request
  * stays to be answered again.
  */
-export async function consent(db: D1Database, personId: string, choices: Consent & ConnectOptions, now = Date.now()): Promise<{ agentId: string; code: string; redirectUri: string; state: string | null }> {
+export async function consent(db: D1Database, personId: string, choices: Consent & ConnectOptions, now = Date.now(), ended?: number): Promise<{ agentId: string; code: string; redirectUri: string; state: string | null }> {
   const { requestId, name, ...options } = choices;
   const request = await ownRequest(db, personId, requestId, now);
   const { id: agentId, insert } = await prepareAgent(
@@ -353,19 +353,24 @@ export async function consent(db: D1Database, personId: string, choices: Consent
     // The agent's own token is never issued: this is a hash nothing hashes to.
     { tokenPrefix: "oauth", tokenHash: await hashToken(secret("unissued_")), clientId: request.client_id },
     now,
+    ended,
   );
   await claim(db, personId, requestId, now);
   const code = secret(CODE_PREFIX);
   const clientId = request.client_id;
-  await db.batch([
+  const [, , , made] = await db.batch([
     // A later consent for this app replaces the earlier connection, so it does not add another agent.
     db.prepare("DELETE FROM oauth_tokens WHERE agent_id IN (SELECT id FROM agents WHERE person_id = ? AND client_id = ? AND revoked_at IS NULL)").bind(personId, clientId),
     db.prepare("DELETE FROM oauth_codes WHERE agent_id IN (SELECT id FROM agents WHERE person_id = ? AND client_id = ? AND revoked_at IS NULL)").bind(personId, clientId),
     db.prepare("UPDATE agents SET revoked_at = ? WHERE person_id = ? AND client_id = ? AND revoked_at IS NULL").bind(now, personId, clientId),
     insert,
-    db.prepare("INSERT INTO oauth_codes (hash, client_id, redirect_uri, code_challenge, agent_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)").bind(await hashToken(code), request.client_id, request.redirect_uri, request.code_challenge, agentId, now + CODE_MS),
+    // The code is for the agent just made, so a consent whose agent wasn't made, its person signed out everywhere meanwhile, gives no code either.
+    db
+      .prepare("INSERT INTO oauth_codes (hash, client_id, redirect_uri, code_challenge, agent_id, expires_at) SELECT ?, ?, ?, ?, id, ? FROM agents WHERE id = ?")
+      .bind(await hashToken(code), request.client_id, request.redirect_uri, request.code_challenge, now + CODE_MS, agentId),
     db.prepare("UPDATE oauth_clients SET last_used_at = ? WHERE id = ?").bind(now, request.client_id),
   ]);
+  if (!made!.meta.changes) throw new OpError("conflict", SIGNED_OUT_MEANWHILE);
   return { agentId, code, redirectUri: request.redirect_uri, state: request.state };
 }
 

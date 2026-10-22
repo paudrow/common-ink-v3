@@ -4,12 +4,13 @@
 //
 // The bytes are whatever somebody uploaded, served from the app's own host, so every answer is made
 // unable to act as a page of the app: see `SEALED`.
+import { sessionHolds } from "../core/accounts.ts";
 import { disposition, fileClass } from "../core/filetypes.ts";
 import { agentActor, perform, type Actor, type Visitor } from "../core/operations.ts";
 import { OpError, PART_BYTES, type OpErrorCode, type OpenedUpload } from "../core/protocol.ts";
 import { passHolder } from "../core/uploads.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
-import { listed, sessionPersonId, tokenHolder } from "./auth.ts";
+import { listed, sessionOf, sessionPersonId, tokenHolder } from "./auth.ts";
 import { sign, verify } from "./session.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 
@@ -58,7 +59,7 @@ function served(req: Request, { upload, body, etag, range }: OpenedUpload, more:
 }
 
 /** Who is asking for a workspace's files: an agent by its token, a clipper allowed by the member (which may only upload), or else the person signed in. A token is never a cookie, so no page can send it. */
-async function asker(req: Request, env: Env, url: URL, workspaceId: string): Promise<{ actor: Actor; byToken: boolean; clipper?: true } | Response> {
+async function asker(req: Request, env: Env, url: URL, workspaceId: string): Promise<{ actor: Actor; byToken: boolean; clipper?: true; ended?: number } | Response> {
   const token = bearerToken(req);
   if (token) {
     const holder = await tokenHolder(env, url, token);
@@ -66,8 +67,8 @@ async function asker(req: Request, env: Env, url: URL, workspaceId: string): Pro
     if (holder) return { byToken: true, clipper: true, actor: { kind: "member", personId: holder.clipper.personId, workspaceId } satisfies Actor };
     return json({ error: "unauthorized", message: "Send a Common Ink agent token or an OAuth access token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
   }
-  const personId = await sessionPersonId(req, env, url);
-  return personId ? { byToken: false, actor: { kind: "member", personId, workspaceId } } : json({ error: "signed_out" }, 401);
+  const session = await sessionOf(req, env, url);
+  return session ? { byToken: false, actor: { kind: "member", personId: session.personId, workspaceId }, ended: session.ended } : json({ error: "signed_out" }, 401);
 }
 
 const UPLOADS = /^\/api\/workspaces\/([a-z0-9]{12})\/uploads(?:\/([a-z0-9]{12}))?$/;
@@ -185,25 +186,28 @@ interface SiteFile extends Record<string, unknown> {
   workspaceId: string;
   uploadId: string;
   personId: string;
+  /** How many times they had been signed out everywhere when the session that asked began: the address ends with that session. */
+  ended: number;
 }
 
 /**
  * Where a member's PDF opens in a tab: on the file site, at an address that names it and them and
  * lapses in ten minutes. Null where it is downloaded: no file site, an agent, a file that isn't a PDF.
  */
-async function siteAddress(env: Env, actor: Actor, workspaceId: string, id: string): Promise<string | null> {
+async function siteAddress(env: Env, actor: Actor, workspaceId: string, id: string, ended: number | undefined): Promise<string | null> {
   const origin = fileOrigin(env);
-  if (!origin || actor.kind !== "member" || !env.SESSION_SECRET) return null;
+  if (!origin || actor.kind !== "member" || ended === undefined || !env.SESSION_SECRET) return null;
   const upload = await perform(env.DB, actor, { type: "upload.read", id });
   if (fileClass(upload) !== "pdf") return null;
-  return `${origin}/file/${await sign({ workspaceId, uploadId: id, personId: actor.personId } satisfies SiteFile, siteKey(env), SITE_SECONDS)}`;
+  return `${origin}/file/${await sign({ workspaceId, uploadId: id, personId: actor.personId, ended } satisfies SiteFile, siteKey(env), SITE_SECONDS)}`;
 }
 
 /**
  * What the file site answers, or null for a request that is the app's. With `FILE_ORIGIN` set, that
  * host answers a PDF at an address the app gave out, shown in place, and nothing else: no session
  * reaches it, and whoever the address names is asked again on every request whether they may still
- * see the file, so an address outlives no grant. Its origin is not the app's, so the browser's viewer
+ * see the file, and whether the session it came from still holds and they are still on the list, so an
+ * address outlives no grant and no sign-out. Its origin is not the app's, so the browser's viewer
  * draws there with nothing of the app's to reach.
  */
 export function fileSiteResponse(req: Request, env: Env, url: URL): Promise<Response> | null {
@@ -214,7 +218,7 @@ export function fileSiteResponse(req: Request, env: Env, url: URL): Promise<Resp
     const at = SITE_FILE.exec(url.pathname);
     if (!at || !reads(req) || !env.SESSION_SECRET) return gone();
     const named = await verify<SiteFile>(at[1], siteKey(env));
-    if (!named) return gone();
+    if (!named || typeof named.ended !== "number" || !(await sessionHolds(env.DB, named.personId, named.ended)) || !(await listed(env, url, named.personId))) return gone();
     try {
       const opened = await perform(env.DB, { kind: "member", personId: named.personId, workspaceId: named.workspaceId }, { type: "upload.open", id: named.uploadId }, Date.now(), undefined, { bucket: env.FILES, asked: req.headers });
       if (fileClass(opened.upload) !== "pdf") {
@@ -248,7 +252,7 @@ export async function handleFiles(req: Request, env: Env, url: URL): Promise<Res
   if (who.clipper) return json({ error: "forbidden", message: "The clipper can only upload files" }, 403);
   try {
     // Asked to open in a tab: a PDF goes to the file site, where there is one, and anything else is answered here as ever.
-    const site = url.searchParams.get("open") === "tab" ? await siteAddress(env, who.actor, workspaceId!, id) : null;
+    const site = url.searchParams.get("open") === "tab" ? await siteAddress(env, who.actor, workspaceId!, id, who.ended) : null;
     if (site) return new Response(null, { status: 302, headers: { Location: site, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
     return served(req, await perform(env.DB, who.actor, { type: "upload.open", id }, Date.now(), undefined, { bucket: env.FILES, asked: req.headers }));
   } catch (err) {

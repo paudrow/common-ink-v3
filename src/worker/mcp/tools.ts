@@ -1322,12 +1322,18 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       const upload = await perform(db, actor, { type: "upload.create", name: fileName as string, size: bytes.byteLength, ...(folderId === undefined ? {} : { folderId: folderId as string }), ...(writeId === undefined ? {} : { writeId: writeId as string }) }, Date.now(), sources, { bucket: reached.bucket, body: new Response(bytes).body });
       return written(withLine(upload));
     }
-    if (agent.clipper && name === "create_note" && typeof fields.writeId === "string") {
-      // The clipper writes as its member, so its write ids are its own, and a replay finds only a note it made. It can't read notes, so it is told the id alone.
-      if (fields.writeId.length > MAX_WRITE_ID - CLIPPER_WRITE.length) throw new OpError("invalid", `The clipper's writeId is at most ${MAX_WRITE_ID - CLIPPER_WRITE.length} characters`);
-      fields.writeId = CLIPPER_WRITE + fields.writeId;
-      const prior = await db.prepare(PRIOR_WRITE).bind(fields.writeId, workspaceId, "member", agent.personId).first<{ id: string }>();
-      if (prior) return text({ id: prior.id });
+    if (agent.clipper && name === "create_note") {
+      // Resolving a link or a mention looks through every note and member its member can see, and its refusals and the
+      // answer say what was found. The clipper reads nothing, so what it writes is kept as written, as the extension asks.
+      fields.linkTitles = "keep";
+      fields.mentionNames = "keep";
+      if (typeof fields.writeId === "string") {
+        // The clipper writes as its member, so its write ids are its own, and a replay finds only a note it made. It can't read notes, so it is told the id alone.
+        if (fields.writeId.length > MAX_WRITE_ID - CLIPPER_WRITE.length) throw new OpError("invalid", `The clipper's writeId is at most ${MAX_WRITE_ID - CLIPPER_WRITE.length} characters`);
+        fields.writeId = CLIPPER_WRITE + fields.writeId;
+        const prior = await db.prepare(PRIOR_WRITE).bind(fields.writeId, workspaceId, "member", agent.personId).first<{ id: string }>();
+        if (prior) return text({ id: prior.id });
+      }
     }
     const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
     return written(tool.told ? tool.told(answer as never, reached.origin, own) : answer);
