@@ -39,6 +39,7 @@ export const bullets: Plugin = {
       ["moveDown", "Move bullet down", "alt+arrowdown"],
       ["moveRight", "Move bullet right", MAC ? "alt+arrowright" : "alt+shift+arrowright"],
       ["moveLeft", "Move bullet left", MAC ? "alt+arrowleft" : "alt+shift+arrowleft"],
+      ["select", "Select bullet with what is under it", "mod+shift+l"],
       ["toggleFold", "Fold or unfold bullet", "mod+shift+."],
     ] as const;
     for (const [name, title, key] of commands) host.commands.register({ id: `bullets.${name}`, title, keys: [key], group: "Editor", ...bulletCommands[name] });

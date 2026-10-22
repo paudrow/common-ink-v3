@@ -4,7 +4,7 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemir
 import { BOX_PATTERN, isReading } from "../../plugin-api.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
 import { mathBlocksIn, type Formula } from "../math/syntax.ts";
-import { indent, itemAt, leading, move, outdent, textStart, type Edit, type Item, type Lines } from "./outline.ts";
+import { indent, itemAt, leading, move, outdent, parentOf, textStart, type Edit, type Item, type Lines } from "./outline.ts";
 
 export const linesIn = (doc: Text): Lines => ({ count: doc.lines, at: (n) => doc.line(n + 1).text });
 
@@ -266,6 +266,21 @@ const KEPT: readonly string[] = ["moveUp", "moveDown", "moveRight", "moveLeft"];
  */
 export const bulletCommands = {
   ...(Object.fromEntries(Object.entries(MAKES).map(([name, make]) => [name, { when: () => (KEPT.includes(name) ? onBullet() !== null : ready(make) !== null), run: () => edit(make) }])) as Record<keyof typeof MAKES, { when: () => boolean; run: () => void }>),
+  select: {
+    when: () => onBullet() !== null,
+    /** The bullet and everything under it, from the start of its line to the end of its last. Again, the bullet it is under, and so on out. */
+    run() {
+      const at = onBullet();
+      if (!at) return;
+      const { state } = at.view;
+      const span = (item: Item) => ({ anchor: state.doc.line(item.line + 1).from, head: state.doc.line(item.end).to });
+      const { from, to } = state.selection.main;
+      const covered = (item: Item) => from <= span(item).anchor && to >= span(item).head;
+      let item = bulletAt(state, at.line)!;
+      for (let up = parentOf(linesIn(state.doc), item); up && covered(item); up = parentOf(linesIn(state.doc), up)) item = up;
+      at.view.dispatch({ selection: span(item), scrollIntoView: true, userEvent: "select" });
+    },
+  },
   toggleFold: {
     /** A bullet folds when it has something under it. */
     when() {
