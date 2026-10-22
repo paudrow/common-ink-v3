@@ -5,6 +5,7 @@ import { authorizeUrl, covers, exchange, isGoogleSource, REACHING_SCOPES, revoke
 import { connectionOf, keepTokens } from "./sources/connections.ts";
 import { PROVIDER as GOOGLE } from "./sources/google.ts";
 import { vault } from "./vault.ts";
+import { THIS_MACHINE } from "./hosts.ts";
 import { b64url, cookie, setCookie, sign, verify } from "./session.ts";
 
 const SESSION_COOKIE = "__Host-ink_session";
@@ -12,7 +13,6 @@ const STATE_COOKIE = "__Host-ink_google";
 const SESSION_SECONDS = 30 * 86_400;
 const STATE_SECONDS = 600;
 
-const LOCAL_HOSTS = /^(localhost|127\.0\.0\.1|\[::1\])$/;
 /** A Preview's addresses on the Previews' own Worker: `pr-<n>-…` and each deployment's own `<hex>-…`. Production has no workers.dev address. */
 const PREVIEW_HOSTS = /^[a-z0-9-]+-common-ink-v3-previews\.draftox\.workers\.dev$/;
 
@@ -23,7 +23,7 @@ const PREVIEW_HOSTS = /^[a-z0-9-]+-common-ink-v3-previews\.draftox\.workers\.dev
  * DEV_SIGN_IN must not make anyone anyone there.
  */
 export const devSignIn = (env: Env, url: URL) =>
-  env.DEV_SIGN_IN === "1" && (LOCAL_HOSTS.test(url.hostname) || (PREVIEW_HOSTS.test(url.hostname) && !env.GOOGLE_CLIENT_ID && !env.ALLOWED_EMAILS));
+  env.DEV_SIGN_IN === "1" && (THIS_MACHINE.test(url.hostname) || (PREVIEW_HOSTS.test(url.hostname) && !env.GOOGLE_CLIENT_ID && !env.ALLOWED_EMAILS));
 
 const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
 
