@@ -260,7 +260,7 @@ test("/ offers an image, a video, a recording and any file to upload, and each a
   const sent = [
     { typed: "/ima", accept: "image/*", file: { name: "map.png", mimeType: "image/png", buffer: png(200, 100) } },
     { typed: "/vid", accept: "video/*", file: { name: "clip.mp4", mimeType: "video/mp4", buffer: MP4 } },
-    { typed: "/rec", accept: "audio/*", file: { name: "song.mp3", mimeType: "audio/mpeg", buffer: MP3 } },
+    { typed: "/recording", accept: "audio/*", file: { name: "song.mp3", mimeType: "audio/mpeg", buffer: MP3 } },
     { typed: "/fil", accept: null, file: { name: "minutes.bin", mimeType: "application/octet-stream", buffer: Buffer.from("fourteen bytes") } },
   ];
   for (const [i, { typed, accept, file }] of sent.entries()) {

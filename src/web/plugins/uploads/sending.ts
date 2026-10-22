@@ -152,10 +152,15 @@ export function sender(host: PluginHost) {
   /**
    * Sends files for a note and writes each where they were pasted, dropped or picked: to the note's
    * own folder, and private when the note is, so a picture isn't shown to people the note is hidden from.
+   * Answers the uploads it wrote in the note.
    */
-  async function intoNote(view: EditorView, noteId: string, files: readonly File[], at: number, userEvent: string) {
-    if (!files.length) return;
-    if (!writable(view.state)) return void host.app().notify({ message: "You can read this note, and not change it." });
+  async function intoNote(view: EditorView, noteId: string, files: readonly File[], at: number, userEvent: string): Promise<Upload[]> {
+    const written: Upload[] = [];
+    if (!files.length) return written;
+    if (!writable(view.state)) {
+      host.app().notify({ message: "You can read this note, and not change it." });
+      return written;
+    }
     const note = host.app().notes?.find((n) => n.id === noteId);
     const key = ++ids;
     view.dispatch({ effects: placing.of({ key, pos: at }) });
@@ -176,11 +181,16 @@ export function sender(host: PluginHost) {
       // A file sent in parts is written as soon as it has an id, and its line shows how far it has got until it is there.
       let placed = false;
       const sent = await send(file, { folderId: note?.folderId ?? undefined, private: note?.private || undefined }, (begun) => void (placed = place(begun)));
-      if (!sent || placed || place(sent)) continue;
+      if (!sent) continue;
+      if (placed || place(sent)) {
+        written.push(sent.upload);
+        continue;
+      }
       const { upload } = sent;
       host.app().notify({ message: `${upload.name} was uploaded, and its note has closed.`, action: { label: "Show it", run: () => host.app().go(uploadPath(upload.id)) } });
     }
     if (there()) view.dispatch({ effects: placing.of({ key, pos: null }) });
+    return written;
   }
 
   /** Asks the member for files, as a click on a file field does: those of the types `accept` names, as a file field's `accept` does, or any. */
@@ -268,6 +278,7 @@ export function sender(host: PluginHost) {
   return {
     extension,
     sendAll,
+    intoNote,
     pick,
     pickInto,
     sending: () => sending,

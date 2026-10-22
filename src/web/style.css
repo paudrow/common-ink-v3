@@ -11597,6 +11597,71 @@ a.file-chip:hover .file-chip-name {
   color: var(--muted);
 }
 
+.cm-editor .cm-tooltip.upload-recorder {
+  box-sizing: border-box;
+  width: min(18rem, calc(100vw - 16px));
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-family: var(--prose);
+  font-size: calc(13px * var(--text-scale));
+}
+
+.upload-recorder-words {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.upload-recorder-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-recorder-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.upload-recorder-dot.live {
+  background: var(--danger);
+  animation: upload-recorder-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes upload-recorder-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upload-recorder-dot.live {
+    animation: none;
+  }
+}
+
+.upload-recorder-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.upload-recording-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 .file-page {
   display: flex;
   flex-direction: column;

@@ -28,7 +28,7 @@ async function open(page: Page, body: string) {
   return note;
 }
 
-const EMBEDS = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Drawing/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Insert an upload/];
+const EMBEDS = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Drawing/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Record your voice/, /^Insert an upload/];
 
 test("/ says what each item makes in words, with a picture of it, under Blocks and Embeds, and never shows syntax", async ({ page }) => {
   await open(page, "# Insert\n\n");

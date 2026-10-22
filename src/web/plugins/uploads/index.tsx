@@ -8,6 +8,7 @@ import { FILE_PATH, PREVIEW } from "./opening.ts";
 import { uploadsAt } from "./pointing.ts";
 import { outline, panel, sketch, words } from "../lib/sketch.ts";
 import { Preview } from "./Preview.tsx";
+import { recorder, RecordingStatus } from "./recording.tsx";
 import { sender, type Sender } from "./sending.ts";
 import { UploadsPage } from "./UploadsPage.tsx";
 
@@ -53,14 +54,17 @@ const SENDS: readonly { title: string; accept?: string; description: string; pic
   { title: "Upload a file", description: "Any file from your computer, shown as what it is", picture: sketch(outline(30, 10, 140, 64, 6) + panel(30, 10, 140, 22, 6) + words(40, 18, 70) + words(124, 18, 36) + words(40, 44, 120) + words(40, 56, 90)) },
 ];
 
+/** A microphone beside a recording's line, as the insert menu pictures recording in the note. */
+const RECORD_PICTURE = sketch(panel(16, 26, 132, 32, 16) + `<circle cx="34" cy="42" r="6"/>` + words(50, 39, 84) + outline(160, 22, 20, 30, 10) + `<path d="M154 46 a16 16 0 0 0 32 0 M170 62 v8 M162 72 h16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>`);
+
 /** Pictures in a row, as the insert menu pictures uploads to choose from. */
 const INSERT_PICTURE = sketch([20, 76, 132].map((x) => framed(x, 18, 48, 48)).join(""));
 
 /**
  * Uploads: files in a workspace that a note shows by `::image{id 640x480}`, `::video{id 640x360}`,
  * `::audio{id}` or `::file{id}`. A file pasted, dropped or picked into a note is sent and written
- * there, `@` finds one already uploaded among everything else it lists, and the Uploads page lists
- * every one the member can see. A file opens as its kind does
+ * there, as is a recording made in it. `@` finds one already uploaded among everything else it
+ * lists, and the Uploads page lists every one the member can see. A file opens as its kind does
  * (`openUpload`): a picture, a video or a recording in a preview, a PDF in a tab, and text on its own
  * page at `/file/<id>`, read and not changed.
  */
@@ -72,10 +76,12 @@ export const uploads: Plugin = {
   activate(host) {
     const sending = sender(host);
     const inserting = inserter(host);
+    const recording = recorder(host, sending);
     const { embeds, stop } = uploadEmbeds(
       host,
       [
         ...SENDS.map(({ title, accept, description, picture }) => ({ title, description, preview: { image: picture }, insert: sending.pickInto(accept) })),
+        { title: "Record your voice", description: "Your microphone, recorded here and played in the note", preview: { image: RECORD_PICTURE }, insert: recording.ask },
         { title: "Insert an upload", description: "A file already uploaded to the workspace", preview: { image: INSERT_PICTURE }, insert: inserting.ask },
       ],
       { of: sending.of, subscribe: sending.subscribe },
@@ -83,8 +89,11 @@ export const uploads: Plugin = {
     for (const embed of embeds) host.embeds.register(embed);
     host.editorExtensions.register({ id: "uploads", extension: sending.extension });
     host.editorExtensions.register({ id: "upload-inserting", extension: inserting.extension });
+    host.editorExtensions.register({ id: "upload-recording", extension: recording.extension });
+    host.commands.register({ id: "uploads.record", title: "Record your voice", aliases: ["record audio", "voice note", "microphone", "dictate"], group: "Editor", run: recording.run });
     host.completions.register({ id: "uploads.at", trigger: "@", spaces: true, items: uploadsAt(host) });
     host.views.register("bar", { id: "uploads", live: true, component: () => <SendingStatus sender={sending} /> });
+    host.views.register("bar", { id: "upload-recording", live: true, component: () => <RecordingStatus recorder={recording} /> });
     host.views.register("page", { id: "uploads", path: UPLOADS_PATH, label: "Uploads", icon: "uploads", nav: "more", component: (props) => <UploadsPage host={host} sender={sending} {...props} /> });
     host.views.register("page", { id: "file", path: FILE_PATH, label: "File", icon: "text", component: (props) => <FilePage key={props.app.path} host={host} {...props} /> });
     host.views.register("overlay", { id: PREVIEW, component: (props) => <Preview host={host} {...props} /> });
