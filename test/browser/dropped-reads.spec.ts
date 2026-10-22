@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { anotherPerson, connectAgent, dropFirst, editOf, join, panelIcon, perform, signInAsNewPerson, test } from "./helpers.ts";
 import { codeHashOf, install, openPlugins, runCommand, toast, turnOn } from "./third-party-helpers.ts";
 
@@ -142,4 +142,46 @@ test("which agents wrote anything, unread once, isn't said to be none, and is re
 
   await perform(page, { type: "note.create", text: "# Mine" });
   await expect(row.getByRole("button", { name: "See its changes" })).toBeVisible({ timeout: 10_000 });
+});
+
+const trashedFile = (page: Page) =>
+  page.evaluate(async () => {
+    const workspaceId = ((await (await fetch("/api/me")).json()) as { workspaces: { id: string }[] }).workspaces[0]!.id;
+    const headers = { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name: "list.txt" })) };
+    const { id } = (await (await fetch(`/api/workspaces/${workspaceId}/uploads`, { method: "POST", headers, body: "milk\n" })).json()) as { id: string };
+    return id;
+  });
+
+test("the files in Trash, unread once, aren't said to be none, and are read when Trash opens again", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "upload.trash", id: await trashedFile(page) });
+  await page.goto("/dashboard");
+  const trashed = await dropFirst(page, "upload.trashed");
+  const notes = page.waitForResponse((res) => res.url().endsWith("/ops") && (res.request().postDataJSON() as { type: string }).type === "trash.list");
+
+  await page.goto("/trash");
+  await notes;
+  await trashed.handled();
+  const trash = page.getByRole("region", { name: "Trash" });
+  await expect(trash.getByRole("alert")).toHaveText("Internal Server Error");
+  await expect(trash.getByText("Trash is empty.")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("list", { name: "Files in Trash" }).getByRole("listitem")).toHaveText([/^list\.txt/]);
+  await expect(trash.getByRole("alert")).toHaveCount(0);
+});
+
+test("the files in Trash, unread once, are read when Trash changes", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "upload.trash", id: await trashedFile(page) });
+  const scrap = await perform(page, { type: "note.create", text: "# Scrap" });
+  await page.goto("/dashboard");
+  const trashed = await dropFirst(page, "upload.trashed");
+
+  await page.goto("/trash");
+  await trashed.handled();
+  await perform(page, { type: "note.trash", id: scrap.id });
+
+  await expect(page.getByRole("list", { name: "Notes in Trash" }).getByRole("listitem")).toHaveText([/^Scrap/], { timeout: 20_000 });
+  await expect(page.getByRole("list", { name: "Files in Trash" }).getByRole("listitem")).toHaveText([/^list\.txt/]);
 });
