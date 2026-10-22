@@ -89,6 +89,22 @@ const firstEdge = (page: Page) =>
     return first.left - r.left;
   });
 
+const clocked = new WeakSet<Page>();
+/** A trackpad stroke: wheel events a frame apart in the page's own time, however slow the machine is. A gap longer than the app's idle gap (`IDLE_MS`) would end the stroke there, and the days would settle. */
+async function stroke(page: Page, deltas: [number, number][]) {
+  if (!clocked.has(page)) {
+    await page.clock.install();
+    clocked.add(page);
+  }
+  // A second ahead, as the page's clock runs on while this is asked; the days are at rest, so nothing moves in that second.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  for (const [dx, dy] of deltas) {
+    await page.mouse.wheel(dx, dy);
+    await page.clock.runFor(16);
+  }
+  await page.clock.resume();
+}
+
 test("a sideways scroll slides the days continuously and settles on a day's edge, with the hours, the header and the gutter staying put and every day read before it shows", async ({ page }) => {
   await openWithSample(page);
   const week = thisWeek();
@@ -106,10 +122,7 @@ test("a sideways scroll slides the days continuously and settles on a day's edge
   await page.mouse.move(over.x, over.y);
   await expect(column(page, week[3]!).locator(".cal-ghost")).toHaveCount(1);
   // A sideways trackpad stroke leans a little up and down as fingers do.
-  for (let i = 0; i < 12; i++) {
-    await page.mouse.wheel(45, i % 2 ? 9 : -6);
-    await page.waitForTimeout(16);
-  }
+  await stroke(page, Array.from({ length: 12 }, (_, i) => [45, i % 2 ? 9 : -6]));
   await expect.poll(() => firstEdge(page), { message: "settled on a day's edge" }).toBeCloseTo(0, 0);
   const moved = await daysInView(page);
   const by = (Date.parse(moved[0]!) - Date.parse(week[0]!)) / DAY_MS;
@@ -145,10 +158,7 @@ test("a long slide passes each day once and in order, while the window of days d
   const week = thisWeek();
   await watch(page);
   await page.mouse.move(700, 300);
-  for (let i = 0; i < 40; i++) {
-    await page.mouse.wheel(60, 0);
-    await page.waitForTimeout(16);
-  }
+  await stroke(page, Array.from({ length: 40 }, () => [60, 0]));
   await expect.poll(() => firstEdge(page)).toBeCloseTo(0, 0);
   const { centres, unread } = await seen(page);
   const back = centres.findIndex((day, i) => i > 0 && day < centres[i - 1]!);
@@ -447,10 +457,7 @@ const scrollTop = (page: Page) => grid(page).locator(".cal-tg-scroll").evaluate(
 async function swipe(page: Page, by: number) {
   const box = (await grid(page).locator(".cal-tg-scroll").boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  for (let i = 0; i < 6; i++) {
-    await page.mouse.wheel(by / 6, i % 2 ? 4 : -3);
-    await page.waitForTimeout(16);
-  }
+  await stroke(page, Array.from({ length: 6 }, (_, i) => [by / 6, i % 2 ? 4 : -3]));
 }
 
 test("the views are offered Day, 3 days, Week, Month, and Agenda after them", async ({ page }) => {
