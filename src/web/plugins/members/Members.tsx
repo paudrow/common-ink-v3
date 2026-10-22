@@ -344,9 +344,9 @@ export function Members({ host, app }: { host: PluginHost; app: App }) {
               {fresh.email} is invited as {fresh.role === "viewer" ? "a" : "an"}{" "}
               {fresh.role}.
             </strong>{" "}
-            They are in {workspace.name} the next time they sign in with that
-            email. Common Ink doesn't email them, so tell them, or send this
-            link.
+            Someone new is in {workspace.name} when they first sign in with
+            that email. Someone who already has an account joins at this link,
+            when they choose to. Common Ink doesn't email them, so send it.
           </p>
           <Copyable label="Invite link" value={inviteLink(fresh)} />
           <p className="hint">

@@ -1,4 +1,4 @@
-import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
+import { acceptInvite, arrive, invitation, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
 import { perform, trustedCode, type Actor, type Visitor } from "../core/operations.ts";
 import { redeemFrame } from "../core/pluginRecord.ts";
 import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../core/protocol.ts";
@@ -72,7 +72,7 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
   if (!personId) return json({ error: "signed_out" }, 401);
 
   if (url.pathname === "/api/me" && req.method === "GET") {
-    // Opening the app is arriving: an invite made since the person signed in takes effect here.
+    // Opening the app is arriving: a workspace of their own if they are in none, and the invites made before they had an account.
     await arrive(env.DB, personId);
     return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
   }
@@ -80,8 +80,21 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
   // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
   const lookup = /^\/api\/(notes|invites)\/([a-z0-9]{12})$/.exec(url.pathname);
   if (lookup && req.method === "GET") {
-    if (lookup[1] === "invites") await arrive(env.DB, personId);
-    const workspaceId = await (lookup[1] === "notes" ? workspaceOfNote : workspaceOfInvite)(env.DB, personId, lookup[2]!);
+    if (lookup[1] === "notes") {
+      const workspaceId = await workspaceOfNote(env.DB, personId, lookup[2]!);
+      return workspaceId ? json({ workspaceId }) : json({ error: "not_found" }, 404);
+    }
+    // An invite's link leads its person into the workspace once they have joined, and until then says what the invite is.
+    await arrive(env.DB, personId);
+    const workspaceId = await workspaceOfInvite(env.DB, personId, lookup[2]!);
+    if (workspaceId) return json({ workspaceId });
+    const invite = await invitation(env.DB, personId, lookup[2]!);
+    return invite ? json({ invite }) : json({ error: "not_found" }, 404);
+  }
+  // Joining by an invite is the person's own choice, made on Common Ink's page: a link followed from another site doesn't make it.
+  if (lookup?.[1] === "invites" && req.method === "POST") {
+    if (req.headers.get("Origin") !== url.origin) return json({ error: "forbidden", message: "Join from Common Ink itself" }, 403);
+    const workspaceId = await acceptInvite(env.DB, personId, lookup[2]!);
     return workspaceId ? json({ workspaceId }) : json({ error: "not_found" }, 404);
   }
 

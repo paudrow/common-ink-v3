@@ -1,6 +1,6 @@
 import { allows, itemLevel } from "./access.ts";
 import { newId } from "./ids.ts";
-import type { Me, Standing } from "./protocol.ts";
+import type { Invitation, Me, Standing } from "./protocol.ts";
 import { MAKER_SHARES } from "./sharing.ts";
 import { standingIn } from "./standing.ts";
 
@@ -48,14 +48,46 @@ export async function sessionHolds(db: D1Database, personId: string, sessionsEnd
 const STANDS = "EXISTS (SELECT 1 FROM members a WHERE a.workspace_id = i.workspace_id AND a.person_id = i.invited_by AND a.role = 'admin')";
 
 /**
+ * The invites a person is taken into without being asked: those made before they had an account, which their first
+ * sign-in takes up. One made for someone who already had an account waits for them to accept it, at its link, since
+ * anyone who is an admin anywhere can invite any email, and a member is someone that workspace's admins can sign out
+ * everywhere and whose agents its content reaches.
+ */
+const UNASKED = "i.created_at <= p.created_at";
+
+/** The statements that make the person a member by the invites `which` names among theirs that still stand, and take those invites up. */
+const takeUp = (db: D1Database, personId: string, which: string, bound: unknown, now: number) => [
+  db
+    .prepare(
+      `INSERT INTO members (workspace_id, person_id, role, joined_at)
+       SELECT i.workspace_id, p.id, i.role, ?2 FROM invites i JOIN people p ON p.email = i.email WHERE p.id = ?1 AND i.state = 'pending' AND ${STANDS} AND ${which}
+       ON CONFLICT (workspace_id, person_id) DO NOTHING`,
+    )
+    .bind(personId, now, bound),
+  // Whoever was a guest is a member now, with the role they were offered. The grants that made them a guest
+  // would from here on only narrow that role, which nobody chose, so they go. One on a private note stays: it is what lets them in.
+  db
+    .prepare(
+      `DELETE FROM grants WHERE kind = 'person' AND person_id = ?1
+         AND EXISTS (SELECT 1 FROM invites i JOIN people p ON p.email = i.email WHERE p.id = ?1 AND i.workspace_id = grants.workspace_id AND i.state = 'pending' AND ${STANDS} AND ${which})
+         AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.private_owner IS NOT NULL)
+         AND NOT EXISTS (SELECT 1 FROM uploads u WHERE u.id = grants.upload_id AND u.private_owner IS NOT NULL)`,
+    )
+    .bind(personId, now, bound),
+  db
+    .prepare(`UPDATE invites AS i SET state = 'accepted', decided_at = ?2 WHERE i.state = 'pending' AND ${STANDS} AND EXISTS (SELECT 1 FROM people p WHERE p.id = ?1 AND p.email = i.email AND ${which})`)
+    .bind(personId, now, bound),
+];
+
+/**
  * What a person finds done each time they sign in or open Common Ink: a workspace of their own if
- * they are in none, and a place in every workspace their email has been invited to. Their email was
- * checked when they signed in, so an invite is taken up by nobody else.
+ * they are in none, and a place in every workspace that invited their email before they had an
+ * account. Their email was checked when they signed in, so an invite is taken up by nobody else.
  */
 export async function arrive(db: D1Database, personId: string, now = Date.now()): Promise<void> {
   const person = await db
     .prepare(
-      `SELECT p.name, p.email, EXISTS (SELECT 1 FROM members m WHERE m.person_id = p.id) AS member, EXISTS (SELECT 1 FROM invites i WHERE i.email = p.email AND i.state = 'pending') AS invited,
+      `SELECT p.name, p.email, EXISTS (SELECT 1 FROM members m WHERE m.person_id = p.id) AS member, EXISTS (SELECT 1 FROM invites i WHERE i.email = p.email AND i.state = 'pending' AND ${UNASKED}) AS invited,
          EXISTS (SELECT 1 FROM grants g WHERE g.email = p.email AND g.kind = 'person' AND g.person_id IS NULL) AS granted
        FROM people p WHERE p.id = ?`,
     )
@@ -65,26 +97,26 @@ export async function arrive(db: D1Database, personId: string, now = Date.now())
   if (!person.member) await createFirstWorkspace(db, personId, `${person.name.split(/\s+/)[0]}'s workspace`, now);
   if (person.granted) await takeUpGrants(db, personId, person.email);
   if (!person.invited) return;
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO members (workspace_id, person_id, role, joined_at)
-         SELECT i.workspace_id, p.id, i.role, ?2 FROM invites i JOIN people p ON p.email = i.email WHERE p.id = ?1 AND i.state = 'pending' AND ${STANDS}
-         ON CONFLICT (workspace_id, person_id) DO NOTHING`,
-      )
-      .bind(personId, now),
-    // Whoever was a guest is a member now, with the role they were offered. The grants that made them a guest
-    // would from here on only narrow that role, which nobody chose, so they go. One on a private note stays: it is what lets them in.
-    db
-      .prepare(
-        `DELETE FROM grants WHERE kind = 'person' AND person_id = ?1
-           AND EXISTS (SELECT 1 FROM invites i JOIN people p ON p.email = i.email WHERE p.id = ?1 AND i.workspace_id = grants.workspace_id AND i.state = 'pending' AND ${STANDS})
-           AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.private_owner IS NOT NULL)
-           AND NOT EXISTS (SELECT 1 FROM uploads u WHERE u.id = grants.upload_id AND u.private_owner IS NOT NULL)`,
-      )
-      .bind(personId),
-    db.prepare(`UPDATE invites AS i SET state = 'accepted', decided_at = ?2 WHERE i.state = 'pending' AND i.email = (SELECT email FROM people WHERE id = ?1) AND ${STANDS}`).bind(personId, now),
-  ]);
+  // `takeUp` binds the invite `acceptInvite` names as ?3, which is null here: every invite of theirs from before their account.
+  await db.batch(takeUp(db, personId, `${UNASKED} AND ?3 IS NULL`, null, now));
+}
+
+/** What an invite that waits for this person to accept it says, or null when it is no such invite of theirs. */
+export async function invitation(db: D1Database, personId: string, inviteId: string): Promise<Invitation | null> {
+  return db
+    .prepare(
+      `SELECT w.name AS workspace, i.role, b.name AS invitedBy FROM invites i JOIN people p ON p.email = i.email AND p.id = ?1
+       JOIN workspaces w ON w.id = i.workspace_id JOIN people b ON b.id = i.invited_by
+       WHERE i.id = ?2 AND i.state = 'pending' AND w.deleting_at IS NULL AND ${STANDS}`,
+    )
+    .bind(personId, inviteId)
+    .first<Invitation>();
+}
+
+/** The person accepts the invite at its link: they are a member of its workspace from now, which is answered. Null when it is no invite waiting for them. */
+export async function acceptInvite(db: D1Database, personId: string, inviteId: string, now = Date.now()): Promise<string | null> {
+  await db.batch(takeUp(db, personId, "i.id = ?3", inviteId, now));
+  return workspaceOfInvite(db, personId, inviteId);
 }
 
 /**

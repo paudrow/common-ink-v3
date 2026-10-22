@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { arrive, signIn, whoAmI, workspaceOfNote } from "../../src/core/accounts.ts";
+import { acceptInvite, arrive, signIn, whoAmI, workspaceOfNote } from "../../src/core/accounts.ts";
 import { connectAgent, hashToken } from "../../src/core/agents.ts";
 import { sealOldLinks } from "../../src/core/linkSeal.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
@@ -240,9 +240,11 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     await share(eve, { noteId: diary.id }, gus.email, "view");
     expect((await read(gus.actor, plan.id)).access).toBe("view");
 
-    await perform(env.DB, ada, { type: "member.invite", email: gus.email, as: "editor" });
+    const { invite } = await perform(env.DB, ada, { type: "member.invite", email: gus.email, as: "editor" }, Date.now() + 1000);
     expect((await read(gus.actor, plan.id)).access).toBe("view");
     await arrive(env.DB, gus.personId);
+    expect((await read(gus.actor, plan.id)).access, "until they join, they are a guest still").toBe("view");
+    await acceptInvite(env.DB, gus.personId, invite!.id);
 
     expect((await whoAmI(env.DB, gus.personId)).workspaces.map((w) => `${w.name}: ${w.role}`)).toEqual(["Gus's workspace: admin", "Ada's workspace: editor"]);
     expect((await read(gus.actor, plan.id)).access).toBe("edit");

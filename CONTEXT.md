@@ -282,7 +282,7 @@ An admin deleting a workspace, from Settings, after typing its name. It can't be
 _Avoid_: Archiving a workspace, closing a workspace
 
 **Invite**:
-An admin's offer of a role in a workspace to an email. Whoever signs in with that email is a member from then on, and from the next time they open Common Ink if they were signed in already. Until then the admin can revoke it. A workspace has one invite for an email, and inviting it again changes the role offered. The email is matched as the person's sign-in gives it, ignoring case and nothing else. The admin is given a link to send, since Common Ink sends no email. The link lets in only the invited email, so it is safe wherever it ends up. An invite does not let anyone sign in who otherwise couldn't.
+An admin's offer of a role in a workspace to an email. Someone who first signs in with that email after it was made is a member from then on. Someone who already had an account is a member only once they join at the invite's link, which shows them the workspace, the role and who invited them: anyone who is an admin anywhere can invite any email, and a member is someone that workspace's admins can sign out everywhere, and whose unpinned agents reach it. Until it is taken up the admin can revoke it. A workspace has one invite for an email, and inviting it again changes the role offered. The email is matched as the person's sign-in gives it, ignoring case and nothing else. The admin is given a link to send, since Common Ink sends no email. The link lets in only the invited email, so it is safe wherever it ends up. An invite does not let anyone sign in who otherwise couldn't.
 _Avoid_: Invitation, request
 
 **Grant**:

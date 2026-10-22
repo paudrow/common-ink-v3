@@ -101,7 +101,9 @@ export async function anotherPerson(page: Page, name: string): Promise<Page> {
 export async function join(page: Page, admin: Page, role: Role): Promise<{ workspaceId: string; inviteId: string }> {
   const workspaceId = (await me(admin)).workspaces[0]!.id;
   const { invite } = await perform(admin, { type: "member.invite", email: (await me(page)).person.email, as: role });
-  await me(page);
+  // They have an account already, so the invite waits for them to join, which they do from Common Ink's own page.
+  const joined = await page.evaluate(async (id) => (await fetch(`/api/invites/${id}`, { method: "POST" })).status, invite!.id);
+  expect(joined).toBe(200);
   return { workspaceId, inviteId: invite!.id };
 }
 

@@ -27,7 +27,7 @@ Only an admin can invite.
 3. Press **Invite**.
 4. Copy the **Invite link** and send it to them.
 
-Common Ink sends no email, so the link is how the person hears about it. The link admits only the email it was made for, whoever ends up holding it. The person becomes a member the next time they sign in with that email.
+Common Ink sends no email, so the link is how the person hears about it. The link admits only the email it was made for, whoever ends up holding it. Someone who signs in for the first time with that email is a member from then on. Someone who already has an account opens the link and chooses to join: it shows them the workspace, the role and who invited them, and they become a member only when they press **Join**.
 
 Pending invites are listed under **Invited**. Press **Link** to show an invite's link again, or **Revoke** to take it back. Inviting the same email again changes the role offered.
 

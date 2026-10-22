@@ -43,6 +43,9 @@ describe("what an address shows", () => {
     expect(showing(INVITE, new Map(), BOTH, OWN.id)).toEqual({ kind: "asking" });
     expect(showing(INVITE, new Map([["invite:bbbbbbbbbbbb", TEAM.id]]), BOTH, OWN.id)).toEqual({ kind: "joined", workspace: TEAM });
     expect(showing(INVITE, new Map([["invite:bbbbbbbbbbbb", null]]), BOTH, OWN.id)).toEqual({ kind: "not-invited" });
+    // One that waits for them to join is shown to them, to join or not.
+    const invitation = { workspace: "Team", role: "editor", invitedBy: "Ada Lovelace" } as const;
+    expect(showing(INVITE, new Map([["invite:bbbbbbbbbbbb", invitation]]), BOTH, OWN.id)).toEqual({ kind: "invited", inviteId: "bbbbbbbbbbbb", invitation });
     expect(showing(INVITE, new Map([["bbbbbbbbbbbb", TEAM.id]]), BOTH, OWN.id), "a note with the same id says nothing of the invite").toEqual({ kind: "asking" });
   });
 
