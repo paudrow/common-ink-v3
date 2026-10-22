@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { contextMenus } from "./Menu.tsx";
 
 /** How long the pointer rests on an anchor before its card shows, so passing over one shows nothing. */
 const SHOW_MS = 350;
@@ -54,6 +55,8 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
   const open = (anchor: HTMLElement, key: string, how: Showing) => {
     clearTimeout(showing);
     clearTimeout(hiding);
+    // A card would cover the menu, which is beside its anchor too.
+    if (contextMenus.open()) return close();
     if (shown?.anchor === anchor && shown.key === key) {
       shown.how = how;
       holder!.dataset.showing = how;
@@ -145,6 +148,10 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
   page?.addEventListener("focusin", focused, true);
   page?.addEventListener("focusout", blurred, true);
   page?.addEventListener("keydown", escape, true);
+  const unwatch = contextMenus.onOpen(() => {
+    clearTimeout(showing);
+    close();
+  });
 
   return {
     show: open,
@@ -160,6 +167,7 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
       page?.removeEventListener("focusin", focused, true);
       page?.removeEventListener("focusout", blurred, true);
       page?.removeEventListener("keydown", escape, true);
+      unwatch();
     },
   };
 }
