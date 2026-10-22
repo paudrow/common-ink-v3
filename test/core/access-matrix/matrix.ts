@@ -901,6 +901,8 @@ export function accessMatrix(part: ActorName | null) {
     needs?: { folder: FolderName } | { note: NoteName } | { anyOf: readonly NoteName[] };
     /** The same query naming something that was never there. */
     missing?: string;
+    /** It names a member, whom a guest is never told of: to a guest it is answered as a name nobody has. */
+    member?: true;
   }
   const NOTE_FILTERS: Record<string, Row[]> = {
     folder: [
@@ -917,8 +919,8 @@ export function accessMatrix(part: ActorName | null) {
       { query: "editor:@me", finds: ({ name, agent }) => (agent ? [] : name === "Ada, an admin" ? BY_ADA : NOTES.filter((note) => MAKER[note] === name)) },
     ],
     author: [
-      { query: 'author:"Vera Viewer"', finds: ["vpriv"], needs: { note: "vpriv" }, missing: 'author:"Nobody Viewer"' },
-      { query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"' },
+      { query: 'author:"Vera Viewer"', finds: ["vpriv"], needs: { note: "vpriv" }, missing: 'author:"Nobody Viewer"', member: true },
+      { query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"', member: true },
       { query: "-author:@me", finds: ({ name, agent }) => (agent ? NOTES : name === "Ada, an admin" ? NOTES.filter((note) => MAKER[note]) : NOTES.filter((note) => MAKER[note] !== name)) },
     ],
     is: [
@@ -962,8 +964,8 @@ export function accessMatrix(part: ActorName | null) {
     name: [{ query: "name:File-team", finds: ["team"] }, { query: "file-DEEP OR name:file-lone", finds: ["deep", "lone"] }, { query: "-name:.png", finds: [] }],
     type: [{ query: "type:image", finds: NOTES }, { query: "type:pdf OR type:text OR kind:other OR type:video OR type:audio", finds: [] }],
     uploader: [
-      { query: 'uploader:"Eve Editor"', finds: ["secret"], needs: { note: "secret" }, missing: 'uploader:"Nobody Editor"' },
-      { query: 'uploaded-by:"ada lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'uploaded-by:"Nobody Lovelace"' },
+      { query: 'uploader:"Eve Editor"', finds: ["secret"], needs: { note: "secret" }, missing: 'uploader:"Nobody Editor"', member: true },
+      { query: 'uploaded-by:"ada lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'uploaded-by:"Nobody Lovelace"', member: true },
       { query: "uploader:@me", finds: ({ name, agent }) => (agent ? [] : name === "Ada, an admin" ? BY_ADA : NOTES.filter((note) => MAKER[note] === name)) },
     ],
     // `open` shows the upload beside `team`: it is used for whoever sees `open`, and for nobody else.
@@ -986,7 +988,7 @@ export function accessMatrix(part: ActorName | null) {
     updated: [{ query: "updated:>=yesterday", finds: NOTES }],
     created: [{ query: "created:<2020-01-01", finds: [] }],
     editor: [{ query: 'editor:"Zed-agent"', finds: ["secret"], needs: { note: "secret" }, missing: 'editor:"Nobody-agent"' }],
-    author: [{ query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"' }],
+    author: [{ query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"', member: true }],
     is: [
       { query: "is:open", finds: NOTES },
       { query: "is:done", finds: [] },
@@ -1038,12 +1040,14 @@ export function accessMatrix(part: ActorName | null) {
               const key = `${type} ${row.query}`;
               const input: OpInput = type === "search" ? { type, query: row.query, today, limit: 50 } : { type, query: row.query, today };
               const there = !row.needs || ("folder" in row.needs ? seesFolder(row.needs.folder) : "note" in row.needs ? sees(row.needs.note) : row.needs.anyOf.some(sees));
+              // A guest is told no member's name, so one they guess finds nothing they could tell from a name nobody has.
+              const unknown = !there || (row.member && roleOf(name) === "guest");
               if (row.missing) {
                 // Naming what the actor can't see is answered in the words naming what was never there is, with the name alone different.
                 const blank = (text: string) => text.replace(/"[^"]*"/g, '"…"').replace(/of the query: .*\)$/, "");
                 const missing = await said({ ...input, query: row.missing } as OpInput);
                 expect(missing, `${key}: what was never there`).toMatch(/^invalid: (No folder named|Nobody named) "/);
-                if (!there) {
+                if (unknown) {
                   expect(blank(await said(input)), `${key}: hidden`).toBe(blank(missing));
                   continue;
                 }

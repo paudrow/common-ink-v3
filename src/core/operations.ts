@@ -1680,15 +1680,17 @@ export async function finding(ctx: Context, scope: Scope, op: { query: string; t
     }
     return [...under];
   };
+  // A member is found by name only by an asker who is told members' names, as `unnamed` decides; anyone else finds only themself, so a name answers as if nobody had it.
+  const namedTo = "(?4 OR p.id = ?5)";
   const authors = async (named: string): Promise<string[]> => {
     if (named.toLowerCase() === "@me") return [`${ctx.author.kind}:${authorId(ctx)}`];
     const changed = (kind: string, id: string) => `EXISTS (SELECT 1 FROM changes c JOIN notes n ON n.id = c.note_id WHERE c.author_kind = '${kind}' AND c.author_id = ${id} AND n.workspace_id = ?1 AND ${SEEN("n", "?2", "any")})`;
     const { results } = await ctx.db
       .prepare(
-        `SELECT 'member:' || p.id AS author FROM people p WHERE p.name = ?3 COLLATE NOCASE AND ${changed("member", "p.id")}
+        `SELECT 'member:' || p.id AS author FROM people p WHERE p.name = ?3 COLLATE NOCASE AND ${namedTo} AND ${changed("member", "p.id")}
          UNION ALL SELECT 'agent:' || a.id FROM agents a WHERE a.name = ?3 COLLATE NOCASE AND ${changed("agent", "a.id")}`,
       )
-      .bind(ctx.workspaceId, ctx.sight.bind, named)
+      .bind(ctx.workspaceId, ctx.sight.bind, named, ctx.namesMembers ? 1 : 0, ctx.personId)
       .all<{ author: string }>();
     if (!results.length) throw new OpError("invalid", `Nobody named "${named}" has changed a note you can see`);
     return results.map((r) => r.author);
@@ -1699,10 +1701,10 @@ export async function finding(ctx: Context, scope: Scope, op: { query: string; t
     const uploaded = (kind: string, id: string) => `EXISTS (SELECT 1 FROM uploads u WHERE u.uploaded_by = ${id} AND u.uploaded_by_kind = '${kind}' AND u.workspace_id = ?1 AND ${SEEN("u", "?2", "any")})`;
     const { results } = await ctx.db
       .prepare(
-        `SELECT 'member:' || p.id AS author FROM people p WHERE p.name = ?3 COLLATE NOCASE AND ${uploaded("member", "p.id")}
+        `SELECT 'member:' || p.id AS author FROM people p WHERE p.name = ?3 COLLATE NOCASE AND ${namedTo} AND ${uploaded("member", "p.id")}
          UNION ALL SELECT 'agent:' || a.id FROM agents a WHERE a.name = ?3 COLLATE NOCASE AND ${uploaded("agent", "a.id")}`,
       )
-      .bind(ctx.workspaceId, ctx.sight.bind, named)
+      .bind(ctx.workspaceId, ctx.sight.bind, named, ctx.namesMembers ? 1 : 0, ctx.personId)
       .all<{ author: string }>();
     if (!results.length) throw new OpError("invalid", `Nobody named "${named}" has uploaded a file you can see`);
     return results.map((r) => r.author);

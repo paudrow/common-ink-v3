@@ -74,6 +74,20 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     expect((await read(ada, plan.id)).text).toBe("# Plan\n\nStep one");
   });
 
+  it("can't confirm a member's name by searching for what they wrote: a name is answered as if nobody had it, and @me is still them", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const plan = await note(ada, "# Plan\n\nlaunchword");
+    const vic = await newPerson(ada, "Vic Viewer");
+    await share(ada, { noteId: plan.id }, vic.email, "view");
+    const found = (query: string) =>
+      perform(env.DB, vic.actor, { type: "search", query }).then(
+        (r) => r.results.map((x) => x.note.id),
+        (err: Error) => err.message.replace(/"[^"]*"/, "NAME"),
+      );
+    for (const filter of ["editor", "author"]) expect([filter, await found(`${filter}:"Ada Lovelace" launchword`)]).toEqual([filter, await found(`${filter}:"Nobody Atall" launchword`)]);
+    expect(await found("editor:@me launchword")).toEqual([]);
+  });
+
   it("with edit on a folder changes its notes, sees their history, and makes notes and folders in it, and only there", async () => {
     const ada = await newMember("Ada Lovelace");
     const shared = await folder(ada, "Shared");
