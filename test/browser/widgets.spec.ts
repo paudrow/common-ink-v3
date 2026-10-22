@@ -126,8 +126,9 @@ test("an ordinary word after a / and Enter or Tab stays as it was typed", async 
   await page.keyboard.press("Enter");
   await page.keyboard.type("x /wat");
   await settled(page);
+  // With no menu open, Tab is the note's own: it adds room after the word and takes nothing from it.
   await page.keyboard.press("Tab");
-  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /hr\nN /A\n/an\n> /tmr\n> in /or\n> x /wat");
+  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /hr\nN /A\n/an\n> /tmr\n> in /or\n> x /wat  ");
 });
 
 const highlighted = (page: Page) => options(page).and(page.locator("[aria-selected=true]"));

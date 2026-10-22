@@ -1,5 +1,5 @@
 import { EditorState, Prec, type Extension } from "@codemirror/state";
-import { EditorView, RectangleMarker, ViewPlugin, drawSelection, layer } from "@codemirror/view";
+import { EditorView, RectangleMarker, ViewPlugin, drawSelection, keymap, layer } from "@codemirror/view";
 import { Vim, getCM, vim, type MotionFn } from "@replit/codemirror-vim";
 import { dismissing, noteJump } from "../../plugin-api.ts";
 
@@ -117,6 +117,12 @@ Vim.defineMotion("rowsOrLines", rowsOrLines);
  * The editor's own painting runs the first line from where its text starts and the last to where its text ends, which in a
  * code block is short of the block's edges on both sides.
  */
+/** Out of insert mode Tab and Shift+Tab change nothing, as in vim, and don't leave the note: Escape and then Tab does. */
+const notTyped = (view: EditorView) => {
+  const state = getCM(view)?.state.vim;
+  return !!state && !state.insertMode;
+};
+
 const wholeLines = layer({
   above: false,
   class: "cm-selectionLayer",
@@ -167,6 +173,7 @@ export function vimEditing(runCommand: (commandId: string) => boolean): { extens
       // Without this nothing selected in visual mode is painted anywhere.
       drawSelection(),
       wholeLines,
+      keymap.of([{ key: "Tab", run: notTyped, shift: notTyped }]),
       // Visual block mode is a selection on each of its lines, which an editor keeps only when told it may. A click still makes one.
       EditorState.allowMultipleSelections.of(true),
       EditorView.clickAddsSelectionRange.of(() => false),

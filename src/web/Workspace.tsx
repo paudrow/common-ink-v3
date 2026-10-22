@@ -39,6 +39,7 @@ import type { SettingsStore } from "./settingsStore.ts";
 import { forgetAll } from "./stash.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { isOpen, openInAnotherTab } from "./openNotes.ts";
+import { tabLeaves } from "./tabbing.ts";
 import { catchUp, commitTyping, onFiled, onLost, performInSync, recover, saveAll, saveNow, undoOrRedo } from "./sync.ts";
 import { retryAfter } from "./retry.ts";
 import { ago, useNow } from "./time.ts";
@@ -995,6 +996,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       if (e.target instanceof HTMLIFrameElement) return;
       // A press in the keyboard shortcuts table's recorder is a key to write down, and one in a drawing's editor is Excalidraw's, not one to run.
       if (e.target instanceof Element && e.target.closest("[data-records-keys], [data-keeps-keys]")) return;
+      // Escape and then Tab in a note leaves it for what comes next on the page, whatever Tab is bound to there.
+      if (e.key === "Tab" && tabLeaves(e.target)) return;
       const { keybindings, commands } = host.contributions();
       const chord = chordOf(e, MAC);
       const begun = pending;

@@ -919,6 +919,7 @@ test("a line that only looks like a bullet, in code or in a block of math, is no
 
   await line(page, "more code").click();
   await keys(page, "Alt+ArrowUp", "Alt+ArrowDown", "ControlOrMeta+Shift+.");
+  // Shift+Tab there outdents the line as text, and nothing under it goes with it.
   await line(page, "under code").click();
   await page.keyboard.press("Shift+Tab");
   await editor(page).locator(".math-block").click();
@@ -927,22 +928,12 @@ test("a line that only looks like a bullet, in code or in a block of math, is no
   await keys(page, "ControlOrMeta+Shift+.");
   await expect(editor(page)).not.toContainText("…");
   await page.keyboard.type("!");
-  await expect.poll(() => read(page, note.id)).toBe(text.replace("- y", "- y!"));
+  await expect.poll(() => read(page, note.id)).toBe(text.replace("- y", "- y!").replace("  - under code", "- under code"));
 
   // The same keys on a real bullet are the outline's.
   await clickLine(page, "also real");
   await page.keyboard.press("Tab");
-  await expect.poll(() => read(page, note.id)).toContain("- real\n  - also real\n\n```\n- in code\n- more code\n  - under code\n```");
-});
-
-test("Tab on a bullet that has nothing to go under is not taken by the outline", async ({ page }) => {
-  const note = await open(page, OUTLINE);
-
-  await clickLine(page, "pack");
-  await page.keyboard.press("Tab");
-  // The browser's own Tab, which leaves the note for the next thing on the page.
-  await expect(editor(page)).not.toBeFocused();
-  await expect.poll(() => read(page, note.id)).toBe(OUTLINE);
+  await expect.poll(() => read(page, note.id)).toContain("- real\n  - also real\n\n```\n- in code\n- more code\n- under code\n```");
 });
 
 test("each kind of rendering is its own plugin: turning one off shows that markdown as written and leaves the rest drawn", async ({ page }) => {
