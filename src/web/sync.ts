@@ -150,6 +150,10 @@ const open = new Map<string, NoteSync>();
 
 /** Sends what's typed in a note now, without waiting for a pause. */
 export const saveNow = (noteId: string) => open.get(noteId)?.commit();
+/** Reads each open note again that the listing has a later revision of than its editor, as after a read of that revision failed. */
+export const catchUp = (listed: readonly Pick<Note, "id" | "revision">[]) => {
+  for (const note of listed) void open.get(note.id)?.pull(note.revision).catch(() => {});
+};
 /** Sends what is typed in every open note and not yet saved, before the app is loaded again. */
 export const saveAll = (): Promise<unknown> => Promise.allSettled([...open.values()].map((sync) => sync.commit()));
 
@@ -572,6 +576,8 @@ export class NoteSync {
   /** Reads the note again when the server has a later revision than this editor does, or may have when none is named. */
   async pull(revision?: number): Promise<void> {
     while (this.inFlight) await this.inFlight;
+    // A write still waiting on the server takes in what is there when it lands, and take() would drop the reading.
+    if (this.unacknowledged) return;
     if (revision !== undefined && revision <= this.revision) return;
     await this.take(await perform(this.workspaceId, { type: "note.read", id: this.noteId }));
   }
