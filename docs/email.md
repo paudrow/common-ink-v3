@@ -121,4 +121,7 @@ What a message is trusted by is the topmost `Authentication-Results` header, whi
 - **Attachments.** Only names, types and sizes are kept. Keeping the bytes means R2 objects of the person's own, outside any workspace, deleted with the account and on disconnect. Another way is saving one as an upload into a workspace the member picks.
 - **Retention.** Mail is kept until the member disconnects or deletes their account. A limit, such as a year, or a cap per person, isn't set.
 - **Search.** It is a `LIKE` over each message, fine for a person's mail at this size. The notes' full-text index (`note_search`) is per workspace and isn't used.
+- **Paging.** The next page of threads is asked for by the last one's time alone, so a thread whose latest message arrived in the same millisecond as the last one listed can be skipped. A cursor of time and id would fix it, at the cost of one more argument for every agent.
+- **Threads merged by an old id.** Any id in References joins threads. Two threads of a mailing list that share one ancestor become one, and stay one.
+- **A domain that lets anyone send as anyone.** Trust is the domain's: where one user can send as another's address, they can verify it as theirs. The code's prompt warns against sending a code someone else gave you.
 - **`@` and `[[`.** A thread is referenced by Copy reference on the Email page, by `refer_record`, and by hand. `@` and `[[` offer events and contacts, and don't offer threads yet.
