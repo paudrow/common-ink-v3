@@ -8,6 +8,7 @@ import { EMPTY, keyOf, left, listing, pending, type Hold, type Listing, type Lis
 import { Assignees, sameWho, whoOf } from "./Assignees.tsx";
 import { ChipMenu, MoreTags, TagMenu, type PlacedTag } from "./ChipMenu.tsx";
 import { putAway, refused, takeBack } from "./completed.ts";
+import { QuickAdd } from "./QuickAdd.tsx";
 import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
@@ -1304,6 +1305,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
         </label>
       </div>
       <Segmented className="todo-state-choices" name={`${ids}-state`} label="Todos by state" choices={STATE_CHOICES} chosen={stateOf(typed)} onChoose={chooseState} />
+      <QuickAdd host={host} />
       <TodoList
         host={host}
         app={app}

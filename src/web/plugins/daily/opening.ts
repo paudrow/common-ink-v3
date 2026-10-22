@@ -1,5 +1,14 @@
-import type { PluginHost } from "../../plugin-api.ts";
+import { today, type Note, type PluginHost } from "../../plugin-api.ts";
 import type { Asked } from "./days.ts";
+
+/** Finds or makes the member's daily note for today, where today is this browser's day. One the app doesn't have yet may have just been made, in a folder that was just made, so the app reads its folders again. */
+export async function todaysNote(host: PluginHost): Promise<Note> {
+  const note = await host.perform({ type: "daily.open", on: today() });
+  const known = host.app().notes?.some((n) => n.id === note.id);
+  host.app().noteChanged(note);
+  if (!known) host.app().refresh();
+  return note;
+}
 
 /** Opens the member's daily note for the day asked, made as Today makes it when it may be, or says there is none. */
 export async function openDay(host: PluginHost, { day, make }: Asked) {

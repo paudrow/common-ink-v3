@@ -93,3 +93,79 @@ test("in a phone's width the Sort menu goes under the bar and the state choices 
   expect(new Set(tops).size).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+const said = (page: Page) => todosPage(page).locator(".todo-add").getByRole("status");
+const adder = (page: Page) => todosPage(page).getByRole("textbox", { name: "Add a todo to today's note" });
+const localDay = (page: Page, days = 0) =>
+  page.evaluate((d) => {
+    const at = new Date(Date.now() + d * 86_400_000);
+    return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+  }, days);
+
+test("a todo typed in the Add field is written at the end of today's daily note, made for it, and is on the list at once when the bar asks for it", async ({ page }) => {
+  await aNoteOfEveryState(page);
+  const today = await localDay(page);
+  const tomorrow = await localDay(page, 1);
+  expect((await perform(page, { type: "daily.find", on: today })).note).toBeNull();
+
+  await adder(page).fill("Book the dentist due:tomorrow #health !!");
+  await adder(page).press("Enter");
+  // The field is empty at once for the next, and says where the todo went.
+  await expect(adder(page)).toHaveValue("");
+  await expect(adder(page)).toBeFocused();
+  await expect(said(page)).toHaveText(`Added “Book the dentist due:tomorrow #health !!” to ${today}`);
+  await expect(words(page)).toContainText(["Book the dentist"]);
+  const added = todosPage(page).getByRole("listitem").filter({ hasText: "Book the dentist" });
+  await expect(added.locator(".todo-note")).toHaveText(today);
+
+  // Two typed quickly land in the order they were typed, after what the note had.
+  await adder(page).fill("Water the ferns every:weekly");
+  await adder(page).press("Enter");
+  await adder(page).fill("Sweep the porch");
+  await adder(page).press("Enter");
+  const daily = (await perform(page, { type: "daily.find", on: today })).note!;
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: daily.id })).text).toBe(`# ${today}\n\n- [ ] !! Book the dentist due:${tomorrow} #health\n- [ ] Water the ferns every:1w\n- [ ] Sweep the porch\n`);
+
+  // Narrowed by the bar, a todo added that the bar asks for is listed, and one it doesn't ask for isn't.
+  await bar(page).fill("ferns");
+  await expect(words(page)).toHaveText(["Water the ferns"]);
+  await adder(page).fill("Repot the ferns");
+  await adder(page).press("Enter");
+  // Read back as soon as it lands, well before the app would list everything again by itself.
+  await expect(words(page)).toHaveText(["Water the ferns", "Repot the ferns"], { timeout: 3000 });
+  await adder(page).fill("Mop the floor");
+  await adder(page).press("Enter");
+  await expect(said(page)).toContainText("Mop the floor");
+  await expect(words(page)).toHaveText(["Water the ferns", "Repot the ferns"]);
+
+  // Where it went opens from what the field says.
+  await todosPage(page).getByRole("status").getByRole("button", { name: today }).click();
+  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("Mop the floor");
+});
+
+test("a todo that can't be added waits with those typed after it, in order, until Try again sends each once; a due: that says no day is said to be words", async ({ page }) => {
+  await aNoteOfEveryState(page);
+  const today = await localDay(page);
+  await adder(page).fill("Ask about due:someday");
+  await adder(page).press("Enter");
+  await expect(said(page)).toHaveText(`Added “Ask about due:someday” to ${today}. due:someday says no day or repeat, so it is words.`);
+
+  // Every edit fails while the network is down.
+  const down = (route: import("@playwright/test").Route) => (route.request().postDataJSON()?.type === "note.edit" ? route.abort() : route.continue());
+  await page.route("**/ops", down);
+  await adder(page).fill("Fix the gate");
+  await adder(page).press("Enter");
+  await adder(page).fill("Oil the hinge");
+  await adder(page).press("Enter");
+  const alert = todosPage(page).locator(".todo-add").getByRole("alert");
+  await expect(alert).toContainText("aren't added yet");
+  await expect(alert).toContainText("2 todos");
+  // Nothing typed is lost: the field is free for more, and the two wait their turn.
+  await expect(adder(page)).toHaveValue("");
+
+  await page.unroute("**/ops", down);
+  await alert.getByRole("button", { name: "Try again" }).click();
+  await expect(alert).toHaveCount(0);
+  const daily = (await perform(page, { type: "daily.find", on: today })).note!;
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: daily.id })).text).toBe(`# ${today}\n\n- [ ] Ask about due:someday\n- [ ] Fix the gate\n- [ ] Oil the hinge\n`);
+});

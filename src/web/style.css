@@ -6988,6 +6988,35 @@ button.diff-fold:hover {
   }
 }
 
+/* The field a todo is added to today's note from, and under it where the last one went. */
+.todo-add {
+  display: flex;
+  flex-direction: column;
+}
+
+.todo-add-said {
+  margin: 0;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.todo-add-said:not(:empty) {
+  margin-top: 4px;
+}
+
+.todo-add-said button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.todo-add-said button:hover {
+  text-decoration: underline;
+}
+
 .todo-sort {
   display: flex;
   align-items: center;
