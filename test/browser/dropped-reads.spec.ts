@@ -125,6 +125,21 @@ test("whether someone else changed the open note, unread once, is read at the me
   await expect(panelIcon(page, "History")).toHaveAccessibleDescription("Changes you haven't seen");
 });
 
+test("a change made elsewhere to the open note, unread once, is read at the next listing", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Plan" });
+  await page.goto(`/note/${note.id}`);
+  const editor = page.getByRole("textbox", { name: "Note text" });
+  await expect(editor).toContainText("Plan");
+  const reads = await dropFirst(page, "note.read");
+
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\nFrom elsewhere" });
+  await reads.handled();
+
+  // The notes are listed again every five seconds.
+  await expect(editor).toContainText("From elsewhere", { timeout: 10_000 });
+});
+
 test("which agents wrote anything, unread once, isn't said to be none, and is read when a note changes", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const claude = await connectAgent(page, "Claude");

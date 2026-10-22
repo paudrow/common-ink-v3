@@ -39,7 +39,7 @@ import type { SettingsStore } from "./settingsStore.ts";
 import { forgetAll } from "./stash.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { isOpen, openInAnotherTab } from "./openNotes.ts";
-import { commitTyping, onFiled, onLost, performInSync, recover, saveAll, saveNow, undoOrRedo } from "./sync.ts";
+import { catchUp, commitTyping, onFiled, onLost, performInSync, recover, saveAll, saveNow, undoOrRedo } from "./sync.ts";
 import { retryAfter } from "./retry.ts";
 import { ago, useNow } from "./time.ts";
 import { Toasts } from "./Toasts.tsx";
@@ -630,6 +630,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
         everyNote(workspaceId, lastChange(known)).catch(() => []),
         everyTrashed(workspaceId).catch(() => []),
       ]);
+      // An editor reads a note when its listed revision changes, and asks here again for one it couldn't read then.
+      catchUp(known);
       setNotes((all) => all && withChanged([...changed, ...trash], all));
     };
     const timer = setInterval(relist, REFRESH_MS);
