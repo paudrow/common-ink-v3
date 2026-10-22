@@ -97,6 +97,31 @@ test("@ lists the members in the theme colour and my contacts in gray, narrows a
   expect(contactLists).toHaveLength(1);
 });
 
+test("contacts that couldn't be read are read again by the next letter typed after @", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "source.connect", id: "sample-contacts", back: "/contacts" });
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\n" });
+  let refused = false;
+  await page.route("**/api/workspaces/*/ops", (route) => {
+    if (refused || !/"contact\.list"/.test(route.request().postData() ?? "")) return route.continue();
+    refused = true;
+    return route.fulfill({ status: 500, contentType: "text/plain", body: "Error: Network connection lost." });
+  });
+  const contactLists = asked(page, "contact.list");
+  await open(page, note.id, "Plan");
+
+  const read = page.waitForResponse((response) => response.request().postDataJSON()?.type === "contact.list");
+  await page.keyboard.type("Ask @");
+  expect((await read).status()).toBe(500);
+  await expect(options(page)).toHaveText(["Ada LovelaceYou"]);
+  await page.keyboard.type("a");
+  await expect(options(page)).toHaveText(["Ada LovelaceYou", "Ada LovelaceContact · Analytical Engines", "Zoë ÁlvarezContact"]);
+  // Read again once, not at every letter after.
+  await page.keyboard.type("d");
+  await expect(options(page)).toHaveText(["Ada LovelaceYou", "Ada LovelaceContact · Analytical Engines"]);
+  expect(contactLists).toHaveLength(2);
+});
+
 test("@ opens nothing inside an address or a word, and a handle that is typed and left is text", async ({ page }) => {
   await team(page);
   const note = await perform(page, { type: "note.create", text: "# Plan\n\n" });
