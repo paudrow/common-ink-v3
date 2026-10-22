@@ -438,13 +438,19 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   }, [workspaceId, guest]);
   useEffect(readRecord, [readRecord]);
   reread.current = readRecord;
-  useEffect(() => {
+  // Drafts that couldn't be read are read again with the record: until they are, a draft set running is not what runs.
+  const draftsUnread = useRef(false);
+  const readDrafts = useCallback(() => {
     if (guest) return;
     void perform(workspaceId, { type: "draft.list" }).then(
-      (mine) => setDrafts(mine.drafts),
-      () => {},
+      (mine) => {
+        draftsUnread.current = false;
+        setDrafts(mine.drafts);
+      },
+      () => void (draftsUnread.current = true),
     );
   }, [workspaceId, guest]);
+  useEffect(readDrafts, [readDrafts]);
   relist.current = () => host.setInstalled(installer.list());
   useEffect(() => host.setInstalled(installer.list()), [host, installer, record, drafts]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
@@ -595,6 +601,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       if (document.visibilityState !== "visible") return;
       refresh();
       readRecord();
+      if (draftsUnread.current) readDrafts();
     };
     const timer = setInterval(again, REFRESH_ALL_MS);
     addEventListener("focus", again);
@@ -602,7 +609,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       clearInterval(timer);
       removeEventListener("focus", again);
     };
-  }, [refresh, readRecord]);
+  }, [refresh, readRecord, readDrafts]);
 
   useEffect(() => {
     const relist = async () => {
