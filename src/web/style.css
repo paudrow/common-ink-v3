@@ -10494,7 +10494,7 @@ button.todo-tag[aria-pressed="true"] {
  * around it. It fills the room the note keeps for it, and the room never follows it. Its size handle
  * and the width a drag will snap to are drawn past its edges.
  */
-.embed-below:has(> .embed-below-drawn > :is(.upload-picture, .upload-video, .upload-audio)) {
+.embed-below:has(> .embed-below-drawn > :is(.upload-picture, .upload-video, .upload-audio, .upload-audio-row)) {
   overflow: visible;
   border: 0;
   border-radius: 0;
@@ -10534,6 +10534,23 @@ button.todo-tag[aria-pressed="true"] {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.upload-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+}
+
+.upload-audio-row .upload-audio {
+  flex: 1;
+  min-width: 0;
+}
+
+.upload-transcribe {
+  flex: none;
+  font-family: var(--prose);
 }
 
 /* The size handle: a bar on the right edge, seen on hover or focus, which drags the width to any share of the column. It is inside the picture, so a picture as wide as the column doesn't make the note scroll sideways. */
@@ -11599,7 +11616,7 @@ a.file-chip:hover .file-chip-name {
 
 .cm-editor .cm-tooltip.upload-recorder {
   box-sizing: border-box;
-  width: min(18rem, calc(100vw - 16px));
+  width: min(22rem, calc(100vw - 16px));
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -11649,6 +11666,23 @@ a.file-chip:hover .file-chip-name {
 .upload-recorder-buttons {
   display: flex;
   gap: 6px;
+}
+
+.vocabulary-control {
+  align-items: flex-start;
+}
+
+.vocabulary-control textarea {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
 }
 
 .upload-recording-status {

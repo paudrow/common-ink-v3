@@ -82,6 +82,9 @@ const APPROVAL = " Your request waits for an admin to approve it in the app: the
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
   "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
+  "upload.transcribe": "Each minute of a recording transcribed is paid for, and the member asks for it in the app, on the recording in the note, where the words are written under it. An agent reads what was transcribed there.",
+  "vocabulary.read": "The vocabulary is only of use for transcribing, which the member asks for in the app.",
+  "vocabulary.write": "The vocabulary is how every member's recordings are spelled, so an admin or an editor writes it in the app, in Settings.",
   "agentsFile.write": "The agents file steers every agent in the workspace, so one that was talked into changing it would steer the others. To suggest a change, an agent writes a note, and an admin or an editor puts what they agree with in the file, in the app.",
   "timeZone.record": "A member's time zone is the one their own browser keeps, which the app records as they use it. An agent runs somewhere else, whose clock says nothing of where the member is. It passes the day it means as on, and is told times in the member's zone.",
   "member.invite": MEMBERS,

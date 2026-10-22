@@ -10,6 +10,7 @@ import { paging } from "./paging.ts";
 import { orderOf } from "./query.ts";
 import { partSpan, partsLeft, planParts } from "./parts.ts";
 import { finishRemoving, removeUpload } from "./purge.ts";
+import type { Listener } from "./transcripts.ts";
 import { uploadIds } from "./uploadRefs.ts";
 
 /**
@@ -28,6 +29,8 @@ export interface Files {
   asked?: Headers;
   /** The secret of the address a part of an upload was sent to: see `upload.part`. */
   pass?: string;
+  /** What hears a recording to transcribe it. Without one, nothing is transcribed. */
+  listen?: Listener;
 }
 
 export const NO_FILES: Files = { bucket: null };

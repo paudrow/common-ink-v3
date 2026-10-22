@@ -85,8 +85,18 @@ const excalidrawFonts = (): Plugin => {
   };
 };
 
+/**
+ * The Worker as this machine runs it: dev sign-in on, and without Workers AI, which always runs on
+ * Cloudflare and is paid for, unless `npm run dev -- --ai` asked for it (it needs `wrangler login`).
+ * Without it, transcribing a recording says how to turn it on.
+ */
+const devConfig = (config: { ai?: unknown }) => {
+  if (!process.env.INK_AI) delete config.ai;
+  return { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } };
+};
+
 // Builds only the web app; wrangler bundles the Worker, so one wrangler.jsonc serves dev, deploys, and Previews.
 export default defineConfig(({ command }) => ({
-  plugins: [thisMachine, react(), clipperDownload, excalidrawFonts(), command === "serve" && cloudflare({ persistState: { path: process.env.INK_STATE ?? ".wrangler/state" }, config: { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } } })],
+  plugins: [thisMachine, react(), clipperDownload, excalidrawFonts(), command === "serve" && cloudflare({ persistState: { path: process.env.INK_STATE ?? ".wrangler/state" }, config: devConfig })],
   build: { outDir: "dist", emptyOutDir: true },
 }));

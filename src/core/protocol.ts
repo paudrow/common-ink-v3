@@ -19,6 +19,10 @@ export const MAX_FOLDER_DESCRIPTION = 500;
 export const MAX_SETTINGS_LENGTH = 100_000;
 /** The longest a workspace's agents file can be. */
 export const MAX_AGENTS_FILE_LENGTH = 100_000;
+/** The longest a workspace's vocabulary for transcribing can be: Whisper reads about 220 tokens of it, and drops the rest. */
+export const MAX_VOCABULARY = 600;
+/** The largest recording transcribed: half an hour of what the app records at 32 kbps, and 4 minutes of an MP3 at 256 kbps. Each minute costs, so a larger one is refused before it is sent. */
+export const MAX_TRANSCRIBED_BYTES = 8 * 1024 * 1024;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
 /** A page of the app, as it names itself when it holds a note open. An agent's holds are the server's to make. */
@@ -661,6 +665,10 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
     supersedes: z.string().min(1).max(64).optional(),
   }),
+  /** The workspace's vocabulary: the names and jargon a recording is transcribed with, as written, one per line or separated by commas. */
+  z.object({ type: z.literal("vocabulary.read") }),
+  /** Replaces the vocabulary, for an admin or an editor of the whole workspace, signed in. The last write is what it is. */
+  z.object({ type: z.literal("vocabulary.write"), words: z.string().max(MAX_VOCABULARY) }),
   /** The workspace's agents file: Markdown that tells agents how the workspace is organized. Everyone who reaches the workspace reads it. */
   z.object({ type: z.literal("agentsFile.read") }),
   /**
@@ -790,6 +798,12 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("upload.read"), id: Id }),
   /** The bytes of one upload. Over HTTP it is `GET /api/workspaces/<id>/uploads/<upload id>`. */
   z.object({ type: z.literal("upload.open"), id: Id }),
+  /**
+   * The words said in a recording, as Workers AI's Whisper hears them, told the workspace's vocabulary
+   * so that its names and jargon are spelled as the workspace spells them. A recording of at most
+   * MAX_TRANSCRIBED_BYTES. Nothing is kept: the text is the asker's to write where they want it.
+   */
+  z.object({ type: z.literal("upload.transcribe"), id: Id }),
   z.object({ type: z.literal("upload.move"), id: Id, folderId: Id }),
   /**
    * What putting an upload in a note asks of it, before its embed is written there. An upload that is
@@ -1632,6 +1646,11 @@ export interface Visit {
   now: number;
 }
 
+/** A workspace's vocabulary for transcribing, as it was written. Empty until someone writes it. */
+export interface Vocabulary {
+  words: string;
+}
+
 /** A workspace's agents file as it is stored. */
 export interface AgentsFile {
   /** Markdown. Empty until someone writes it. */
@@ -1723,6 +1742,8 @@ export interface Results {
   "folder.delete": { id: string };
   "folder.describe": { id: string; description: string | null };
   "settings.read": StoredSettings;
+  "vocabulary.read": Vocabulary;
+  "vocabulary.write": Vocabulary;
   "agentsFile.read": AgentsFile;
   "agentsFile.write": AgentsFile;
   "settings.write": StoredSettings;
@@ -1760,6 +1781,7 @@ export interface Results {
   "upload.list": { uploads: ListedUpload[]; next: string | null };
   "upload.read": Upload & { usedIn: NoteSummary[] };
   "upload.open": OpenedUpload;
+  "upload.transcribe": { text: string };
   "upload.move": Upload;
   "upload.place": Upload;
   "upload.archive": Upload;

@@ -69,6 +69,7 @@ import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, lis
 import { openExport, planExport } from "./export.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
+import { readVocabulary, transcribeUpload, writeVocabulary } from "./transcripts.ts";
 import { NO_FILES, abortUpload, archiveUpload, createUpload, finishUpload, listUploads, moveUpload, openUpload, placeUpload, purgeUpload, putPart, readUpload, referred, restoreUpload, resumeUpload, startUpload, trashUpload, trashedUploads, uploadStorage, type Files } from "./uploads.ts";
 import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
 import { asc, desc, type Order } from "./order.ts";
@@ -3124,6 +3125,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     },
   },
 
+  "vocabulary.read": { needs: "view", by: "member", members: true, run: async (ctx) => ({ words: await readVocabulary(ctx) }) },
+  // How the workspace's recordings are spelled is the workspace's, so only an admin or an editor of all of it writes it.
+  "vocabulary.write": { needs: "edit", by: "member", members: true, run: (ctx, op) => writeVocabulary(ctx, op.words) },
+
   // Whoever reaches the workspace reads it: a viewer, a guest, and an agent of any of them, limited to folders or not.
   "agentsFile.read": {
     needs: "view",
@@ -3253,6 +3258,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "upload.list": { needs: "view", run: (ctx, op) => listUploads(ctx, op) },
   "upload.read": { needs: "view", run: (ctx, op) => readUpload(ctx, op.id) },
   "upload.open": { needs: "view", run: (ctx, op) => openUpload(ctx, op.id, "opens") },
+  // What it answers is for writing beside the recording, and each minute of it is paid for: someone who can change the recording asks it, in the app.
+  "upload.transcribe": { needs: "edit", by: "member", run: (ctx, op) => transcribeUpload(ctx, op.id) },
   // An export holds what the asker could read one note and one upload at a time, and nothing more, so whoever reads may export: a guest, a viewer, an agent within its folders.
   "export.plan": { needs: "view", run: (ctx, op) => planExport(ctx, { bytes: op.partBytes, files: op.partFiles }) },
   "export.open": { needs: "view", run: (ctx, op) => openExport(ctx, op) },

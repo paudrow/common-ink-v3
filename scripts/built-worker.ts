@@ -10,20 +10,30 @@
 //
 // The session secret is made here for this run and kept nowhere. Nothing is read from .dev.vars: run
 // it where there is none, as CI does.
+//
+// It runs from wrangler.jsonc less Workers AI, written to wrangler.built.json: Workers AI always runs
+// on Cloudflare, paid for, and dev sign-in here counts nobody's requests. Transcribing says it isn't set up.
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { parse } from "jsonc-parser";
 import { unpackedExtensionId } from "./extension-id.ts";
 
 const { values } = parseArgs({ options: { port: { type: "string", default: "8787" }, state: { type: "string", default: ".wrangler/built" }, https: { type: "boolean", default: false } } });
 const state = values.state!;
+const CONFIG = "wrangler.built.json";
+const { ai: _, ...config } = parse(readFileSync("wrangler.jsonc", "utf8"));
+writeFileSync(CONFIG, JSON.stringify(config, null, 2));
 
-execFileSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state], { stdio: "inherit", env: { ...process.env, CI: "1" } });
+execFileSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state, "-c", CONFIG], { stdio: "inherit", env: { ...process.env, CI: "1" } });
 spawn(
   "npx",
   [
     "wrangler",
     "dev",
+    "-c",
+    CONFIG,
     "--local",
     "--port",
     values.port!,

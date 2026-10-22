@@ -6,6 +6,7 @@ import type { Dispose, InsertAt, PluginHost } from "../../plugin-api.ts";
 import { writable } from "../lib/live.ts";
 import { clockOf, MAX_RECORDING_MS, recordedType, recordingName, refusedBecause, type Recorded } from "./recorded.ts";
 import type { Sender } from "./sending.ts";
+import type { Transcriber } from "./transcribing.ts";
 
 /** Speech is clear at 32 kbps of Opus, so ten minutes is about 2.4 MB: well under what is transcribed. */
 const BITS_PER_SECOND = 32_000;
@@ -47,7 +48,7 @@ interface Session {
 
 /** What the recorder answers to, from its buttons and from the bar. */
 interface Controls {
-  stop(): void;
+  stop(transcribe?: boolean): void;
   cancel(): void;
   close(): void;
 }
@@ -55,10 +56,10 @@ interface Controls {
 /**
  * Recording in a note: the microphone recorded right where the cursor is, in a small recorder that
  * says how long it has run, and the recording sent and written there as `::audio{id}` once it is
- * stopped, as a file picked there would be. The note can be typed in meanwhile. Leaving the note
+ * stopped, as a file picked there would be, with what was said written under it when asked. The note can be typed in meanwhile. Leaving the note
  * stops the recording and keeps it in the workspace, which is said. A recording runs ten minutes at most.
  */
-export function recorder(host: PluginHost, sending: Sender) {
+export function recorder(host: PluginHost, sending: Sender, transcribing: Transcriber) {
   const editors = new Set<{ view: EditorView; noteId: string }>();
   let session: Session | null = null;
   const listeners = new Set<() => void>();
@@ -92,8 +93,11 @@ export function recorder(host: PluginHost, sending: Sender) {
     });
   }
 
-  /** Stops recording and writes the recording where the recorder hung, or keeps it in the workspace, said, once its note has closed. */
-  async function stop(done: Session) {
+  /**
+   * Stops recording and writes the recording where the recorder hung, or keeps it in the workspace,
+   * said, once its note has closed. Asked to, it then transcribes it under its line.
+   */
+  async function stop(done: Session, transcribe = false) {
     const at = done.view.state.field(recorderAt, false);
     const chunks = await end(done);
     if (!done.type) return;
@@ -102,6 +106,7 @@ export function recorder(host: PluginHost, sending: Sender) {
     const written = await sending.intoNote(done.view, done.noteId, [file], at ?? done.view.state.doc.length, "input.paste");
     // Not sent, said by the sender: the recording is still here, to keep on this computer.
     if (!written.length && [...editors].some((e) => e.view === done.view)) host.app().notify({ message: `${file.name} is kept on this computer until this notice goes.`, action: { label: "Download it", run: () => download(file) } });
+    if (written[0] && transcribe) await transcribing.into(done.view, written[0].id);
   }
 
   async function begin(view: EditorView, noteId: string) {
@@ -148,7 +153,7 @@ export function recorder(host: PluginHost, sending: Sender) {
   }
 
   const controlsOf = (view: EditorView): Controls => ({
-    stop: () => session?.view === view && void stop(session),
+    stop: (transcribe) => session?.view === view && void stop(session, transcribe),
     cancel: () => {
       if (session?.view !== view) return;
       void end(session);
@@ -263,8 +268,11 @@ function RecorderView({ phase, subscribe, controls }: { phase: () => Phase | nul
             {now.kind === "asking" ? "Asking for your microphone…" : <>Recording <Elapsed since={now.since} /></>}
           </p>
           <div className="upload-recorder-buttons">
-            <button ref={first} type="button" className="button small primary" disabled={now.kind !== "recording"} onClick={controls.stop}>
+            <button ref={first} type="button" className="button small primary" disabled={now.kind !== "recording"} onClick={() => controls.stop()}>
               Stop
+            </button>
+            <button type="button" className="button small" disabled={now.kind !== "recording"} onClick={() => controls.stop(true)}>
+              Stop and transcribe
             </button>
             <button type="button" className="button small" onClick={controls.cancel}>
               Cancel

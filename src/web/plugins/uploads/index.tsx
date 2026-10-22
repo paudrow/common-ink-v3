@@ -9,6 +9,8 @@ import { uploadsAt } from "./pointing.ts";
 import { outline, panel, sketch, words } from "../lib/sketch.ts";
 import { Preview } from "./Preview.tsx";
 import { recorder, RecordingStatus } from "./recording.tsx";
+import { transcriber } from "./transcribing.ts";
+import { VocabularySettings } from "./Vocabulary.tsx";
 import { sender, type Sender } from "./sending.ts";
 import { UploadsPage } from "./UploadsPage.tsx";
 
@@ -76,7 +78,8 @@ export const uploads: Plugin = {
   activate(host) {
     const sending = sender(host);
     const inserting = inserter(host);
-    const recording = recorder(host, sending);
+    const transcribing = transcriber(host);
+    const recording = recorder(host, sending, transcribing);
     const { embeds, stop } = uploadEmbeds(
       host,
       [
@@ -85,17 +88,21 @@ export const uploads: Plugin = {
         { title: "Insert an upload", description: "A file already uploaded to the workspace", preview: { image: INSERT_PICTURE }, insert: inserting.ask },
       ],
       { of: sending.of, subscribe: sending.subscribe },
+      transcribing.fromEmbed,
     );
     for (const embed of embeds) host.embeds.register(embed);
     host.editorExtensions.register({ id: "uploads", extension: sending.extension });
     host.editorExtensions.register({ id: "upload-inserting", extension: inserting.extension });
     host.editorExtensions.register({ id: "upload-recording", extension: recording.extension });
+    host.editorExtensions.register({ id: "upload-transcribing", extension: transcribing.extension });
     host.commands.register({ id: "uploads.record", title: "Record your voice", aliases: ["record audio", "voice note", "microphone", "dictate"], group: "Editor", run: recording.run });
     host.completions.register({ id: "uploads.at", trigger: "@", spaces: true, items: uploadsAt(host) });
     host.views.register("bar", { id: "uploads", live: true, component: () => <SendingStatus sender={sending} /> });
     host.views.register("bar", { id: "upload-recording", live: true, component: () => <RecordingStatus recorder={recording} /> });
     host.views.register("page", { id: "uploads", path: UPLOADS_PATH, label: "Uploads", icon: "uploads", nav: "more", component: (props) => <UploadsPage host={host} sender={sending} {...props} /> });
     host.views.register("page", { id: "file", path: FILE_PATH, label: "File", icon: "text", component: (props) => <FilePage key={props.app.path} host={host} {...props} /> });
+    // The vocabulary is the workspace's, which a guest sees none of.
+    if (host.workspace.role !== "guest") host.views.register("settings", { id: "voice", label: "Voice", component: () => <VocabularySettings host={host} /> });
     host.views.register("overlay", { id: PREVIEW, component: (props) => <Preview host={host} {...props} /> });
     return stop;
   },

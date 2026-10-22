@@ -18,6 +18,8 @@ export const LIMITS = {
   OPS_LIMIT: "one person's operations",
   /** An agent's or a clipper's MCP calls: 300 a minute per token. */
   MCP_LIMIT: "one token's MCP calls",
+  /** Each recording transcribed is paid for by the minute of it: 6 a minute per person, on top of their operations. */
+  TRANSCRIBE_LIMIT: "one person's transcriptions",
 } as const;
 
 export type Limit = keyof typeof LIMITS;

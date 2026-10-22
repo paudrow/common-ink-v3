@@ -60,6 +60,17 @@ describe("how often one caller may ask", () => {
     expect((await (await op())()).status).toBe(400);
   });
 
+  it("lets one person transcribe 6 recordings a minute, which are among their operations", async () => {
+    const { personId } = await signIn(env.DB, { email: `ada-${crypto.randomUUID()}@example.com`, name: "Ada" });
+    const workspaceId = (await env.DB.prepare("SELECT workspace_id FROM members WHERE person_id = ?").bind(personId).first<string>("workspace_id"))!;
+    const cookie = `__Host-ink_session=${encodeURIComponent(await sign({ t: "session", personId }, SECRET, 600))}`;
+    const ask = (op: object) => send(`/api/workspaces/${workspaceId}/ops`, from("203.0.113.7", { method: "POST", headers: { Cookie: cookie, Origin: "https://commonink.app", "Content-Type": "application/json" }, body: JSON.stringify(op) }));
+    const all = await statuses(7, () => ask({ type: "upload.transcribe", id: "aaaaaaaaaaaa" }));
+    expect(all).toEqual([404, 404, 404, 404, 404, 404, 429]);
+    expect(((await (await ask({ type: "upload.transcribe", id: "aaaaaaaaaaaa" })).json()) as { message: string }).message).toBe("Too many requests: one person's transcriptions are limited each minute. Try again in a minute.");
+    expect((await ask({ type: "upload.read", id: "aaaaaaaaaaaa" })).status).toBe(404);
+  });
+
   it("lets one token make 300 MCP calls a minute", async () => {
     const all = await statuses(301, () => send("/mcp", from("203.0.113.5", { method: "POST", headers: { Authorization: "Bearer cink_nothing", "Content-Type": "application/json" }, body: "{}" })));
     expect([before(all), last(all)]).toEqual([false, 429]);

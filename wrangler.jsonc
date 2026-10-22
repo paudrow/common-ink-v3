@@ -51,8 +51,13 @@
     { "name": "LINK_LIMIT", "namespace_id": "3002", "simple": { "limit": 60, "period": 60 } },
     { "name": "OAUTH_LIMIT", "namespace_id": "3003", "simple": { "limit": 30, "period": 60 } },
     { "name": "OPS_LIMIT", "namespace_id": "3004", "simple": { "limit": 300, "period": 60 } },
-    { "name": "MCP_LIMIT", "namespace_id": "3005", "simple": { "limit": 300, "period": 60 } }
+    { "name": "MCP_LIMIT", "namespace_id": "3005", "simple": { "limit": 300, "period": 60 } },
+    { "name": "TRANSCRIBE_LIMIT", "namespace_id": "3006", "simple": { "limit": 6, "period": 60 } }
   ],
+  // Workers AI, for Whisper to transcribe recordings (src/worker/listen.ts). It always runs on Cloudflare, paid for by the
+  // minute of audio, so the dev server leaves it out unless asked (`npm run dev -- --ai`), Previews and the built Worker
+  // CI tests against leave it out (scripts/preview.ts, scripts/built-worker.ts), and unit tests stand in for it.
+  "ai": { "binding": "AI" },
   // Which version of the Worker is answering: /health says its id, and a fault sent to Sentry names it as the release,
   // the same id `wrangler versions list` and `wrangler rollback` use (docs/runbooks/rollback.md).
   "version_metadata": { "binding": "CF_VERSION_METADATA" },

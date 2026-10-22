@@ -20,6 +20,7 @@ import { embedOrigin, embedResponse } from "./frames.ts";
 import { crossOrigin, secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
 import { addressOf, limitByAddress, overLimit, tokenKey } from "./limits.ts";
+import { listenerOf } from "./listen.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 import { handleClientFault, opName, report, reportOf, told, traceOf, type Report, type Trace } from "./report.ts";
 import { handleEmail, logged, mailAddress } from "./mail.ts";
@@ -130,9 +131,13 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
       return json({ error: "invalid", message: "The body isn't JSON" }, 400);
     }
     trace.op = opName((op as { type?: unknown } | null)?.type);
+    if ((op as { type?: unknown } | null)?.type === "upload.transcribe") {
+      const busier = await overLimit(env, url, "TRANSCRIBE_LIMIT", personId);
+      if (busier) return busier;
+    }
     if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, a part of one at the address upload.start gives, and an export's at the addresses export.plan gives" }, 400);
     try {
-      return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
+      return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES, listen: listenerOf(env) }));
     } catch (err) {
       if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
       throw err;

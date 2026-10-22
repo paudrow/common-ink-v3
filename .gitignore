@@ -7,5 +7,6 @@ cli/dist/
 test-results/
 playwright-report/
 wrangler.preview.json
+wrangler.built.json
 blob-report/
 src/worker/site/pages.gen.ts

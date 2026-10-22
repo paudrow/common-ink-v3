@@ -352,6 +352,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "settings.write": { on: "workspace", who: EVERYONE, args: () => ({ text: "{}", baseRevision: 99 }) },
   "agentsFile.read": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "agentsFile.write": { on: "workspace", who: ["admin", "editor"], args: () => ({ text: "# Matrix", baseRevision: 99 }) },
+  "vocabulary.read": { on: "workspace", who: MEMBERS, args: () => ({}) },
+  "vocabulary.write": { on: "workspace", who: ["admin", "editor"], args: () => ({ words: "Matrix" }) },
   "timeZone.record": { on: "workspace", who: EVERYONE, args: () => ({ timeZone: "America/Chicago" }) },
   "member.list": { on: "workspace", who: MEMBERS, args: () => ({}) },
   "member.invite": { on: "workspace", who: ADMINS, args: () => ({ email: address(), as: "viewer" }) },
@@ -386,6 +388,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "upload.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
   "upload.read": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "upload.open": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
+  // Each upload here is a picture, so whoever is let through is told it isn't a recording, before anything is paid for: test/core/transcribe.test.ts transcribes for real.
+  "upload.transcribe": { on: "upload", needs: "E", trashed: "refused", args: (id) => ({ id }) },
   "upload.move": { on: "upload", needs: "E", trashed: "refused", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
   // The upload beside each note put in that note: none here is its owner's alone in a note that isn't private, so nothing moves.
   "upload.place": { on: "upload", needs: "E", trashed: "refused", args: (id, w, note) => ({ id, noteId: w.notes[note] }) },
