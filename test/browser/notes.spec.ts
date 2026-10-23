@@ -156,7 +156,8 @@ test("a long note in a script that takes several bytes a character saves", async
 
   await expect(page.getByRole("status")).toHaveText("Saved", { timeout: 10_000 });
   await page.reload();
-  await expect(page.locator(".cm-line").first()).toHaveText("# 狂人日记");
+  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("今天晚上，很好的月光。");
+  expect((await perform(page, { type: "note.read", id: noteIdIn(page) })).text).toBe(`# 狂人日记\n\n${"今天晚上，很好的月光。".repeat(2500)}`);
   expect(await history(page, noteIdIn(page))).toHaveLength(1);
 });
 

@@ -106,7 +106,7 @@ export { Icon, type IconName } from "./icons.tsx";
 export { HelpOverlay } from "./HelpOverlay.tsx";
 export { ago, dayOf, today, useNow } from "./time.ts";
 /** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
-export { useOpenNote, type OpenNote } from "./openNotes.ts";
+export { keepPlacesIn, useOpenNote, type OpenNote } from "./openNotes.ts";
 /**
  * A CodeMirror effect that says the cursor jumped within a note, as vim's G or a search sends it:
  * `{ from, to }` as offsets. Put on a transaction of its own after the move, it makes a stop in the
@@ -659,8 +659,9 @@ export interface EditorProps extends ViewProps {
    * the editor takes the cursor once the note is there, and then calls `onFocused`: for a note the
    * view moved to another part of itself, where its editor is drawn anew. With `behind`, it is one of
    * several editors of the note and not the one in front, so a note opened to take the cursor leaves it alone.
+   * `pane` names where it is drawn, such as a group of tabs: the note starts where it was last left there.
    */
-  renderNote: (noteId: string, options?: { onEdit?: () => void; focus?: boolean; onFocused?: () => void; behind?: boolean }) => ReactNode;
+  renderNote: (noteId: string, options?: { onEdit?: () => void; focus?: boolean; onFocused?: () => void; behind?: boolean; pane?: string }) => ReactNode;
   /** Draws a folder's list of notes, with whatever is in the `folder` slot. */
   renderFolder: (folderId: string) => ReactNode;
   /** Draws an open note's own buttons for its group's tab row, before Focus: the `tool` slot's. Nothing for a note not known yet. */

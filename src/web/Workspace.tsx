@@ -28,6 +28,7 @@ import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
 import { createInstaller, loadAgain } from "./pluginRuntime.ts";
 import { referredUploads } from "./referredUploads.ts";
+import { KeptScroll } from "./KeptScroll.tsx";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, keepsATab, pageAt, routeOf, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
@@ -1189,13 +1190,14 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   })();
 
   const summaryFor = (noteId: string) => byId.get(noteId) ?? (notes ? undefined : early.get(noteId));
-  const renderNote = (noteId: string, { onEdit, focus, onFocused, behind }: { onEdit?: () => void; focus?: boolean; onFocused?: () => void; behind?: boolean } = {}) => {
+  const renderNote = (noteId: string, { onEdit, focus, onFocused, behind, pane }: { onEdit?: () => void; focus?: boolean; onFocused?: () => void; behind?: boolean; pane?: string } = {}) => {
     const note = summaryFor(noteId);
     return (
       <NoteEditor
         key={noteId}
         workspaceId={workspaceId}
         noteId={noteId}
+        pane={pane}
         onLoaded={remember}
         onSaved={remember}
         revision={note?.revision}
@@ -1283,9 +1285,9 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     const cut = path.indexOf("?");
     const at = { path: cut < 0 ? path : path.slice(0, cut), query: cut < 0 ? "" : path.slice(cut), pageState: here ? place.state : null };
     return (
-      <div className="page-pane" key={page.tabAt ? `${page.id} ${page.tabAt(at.path).key}` : page.id}>
+      <KeptScroll className="page-pane" key={page.tabAt ? `${page.id} ${page.tabAt(at.path).key}` : page.id} place={`${workspaceId} ${pageId} ${path}`}>
         <Drawn host={host} view={page} as={(app) => ({ ...app, ...at, opened: { kind: "page", id: pageId, path }, noteId: null, note: null, unseen: false, folderId: null, inspect: inspectFor(pageId) })} />
-      </div>
+      </KeptScroll>
     );
   };
   const home = contributed.views.page.find((p) => p.home);
