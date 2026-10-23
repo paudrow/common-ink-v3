@@ -1,4 +1,4 @@
-import { markdownLanguage } from "@codemirror/lang-markdown";
+import { noteParser } from "../lib/markdownSpaces.ts";
 import { opens } from "../lib/opening.ts";
 
 /** A link out of the app in a todo's words: where it is written, the words it shows, and the address it opens. */
@@ -17,7 +17,7 @@ export interface LinkOut {
 export function linksOut(words: string): LinkOut[] {
   if (!/:\/\/|mailto:/i.test(words)) return [];
   const found: LinkOut[] = [];
-  markdownLanguage.parser.parse(words).iterate({
+  noteParser.parse(words).iterate({
     enter(node) {
       if (node.name === "InlineCode" || node.name === "Image") return false;
       const link = node.name === "Link" || node.name === "Autolink";

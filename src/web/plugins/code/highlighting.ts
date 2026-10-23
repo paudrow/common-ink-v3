@@ -1,8 +1,11 @@
 import { LanguageDescription, type Language } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
+import { languages as known } from "@codemirror/language-data";
 import type { Range } from "@codemirror/state";
 import { Decoration } from "@codemirror/view";
 import { classHighlighter, highlightTree } from "@lezer/highlight";
+import { withSpaceRuns } from "../lib/markdownSpaces.ts";
+
+const languages = withSpaceRuns(known);
 
 type Loaded = Language | "loading" | "failed";
 

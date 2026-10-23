@@ -1,10 +1,11 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { LanguageDescription, syntaxHighlighting } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
+import { languages as known } from "@codemirror/language-data";
 import { Annotation, Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { classHighlighter } from "@lezer/highlight";
+import { withSpaceRuns } from "./plugins/lib/markdownSpaces.ts";
 
 export interface CodeOptions {
   /** The file's name, which says what language it is in. */
@@ -56,7 +57,7 @@ export function codeView(parent: HTMLElement, { path, text, label, onChange, onS
   };
   if (onSave) addEventListener("keydown", saving, true);
   let destroyed = false;
-  const description = path.endsWith(".json") ? null : LanguageDescription.matchFilename(languages, path);
+  const description = path.endsWith(".json") ? null : LanguageDescription.matchFilename(withSpaceRuns(known), path);
   // A grammar that can't be fetched leaves the file in one color, which is still the file.
   description?.load().then(
     (support) => void (destroyed || view.dispatch({ effects: language.reconfigure(support) })),

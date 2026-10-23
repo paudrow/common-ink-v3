@@ -5,6 +5,7 @@ import { classHighlighter } from "@lezer/highlight";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PluginHost, Upload, ViewProps } from "../../plugin-api.ts";
 import { tokenColors } from "../code/colors.ts";
+import { withSpaceRuns } from "../lib/markdownSpaces.ts";
 import { shownTable, tableOf } from "./delimited.ts";
 import { UNAVAILABLE } from "./drawing.ts";
 import { fileIn } from "./opening.ts";
@@ -152,7 +153,7 @@ function FileCode({ name, text }: { name: string; text: string }) {
     let live = true;
     // The list of languages is loaded only once a file of code is read, as a note's code block loads it.
     import("@codemirror/language-data")
-      .then(({ languages }) => LanguageDescription.matchFilename(languages, name)?.load())
+      .then(({ languages }) => LanguageDescription.matchFilename(withSpaceRuns(languages), name)?.load())
       .then(
         (support) => live && support && view.dispatch({ effects: language.reconfigure(support) }),
         () => {},

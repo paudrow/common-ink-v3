@@ -6,6 +6,7 @@ import { useDrawing } from "./drawingHost.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
+import { spaceRuns } from "./plugins/lib/markdownSpaces.ts";
 import { reading } from "./readOnly.ts";
 
 const NOWHERE = () => "about:blank";
@@ -28,7 +29,7 @@ export function MarkdownReader({ text }: { text: string }) {
       parent: el.current,
       state: EditorState.create({
         doc: text,
-        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding(""), embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "File text", "aria-readonly": "true" })],
+        extensions: [reading, added, markdown({ base: markdownLanguage, extensions: spaceRuns }), noteHighlighting, embedding(""), embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "File text", "aria-readonly": "true" })],
       }),
     });
     return () => view.destroy();

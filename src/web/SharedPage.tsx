@@ -8,6 +8,7 @@ import { useDrawing } from "./drawingHost.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
+import { spaceRuns } from "./plugins/lib/markdownSpaces.ts";
 import { reading } from "./readOnly.ts";
 
 /** A link's address: `/s/<token>`. */
@@ -182,7 +183,7 @@ function SharedNoteView({ token, noteId }: { token: string; noteId: string }) {
       parent: el.current,
       state: EditorState.create({
         doc: note.text,
-        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding(noteId), embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "Note text" })],
+        extensions: [reading, added, markdown({ base: markdownLanguage, extensions: spaceRuns }), noteHighlighting, embedding(noteId), embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "Note text" })],
       }),
     });
     return () => view.destroy();
