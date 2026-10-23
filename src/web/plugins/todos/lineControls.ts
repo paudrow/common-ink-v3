@@ -5,19 +5,18 @@ import { writable } from "../lib/live.ts";
 import { openFrom, openPopover } from "../lib/Popover.tsx";
 import { replacing } from "../lib/rewrite.ts";
 import { todoLines } from "../lib/todoLines.ts";
+import { CHIP_ICONS } from "./chipIcons.ts";
 import { chipMenu } from "./chips.ts";
 import { CHIP_NAMES, pickerLabel, type ChipKind } from "./picking.ts";
 
-const svg = (paths: string) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-
 /**
  * What a todo can be given from beside it in a note, in the order the Todos page has them: its chip's
- * icon there (calendar, repeat and flag in icons.tsx) and title, and whether the todo has it.
+ * icon and title there, and whether the todo has it.
  */
 const OPTIONS: readonly { chip: ChipKind; icon: string; title: string; has: (todo: Todo) => boolean }[] = [
-  { chip: "due", icon: svg('<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>'), title: "Add date", has: (todo) => todo.due !== null },
-  { chip: "every", icon: svg('<path d="M12.5 6.5A4.75 4.75 0 0 0 4 4.75M3.5 2.5v2.5H6M3.5 9.5A4.75 4.75 0 0 0 12 11.25M12.5 13.5V11H10"/>'), title: "Repeat", has: (todo) => todo.every !== null },
-  { chip: "importance", icon: svg('<path d="M4 14V2.75h8l-1.5 3 1.5 3H4"/>'), title: "Priority", has: (todo) => todo.importance > 0 },
+  { chip: "due", icon: CHIP_ICONS.due, title: "Add date", has: (todo) => todo.due !== null },
+  { chip: "every", icon: CHIP_ICONS.every, title: "Repeat", has: (todo) => todo.every !== null },
+  { chip: "importance", icon: CHIP_ICONS.importance, title: "Priority", has: (todo) => todo.importance > 0 },
 ];
 
 /** How far after a todo's words its controls start, in the text's own size. */

@@ -95,6 +95,8 @@ export class ChipWidget<T extends Token> extends WidgetType {
     const el = document.createElement("span");
     el.className = `md-chip md-chip-${chip.id}`;
     let into = el;
+    // One that takes its own width holds no token, so it says which it stands for.
+    if (!chip.keepsWidth) el.dataset.written = written;
     if (chip.keepsWidth) {
       el.classList.add("md-chip-sized");
       el.appendChild(document.createElement("span")).textContent = written;

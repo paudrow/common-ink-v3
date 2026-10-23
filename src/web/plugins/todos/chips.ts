@@ -11,6 +11,7 @@ import { replacing } from "../lib/rewrite.ts";
 import { onTodo, todoLines } from "../lib/todoLines.ts";
 import { ChipMenu } from "./ChipMenu.tsx";
 import { Completions } from "./Completions.tsx";
+import { CHIP_ICONS } from "./chipIcons.ts";
 import { continuedTodos } from "./continuing.ts";
 import { dueLabel, dueState, tickedLabel, today } from "./dates.ts";
 import { CHIP_NAMES, PRIORITY, STATE_NAMES, clicked, pickerLabel, type ChipKind } from "./picking.ts";
@@ -41,11 +42,12 @@ export interface TodoChipsContext {
 }
 
 /**
- * What every chip of a todo shares. It is drawn on exactly the lines the server takes for todos, and
- * over its token's own width, so nothing on the line is anywhere else when the cursor comes and the
- * token is shown as written.
+ * What every chip of a todo shares: it is drawn on exactly the lines the server takes for todos. The box
+ * is drawn over its token's own width, so the words after it stay put when the cursor shows it as written.
+ * The rest are as wide as the Todos page draws them, and what follows one on its row moves over when its
+ * token is shown as written, as it does for a link.
  */
-const onTodoLine = { keepsWidth: true, inCode: true, skip: (state: Parameters<typeof onTodo>[0], token: Token) => !onTodo(state, token.from) } as const;
+const onTodoLine = { inCode: true, skip: (state: Parameters<typeof onTodo>[0], token: Token) => !onTodo(state, token.from) } as const;
 
 /** A todo's line as checking it off left it, and where that line starts now. */
 interface Ticked {
@@ -89,6 +91,7 @@ export function untick(view: EditorView): boolean {
  */
 const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
   ...onTodoLine,
+  keepsWidth: true,
   id: "task",
   find(line, offset) {
     const todo = parseTodo(line, offset);
@@ -193,11 +196,13 @@ function tickedCard(el: HTMLElement, box: HTMLInputElement, ask: () => Promise<T
 }
 
 /**
- * Draws what a chip says, as a button that opens a panel under it. The press doesn't move the cursor, so
- * the line stays drawn; the keyboard goes back to the note when the panel closes from inside.
+ * Draws what a chip says as the Todos page draws that chip, its icon and its words in a pill as wide as they
+ * are, and as a button that opens a panel under it. The press doesn't move the cursor, so the line stays
+ * drawn; the keyboard goes back to the note when the panel closes from inside.
  */
-function panel(el: HTMLElement, says: string, name: string, label: string, disabled: boolean, open: (close: () => void) => ReactNode) {
-  el.classList.add("md-todo-chip");
+function panel(el: HTMLElement, kind: ChipKind | "done", says: string, name: string, label: string, disabled: boolean, open: (close: () => void) => ReactNode) {
+  el.classList.add("md-todo-chip", "todo-chip", `todo-${kind}`);
+  if (kind !== "done") el.insertAdjacentHTML("beforeend", CHIP_ICONS[kind]);
   el.append(says);
   el.setAttribute("role", "button");
   el.setAttribute("aria-label", name);
@@ -248,7 +253,7 @@ export function chipMenu(chip: ChipKind, line: string | undefined, close: () => 
 
 /** A chip that opens the popover the Todos page opens from the same chip, and writes what is picked there on its line as the member's edit. */
 function opener(el: HTMLElement, says: string, chip: ChipKind, source: Source, named = says) {
-  panel(el, says, `${CHIP_NAMES[chip]}: ${named}`, pickerLabel(chip), source.readOnly, (close) => chipMenu(chip, source.line()?.text, close, source.rewriteLine, () => source.edit()));
+  panel(el, chip, says, `${CHIP_NAMES[chip]}: ${named}`, pickerLabel(chip), source.readOnly, (close) => chipMenu(chip, source.line()?.text, close, source.rewriteLine, () => source.edit()));
 }
 
 const importance: Chip<ImportanceMarks> = {
@@ -260,7 +265,7 @@ const importance: Chip<ImportanceMarks> = {
   },
   draw(el, token, source) {
     el.dataset.level = String(token.level);
-    // The note shows its marks as written, as wide as they are; they are named in words.
+    // The note shows its marks as written; they are named in words.
     el.title = `Priority: ${PRIORITY[token.level]}`;
     opener(el, "!".repeat(token.level), "importance", source, PRIORITY[token.level]);
   },
@@ -285,16 +290,12 @@ const due: Chip<Due> = {
 /** How a todo recurs, in a few plain words. A click opens the recurrence popover, which rewrites the token, or takes it away with the space before it. */
 const every: Chip<Every> = {
   ...onTodoLine,
-  // Its words are longer than its token, so it takes its own width: what follows it on its row moves by the difference, and nothing else does.
-  keepsWidth: false,
   id: "every",
   find(line, offset) {
     const todo = parseTodo(line, offset);
     return todo?.every ? [{ from: todo.every.from, to: todo.every.to, written: todo.every.written }] : [];
   },
   draw(el, token, source) {
-    // The chip doesn't hold its token as the chips drawn over theirs do, so it says here what it stands for.
-    el.dataset.written = `every:${token.written}`;
     el.title = everyName(token.written);
     opener(el, everyLabel(token.written), "every", source);
   },
@@ -338,7 +339,7 @@ function lastDone(context: TodoChipsContext): Chip<Done> {
     draw(el, token, source) {
       const now = today();
       // Listing them changes nothing, so someone who can only read may look.
-      panel(el, doneLabel(token, now), doneName(token, now), "Completions", false, (close) =>
+      panel(el, "done", doneLabel(token, now), doneName(token, now), "Completions", false, (close) =>
         createElement(Completions, {
           ask: () => historyOf(context, source).then((history) => history.completions),
           done: token,
@@ -424,19 +425,12 @@ const look = EditorView.baseTheme({
   ".md-chip-task input:disabled": { cursor: "default", opacity: "0.7" },
   ".md-chip-task:has(input:disabled) > :last-child": { cursor: "default" },
   ".md-todo-token": { whiteSpace: "nowrap" },
-  // The Todos page's chips, in a note: only a due date's changes colour, as it comes and passes.
-  ".md-chip-sized > span.md-todo-chip": { top: "0.2em", bottom: "0.2em", borderRadius: "999px", overflow: "hidden", fontSize: "0.75em", fontWeight: "500", lineHeight: "1", whiteSpace: "nowrap", background: "var(--hover)", color: "var(--chip-ink)", cursor: "pointer" },
-  ".md-chip-sized > span.md-todo-chip:hover": { boxShadow: "inset 0 0 0 1px var(--line-strong)" },
-  ".md-chip-sized > span.md-todo-chip[aria-expanded]": { boxShadow: "inset 0 0 0 1px var(--accent)" },
-  ".md-chip-sized > span.md-todo-chip[aria-disabled]": { cursor: "default", boxShadow: "none" },
-  ".md-chip-sized > span.md-todo-chip[data-due=today]": { background: "color-mix(in srgb, var(--warn) 16%, transparent)", color: "var(--warn-ink)" },
-  ".md-chip-sized > span.md-todo-chip[data-due=overdue]": { background: "color-mix(in srgb, var(--danger) 14%, transparent)", color: "var(--danger)" },
-  ".md-chip-importance > span.md-todo-chip": { fontWeight: "700" },
-  // A pill as the others are, smaller than the line and no taller, on the line's own baseline, so the line is as high with it as with its token.
-  ".md-chip-every": { position: "relative", display: "inline-block", padding: "0 0.6em", borderRadius: "999px", fontSize: "0.75em", fontWeight: "500", lineHeight: "1.5", whiteSpace: "nowrap", background: "var(--hover)", color: "var(--chip-ink)", cursor: "pointer" },
-  ".md-chip-every:hover": { boxShadow: "inset 0 0 0 1px var(--line-strong)" },
-  ".md-chip-every[aria-expanded]": { boxShadow: "inset 0 0 0 1px var(--accent)" },
-  ".md-chip-every[aria-disabled]": { cursor: "default", boxShadow: "none" },
+  // The Todos page's chips, in a note, where they are spans: a press opens their popover as a button's does there.
+  // On the middle of the line's letters whatever is first in it, an icon or a word, so chips side by side line up, and the line is no taller.
+  ".md-todo-chip": { verticalAlign: "middle", cursor: "pointer" },
+  ".md-todo-chip:hover": { boxShadow: "inset 0 0 0 1px var(--line-strong)" },
+  ".md-todo-chip[aria-expanded]": { boxShadow: "inset 0 0 0 1px var(--accent)" },
+  ".md-todo-chip[aria-disabled]": { cursor: "default", boxShadow: "none" },
 });
 
 /** Draws a todo's checkbox and its options as chips. */

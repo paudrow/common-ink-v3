@@ -123,3 +123,28 @@ test("a member who can only read a note sees what is set on its todos and nothin
   await expect(editor(page).locator(".md-todo-adds")).toHaveCount(0);
   await expect(line(page, "Call the plumber").getByRole("button", { name: /^Due date/ })).toBeVisible();
 });
+
+test("a note's date, repeat and priority chips are the Todos page's: as wide as their words, the same height, padding, type and colours, and the line no taller", async ({ page }) => {
+  await open(page, "# Chips\n\n- [ ] !! Pay the bill due:2031-10-30 every:1w\n- Plain line\n\nLast words.");
+  const style = (el: Element) => {
+    const s = getComputedStyle(el);
+    return { height: s.height, padding: `${s.paddingLeft} ${s.paddingRight}`, radius: s.borderRadius, font: `${s.fontWeight} ${s.fontSize} ${s.fontFamily}`, background: s.backgroundColor, color: s.color };
+  };
+  const bill = line(page, "Pay the bill");
+  const inNote = await Promise.all([".md-chip-due", ".md-chip-every", ".md-chip-importance"].map((chip) => bill.locator(chip).evaluate(style)));
+  const widths = await bill.evaluate((el) => {
+    const due = el.querySelector(".md-chip-due")!;
+    const probe = Object.assign(document.createElement("span"), { textContent: "due:2031-10-30" });
+    el.append(probe);
+    const written = probe.getBoundingClientRect().width;
+    probe.remove();
+    return { chip: due.getBoundingClientRect().width, written };
+  });
+  expect(widths.chip, `the date chip is ${widths.chip}px, its token ${widths.written}px`).toBeLessThan(widths.written * 0.75);
+  expect((await bill.boundingBox())!.height).toBe((await line(page, "Plain line").boundingBox())!.height);
+
+  await page.goto("/todos");
+  const row = page.getByRole("region", { name: "Todos" }).getByRole("listitem").filter({ hasText: "Pay the bill" });
+  const onPage = await Promise.all([".todo-due", ".todo-every", ".todo-importance"].map((chip) => row.locator(chip).first().evaluate(style)));
+  expect(inNote).toEqual(onPage);
+});
