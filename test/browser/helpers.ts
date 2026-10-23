@@ -160,13 +160,9 @@ export async function connectAgent(page: Page, name: string) {
 /** The folder tree's row for a folder, or for one of the lists that stand beside the folders: "All notes", "Shared with me". */
 export const folderRow = (page: Page, name: string) => page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name, exact: true });
 
-/**
- * Opens a folder's list from the tree, with a click or, to keep its tab, a double click, and takes the pointer off the row as a person
- * going on to the list does. A pointer left resting on the row shows the folder's card beside it a moment later, over the list's first card.
- */
+/** Opens a folder's list from the tree, with a click or, to keep its tab, a double click. */
 export async function openFolder(page: Page, name: string, how: "click" | "dblclick" = "click") {
   await folderRow(page, name)[how]();
-  await page.mouse.move(2, 2);
 }
 
 /** Opens the list of every note in a tab, which is where a note is found by its title. A second call comes back to it from a note opened since. */

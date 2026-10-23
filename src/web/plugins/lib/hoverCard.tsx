@@ -100,11 +100,22 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
     away = near;
   };
 
+  /** The row a click was on, which shows no card until the pointer has left it: a click is no rest, and the card beside the row would cover the list the click opened. */
+  let pressed: string | undefined;
+  const down = (e: PointerEvent) => {
+    if (e.pointerType === "touch") return;
+    const anchor = anchorOf(e.target);
+    if (anchor?.dataset[beside] !== "beside") return;
+    clearTimeout(showing);
+    pressed = anchor.dataset[kind];
+    if (shown?.anchor === anchor) close();
+  };
+
   const over = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
     const anchor = anchorOf(e.target);
     const key = anchor?.dataset[kind];
-    if (!anchor || !key) return;
+    if (!anchor || !key || key === pressed) return;
     if (shown?.anchor === anchor) return void clearTimeout(hiding);
     clearTimeout(showing);
     showing = setTimeout(() => anchor.isConnected && open(anchor, key, "pointer"), SHOW_MS);
@@ -113,10 +124,11 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
     const anchor = anchorOf(e.target);
     if (!anchor) return;
     if (e.relatedTarget instanceof Node && anchor.contains(e.relatedTarget)) return;
+    if (anchor.dataset[kind] === pressed) pressed = undefined;
     if (!shown || shown.anchor !== anchor) return void clearTimeout(showing);
     if (shown.how === "pointer") later();
   };
-  // The keyboard's focus, and not a click's, which the pointer resting there already answers.
+  // The keyboard's focus, and not a click's, which is the pointer's.
   const focused = (e: FocusEvent) => {
     const anchor = e.target instanceof HTMLElement && e.target.dataset[kind] !== undefined && e.target.matches(":focus-visible") ? e.target : null;
     const key = anchor?.dataset[kind];
@@ -142,6 +154,7 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
 
   // There is no page where plugins are started to read what they add, as a test of them does.
   const page = globalThis.document as Document | undefined;
+  page?.addEventListener("pointerdown", down, true);
   page?.addEventListener("pointerover", over, true);
   page?.addEventListener("pointerout", out, true);
   page?.addEventListener("pointermove", moved, true);
@@ -161,6 +174,7 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
     dispose() {
       clearTimeout(showing);
       close();
+      page?.removeEventListener("pointerdown", down, true);
       page?.removeEventListener("pointerover", over, true);
       page?.removeEventListener("pointerout", out, true);
       page?.removeEventListener("pointermove", moved, true);
