@@ -357,11 +357,11 @@ test("an HTML embed is picked from the insert menu, runs by itself in its room w
   await expect(editor(page).getByRole("button", { name: "Settings for HTML" })).toBeVisible();
 
   // The block as written, with a counter in it. Its body changed, so what was running is gone and the new body runs.
-  await goTo(page, 6);
+  await goTo(page, 7);
   await expect(editor(page)).toContainText("<p>Hello from <b>HTML</b>.</p>");
   await page.keyboard.type("<script>window.born = String(Math.random()); window.ticks = 0; setInterval(() => window.ticks++, 20);</script>");
   await goTo(page, 3);
-  await expect(line(page, ":::html{}")).toHaveCount(0);
+  await expect(line(page, "/html()")).toHaveCount(0);
   await expect.poll(async () => (await running(page)[0]?.evaluate(() => typeof (window as unknown as { ticks?: number }).ticks).catch(() => "")) ?? "").toBe("number");
   const { born } = await playing(running(page)[0]!);
   await watch(page, "html");
@@ -384,7 +384,7 @@ test("an HTML embed is picked from the insert menu, runs by itself in its room w
 
   // A press on the card's head puts the cursor in the block, which shows it as written. Nothing of it changed, so the frame stays.
   await editor(page).locator(".embed-joined .embed-head").click({ position: { x: 120, y: 12 } });
-  await expect(editor(page)).toContainText(":::html{}");
+  await expect(editor(page)).toContainText("/html()");
   await expectStillRunning("with the cursor in its block");
   await expectOverItsRoom(page, "html", "with the cursor in its block");
   await page.keyboard.press("ControlOrMeta+Home");
@@ -523,7 +523,7 @@ test("what is below a line is there, whole and in its place, in every frame pain
       const content = document.querySelector(".cm-content");
       if (!content) return;
       painted.push({
-        written: /:::html/.test(content.textContent!),
+        written: /\/html\(/.test(content.textContent!),
         rooms: [...document.querySelectorAll(".embed-below-room > div")].map(box),
         shown: [...document.querySelectorAll(".embed-below")].map(box),
         filled: [...document.querySelectorAll(".embed-below-drawn")].every((el) => el.childElementCount > 0),
@@ -725,7 +725,7 @@ test("what is below a line can write what it learned into the note, which is whe
       },
     ];
   });
-  const note = await open(page, "# Album\n\nabove\n\n::pic{cat}\n\nbelow\n");
+  const note = await open(page, "# Album\n\nabove\n\n/pic(cat)\n\nbelow\n");
   const size = async () => (await placed(page, "pic")).el!.slice(2);
   await expect(below(page, "pic")).toBeVisible();
   const usual = await size();
@@ -733,7 +733,7 @@ test("what is below a line can write what it learned into the note, which is whe
   await below(page, "pic").evaluate((el: HTMLElement & { marked?: boolean }) => (el.marked = true));
 
   await below(page, "pic").getByRole("button", { name: "It has loaded" }).click();
-  await expect.poll(() => read(page, note.id)).toBe("# Album\n\nabove\n\n::pic{cat 400x100}\n\nbelow\n");
+  await expect.poll(() => read(page, note.id)).toBe("# Album\n\nabove\n\n/pic(cat 400x100)\n\nbelow\n");
   await expect.poll(async () => { const [width, height] = await size(); return Math.round(width! / height!); }).toBe(4);
   await expectOverItsRoom(page, "pic", "once its size is in the note");
   await expect.poll(() => below(page, "pic").evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
@@ -824,9 +824,9 @@ test("an HTML block's lines fold away when the cursor leaves it, which moves the
   const top = () => line(page, "after the block").evaluate((el) => Math.round(el.getBoundingClientRect().top));
   const outside = await top();
   await goTo(page, 5);
-  await expect(editor(page)).toContainText(":::html{height=120}");
+  await expect(editor(page)).toContainText("/html(height=120)");
   await expectOverItsRoom(page, "html", "with the block shown as written");
-  // Five lines as written above its card, where there were none.
+  // Six lines as written above its card, where there were none.
   const lineHeight = await line(page, "after the block").evaluate((el) => el.getBoundingClientRect().height);
   await expect.poll(async () => (await top()) - outside).toBeGreaterThan(3 * lineHeight);
   await page.keyboard.press("ControlOrMeta+Home");
@@ -938,7 +938,7 @@ test("an HTML body being written runs nothing at each key: what was written runs
   await expect(framed.getByText("first")).toBeVisible();
   expect(asked()).toHaveLength(1);
   // Half-written, this would loop for ever: it must not run until the cursor leaves.
-  await goTo(page, 4);
+  await goTo(page, 5);
   await page.keyboard.type("<script>let i = 0; while (i < 3) { i }</script><p>second</p>");
   await settled(page);
   await page.waitForTimeout(300);

@@ -1,5 +1,5 @@
 import { deflateSync, crc32 } from "node:zlib";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
 import { asViewerOfNote, frameOrigin, perform, signInAsNewPerson, test } from "./helpers.ts";
 
@@ -54,6 +54,14 @@ function send(page: Page, name: string, bytes: Buffer): Promise<Upload> {
     },
     { name, base64: bytes.toString("base64") },
   );
+}
+
+/** An embed's settings hang from their button, as the app's other popovers do: just under it, from its left edge, kept in the window. */
+async function expectHungFrom(page: Page, panel: Locator, button: Locator) {
+  const [p, b] = [(await panel.boundingBox())!, (await button.boundingBox())!];
+  expect(p.y - (b.y + b.height), "just under its button").toBeGreaterThanOrEqual(0);
+  expect(p.y - (b.y + b.height), "just under its button").toBeLessThan(8);
+  expect(p.x, "from its button's left edge, in the window").toBeCloseTo(Math.max(8, Math.min(b.x, page.viewportSize()!.width - 8 - p.width)), 0);
 }
 
 test("an HTML block's settings set its height into its line and clear it out again", async ({ page }) => {
@@ -183,7 +191,22 @@ test("the settings close when what the note writes of their embed is taken out",
   await expect(panel).toHaveCount(0);
 });
 
-test("a picture's settings open from its corner, beneath it, and set and clear its width in its line", async ({ page }) => {
+test("a timer's settings open from its button, and not under a picture on the line under it", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.setViewportSize({ width: 1280, height: 1200 });
+  const photo = await send(page, "harbour.png", png(400, 300));
+  await open(page, `# Tea\n\nSteep /timer(5m) now.\n/image(${photo.id} 400x300)\n\nlast\n`);
+  const picture = page.locator('.embed-below[data-embed="image"]');
+  await expect(picture.locator("img")).toBeVisible();
+  const button = page.getByRole("button", { name: "Settings for Timer" });
+  await button.click();
+  const panel = page.getByRole("dialog", { name: "Settings for Timer" });
+  await expect(panel).toBeVisible();
+  await expectHungFrom(page, panel, button);
+  expect((await panel.boundingBox())!.y).toBeLessThan((await picture.boundingBox())!.y);
+});
+
+test("a picture's settings open from its button in its corner, and set and clear its width in its line", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.setViewportSize({ width: 1280, height: 1200 });
   const photo = await send(page, "harbour.png", png(400, 300));
@@ -203,8 +226,8 @@ test("a picture's settings open from its corner, beneath it, and set and clear i
   // Its size is measured by the app once it has loaded, and isn't set by hand.
   await expect(panel.getByRole("textbox", { name: "Width" })).toBeVisible();
   await expect(panel.getByRole("textbox", { name: "Size" })).toHaveCount(0);
-  const [under, box] = [(await shown.boundingBox())!, (await panel.boundingBox())!];
-  expect(box.y).toBeGreaterThanOrEqual(under.y + under.height);
+  await expectHungFrom(page, panel, button);
+  const under = (await shown.boundingBox())!;
 
   await panel.getByRole("textbox", { name: "Width" }).fill("medium");
   await page.keyboard.press("Enter");

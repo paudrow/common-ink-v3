@@ -1,4 +1,5 @@
 import { dismissOn } from "./dismiss.ts";
+import { EDGE, hang } from "./plugins/lib/hanging.ts";
 import { defaultOf, durationParts, durationWords, numberRule, shownValue, SWATCHES, valueOf } from "../core/embedOptions.ts";
 import { clearKey, isDuration, placeProblems, problemText, readConfig, removeWord, renameKey, schemaFor, setKey, settableKeys, type EmbedKey, type EmbedSchema, type Stray } from "../core/embedSchema.ts";
 import type { Embed, EmbedField, EmbedOptions } from "./plugin-api.ts";
@@ -21,10 +22,10 @@ export interface Options {
   remove(stray: Stray): string | void;
   /** Gives a key=value word the key it was likely meant to have, keeping its value. */
   rename(from: string, to: string): string | void;
+  /** Shows the embed's source in the note, `/name(args)` and its content, to be edited there. */
+  source(): void;
 }
 
-const GAP = 4;
-const EDGE = 8;
 const MIN_WIDTH = 360;
 
 let shown: { anchor: HTMLElement; panel: HTMLElement; read: () => Options | null; close: () => void; place: () => void } | null = null;
@@ -282,7 +283,16 @@ function fill(panel: HTMLElement, options: Options, read: () => Options | null) 
     const clear = (id: string) => said(read()?.clear(id));
     const wrong = document.createElement("div");
     wrong.className = "embed-option-problems";
-    panel.replaceChildren(wrong, ...options.fields.map((field) => fieldOf(field, set, said, clear)), ...options.strays.map((stray) => strayOf(stray, said, read)), error);
+    const source = document.createElement("button");
+    source.type = "button";
+    source.className = "embed-edit-source";
+    source.textContent = "Edit source";
+    source.addEventListener("click", () => {
+      const now = read();
+      shown?.close();
+      now?.source();
+    });
+    panel.replaceChildren(wrong, ...options.fields.map((field) => fieldOf(field, set, said, clear)), ...options.strays.map((stray) => strayOf(stray, said, read)), error, source);
   }
   const wrong = panel.querySelector<HTMLElement>(".embed-option-problems")!;
   if (wrong.textContent !== options.loose.join("")) {
@@ -330,8 +340,9 @@ function fill(panel: HTMLElement, options: Options, read: () => Options | null) 
 }
 
 /**
- * Opens an embed's options beneath `under`, the embed's card, at least as wide as it, laid over the app so
- * nothing in the note moves, or closes them if they are open from `anchor`, the options button.
+ * Opens an embed's options from `anchor`, its settings button, as the app's other popovers open from
+ * theirs, at least as wide as `under`, the embed's card, laid over the app so nothing in the note
+ * moves, or closes them if they are open from `anchor`.
  * One is open at a time. It closes on Escape, on a press outside it, and when `read` has nothing to
  * give, as when the embed is gone or has no options left.
  */
@@ -346,17 +357,9 @@ export function toggleOptions(anchor: HTMLElement, under: HTMLElement, read: () 
   panel.setAttribute("role", "dialog");
   const place = () => {
     if (!anchor.isConnected) return close();
-    const [card, button] = [under.getBoundingClientRect(), anchor.getBoundingClientRect()];
-    // Under a card in a line of text, beneath the whole line, which may wrap onto rows below the card's.
-    const foot = (under.closest(".cm-line")?.getBoundingClientRect() ?? card).bottom;
-    // As wide as the card it is under, as v1's options were, and never so narrow that a hint wraps into a column, as under a timer in a line of text.
-    panel.style.width = `${Math.min(Math.max(card.width, MIN_WIDTH), innerWidth - 2 * EDGE)}px`;
-    const { width, height } = panel.getBoundingClientRect();
-    const fits = (top: number) => top >= EDGE && top + height <= innerHeight - EDGE;
-    // Beneath the card where that is in the window. A card taller than the window has its foot out of sight, and the options are then beneath their button.
-    const [at, top] = fits(foot + GAP) ? [card.left, foot + GAP] : [button.right - width, fits(button.bottom + GAP) ? button.bottom + GAP : button.top - GAP - height];
-    panel.style.left = `${Math.max(EDGE, Math.min(at, innerWidth - EDGE - width))}px`;
-    panel.style.top = `${Math.max(EDGE, Math.min(top, innerHeight - EDGE - height))}px`;
+    // As wide as the card, as v1's options were, and never so narrow that a hint wraps into a column, as for a timer in a line of text.
+    panel.style.width = `${Math.min(Math.max(under.getBoundingClientRect().width, MIN_WIDTH), innerWidth - 2 * EDGE)}px`;
+    hang(panel, anchor);
   };
   const undismiss = dismissOn(() => close(), () => [panel, anchor]);
   const close = () => {
@@ -381,10 +384,10 @@ export function toggleOptions(anchor: HTMLElement, under: HTMLElement, read: () 
   panel.querySelector<HTMLElement>("input, button")?.focus();
 }
 
-/** Shows `options`, which are what the note says now, in the settings open from `anchor`, if any are, and closes them if the embed has nothing left to show. */
+/** Shows `options`, which are what the note says now, in the settings open from `anchor`, if any are, and closes them if the embed is gone. */
 export function refreshOptions(anchor: HTMLElement, options: Options | null): void {
   if (shown?.anchor !== anchor) return;
-  if (!options || (!options.fields.length && !options.problems.length)) return shown.close();
+  if (!options) return shown.close();
   fill(shown.panel, options, shown.read);
   shown.place();
 }
@@ -398,12 +401,13 @@ const opening = new WeakMap<HTMLElement, { under: () => HTMLElement; read: () =>
 
 /**
  * Fits the settings button in `parent` to `options`, an embed's settings as the note writes it now:
- * made with `className` the first time, and taken away with its panel where there is nothing to set,
- * as for a member who can't change the note. A press opens what `open` reads then beneath its `under`.
+ * made with `className` the first time, and taken away with its panel where there are none, as for a
+ * member who can't change the note. Every embed a member can change has one, for Edit source if
+ * nothing else. A press opens what `open` reads then beneath its `under`.
  */
 export function fitSettingsButton(parent: HTMLElement, className: string, options: Options | null, open: { under: () => HTMLElement; read: () => Options | null }): void {
   let button = parent.querySelector<HTMLButtonElement>(":scope > .embed-options");
-  if (!options?.fields.length && !options?.problems.length) {
+  if (!options) {
     if (button) closeOptions(button);
     if (button) markProblems(button, "", []);
     button?.remove();
@@ -506,8 +510,8 @@ export function settingsOf(embed: Pick<Embed, "name" | "options">): Settings | u
   };
 }
 
-/** The panel's settings for an embed as the note writes it now, each set and cleared by rewriting it there. */
-export function optionsOn(title: string, settings: Settings, now: Note, rewrite: (next: { config?: string; body?: string }) => void): Options {
+/** The panel's settings for an embed as the note writes it now, each set and cleared by rewriting it there, and Edit source, which `source` does. */
+export function optionsOn(title: string, settings: Settings | undefined, now: Note, rewrite: (next: { config?: string; body?: string }) => void, source: () => void): Options {
   const written = { config: now.config, body: now.body };
   const apply = (next: () => { config?: string; body?: string } | string) => {
     try {
@@ -518,15 +522,17 @@ export function optionsOn(title: string, settings: Settings, now: Note, rewrite:
       return err instanceof Error ? err.message : String(err);
     }
   };
+  const none = (id: string) => `No setting ${id}.`;
   return {
     title,
-    fields: settings.fields(written),
-    problems: settings.problems(written),
-    ...settings.placing(written),
-    set: (id, value) => apply(() => settings.set(written, id, value)),
-    clear: (id) => apply(() => settings.clear(written, id)),
-    remove: (stray) => apply(() => settings.remove(written, stray)),
-    rename: (from, to) => apply(() => settings.rename(written, from, to)),
+    fields: settings?.fields(written) ?? [],
+    problems: settings?.problems(written) ?? [],
+    ...(settings?.placing(written) ?? { strays: [], loose: [] }),
+    set: (id, value) => (settings ? apply(() => settings.set(written, id, value)) : none(id)),
+    clear: (id) => (settings ? apply(() => settings.clear(written, id)) : none(id)),
+    remove: (stray) => (settings ? apply(() => settings.remove(written, stray)) : undefined),
+    rename: (from, to) => (settings ? apply(() => settings.rename(written, from, to)) : none(to)),
+    source,
   };
 }
 

@@ -629,6 +629,6 @@ export const forms: Plugin = {
   description: "A form in a note. An agent writes the questions. Members answer, and the answers stay in the note.",
   icon: "list",
   activate(host) {
-    host.embeds.register({ name: "form", title: "Form", block: true, starts, description: "Questions for members to answer, with the answers kept in the note", preview: { image: PICTURE }, options, render: (el, embed) => present(host, el, embed) });
+    host.embeds.register({ name: "form", title: "Form", block: true, content: "json", starts, description: "Questions for members to answer, with the answers kept in the note", preview: { image: PICTURE }, options, render: (el, embed) => present(host, el, embed) });
   },
 };

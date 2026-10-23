@@ -6,12 +6,14 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { createPortal } from "react-dom";
 import type { GrantAccess, Note } from "../core/protocol.ts";
 import { ApiError, perform, session } from "./api.ts";
+import { drawsLines, lineExtensions } from "./drawnLines.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { listKeys } from "./listEnter.ts";
 import { completing } from "./completing.ts";
 import { dismissing } from "./dismiss.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
+import { embedContent } from "./embedContent.ts";
 import { spaceRuns } from "./plugins/lib/markdownSpaces.ts";
 import { readOnly } from "./readOnly.ts";
 import { noteTabs } from "./tabbing.ts";
@@ -149,7 +151,12 @@ export function NoteEditor({ workspaceId, noteId, pane, onLoaded, onSaved, revis
   offeredNow.current = offered;
   const [added] = useState(() => new Compartment());
   const mine = useMemo(() => forEditor({ noteId }), [noteId]);
-  const { extensions, refused } = useMemo(() => mine(contributed), [mine, contributed]);
+  // A line an embed draws, as a board's card, is drawn as a reading of the note, which nothing takes for its editor.
+  const lines = useMemo(() => forEditor({ noteId, reading: true }), [noteId]);
+  const { extensions, refused } = useMemo(() => {
+    const own = mine(contributed);
+    return { extensions: [...own.extensions, drawsLines.of(lines(lineExtensions(contributed)).extensions)], refused: own.refused };
+  }, [mine, lines, contributed]);
   const [locked] = useState(() => new Compartment());
   const [read, setRead] = useState<Pick<Note, "access" | "state"> | undefined>(undefined);
   const trashed = (state ?? read?.state) === "trashed";
@@ -201,7 +208,7 @@ export function NoteEditor({ workspaceId, noteId, pane, onLoaded, onSaved, revis
               keymap.of(defaultKeymap),
               noteTabs,
               // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
-              markdown({ base: markdownLanguage, extensions: spaceRuns, addKeymap: false }),
+              markdown({ base: markdownLanguage, extensions: [spaceRuns, embedContent], addKeymap: false }),
               listKeys,
               noteHighlighting,
               embedding(noteId),

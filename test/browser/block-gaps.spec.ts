@@ -167,7 +167,7 @@ test("the arrow keys and vim's j and k each stop on the line of an upload or an 
   const picture = await send(page, "picture.png", png(320, 180));
   const video = "https://www.youtube.com/watch?v=NgRkyAlJx5s";
   const note = await perform(page, { type: "note.create", text: `# Steps\n\nPara A.\n/image(${picture.id} 320x180)\n${video}\nPara B.` });
-  const shown = () => page.locator(".cm-content > .cm-line").evaluateAll((lines) => lines.map((l) => l.textContent).filter((t) => t!.startsWith("::") || t!.startsWith("https")));
+  const shown = () => page.locator(".cm-content > .cm-line").evaluateAll((lines) => lines.map((l) => l.textContent).filter((t) => t!.startsWith("/") || t!.startsWith("https")));
   const steps = [
     [[], ["ArrowDown", "j"]],
     [[`/image(${picture.id} 320x180)`], ["ArrowDown", "j"]],

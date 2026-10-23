@@ -1,9 +1,8 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { hang } from "./hanging.ts";
 import { useDismiss } from "../../plugin-api.ts";
 
-const GAP = 4;
-const EDGE = 8;
 
 let shown: { anchor: HTMLElement; close: () => void } | null = null;
 
@@ -54,20 +53,7 @@ function Panel({ anchor, label, close, children }: { anchor: HTMLElement; label:
     const el = ref.current!;
     const place = () => {
       if (!anchor.isConnected) return close();
-      const at = anchor.getBoundingClientRect();
-      const width = el.getBoundingClientRect().width;
-      // Its whole height, however much of it is shown now.
-      const height = el.scrollHeight;
-      const below = at.bottom + GAP;
-      const roomBelow = innerHeight - EDGE - below;
-      const roomAbove = at.top - GAP - EDGE;
-      // Under its anchor, or above it where there is no room under it. Where it fits on neither side it is on the side with
-      // more room, as tall as that room, and scrolls: never over its anchor, so the thing it is for stays in sight.
-      const under = height <= roomBelow || (height > roomAbove && roomBelow >= roomAbove);
-      const room = under ? roomBelow : roomAbove;
-      el.style.maxHeight = height > room ? `${Math.max(room, 0)}px` : "";
-      el.style.left = `${Math.max(EDGE, Math.min(at.left, innerWidth - EDGE - width))}px`;
-      el.style.top = `${under ? below : Math.max(EDGE, at.top - GAP - Math.min(height, room))}px`;
+      hang(el, anchor);
     };
     place();
     (el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>("button:enabled, input:enabled, select:enabled"))?.focus();

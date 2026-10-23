@@ -2491,6 +2491,26 @@ button.link:hover {
   color: var(--ink);
 }
 
+/* Shows what the note writes for the embed, at the panel's foot: quieter than a setting, and alone at its start. */
+.embed-edit-source {
+  align-self: flex-start;
+  padding: 4px 8px;
+  margin: 0 -8px -4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  cursor: pointer;
+}
+
+.embed-edit-source:hover,
+.embed-edit-source:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}
+
 .embed-option-hint {
   grid-column: 2;
 }

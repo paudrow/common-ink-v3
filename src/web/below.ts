@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
+import { Annotation, EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { keep } from "./belowIdentity.ts";
 import { inlineIn, rewriteOf, type KindOf, type Written } from "../core/embedSyntax.ts";
@@ -237,6 +237,9 @@ function inSight(el: Element): boolean {
   }
   return top < bottom && left < right;
 }
+
+/** On a cursor the host puts in an embed itself, which is where it says and nowhere else. */
+export const placed = Annotation.define<true>();
 
 /** The height what is below a line turned out to have, once it had loaded. */
 const resized = StateEffect.define<{ id: number; height: number }>();
@@ -497,12 +500,19 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
       }
 
       /** The settings of what is kept, as the note writes it now, which set and clear by rewriting it there: for one whose settings open from its corner, while the note can be changed. */
-      optionsOf(now: Shown | undefined, view: EditorView, settings = now && settingsOf(now.embed)): Options | null {
-        if (!now || !settings || !cornered(now) || view.state.readOnly) return null;
-        return optionsOn(now.embed.title, settings, now.written, (next) => {
-          const changes = rewriteOf(now.written, next);
+      optionsOf(now: Shown | undefined, view: EditorView): Options | null {
+        if (!now || !cornered(now) || view.state.readOnly) return null;
+        const { written } = now;
+        const rewrite = (next: { config?: string; body?: string }) => {
+          const changes = rewriteOf(written, next);
           if (changes.length) view.dispatch({ changes, userEvent: "input.embed" });
-        });
+        };
+        // Edit source: the cursor at the start of the embed's line, which shows it as written.
+        const source = () => {
+          view.focus();
+          view.dispatch({ selection: { anchor: written.from }, scrollIntoView: true, annotations: placed.of(true) });
+        };
+        return optionsOn(now.embed.title, settingsOf(now.embed), written, rewrite, source);
       }
 
       /** Gives what is kept a red edge for what is wrong with it, and its settings button in its corner, or takes that away, to fit what the note says of it now. */
@@ -510,7 +520,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
         const settings = shown.bare || "claims" in shown.embed ? undefined : settingsOf(shown.embed);
         // The rest of a block's card, and the room of an embed drawn in its line, are edged in red as its card is.
         live.el.classList.toggle("embed-invalid", !!settings?.problems(shown.written).length);
-        fitSettingsButton(live.el, "embed-options embed-options-corner", this.optionsOf(shown, view, settings), {
+        fitSettingsButton(live.el, "embed-options embed-options-corner", this.optionsOf(shown, view), {
           under: () => live.el,
           read: () => this.optionsOf(view.state.field(field, false)?.shown.find((s) => s.id === shown.id), view),
         });

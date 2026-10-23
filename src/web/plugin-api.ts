@@ -875,12 +875,20 @@ export interface Embedded {
   update(next: { config?: string; body?: string }): void;
   /**
    * Puts the cursor in the embed as the note writes it, to be changed there, as moving the cursor
-   * onto it does. The embed stays drawn, the element it was, and its text is shown above its
-   * drawing for as long as the cursor is in it: an inline embed's in rows of their own above its
-   * line, a block's lines above its card. For a block, `at` is how far into its body the cursor goes,
+   * onto it does, and as Edit source in its settings does from the start of its line. The embed stays drawn, the element it was, and its text is shown before its
+   * drawing for as long as the cursor is in it: an inline embed's in its line before it, a block's
+   * lines above its card. For a block, `at` is how far into its body the cursor goes,
    * as a board puts it on the line of the card that was pressed. Without it the cursor goes in the config.
    */
   edit(at?: number): void;
+  /**
+   * Draws `text`, lines of markdown such as a board's card, into `el` as the note draws its own: a
+   * todo's box and chips, links by their names, mentions, tags and dates. What is pressed there
+   * changes the lines as it would in the note, and each change is handed to `changed` as the lines
+   * are then; a press on the words is handed to `pressed`. Where nothing of the note can be drawn,
+   * they are their text. Returns what takes the drawing out, for when the embed is drawn again.
+   */
+  lines(el: HTMLElement, text: string, on: { changed: (text: string) => void; pressed: () => void }): () => void;
 }
 
 export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "content" | "starts" | "description" | "preview" | "pick">;

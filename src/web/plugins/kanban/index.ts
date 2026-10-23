@@ -182,8 +182,8 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
 }
 
 /**
- * A kanban board kept in a note as a block: `:::kanban{}`, a heading for each column with its cards
- * as a list under it, then `:::`. Moving or adding a card rewrites that markdown, and so does giving
+ * A kanban board kept in a note as a block: `/kanban()`, then its markdown in a fence under it, a
+ * heading for each column with its cards as a list under it. Moving or adding a card rewrites that markdown, and so does giving
  * a column a colour, which its heading then ends with: `## Doing {.blue}`.
  */
 export const kanban: Plugin = {
@@ -193,6 +193,6 @@ export const kanban: Plugin = {
   icon: "board",
   screenshots: [{ src: "/plugin-shots/kanban-light.png", dark: "/plugin-shots/kanban-dark.png", alt: "A board in a note: three columns of cards, each with a button to add a card." }],
   activate(host) {
-    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, description: "Columns of cards to drag from one to another", preview: { image: PICTURE }, options, render: draw });
+    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, content: "markdown", starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, description: "Columns of cards to drag from one to another", preview: { image: PICTURE }, options, render: draw });
   },
 };

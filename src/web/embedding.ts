@@ -1,9 +1,12 @@
 import { syntaxTree } from "@codemirror/language";
-import { Annotation, EditorState, Facet, Prec, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
+import { linter, type Diagnostic } from "@codemirror/lint";
+import { EditorState, Facet, Prec, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { aloneIn, aloneOn, boxOf, keptBelow, kindsOf } from "./below.ts";
+import { aloneIn, aloneOn, boxOf, keptBelow, kindsOf, placed } from "./below.ts";
 import { closeOptions, fitSettingsButton, optionsOn, settingsOf, type Options } from "./embedOptions.ts";
-import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "../core/embedSyntax.ts";
+import { misspeltText } from "../core/embedSchema.ts";
+import { blocksIn, inlineIn, misspeltIn, rewriteOf, sameWritten, type Written } from "../core/embedSyntax.ts";
+import { drawLines } from "./drawnLines.ts";
 import { following } from "./following.ts";
 import type { AddressEmbed, Drawn, Embed, Embedded } from "./plugin-api.ts";
 import { isReading } from "./readOnly.ts";
@@ -31,16 +34,22 @@ function writtenAt(view: EditorView, el: HTMLElement, block: boolean): Written |
   const pos = view.posAtDOM(el);
   if (block) return view.state.field(blocks).all.find((b) => b.to === pos);
   const line = view.state.doc.lineAt(pos);
-  return inlineIn(line.text, line.from, kindsOf(view.state.facet(registered))).find((w) => w.from === pos);
+  return inlineIn(line.text, line.from, kindsOf(view.state.facet(registered))).find((w) => w.to === pos);
 }
 
 /** The element an embed draws in, inside the card the host draws around it. */
 const drawingIn = (frame: HTMLElement) => frame.querySelector<HTMLElement>(".embed")!;
-/** The room an embed keeps below its line, where what it shows is, as a third-party plugin's frame is: what its options open beneath. */
-function roomOf(frame: HTMLElement): HTMLElement | null {
-  const next = frame.closest(".cm-line")?.nextElementSibling;
+/**
+ * The room an embed keeps below its line, where what it shows is, as a third-party plugin's frame is: what its options open beneath.
+ * Only its own line's: the room after it may be that of a line out of sight under it, as a picture alone on its line is.
+ */
+function roomOf(view: EditorView, frame: HTMLElement): HTMLElement | null {
+  const line = frame.closest(".cm-line");
+  const next = line?.nextElementSibling;
+  if (!(next instanceof HTMLElement) || !next.classList.contains("embed-below-room") || !view.contentDOM.contains(next)) return null;
+  if (view.state.doc.lineAt(view.posAtDOM(next)).number !== view.state.doc.lineAt(view.posAtDOM(frame)).number) return null;
   // The room's box is the size of what is drawn over it; the room around it has the gaps.
-  return next instanceof HTMLElement && next.classList.contains("embed-below-room") ? (next.querySelector<HTMLElement>("[data-below]") ?? next) : null;
+  return next.querySelector<HTMLElement>("[data-below]") ?? next;
 }
 
 const optionsIn = (frame: HTMLElement) => frame.querySelector<HTMLButtonElement>(".embed-options");
@@ -132,6 +141,13 @@ class EmbedWidget extends WidgetType {
       view.focus();
       view.dispatch({ selection: { anchor }, scrollIntoView: true, annotations: placed.of(true) });
     };
+    /** Edit source: the cursor at the start of the embed's line, which shows it as written. */
+    const editSource = () => {
+      const now = still();
+      if (!now) return;
+      view.focus();
+      view.dispatch({ selection: { anchor: now.from }, scrollIntoView: true, annotations: placed.of(true) });
+    };
     pressed.set(frame, () => edit());
     let drawing = true;
     try {
@@ -146,6 +162,7 @@ class EmbedWidget extends WidgetType {
           else rewrite(next);
         },
         edit,
+        lines: (into, text, on) => drawLines(view.state, into, text, { readOnly: this.readOnly, ...on }),
       });
       live.set(el, typeof drawn === "function" ? { stop: drawn } : (drawn ?? {}));
     } catch (err) {
@@ -157,7 +174,7 @@ class EmbedWidget extends WidgetType {
     } finally {
       drawing = false;
     }
-    this.fitOptions(frame, still, rewrite);
+    this.fitOptions(view, frame, still, rewrite, editSource);
   }
 
   /**
@@ -165,7 +182,7 @@ class EmbedWidget extends WidgetType {
    * and says what is wrong with its config: a red edge on the card, a line under a block's head, and a
    * warning on the button. It is drawn all the same, as its own reading of the config allows.
    */
-  private fitOptions(frame: HTMLElement, still: () => Written | undefined, rewrite: (next: { config?: string; body?: string }) => void) {
+  private fitOptions(view: EditorView, frame: HTMLElement, still: () => Written | undefined, rewrite: (next: { config?: string; body?: string }) => void, editSource: () => void) {
     const { embed, written } = this;
     const settings = settingsOf(embed);
     const problems = settings?.problems({ config: written.config, body: written.body }) ?? [];
@@ -177,10 +194,10 @@ class EmbedWidget extends WidgetType {
       said.className = "embed-problems";
       said.textContent = problems.join(" ");
     } else said?.remove();
-    const optionsFor = (now: Written | undefined): Options | null => (now && settings && !this.readOnly ? optionsOn(embed.title, settings, now, rewrite) : null);
+    const optionsFor = (now: Written | undefined): Options | null => (now && !this.readOnly ? optionsOn(embed.title, settings, now, rewrite, editSource) : null);
     // What is drawn now is what the note says now. Where it is in the note can't be asked while the note is being drawn.
     fitSettingsButton(frame.querySelector<HTMLElement>(".embed-head") ?? frame, "embed-options", optionsFor(written), {
-      under: () => roomOf(frame) ?? frame.querySelector<HTMLElement>(".embed-card") ?? frame,
+      under: () => roomOf(view, frame) ?? frame.querySelector<HTMLElement>(".embed-card") ?? frame,
       read: () => optionsFor(still()),
     });
   }
@@ -204,9 +221,6 @@ const pressed = new WeakMap<HTMLElement, () => void>();
 
 const widgetFor = (state: EditorState, embed: Drawing, written: Written) => new EmbedWidget(embed, written, state.sliceDoc(written.from, written.to), state.readOnly);
 
-/** On a cursor the host puts in an embed itself, which is where it says and nowhere else. */
-const placed = Annotation.define<true>();
-
 /**
  * Whether the cursor has been put anywhere. A note opens with its cursor at its start, where nobody
  * put it, and nothing is shown as written for that: an embed at the top of a note would open as
@@ -226,14 +240,14 @@ const cursorOn = (state: EditorState, { from, to }: Pick<Written, "from" | "to">
 
 const unseen = Decoration.replace({});
 const asText = Decoration.mark({ class: "embed-written" });
-/** A drawn embed's text, shown after its drawing while the cursor is on it. */
+/** A drawn embed's text, shown before its drawing while the cursor is on it. */
 const asSource = Decoration.mark({ class: "embed-source" });
 /** A line that is one such embed and nothing else is only as tall as its text as written. */
 const alone = Decoration.line({ class: "embed-alone" });
 
 /**
- * An inline embed's drawing is a widget of its own before the embed's text, and the text is hidden
- * after it. With the cursor on the embed its text is shown where it is written, after the drawing,
+ * An inline embed's drawing is a widget of its own after the embed's text, and the text is hidden
+ * before it. With the cursor on the embed its text is shown where it is written, before the drawing,
  * which stays the element it was, doing what it was doing.
  */
 function inlineDrawn(view: EditorView): DecorationSet {
@@ -255,8 +269,8 @@ function inlineDrawn(view: EditorView): DecorationSet {
         continue;
       }
       if (!drawing(embed)) continue;
-      ranges.push(Decoration.widget({ widget: widgetFor(state, embed, written), side: -1 }).range(written.from));
       ranges.push((cursorOn(state, written) ? asSource : unseen).range(written.from, written.to));
+      ranges.push(Decoration.widget({ widget: widgetFor(state, embed, written), side: 1 }).range(written.to));
     }
   }
   return Decoration.set(ranges, true);
@@ -396,6 +410,64 @@ const arrowsIn = Prec.high(
   ),
 );
 
+/** Where a JSON parse stopped, from what it said. One that says no place stopped at the end. */
+const stoppedAt = (err: unknown, length: number) => {
+  const at = /at position (\d+)/.exec(err instanceof Error ? err.message : "")?.[1];
+  return at === undefined ? length : Math.min(Number(at), length);
+};
+
+/** JSON content is checked as it is typed, while its source is shown, and marked where it stops being JSON. */
+const jsonChecked = linter(
+  (view) => {
+    const { all, revealed } = view.state.field(blocks);
+    const block = all.find((b) => b.from === revealed && b.content === "json" && b.fence);
+    if (!block) return [];
+    try {
+      JSON.parse(block.body);
+      return [];
+    } catch (err) {
+      const at = block.bodyFrom + stoppedAt(err, block.body.length);
+      const from = Math.max(block.bodyFrom, Math.min(at, block.bodyFrom + block.body.length - 1));
+      return [{ from, to: Math.max(from + 1, at), severity: "error", message: `This isn't JSON from here. ${err instanceof Error ? err.message : ""}`.trim() }];
+    }
+  },
+  { delay: 300, needsRefresh: (update) => update.startState.field(blocks).revealed !== update.state.field(blocks).revealed },
+);
+
+/**
+ * A `/name(args)` where an embed would be, whose name is no embed's and close to one, is said so
+ * quietly, with a fix that writes the name it was likely meant to be. A word nowhere near a name is
+ * left alone, and so is one in code.
+ */
+const misspeltNamed = linter(
+  (view) => {
+    const names = [...view.state.facet(registered).keys()];
+    const tree = syntaxTree(view.state);
+    // A block's content is the block's: what a board's card says is never an embed.
+    const inContent = (at: number) => view.state.field(blocks).all.some((b) => b.fence && at > b.from && at <= b.to);
+    const found: Diagnostic[] = [];
+    for (const { from, to } of view.visibleRanges) {
+      for (let at = from; at <= to; ) {
+        const line = view.state.doc.lineAt(at);
+        for (const misspelt of line.text.includes("(") ? misspeltIn(line.text, line.from, names) : []) {
+          if (/Code/.test(tree.resolveInner(misspelt.from, 1).name) || inContent(misspelt.from)) continue;
+          const { name, meant } = misspelt;
+          found.push({
+            from: misspelt.from - 1,
+            to: misspelt.to,
+            severity: "hint",
+            message: misspeltText(misspelt),
+            actions: [{ name: `Write /${meant}`, apply: (view, start) => view.dispatch({ changes: { from: start + 1, to: start + 1 + name.length, insert: meant }, userEvent: "input.fix" }) }],
+          });
+        }
+        at = line.to + 1;
+      }
+    }
+    return found;
+  },
+  { delay: 300 },
+);
+
 /** The note an editor holds, which each embed drawn in it is told. */
 const noteOf = Facet.define<string, string>({ combine: (values) => values[0] ?? "" });
 
@@ -419,6 +491,6 @@ const pressedAt = following.of((view) => {
  * under that name, and keeps what an embed draws below its line. A name nobody registered stays as
  * text. Which embeds there are is said with `embedsAre`.
  */
-export const embedding = (noteId: string): Extension => [noteOf.of(noteId), used, blocks, steppingIn, arrowsIn, pressedAt, Prec.lowest(inline), keptBelow((state) => ({ noteId: state.facet(noteOf), embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
+export const embedding = (noteId: string): Extension => [noteOf.of(noteId), used, blocks, steppingIn, arrowsIn, jsonChecked, misspeltNamed, pressedAt, Prec.lowest(inline), keptBelow((state) => ({ noteId: state.facet(noteOf), embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
 
 export const embedsAre = (embeds: readonly (Embed | AddressEmbed)[]): Extension => [registered.of(embeds.filter((e): e is Embed => !("claims" in e))), addressed.of(embeds.filter((e): e is AddressEmbed => "claims" in e))];

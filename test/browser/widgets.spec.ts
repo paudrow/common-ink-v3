@@ -77,8 +77,8 @@ test("/ opens the insert menu, typing filters it, and picking a timer writes it 
   await settled(page);
   await page.keyboard.press("Enter");
   await expect(menu(page)).toHaveCount(0);
-  // The timer is drawn at once, and with the cursor in it it is shown as written too, above its line.
-  await expect(lines(page).nth(2)).toHaveText("5:00/timer(5m)");
+  // The timer is drawn at once, and with the cursor in it it is shown as written too, before its drawing.
+  await expect(lines(page).nth(2)).toHaveText("/timer(5m)5:00");
   await expect(editor(page).locator(".embed-source")).toHaveText("/timer(5m)");
 
   await page.keyboard.type("10m");
@@ -186,7 +186,7 @@ test("after words on a line Enter is always a new line, and Tab, the arrow keys 
   await page.keyboard.press("Enter");
   await expect
     .poll(() => read(page, note.id))
-    .toBe("# Words\n\nA /B\ndate /time\nstart /stop\nA /B\nstart /stop\ngo /timer(5m) then /stopwatch() and \n/kanban()\n~~~markdown\n## To do\n\n## Doing\n\n## Done\n~~~\n/stopwatch()\n/board\na/b\nsrc/web/timer\nhttps://example.com/board\n- [ ] Tea\n- [ ] /timer(5m)");
+    .toBe("# Words\n\nA /B\ndate /time\nstart /stop\nA /B\nstart /stop\ngo /timer(5m) then /stopwatch() and \n/kanban()\n```markdown\n## To do\n\n## Doing\n\n## Done\n```\n/stopwatch()\n/board\na/b\nsrc/web/timer\nhttps://example.com/board\n- [ ] Tea\n- [ ] /timer(5m)");
 });
 
 test("with vim on, in insert mode Enter after words is a new line and Tab picks, and at the start of a line Enter picks", async ({ page }) => {
@@ -246,30 +246,30 @@ test("picking a kanban board writes its block on lines of its own and draws it, 
   await expect(editor(page).getByRole("region")).toHaveCount(3);
   await expect.poll(() => board(page)).toEqual({ "To do": [], Doing: [], Done: [] });
   await page.keyboard.type("after");
-  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\nBoard: \n/kanban()\n~~~markdown\n## To do\n\n## Doing\n\n## Done\n~~~\nafter");
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\nBoard: \n/kanban()\n```markdown\n## To do\n\n## Doing\n\n## Done\n```\nafter");
 });
 
 test("a kanban block draws a column for each heading and a card for each list item, shows its markdown above the board while the cursor is in it, and is only markdown with its plugin off", async ({ page }) => {
   const note = await open(page, BOARD);
 
   await expect.poll(() => board(page)).toEqual({ "To do": ["write", "review"], Doing: ["build"], Done: [] });
-  await expect(editor(page)).not.toContainText(":::kanban{}");
+  await expect(editor(page)).not.toContainText("/kanban()");
   await expect(editor(page)).toContainText("After the board.");
 
   // Up from the end: the blank line, then the board's last line, and its markdown is shown, with the board still drawn.
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("ArrowUp");
-  await expect(editor(page)).not.toContainText(":::kanban{}");
+  await expect(editor(page)).not.toContainText("/kanban()");
   await page.keyboard.press("ArrowUp");
-  await expect(lines(page)).toContainText([":::kanban{}", "## To do", "- write", "- review", "## Doing", "- build", "## Done", ":::"]);
+  await expect(lines(page)).toContainText(["/kanban()", "~~~markdown", "## To do", "- write", "- review", "## Doing", "- build", "## Done", "~~~"]);
   await expect(editor(page).getByRole("region")).toHaveCount(3);
   // Up through its lines to the one that opens it, and what is typed in them is the board's.
   for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowUp");
   await page.keyboard.press("End");
   await page.keyboard.type("\n- first");
   await expect.poll(() => board(page)).toEqual({ "To do": ["first", "write", "review"], Doing: ["build"], Done: [] });
-  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowUp");
-  await expect(editor(page)).not.toContainText(":::kanban{}");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowUp");
+  await expect(editor(page)).not.toContainText("/kanban()");
   await page.keyboard.type("above");
   await expect(lines(page).nth(1)).toHaveText("above");
   await page.keyboard.press("ControlOrMeta+End");
@@ -277,7 +277,7 @@ test("a kanban block draws a column for each heading and a card for each list it
   await page.keyboard.press("Home");
   await page.keyboard.type("below ");
   await expect(editor(page)).toContainText("below After the board.");
-  await expect(editor(page)).not.toContainText(":::kanban{}");
+  await expect(editor(page)).not.toContainText("/kanban()");
   await expect.poll(() => board(page)).toEqual({ "To do": ["first", "write", "review"], Doing: ["build"], Done: [] });
   await expect.poll(() => read(page, note.id)).toBe(BOARD.replace("# Plan\n\n", "# Plan\nabove\n").replace("## To do\n", "## To do\n- first\n").replace("After the board.", "below After the board."));
 
@@ -285,7 +285,7 @@ test("a kanban block draws a column for each heading and a card for each list it
   await page.getByRole("combobox", { name: "Commands" }).fill("Disable plugin: Kanban");
   await page.keyboard.press("Enter");
   await expect(editor(page).getByRole("region")).toHaveCount(0);
-  await expect(lines(page)).toContainText([":::kanban{}", "## To do", "- first"]);
+  await expect(lines(page)).toContainText(["/kanban()", "~~~markdown", "## To do", "- first"]);
 });
 
 test("moving a card rewrites the markdown, is recorded as the member's change, and is undone like typing", async ({ page }) => {
@@ -337,7 +337,7 @@ test("dragging a card to another column, and to a place among its cards, rewrite
 
 test("a card is added from the board, and what the board doesn't understand stays in the note", async ({ page }) => {
   const body = "intro words\n## To do\n\nA paragraph.\n\n- write\n  - the intro\n\n```\n## not a column\n```\n## Done\n";
-  const note = await open(page, `# Plan\n\n:::kanban{keep=me}\n${body}:::\n`);
+  const note = await open(page, `# Plan\n\n/kanban(keep=me)\n~~~markdown\n${body}~~~\n`);
 
   await expect.poll(() => board(page)).toEqual({ "To do": ["write"], Done: [] });
   await expect(column(page, "To do").getByRole("listitem")).toContainText("- the intro");
@@ -382,7 +382,7 @@ test("a timer's time is kept in the note: it runs on through a reload, pauses, a
   await timer.click();
   await expect(timer).toHaveAttribute("aria-pressed", "true");
   await expect(timer).toBeFocused();
-  await expect.poll(() => read(page, note.id)).toMatch(/^# Tea\n\nSteep ::timer\{5m since=20\d\d-\d\d-\d\dT[\d:.]+Z\} then pour\.\n$/);
+  await expect.poll(() => read(page, note.id)).toMatch(/^# Tea\n\nSteep \/timer\(5m since=20\d\d-\d\d-\d\dT[\d:.]+Z\) then pour\.\n$/);
   await expect(timer).toHaveText(/^4:5[0-8]$/);
 
   await page.reload();
@@ -391,7 +391,7 @@ test("a timer's time is kept in the note: it runs on through a reload, pauses, a
 
   await timer.click();
   await expect(timer).toHaveAttribute("aria-pressed", "false");
-  await expect.poll(() => read(page, note.id)).toMatch(/^# Tea\n\nSteep ::timer\{5m at=\d+s\} then pour\.\n$/);
+  await expect.poll(() => read(page, note.id)).toMatch(/^# Tea\n\nSteep \/timer\(5m at=\d+s\) then pour\.\n$/);
   const paused = await timer.textContent();
   await reset.click();
   await expect(timer).toHaveText("5:00");
@@ -445,21 +445,21 @@ test("with vim on, j and k go through a board's lines, which are shown above the
 
   await page.keyboard.press("g");
   await page.keyboard.press("g");
-  // Down from the title: the blank line, the board's ten lines from the one that opens it, the blank line past the board, then the words after it.
+  // Down from the title: the blank line, the board's eleven lines from the one that opens it, the blank line past the board, then the words after it.
   for (const key of ["j", "j"]) await page.keyboard.press(key);
-  await expect(page.locator(".cm-fat-cursor")).toHaveText(":");
-  await expect(lines(page)).toContainText([":::kanban{}", "## To do", "- write"]);
+  await expect(page.locator(".cm-fat-cursor")).toHaveText("/");
+  await expect(lines(page)).toContainText(["/kanban()", "~~~markdown", "## To do", "- write"]);
   await expect.poll(() => board(page)).toEqual({ "To do": ["write", "review"], Doing: ["build"], Done: [] });
-  for (let i = 0; i < 9; i++) await page.keyboard.press("j");
-  await expect(editor(page)).toContainText(":::kanban{}");
+  for (let i = 0; i < 10; i++) await page.keyboard.press("j");
+  await expect(editor(page)).toContainText("/kanban()");
   for (const key of ["j", "j"]) await page.keyboard.press(key);
   await expect(page.locator(".cm-fat-cursor")).toHaveText("A");
-  await expect(editor(page)).not.toContainText(":::kanban{}");
+  await expect(editor(page)).not.toContainText("/kanban()");
   for (const key of ["k", "k"]) await page.keyboard.press(key);
-  await expect(editor(page)).toContainText(":::kanban{}");
-  for (let i = 0; i < 11; i++) await page.keyboard.press("k");
+  await expect(editor(page)).toContainText("/kanban()");
+  for (let i = 0; i < 12; i++) await page.keyboard.press("k");
   await expect(page.locator(".cm-fat-cursor")).toHaveText("#");
-  await expect(editor(page)).not.toContainText(":::kanban{}");
+  await expect(editor(page)).not.toContainText("/kanban()");
   await page.keyboard.press("i");
   await page.keyboard.type("top ");
   await expect(lines(page).nth(0)).toHaveText("top # Plan");
@@ -564,7 +564,7 @@ test("an embed's name typed after / without a pause and then Enter writes the em
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("\n/kan\n", { delay: 20 });
   await page.keyboard.type("/sto\n", { delay: 20 });
-  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\n/timer(5m)\n/kanban()\n~~~markdown\n## To do\n\n## Doing\n\n## Done\n~~~\n/stopwatch()");
+  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\n/timer(5m)\n/kanban()\n```markdown\n## To do\n\n## Doing\n\n## Done\n```\n/stopwatch()");
 });
 
 test("a member who can't change the note sees its embeds without their controls, and nothing they do in the editor changes it", async ({ page }) => {
@@ -675,13 +675,13 @@ test("a handle kept past its drawing changes nothing, though an embed just like 
   await page.goto(`/note/${note.id}`);
   await expect(lines(page).nth(0)).toHaveText("shout HI and shout HI end");
 
-  // With the cursor on it the second embed is shown as written above the line, and is still drawn. Taken out of the note, its drawing is gone, and the handle it was given with it.
+  // With the cursor on it the second embed is shown as written before its drawing, and is still drawn. Taken out of the note, its drawing is gone, and the handle it was given with it.
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+Home");
-  for (let i = 0; i < 27; i++) await page.keyboard.press("ArrowRight");
+  for (let i = 0; i < 25; i++) await page.keyboard.press("ArrowRight");
   await expect(editor(page).locator(".embed-source")).toHaveText("/shout(HI)");
-  await expect(lines(page).nth(0)).toHaveText("shout HI and shout HI/shout(HI) end");
-  for (let i = 0; i < 11; i++) await page.keyboard.press("Backspace");
+  await expect(lines(page).nth(0)).toHaveText("shout HI and /shout(HI)shout HI end");
+  for (let i = 0; i < 10; i++) await page.keyboard.press("Backspace");
   await expect(lines(page).nth(0)).toHaveText("shout HI and  end");
   await page.evaluate(() => (window as unknown as { __INK_HANDLES__: { update(next: { config?: string }): void }[] }).__INK_HANDLES__[1]!.update({ config: "GONE" }));
   await expect(lines(page).nth(0)).toHaveText("shout HI and  end");

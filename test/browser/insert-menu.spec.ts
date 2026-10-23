@@ -80,52 +80,53 @@ test("/tab writes a table, and a heading, a task and a code block each leave the
   await expect.poll(() => text(page, note.id)).toBe("# Insert\n\n| Column | Column |\n| ------ | ------ |\n|        |        |\n## Plan\n```\nlet a;\n```\n- [ ] milk");
 });
 
-test(":: lists the embeds alone, filters them by what follows, and writes what / writes in place of what was typed", async ({ page }) => {
+test("/ writes an embed as /name(args), and a block with its fence under it, while :: opens nothing", async ({ page }) => {
   const note = await open(page, "# Plan\n\n");
 
   await page.keyboard.type("::");
-  await expect(options(page)).toHaveText(EMBEDS);
-  await expect(headings(page)).toHaveCount(0);
-  await page.keyboard.type("con");
   await settled(page);
-  await expect(options(page)).toHaveText(["No matches"]);
-  for (let i = 0; i < 3; i++) await page.keyboard.press("Backspace");
-  for (const [typed, shows] of [["vid", /^Upload a video/], ["file", /^Upload a file/]] as const) {
-    await page.keyboard.type(typed);
-    await expect(options(page)).toHaveText([shows]);
-    for (let i = 0; i < typed.length; i++) await page.keyboard.press("Backspace");
-  }
-  await page.keyboard.type("kan");
+  await expect(list(page)).toHaveCount(0);
+  for (let i = 0; i < 2; i++) await page.keyboard.press("Backspace");
+  await page.keyboard.type("/kan");
   await expect(options(page)).toHaveText([/^Kanban board/]);
   await settled(page);
   await page.keyboard.press("Enter");
   await expect(editor(page).getByRole("region")).toHaveCount(3);
-  await page.keyboard.type("after ::ti");
+  await page.keyboard.type("after /ti");
   await expect(options(page)).toHaveText([/^Timer/]);
   await settled(page);
   await page.keyboard.press("Tab");
-  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\n/kanban()\n~~~markdown\n## To do\n\n## Doing\n\n## Done\n~~~\nafter /timer(5m)");
+  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\n/kanban()\n```markdown\n## To do\n\n## Doing\n\n## Done\n```\nafter /timer(5m)");
 });
 
-test("an embed typed by hand past :: is left as typed, and neither a written one nor a block's closing ::: opens the list", async ({ page }) => {
+test("an embed typed by hand is left as typed and drawn once it is whole, and a block typed by hand shows what is typed until the cursor leaves it", async ({ page }) => {
   const note = await open(page, "# Hand\n\n");
 
   await page.keyboard.type("/image(abcdefabcdef) and /timer(5m)", { delay: 20 });
   await settled(page);
   await expect(list(page)).toHaveCount(0);
+  await expect(editor(page).getByRole("button", { name: "Timer, 5:00 left" })).toBeVisible();
   await page.keyboard.press("Enter");
-  // A contact is in no menu, as `@` finds them, and is still written by hand.
-  await page.keyboard.type("::cont", { delay: 20 });
+  // An email is in no menu, as `refer_record` writes it, and is still written by hand.
+  await page.keyboard.type("/emai", { delay: 20 });
   await settled(page);
   await expect(options(page)).toHaveText(["No matches"]);
-  await page.keyboard.type("act{", { delay: 20 });
-  await settled(page);
-  await expect(list(page)).toHaveCount(0);
-  await page.keyboard.type("}\n/html()\n~~~html\n<b>hi</b>\n~~~", { delay: 20 });
+  await page.keyboard.type("l()", { delay: 20 });
   await settled(page);
   await expect(list(page)).toHaveCount(0);
   await page.keyboard.press("Enter");
+  await page.keyboard.type("/html()", { delay: 20 });
+  await expect(page.locator(".cm-line.embed-source-line")).toHaveText(["/html()"]);
+  await page.keyboard.press("Escape");
+  // Until its closing line is typed the fence is code, and the block holds nothing.
+  for (const typed of ["```html", "<b>hi</b>", "```"]) {
+    await page.keyboard.press("Enter");
+    await page.keyboard.type(typed, { delay: 20 });
+  }
+  await expect(page.locator(".cm-line.embed-source-line")).toHaveText(["/html()", "```html", "<b>hi</b>", "```"]);
+  await page.keyboard.press("Enter");
   await page.keyboard.type("x ::: y");
-  await expect.poll(() => text(page, note.id)).toBe("# Hand\n\n::image{abcdefabcdef} and ::timer{5m}\n::contact{}\n:::html{}\n<b>hi</b>\n:::\nx ::: y");
-  await expect(editor(page).locator(".embed-unread", { hasText: /^Contact: / })).toBeVisible();
+  await expect.poll(() => text(page, note.id)).toBe("# Hand\n\n/image(abcdefabcdef) and /timer(5m)\n/email()\n/html()\n```html\n<b>hi</b>\n```\nx ::: y");
+  await expect(page.locator(".cm-line.embed-source-line")).toHaveCount(0);
+  await expect(editor(page).locator(".embed-unread", { hasText: /^Email: / })).toBeVisible();
 });

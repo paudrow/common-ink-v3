@@ -68,7 +68,7 @@ function watch() {
     for (const content of document.querySelectorAll(".cm-content")) {
       seen.frames++;
       const text = content.textContent ?? "";
-      if (/:::?[a-z][a-z0-9-]*\{/.test(text) || /^:::$/m.test((content as HTMLElement).innerText)) seen.source.push(text);
+      if (/\/[a-z][a-z0-9-]*\(/.test(text) || /^(~~~|```)/m.test((content as HTMLElement).innerText)) seen.source.push(text);
       const origin = content.getBoundingClientRect();
       for (const el of content.querySelectorAll(".embed")) {
         const id = idOf(el);
@@ -120,22 +120,25 @@ const NOTE = () =>
     "",
     "A chip /chip(one) and a tag /tag(two) in a line.",
     "",
-    ":::kanban{}",
+    "/kanban()",
+    "~~~markdown",
     "## To do",
     "- write",
     "- review",
     "",
     "## Done",
     "- plan",
-    ":::",
+    "~~~",
     "",
-    ":::box{}",
+    "/box()",
+    "~~~markdown",
     "first",
-    ":::",
+    "~~~",
     "",
-    ":::crate{}",
+    "/crate()",
+    "~~~markdown",
     "first",
-    ":::",
+    "~~~",
     "",
     "The last line.",
     "",
@@ -295,7 +298,7 @@ test("an embed's own rewrite changes it where it stands: the same element, in th
   await page.keyboard.press("Enter");
   await expect(column(page, "Done").getByRole("listitem")).toHaveText(["plan", "ship"]);
   sameElements(await seen(page), first, ["timer", "stopwatch", "kanban", "box", "crate"]);
-  await expect.poll(() => read(page, note.id)).toContain("## Done\n- plan\n- ship\n:::");
+  await expect.poll(() => read(page, note.id)).toContain("## Done\n- plan\n- ship\n~~~");
   await expect.poll(() => read(page, note.id)).toContain("/chip(one!) and a tag /tag(two!)");
 });
 
@@ -357,7 +360,7 @@ test("a line with a clock, and a board, have the same room above and below them 
   /** The room between each embed's card and the text above and below it, and where the lines around them are. */
   const measure = async () => {
     const [before, tea, card, after, drawn, last] = [await box(line("words before")), await box(line("Tea")), await box(clock), await box(line("words after")), await box(board), await box(line("The last line."))];
-    const shown = (await line(":::kanban").count()) ? (await box(lines(page).filter({ hasText: /^:::$/ }))).y + (await box(lines(page).filter({ hasText: /^:::$/ }))).height - (await box(line(":::kanban"))).y : 0;
+    const shown = (await line("/kanban\\(").count()) ? (await box(lines(page).filter({ hasText: /^~~~$/ }))).y + (await box(lines(page).filter({ hasText: /^~~~$/ }))).height - (await box(line("/kanban\\("))).y : 0;
     return {
       shown,
       aboveClock: card.y - tea.y,
@@ -366,7 +369,8 @@ test("a line with a clock, and a board, have the same room above and below them 
       belowBoard: last.y - (drawn.y + drawn.height),
       before: before.y,
       tea: tea.y,
-      x: [tea.x, card.x, drawn.x],
+      // The clock's card is not among them: its text, shown before it, moves it along its row.
+      x: [tea.x, drawn.x],
     };
   };
   const off = await measure();
@@ -386,12 +390,12 @@ test("a line with a clock, and a board, have the same room above and below them 
   await line("words after").click();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
-  await expect(line(":::kanban")).toBeVisible();
+  await expect(line("/kanban\\(")).toBeVisible();
   const onBoard = await measure();
   expect(onBoard.shown).toBeGreaterThan(text * 5);
   expect(onBoard).toEqual({ ...off, shown: onBoard.shown });
 
   await page.keyboard.press("ControlOrMeta+End");
-  await expect(line(":::kanban")).toHaveCount(0);
+  await expect(line("/kanban\\(")).toHaveCount(0);
   await expect.poll(() => measure()).toEqual(off);
 });
