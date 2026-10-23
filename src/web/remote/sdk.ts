@@ -13,7 +13,14 @@ export const SDK = `(() => {
   let next = 1;
   const mac = /Mac|iPhone|iPad/.test(navigator.platform);
   let keys = [];
-  const chordOf = (e) => [(mac ? e.metaKey : e.ctrlKey) && "mod", mac ? e.ctrlKey && "ctrl" : e.metaKey && "meta", e.altKey && "alt", e.shiftKey && "shift", e.key === " " ? "space" : e.key === "+" ? "plus" : e.key.toLowerCase()].filter(Boolean).join("+");
+  // What each key types on the member's keyboard, by its code, as the app reads it: a frame can't read the keyboard's layout itself.
+  let layout = {};
+  // As the app writes a key press: a key held with Option and ⌘ or ⌃ on a Mac, or with Ctrl and Alt elsewhere, is what it types without them.
+  const chordOf = (e) => {
+    const optioned = e.altKey && (e.metaKey || e.ctrlKey) && (mac ? /^[^ -~]$/u : /^[^\\p{L}]$/u).test(e.key) && e.code && layout[e.code];
+    const key = optioned || e.key;
+    return [(mac ? e.metaKey : e.ctrlKey) && "mod", mac ? e.ctrlKey && "ctrl" : e.metaKey && "meta", e.altKey && "alt", e.shiftKey && "shift", key === " " ? "space" : key === "+" ? "plus" : key.toLowerCase()].filter(Boolean).join("+");
+  };
   const isField = (el) => !!el && (el.matches?.("input, textarea, select") || el.isContentEditable);
   const pressesItself = (el, chord) => {
     if (!el?.matches) return false;
@@ -71,7 +78,9 @@ export const SDK = `(() => {
     if (data.init && !ink.context) {
       Object.assign(ink, data.init);
       keys = Array.isArray(ink.keys) ? ink.keys : [];
+      layout = ink.layout || {};
       delete ink.keys;
+      delete ink.layout;
       if (ink.context.kind === "view" && ink.context.slot === "bar") {
         let told = -1;
         const fit = () => {
@@ -102,6 +111,7 @@ export const SDK = `(() => {
       for (const fn of storageHeard) fn(data.key, data.value);
     } else if (data.event === "keys") {
       keys = data.keys;
+      layout = data.layout || {};
     } else if (data.event === "look") {
       document.getElementById("ink-look").textContent = data.styles;
       document.querySelector('meta[name="color-scheme"]').content = data.scheme;

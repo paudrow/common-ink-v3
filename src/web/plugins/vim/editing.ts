@@ -2,7 +2,8 @@ import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { EditorView, RectangleMarker, ViewPlugin, drawSelection, keymap, layer } from "@codemirror/view";
 import { Vim, getCM, vim, type MotionFn } from "@replit/codemirror-vim";
 import { dismissing, following, historyStepped, noteJump } from "../../plugin-api.ts";
-import { TODO_KEYS } from "./keys.ts";
+import { bulletCommands } from "../bullets/outlining.ts";
+import { FOLD_KEYS, TODO_KEYS } from "./keys.ts";
 
 let run: (commandId: string) => boolean = () => false;
 
@@ -63,6 +64,13 @@ for (const { id, vim: keys, runs } of TODO_KEYS) {
     if (state.visualMode) Vim.exitVisualMode(cm);
   });
   for (const context of ["normal", "visual"]) Vim.mapCommand(keys, "action", id, {}, { context });
+}
+
+// za, zc and zo toggle, close and open the fold of the bullet the cursor is on, and zM and zR close and open them all: the bullets'
+// own commands, where they have something to do, and nothing anywhere else, as in vim where there is no fold.
+for (const { vim: keys, runs } of FOLD_KEYS) {
+  Vim.defineAction(runs, () => void (bulletCommands[runs].when() && run(`bullets.${runs}`)));
+  Vim.mapCommand(keys, "action", runs, {}, { context: "normal" });
 }
 
 // zz, zt and zb put the cursor's line in the middle, at the top or at the foot of what is seen, and z., z<CR> and z- do the

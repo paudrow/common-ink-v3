@@ -346,8 +346,9 @@ test("in Settings, Enter on a setting goes to its field and Escape comes back to
   await expect(shown("Vim: next tab")).toHaveText([/^G T/]);
   await expect(shown("Vim: next row, from a field")).toHaveText(MAC ? [/^⌃J/, /^⌃N/] : [/^Ctrl\+J/, /^Ctrl\+N/]);
   await expect(shown("Vim: complete the todo, or open it again")).toHaveText([/^G X/]);
-  await expect(all).toHaveCount(26);
-  await expect(shortcuts.locator("tbody tr")).toHaveCount(26);
+  await expect(shown("Vim: fold or unfold the bullet")).toHaveText([/^Z A/]);
+  await expect(all).toHaveCount(31);
+  await expect(shortcuts.locator("tbody tr")).toHaveCount(31);
 
   // Escape leaves the search box for the list, on its first row, and the keys go on through the shortcuts.
   await page.keyboard.press("Escape");

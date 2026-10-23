@@ -280,6 +280,30 @@ function onBullet(orLast = false): { view: EditorView; line: number; last: numbe
   return bulletAt(view.state, line) ? { view, line, last } : null;
 }
 
+/** The bullet the selection starts on, by where its line starts, when it folds, which it does when it has something under it, and whether it is folded. */
+function foldable(orLast = false): { view: EditorView; from: number; folded: boolean } | null {
+  const at = onBullet(orLast);
+  const item = at && bulletAt(at.view.state, at.line);
+  if (!at || !item || item.end - item.line < 2) return null;
+  const from = at.view.state.doc.line(at.line + 1).from;
+  return { view: at.view, from, folded: isFolded(at.view.state, from) };
+}
+
+/** A key that folds the bullet the selection starts on, or with `false` unfolds it, or with neither does whichever it isn't. It is the key's while there is that to do. */
+function folding(to?: boolean) {
+  const ready = (orLast = false) => {
+    const at = foldable(orLast);
+    return at && at.folded !== to ? at : null;
+  };
+  return {
+    when: () => ready() !== null,
+    run() {
+      const at = ready(true);
+      at?.view.dispatch({ effects: toggleFold.of(at.from) });
+    },
+  };
+}
+
 type Make = (lines: Lines, line: number, last: number) => Edit | null;
 
 /** The edit a bullet key would make now, and where: nothing when the selection doesn't start on a bullet, the note can't be changed, or the bullet has nowhere to go. */
@@ -365,18 +389,9 @@ export const bulletCommands = {
       at.view.dispatch({ selection: span(item), scrollIntoView: true, userEvent: "select" });
     },
   },
-  toggleFold: {
-    /** A bullet folds when it has something under it. */
-    when() {
-      const at = onBullet();
-      const item = at && bulletAt(at.view.state, at.line);
-      return !!item && item.end - item.line > 1;
-    },
-    run() {
-      const at = onBullet(true);
-      if (at) at.view.dispatch({ effects: toggleFold.of(at.view.state.doc.line(at.line + 1).from) });
-    },
-  },
+  toggleFold: folding(),
+  fold: folding(true),
+  unfold: folding(false),
   foldAll: {
     when: () => focused() !== null,
     /** Every bullet with something under it that isn't itself under a bullet folded with it. */

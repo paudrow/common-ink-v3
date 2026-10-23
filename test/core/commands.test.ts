@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { advance, bind, chordFor, chordLabel, chordOf, chordsForFrames, frameCommand, onPlatform, overlap, pressing, typed } from "../../src/web/keybindings.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { advance, bind, chordFor, chordLabel, chordOf, chordsForFrames, frameCommand, keyboardLayout, onLayout, onPlatform, overlap, pressing, readLayout, typed } from "../../src/web/keybindings.ts";
 import { matching, starting } from "../../src/web/plugins/lib/match.ts";
 
 describe("keybindings", () => {
@@ -13,6 +13,43 @@ describe("keybindings", () => {
     expect(press("o", { metaKey: true })).toBe("meta+o");
     expect(press("p")).toBe("p");
     expect(press("k", { ctrlKey: true, altKey: true })).toBe("mod+alt+k");
+  });
+
+  it("writes what a key types on the member's keyboard where a Mac's Option, held with ⌘ or ⌃, writes another character for it", () => {
+    const pressed = (key: string, code: string, held: Partial<Record<"metaKey" | "ctrlKey" | "shiftKey", boolean>>, layout?: Record<string, string>) =>
+      chordOf({ key, code, metaKey: false, ctrlKey: false, altKey: true, shiftKey: false, ...held }, true, layout);
+    // On Dvorak, [ and ] are where a US keyboard has - and =, and the key where US has [ types /.
+    const dvorak = { Minus: "[", Equal: "]", BracketLeft: "/", BracketRight: "=", KeyK: "t", KeyY: "f" };
+    expect(pressed("“", "Minus", { metaKey: true }, dvorak)).toBe("mod+alt+[");
+    expect(pressed("‘", "Equal", { metaKey: true }, dvorak)).toBe("mod+alt+]");
+    expect(pressed("÷", "BracketLeft", { metaKey: true }, dvorak)).toBe("mod+alt+/");
+    expect(pressed("†", "KeyK", { metaKey: true }, dvorak)).toBe("mod+alt+t");
+    // On a German keyboard Option types [ itself, with the 5: that is [ already.
+    expect(pressed("[", "Digit5", { metaKey: true }, { Digit5: "5", BracketLeft: "ü" })).toBe("mod+alt+[");
+    // Where the browser can't say what the keyboard types, as Safari can't, a key is what a US keyboard's types.
+    expect(pressed("“", "BracketLeft", { metaKey: true })).toBe("mod+alt+[");
+    expect(pressed("†", "KeyT", { metaKey: true })).toBe("mod+alt+t");
+    expect(pressed("º", "Digit0", { ctrlKey: true })).toBe("ctrl+alt+0");
+    expect(pressed("”", "BracketLeft", { metaKey: true, shiftKey: true })).toBe("mod+alt+shift+[");
+    // A key that writes what it says is left as it is, and so is Option alone, which types its character.
+    expect(pressed("[", "BracketLeft", { metaKey: true })).toBe("mod+alt+[");
+    expect(pressed("Enter", "Enter", { metaKey: true })).toBe("mod+alt+enter");
+    expect(pressed("“", "BracketLeft", {})).toBe("alt+“");
+  });
+
+  it("writes the key on the keyboard for a sign that Ctrl and Alt together, as AltGr, type off a Mac, so typing it runs no chord of the sign", () => {
+    const pressed = (key: string, code: string) => chordOf({ key, code, metaKey: false, ctrlKey: true, altKey: true, shiftKey: false }, false);
+    // AltGr+8 and AltGr+Q on a German keyboard.
+    expect(pressed("[", "Digit8")).toBe("mod+alt+8");
+    expect(pressed("@", "KeyQ")).toBe("mod+alt+q");
+    expect(pressed("[", "BracketLeft")).toBe("mod+alt+[");
+    // AltGr+5 on a French keyboard, whose 5 key types (.
+    expect(chordOf({ key: "[", code: "Digit5", metaKey: false, ctrlKey: true, altKey: true, shiftKey: false }, false, { Digit5: "(" })).toBe("mod+alt+(");
+    // AltGr on a German keyboard's + key, which a chord writes by name.
+    expect(chordOf({ key: "~", code: "BracketRight", metaKey: false, ctrlKey: true, altKey: true, shiftKey: false }, false, { BracketRight: "+" })).toBe("mod+alt+plus");
+    // A letter is the letter written, wherever a keyboard has it: A is where Q is on a French one.
+    expect(pressed("a", "KeyQ")).toBe("mod+alt+a");
+    expect(chordOf({ key: "[", code: "Digit8", metaKey: false, ctrlKey: true, altKey: false, shiftKey: false }, false)).toBe("mod+[");
   });
 
   it("writes the space bar and the plus key by name, which a chord is joined and a sequence is spaced with", () => {
@@ -197,5 +234,30 @@ describe("items that start with what was typed", () => {
 
   it("offers nothing for letters that are only inside a word or scattered through it", () => {
     for (const typed of ["or", "h", "a", "an", "watch", "tmr", "kb"]) expect([typed, start(typed)]).toEqual([typed, []]);
+  });
+});
+
+describe("the member's keyboard layout", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is read from the browser, a key whose letter isn't one keys are written with being the US keyboard's, and is told when it changes", async () => {
+    const layouts = [new Map([["Minus", "["], ["KeyT", "е"], ["KeyK", "T"]]), new Map([["Minus", "["], ["KeyT", "е"], ["KeyK", "T"]]), new Map<string, string>()];
+    vi.stubGlobal("navigator", { keyboard: { getLayoutMap: () => Promise.resolve(layouts.shift()) } });
+    const heard = vi.fn();
+    const stop = onLayout(heard);
+    const read = async () => {
+      readLayout();
+      await new Promise((done) => setTimeout(done));
+    };
+
+    await read();
+    expect([keyboardLayout().Minus, keyboardLayout().KeyT, keyboardLayout().KeyK, keyboardLayout().BracketLeft]).toEqual(["[", "t", "t", "["]);
+    expect(heard).toHaveBeenCalledTimes(1);
+    await read();
+    expect(heard).toHaveBeenCalledTimes(1);
+    await read();
+    expect(keyboardLayout().Minus).toBe("-");
+    expect(heard).toHaveBeenCalledTimes(2);
+    stop();
   });
 });
