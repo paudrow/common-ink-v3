@@ -7,6 +7,7 @@ import { agentsFileLabel, type AgentsFileStore } from "./agentsFileStore.ts";
 import { forEditor, usable } from "./editorExtensions.ts";
 import { noteHighlighting } from "./highlight.ts";
 import type { Host } from "./pluginHost.ts";
+import { spaceRuns } from "./plugins/lib/markdownSpaces.ts";
 import { readOnly } from "./readOnly.ts";
 import { changeBetween } from "./textChange.ts";
 
@@ -63,7 +64,7 @@ export function AgentsFile({ store, host, canEdit }: { store: AgentsFileStore; h
           added.of(now.current),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
-          markdown({ base: markdownLanguage }),
+          markdown({ base: markdownLanguage, extensions: spaceRuns }),
           noteHighlighting,
           EditorView.lineWrapping,
           panels({ bottomContainer: foot.current ?? undefined }),

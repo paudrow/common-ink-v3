@@ -1,6 +1,5 @@
-import { markdownLanguage } from "@codemirror/lang-markdown";
-import type { MarkdownParser } from "@lezer/markdown";
 import type { DrawMath } from "../lib/drawnMath.ts";
+import { noteParser as parser } from "../lib/markdownSpaces.ts";
 import { opens } from "../lib/opening.ts";
 import { formulasIn, type Formula } from "../math/syntax.ts";
 
@@ -11,7 +10,6 @@ interface Element {
   children?: readonly Element[];
 }
 
-const parser = markdownLanguage.parser as MarkdownParser;
 const nameOf = (el: Element) => parser.nodeSet.types[el.type]!.name;
 
 const TAGS: Record<string, string> = { Emphasis: "em", StrongEmphasis: "strong", InlineCode: "code", Strikethrough: "s", Link: "span" };

@@ -40,16 +40,48 @@ export interface Place {
   card: number;
 }
 
-const HEADING = /^#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
-/** A heading's text, read as its title and the colour it ends with. Braces that name no colour are part of the title. */
-const COLOURED = new RegExp(`^(.*?)[ \\t]*\\{\\.(${SWATCHES.join("|")})\\}$`);
+/** A heading's `#`s and the spaces after them. */
+const HEADING_MARK = /^#{1,6}[ \t]+/;
+/** The colour a heading's text ends with. Braces that name no colour are part of the title. */
+const COLOUR = new RegExp(`\\{\\.(${SWATCHES.join("|")})\\}$`);
 const ITEM = /^(?:[-*+]|\d+[.)])[ \t]+(.*)$/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 /** `---`, `* * *`, `___`: a rule across the page, which the list markers `-` and `*` would otherwise make a card of. */
 const RULE = /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/;
+
+/** Where the spaces and tabs that end at `end` of `text` start. */
+function blanksBefore(text: string, end: number): number {
+  while (end > 0 && (text[end - 1] === " " || text[end - 1] === "\t")) end--;
+  return end;
+}
+
+/**
+ * A heading's text, without its closing `#`s and the spaces around them, or null for a line that
+ * isn't a heading. Cut by hand: as one pattern it tried again from every space, which took minutes
+ * on a heading of many.
+ */
+function headingIn(line: string): string | null {
+  const mark = HEADING_MARK.exec(line);
+  if (!mark) return null;
+  const text = line.slice(mark[0].length);
+  // A line that holds a line break of another kind isn't a heading, as the pattern this was had it.
+  if (/[\n\r\u2028\u2029]/.test(text)) return null;
+  let end = blanksBefore(text, text.length);
+  let hashes = end;
+  while (hashes > 0 && text[hashes - 1] === "#") hashes--;
+  if (hashes < end && hashes > 0 && (text[hashes - 1] === " " || text[hashes - 1] === "\t")) end = blanksBefore(text, hashes);
+  return text.slice(0, end);
+}
+
+/** A heading's text read as its title and the colour it ends with, if it ends with one. */
+function colouredIn(text: string): { title: string; colour: Swatch } | null {
+  const colour = COLOUR.exec(text);
+  return colour ? { title: text.slice(0, blanksBefore(text, colour.index)), colour: colour[1] as Swatch } : null;
+}
+
 const indented = (line: string) => /^[ \t]+\S/.test(line);
 /** A line that carries a list item's paragraph on, which markdown reads as part of the item though it isn't indented. */
-const carriesOn = (line: string) => line.trim() !== "" && !HEADING.test(line) && !ITEM.test(line) && !FENCE.test(line) && !RULE.test(line);
+const carriesOn = (line: string) => line.trim() !== "" && headingIn(line) === null && !ITEM.test(line) && !FENCE.test(line) && !RULE.test(line);
 
 export function parseBoard(body: string): Board {
   const lines = body.split("\n");
@@ -65,11 +97,11 @@ export function parseBoard(body: string): Board {
       other();
       continue;
     }
-    const heading = HEADING.exec(line);
+    const heading = headingIn(line);
     const item = into && !RULE.test(line) && ITEM.exec(line);
-    if (heading) {
-      const coloured = COLOURED.exec(heading[1]!);
-      columns.push({ heading: line, title: coloured ? coloured[1]! : heading[1]!, colour: (coloured?.[2] as Swatch | undefined) ?? null, parts: [] });
+    if (heading !== null) {
+      const coloured = colouredIn(heading);
+      columns.push({ heading: line, title: coloured?.title ?? heading, colour: coloured?.colour ?? null, parts: [] });
     }
     else if (item) {
       // A card takes the indented lines under it, blank lines only where an indented line follows them, and lines that carry on from the one before.
@@ -157,7 +189,8 @@ export function addCard(board: Board, column: number, text: string): Board {
 export function colourColumn(board: Board, column: number, colour: Swatch | null): Board {
   const at = board.columns[column];
   if (!at || at.colour === colour) return board;
-  const [, marks, closing = ""] = /^(#{1,6}[ \t]+).*?((?:[ \t]+#+)?[ \t]*)$/.exec(at.heading)!;
+  const marks = HEADING_MARK.exec(at.heading)![0];
+  const closing = at.heading.slice(marks.length + headingIn(at.heading)!.length);
   const heading = `${marks}${at.title}${colour ? ` {.${colour}}` : ""}${closing}`;
   return { ...board, columns: board.columns.map((c, i) => (i === column ? { ...c, heading, colour } : c)) };
 }

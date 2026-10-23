@@ -12,6 +12,7 @@ import { completing } from "./completing.ts";
 import { dismissing } from "./dismiss.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
+import { spaceRuns } from "./plugins/lib/markdownSpaces.ts";
 import { readOnly } from "./readOnly.ts";
 import { noteTabs } from "./tabbing.ts";
 import { fontLoaded } from "./noteFont.ts";
@@ -195,7 +196,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               keymap.of(defaultKeymap),
               noteTabs,
               // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
-              markdown({ base: markdownLanguage, addKeymap: false }),
+              markdown({ base: markdownLanguage, extensions: spaceRuns, addKeymap: false }),
               listKeys,
               noteHighlighting,
               embedding(noteId),

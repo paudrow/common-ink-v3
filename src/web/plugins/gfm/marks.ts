@@ -68,7 +68,13 @@ function marks(view: EditorView): Range<Decoration>[] {
             const end = spaceAfter(node.to);
             drawn.push(hangs[Number(node.node.parent.name.slice(-1)) - 1]!.range(node.from, end));
             if (!lineTouched(state, node.from)) drawn.push(ghost.range(node.from, end));
-          } else if (!lineTouched(state, node.from)) drawn.push(hidden.range(node.from - /[ \t]*$/.exec(state.sliceDoc(node.node.parent.from, node.from))![0].length, node.to));
+          } else if (!lineTouched(state, node.from)) {
+            // The spaces before the closing #s go with them. Counted by hand: `[ \t]*$` tried again from every space.
+            const words = state.sliceDoc(node.node.parent.from, node.from);
+            let blanks = words.length;
+            while (blanks > 0 && (words[blanks - 1] === " " || words[blanks - 1] === "\t")) blanks--;
+            drawn.push(hidden.range(node.node.parent.from + blanks, node.to));
+          }
         } else if (name === "QuoteMark") {
           if (off(node)) drawn.push(ghost.range(node.from, node.to));
         } else if (name === "Blockquote" && !within(node.node, "Blockquote")) {

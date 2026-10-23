@@ -59,7 +59,13 @@ export function parseTable(text: string): Table | null {
   return { aligns, rows: [header!, ...body].map(wide) };
 }
 
-const written = (cell: string) => cell.replace(/\s*\n\s*/g, " ").trim().replace(/\|/g, "\\|");
+/**
+ * `text` on one line: each run of whitespace that holds a line break is one space. A run is taken whole,
+ * as `\s*\n\s*` tried again from every space before a break, which took seconds on a cell of many.
+ */
+export const oneLine = (text: string) => text.replace(/\s+/g, (space) => (space.includes("\n") ? " " : space));
+
+const written = (cell: string) => oneLine(cell).trim().replace(/\|/g, "\\|");
 
 const dashes = (align: Align, width: number) => {
   const [left, right] = [align === "left" || align === "center" ? ":" : "", align === "right" || align === "center" ? ":" : ""];
