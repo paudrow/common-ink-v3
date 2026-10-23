@@ -556,3 +556,16 @@ _Avoid_: Visibility (that is a note's `is:` words), audience
 **Export**:
 A copy of a workspace to keep: every live and archived note and upload the one asking can see, and nothing else, as Markdown files and the files themselves in directories named by folder path. A note is its title with `.md`, "Untitled" when it has none, and its text as stored, so its links and embeds still name ids; the **export index**, `common-ink-export.json` at the top, says which id is at which path, with each one's title, state and times, and marks `missing` an upload in the first part whose bytes weren't there; a later part lists any of its own in `common-ink-missing.json`. Names that would be the same in one directory, ignoring case, are told apart by ` (2)` and on, in the order they were made. What they can see in a folder they can't, such as a guest's granted note, is under `Shared with me/`. Anyone who can read in the workspace may export it, a guest and an agent too, an agent limited to folders only inside them, since it holds only what each could open one by one. Nothing in Trash is in it. It comes in parts, not a file's parts but each a zip of its own of at most 1 GiB and 300 uploads, the first with the notes and the index, and an upload larger than that alone in one; asked again, a part holds the same uploads. Most workspaces are one part. A member exports from Settings, under Account, an agent with `ink export`.
 _Avoid_: Backup, download, archive (that is a state)
+
+## Operating
+
+**Usage count**:
+One thing the Worker counts as it happens, so the operator knows how Common Ink is used: an event from a fixed list (signing up or in, opening the app, a workspace made, a member joining, a note made or edited, todos added or completed, a feature used, an agent's call), the workspace, whether a person, an agent or a plugin did it, and a hash of who. It never holds what a note, title, tag or email says. Counted on the server, never by a script in the app's pages, so an agent's work counts as a person's does (ADR 20).
+_Avoid_: Tracking, telemetry, event (alone, which is a calendar's)
+
+**Usage page**:
+A page of the app, at `/usage`, where the admins of the operator's workspace, and nobody else, read the usage counts back; nobody else is offered it in the workspace menu or the command palette: weekly and daily active members, sign-ups to trials to paid, what people and agents wrote, and the features used, over 7, 30 or 90 days.
+_Avoid_: Dashboard (that is the member's page of widgets), stats
+
+**Web Analytics**:
+Cloudflare's count of visits to the site's public pages: the landing, the docs, privacy and terms. It sets no cookie, and the app's pages never load it.

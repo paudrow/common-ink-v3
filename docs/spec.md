@@ -211,6 +211,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 141. As a member, I want a Today page that opens today's daily note, with commands for yesterday and tomorrow.
 142. As a member, I want a bottom bar with the word count and running timers, and a quick timer that belongs to no note.
 143. As a member on a phone, I want the app as a stack of screens, with plugins that need a keyboard turned off (#114, not merged yet).
+144. As the operator, I want to know how Common Ink is used, by people and by agents, without a script in the app or anything a note says leaving the Worker: weekly active members, sign-ups to trials to paid, and features used, on a Usage page only my workspace's admins can open, and visits to the public pages from Cloudflare Web Analytics (ADR 20).
 
 ## Implementation Decisions
 
@@ -219,6 +220,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 - Hosted on Cloudflare Workers at commonink.app. D1 holds relational data and history. R2 holds uploads. Every PR deploys a Cloudflare Preview, but PRs are reviewed on a local preview with a "Try in this PR" note. Uploads go up to 25 GB, sent in 80 MiB parts that resume, with no workspace quota (ADRs 8 and 13).
 - Sign-in is Google OAuth, requesting the `calendar.events` and `calendarlist.readonly` scopes and the read-only contacts scope, only where the deployment keeps data sources. Write access to contacts is asked for the first time a member edits one.
 - Branding follows earlier versions of Common Ink.
+- Usage is counted by the Worker into Workers Analytics Engine, never by a script in the app, and read back on `/usage`. The site's public pages alone carry Cloudflare Web Analytics, under a policy of their own (ADR 20, `docs/runbooks/analytics.md`).
 
 ### The workspace operations core
 
