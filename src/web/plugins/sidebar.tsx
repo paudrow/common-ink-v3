@@ -1,7 +1,7 @@
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Icon, draggableAs, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
-import { arrive, goes } from "./lib/rows.ts";
+import { arrive, goes, listOf, step } from "./lib/rows.ts";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
@@ -26,13 +26,22 @@ function Sidebar({ app }: ViewProps) {
   const pages = (
     <>
       {links("primary")}
-      <button type="button" className="mode more-toggle" aria-expanded={more} aria-label={open ? undefined : more ? "Less" : "More"} title={open ? undefined : more ? "Less" : "More"} onClick={() => setMore(!more)}>
+      <button type="button" className="mode more-toggle" data-row data-row-toggle aria-expanded={more} aria-label={open ? undefined : more ? "Less" : "More"} title={open ? undefined : more ? "Less" : "More"} onClick={() => setMore(!more)}>
         <Icon name="chevron" />
         {open && <span>{more ? "Less" : "More"}</span>}
       </button>
       {more && links("more")}
     </>
   );
+  const onKey = (e: KeyboardEvent<HTMLElement>) => {
+    const target = e.target as HTMLElement;
+    if (!e.defaultPrevented && listOf(target) === e.currentTarget && step(e, e.currentTarget)) e.preventDefault();
+    // Right opens More out and Left shuts it, as they do a folder.
+    else if (target.matches("[data-row-toggle]") && target.ariaExpanded === { ArrowRight: "false", ArrowLeft: "true" }[e.key]) {
+      e.preventDefault();
+      target.click();
+    } else if (e.key === "Enter" && !(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) && e.target instanceof Element && goes(e.target)) arrive();
+  };
   // Closed, it is a narrow bar with an icon for each thing the open sidebar lists, in the same order.
   if (!open)
     return (
@@ -59,8 +68,9 @@ function Sidebar({ app }: ViewProps) {
       </nav>
     );
   return (
-    // Enter on a link or a folder opens it and goes there with the keyboard.
-    <aside className="sidebar" aria-label="Sidebar" data-beside onKeyDown={(e) => e.key === "Enter" && !(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) && e.target instanceof Element && goes(e.target) && arrive()}>
+    // One list from the pages through the folders to the tags, whose rows the arrow keys go through. Enter on a link or a folder
+    // opens it and goes there with the keyboard.
+    <aside className="sidebar" aria-label="Sidebar" data-list data-beside onKeyDown={onKey}>
       <WorkspaceMenu app={app} />
       <NewNote app={app} />
       <nav aria-label="Modes" className="modes">
@@ -176,6 +186,7 @@ function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelle
       <a
         href={page.path}
         className="mode"
+        data-row
         aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) || (page.home && app.path === "/") ? "page" : undefined}
         aria-label={labelled ? undefined : page.label}
         title={labelled ? undefined : page.label}

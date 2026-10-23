@@ -4,8 +4,9 @@ import { EditorView } from "@codemirror/view";
  * What the keyboard moves through outside a note's text, found by what the page says of itself and
  * not by which plugin drew it. A list is a tree, a listbox, a menu, a list with a name, or anything
  * marked `data-list`. Its rows are its tree items, options and menu items, or what is marked
- * `data-row`, or else its children. A region is the sidebar, the inspector, a side of a split, or
- * anything marked `data-region`.
+ * `data-row`, or else its children. A list marked `data-joins` is a part of the list around it,
+ * which its rows are rows of, as the folder tree and the tags are of the sidebar's. A region is the
+ * sidebar, the inspector, a side of a split, or anything marked `data-region`.
  */
 export const LIST = '[data-list], [role="tree"], [role="listbox"], [role="list"], [role="menu"], ul[aria-label], ol[aria-label], ul[aria-labelledby], ol[aria-labelledby]';
 export const ROW = '[data-row], [role="treeitem"], [role="option"], [role^="menuitem"]';
@@ -20,8 +21,21 @@ export const shown = (el: Element) => el.getClientRects().length > 0;
 export const typing = (el: Element | null) =>
   el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLInputElement && !TEXTLESS.has(el.type)) || (el instanceof HTMLElement && el.isContentEditable);
 
+/** The list something is in, or is: the nearest, or the one that one is joined into. */
+export function listOf(el: Element) {
+  let list = el.closest(LIST);
+  while (list?.matches("[data-joins]")) {
+    const around = list.parentElement?.closest(LIST);
+    if (!around) break;
+    list = around;
+  }
+  return list;
+}
+
+/** A list's rows, and those of the lists joined into it. A list that is joined into another has none of its own. */
 export const rowsOf = (list: Element) => {
-  const marked = [...list.querySelectorAll<HTMLElement>(ROW)].filter((row) => row.closest(LIST) === list);
+  if (listOf(list) !== list) return [];
+  const marked = [...list.querySelectorAll<HTMLElement>(ROW)].filter((row) => listOf(row) === list);
   return (marked.length ? marked : [...list.children].filter((el) => el instanceof HTMLElement)).filter(shown);
 };
 
@@ -61,6 +75,22 @@ export function focusOn(el: HTMLElement) {
   if (view) return view.focus();
   el.focus();
   el.scrollIntoView({ block: "nearest" });
+}
+
+const STEPS: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity };
+
+/**
+ * Down and Up go from a row of `list` to the next and the one before, and Home and End to the first
+ * and the last, across the lists joined into it. Whether the key was one of them, on a row of it.
+ */
+export function step(e: Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "target">, list: Element | null) {
+  const by = STEPS[e.key];
+  if (by === undefined || !list || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !(e.target instanceof Node)) return false;
+  const rows = rowsOf(list);
+  const at = rows.findIndex((r) => r.contains(e.target as Node));
+  if (at < 0) return false;
+  focusOn(restOf(rows[Math.min(Math.max(at + by, 0), rows.length - 1)]!));
+  return true;
 }
 
 /** Whether opening a row goes somewhere, as a link or a folder does, and doesn't only show more of the list, as More does. */

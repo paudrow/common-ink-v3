@@ -5,6 +5,7 @@ import { MANAGE_PATH, ManageFolders, SETTINGS_ID, asking, folderCards } from "./
 import { canMove, canRename, movable, placesFor, type Place } from "./lib/folderMoves.ts";
 import { useKept } from "./lib/kept.ts";
 import { listable } from "./lib/listable.ts";
+import { listOf, step } from "./lib/rows.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 import { Palette } from "./lib/Palette.tsx";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "./sharing/Summary.tsx";
@@ -271,20 +272,22 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
   visit(null, 1);
   if (editing?.kind === "create" && editing.parentId === null) rows.push(nameRow("new", 1, "", (name) => run({ type: "folder.create", name })));
 
-  /** The arrow keys move through the rows, Home and End go to the first and last, and Right and Left open a folder out and shut it. */
+  /**
+   * The arrow keys move through the rows, Home and End go to the first and last, and Right and Left open a folder out and shut it.
+   * Where the tree is joined into a list, as the sidebar's, Up, Down, Home and End go on through that list's rows.
+   */
   const move = (e: KeyboardEvent<HTMLDivElement>) => {
     const row = e.target;
     if (!(row instanceof HTMLElement) || row.role !== "treeitem" || e.altKey || e.ctrlKey || e.metaKey) return;
     const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]')];
     const at = rows.indexOf(row);
-    const to = { ArrowDown: rows[at + 1], ArrowUp: rows[at - 1], Home: rows[0], End: rows.at(-1) }[e.key];
     const turns = { ArrowRight: "false", ArrowLeft: "true" }[e.key];
     // Right on a folder that is open goes into it, and Left on a row inside one goes to the folder it is in.
     const parent = rows.slice(0, at).findLast((r) => Number(r.ariaLevel) < Number(row.ariaLevel));
     const through = e.key === "ArrowRight" ? (row.ariaExpanded === "true" ? rows[at + 1] : undefined) : e.key === "ArrowLeft" && row.ariaExpanded !== "true" ? parent : undefined;
-    if (to ?? through) (to ?? through)!.focus();
+    if (through) through.focus();
     else if (turns && row.ariaExpanded === turns) row.querySelector<HTMLElement>("[data-row-toggle]")?.click();
-    else if (!(e.key in { ArrowDown: 0, ArrowUp: 0 })) return;
+    else if (!step(e, listOf(row))) return;
     e.preventDefault();
   };
 
@@ -324,7 +327,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
           </button>
         )}
       </div>
-      <div role="tree" aria-labelledby={`${ids}-label`} className="tree" onKeyDown={move}>
+      <div role="tree" aria-labelledby={`${ids}-label`} className="tree" data-joins onKeyDown={move}>
         {rows}
         {loose > 0 && listRow(SHARED_WITH_ME, "Shared with me", loose)}
       </div>

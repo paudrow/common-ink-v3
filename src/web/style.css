@@ -696,7 +696,8 @@ button.link:hover {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
-.folder-row:focus-visible {
+/* The sidebar is one list, so its pages, folders and tags show the keyboard on them alike. */
+:is(.folder-row, .mode, .tag-row):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -8600,11 +8601,6 @@ button.todo-tag[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--accent-ink);
   font-weight: 550;
-}
-
-.tag-row:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
 }
 
 .tag-name {

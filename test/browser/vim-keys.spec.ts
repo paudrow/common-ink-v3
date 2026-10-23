@@ -57,13 +57,15 @@ test("the folder tree moves with j, k, gg and G, za opens a folder out, and h co
   await expectSelected(item("All notes"), "All notes");
   await page.keyboard.press("Shift+G");
   await expectSelected(item("Zebra"), "the last folder");
+  // The tree is one part of the sidebar's list, which begins with the pages.
+  const dashboard = page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: "Dashboard" });
   await keys(page, "g", "g");
-  await expectSelected(item("All notes"), "the first row");
+  await expectSelected(dashboard, "the first row");
   await page.keyboard.press("k");
-  await expectSelected(item("All notes"), "the first row still");
+  await expectSelected(dashboard, "the first row still");
 
   const down = async (to: string) => {
-    for (let i = 0; i < 8 && !(await item(to).evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press("j");
+    for (let i = 0; i < 12 && !(await item(to).evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press("j");
     await expectSelected(item(to), to);
   };
   await down("Work");
@@ -728,7 +730,7 @@ test("a sequence begun on a row and given up takes no key from a note: a press, 
   await page.keyboard.press("g");
   await expect(item("Zebra")).toBeFocused();
   await page.keyboard.press("g");
-  await expectSelected(item("All notes"), "the first row");
+  await expectSelected(page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: "Dashboard" }), "the first row");
 });
 
 test("a letter typed in a note right after a sequence was given up elsewhere arrives in its text", async ({ page }) => {
