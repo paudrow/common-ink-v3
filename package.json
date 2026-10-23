@@ -40,7 +40,7 @@
     "postal-mime": "^4.1.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
@@ -67,6 +67,8 @@
     "@excalidraw/excalidraw": {
       "nanoid": "^3.3.20",
       "sass": "^1.106.0"
-    }
+    },
+    "katex": "$katex",
+    "zod": "$zod"
   }
 }
