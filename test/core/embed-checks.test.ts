@@ -21,6 +21,14 @@ describe("an agent's write of an embed", () => {
     await expect(perform(env.DB, agent, { type: "note.create", text: "/image(abc)" })).rejects.toMatchObject({ message: expect.stringContaining("Upload: An upload's id") });
   });
 
+  it("is refused when it writes a name close to an embed's and no embed's, saying which it was likely meant to be, and not for a word nowhere near one", async () => {
+    const agent = await agentOf(await newMember());
+    await expect(perform(env.DB, agent, { type: "note.create", text: "# Tea\n\nSteep /timr(5m) now." })).rejects.toMatchObject({ message: expect.stringContaining("Line 3, /timr(: No embed called timr. Did you mean /timer?") });
+    await expect(perform(env.DB, agent, { type: "note.create", text: "/stopwach()" })).rejects.toMatchObject({ message: expect.stringContaining("Did you mean /stopwatch?") });
+    const note = await perform(env.DB, agent, { type: "note.create", text: "Run /usr/bin(x) and/or (y), /hello(world), x/timr(5m) and `/timr(5m)`." });
+    expect(note.text).toBe("Run /usr/bin(x) and/or (y), /hello(world), x/timr(5m) and `/timr(5m)`.");
+  });
+
   it("is not checked in code, nor is a plugin's, nor a member's own write", async () => {
     const ada = await newMember();
     const agent = await agentOf(ada);
@@ -36,6 +44,18 @@ describe("an agent's write of an embed", () => {
     await expect(perform(env.DB, agent, { type: "note.create", text: "/html()\n~~~html\n```\n<p>x</p>\n~~~\n/timer()\n/image(abc)" })).rejects.toMatchObject({
       message: expect.stringMatching(/Line 6, \/timer\(\): Length is needed.*\nLine 7, \/image\(abc\): Upload: An upload's id/s),
     });
+  });
+
+  it("is refused when it writes an embed the old way, naming the line and what to write instead, and not for the old way already there or in code", async () => {
+    const ada = await newMember();
+    const agent = await agentOf(ada);
+    await expect(perform(env.DB, agent, { type: "note.create", text: "# Tea\n\nSteep ::timer{5m}\n:::kanban{}\n## To do\n:::\n" })).rejects.toMatchObject({
+      code: "invalid",
+      message: expect.stringMatching(/Line 3, Steep ::timer\{5m\}: write Steep \/timer\(5m\)\.\nLine 4, :::kanban\{\}: write \/kanban\(\) with its content in a fence under it\./),
+    });
+    expect((await perform(env.DB, agent, { type: "note.create", text: "`::timer{5m}` and std::vector{}" })).revision).toBe(1);
+    const note = await perform(env.DB, ada, { type: "note.create", text: "::timer{5m}" });
+    expect((await perform(env.DB, agent, { type: "note.write", id: note.id, baseRevision: note.revision, text: "::timer{5m} and more" })).revision).toBe(2);
   });
 
   it("refuses a second copy of an embed the note already had wrong", async () => {

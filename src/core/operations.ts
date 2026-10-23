@@ -73,6 +73,7 @@ import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
 import { readVocabulary, transcribeUpload, writeVocabulary } from "./transcripts.ts";
 import { embedProblemsIn } from "./embedSchema.ts";
+import { embedsConverted, holdsOldEmbeds, oldEmbedLines } from "./oldEmbeds.ts";
 import { NO_FILES, abortUpload, archiveUpload, createUpload, finishUpload, listUploads, moveUpload, openUpload, placeUpload, purgeUpload, putPart, readUpload, referred, restoreUpload, resumeUpload, startUpload, trashUpload, trashedUploads, uploadStorage, type Files } from "./uploads.ts";
 import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
 import { asc, desc, type Order } from "./order.ts";
@@ -547,7 +548,7 @@ export const DATES_LINKED = "Dates written as links";
 /** The label of the change that wrote a note's mentions and references to events as links. */
 export const LINKS_CONVERTED = "Links converted";
 
-/** How many notes one `note.convertLinks` looks at. */
+/** How many notes one `note.convertLinks` or `note.convertEmbeds` looks at. */
 const CONVERTED_AT_ONCE = 25;
 
 /**
@@ -688,11 +689,14 @@ async function mentionedById(ctx: Context, text: string, base: string, how: "res
 /**
  * Writes note `id`'s mentions and references to events as links, as `linksConverted` does with the
  * members' names now, once, as a change of the asker's labeled {@link LINKS_CONVERTED}, and answers
- * its new revision. Null where the asker may not change the note, which waits for someone who may,
+ * its new revision. Embeds it still writes the old way are converted first, as `convertEmbeds` does. Null where the asker may not change the note, which waits for someone who may,
  * and where there was nothing to convert. One that fails is left for the next asking, unless the
  * change can't be made to it at all, as one it would make too long, which is passed over.
  */
 async function convertLinks(ctx: Context, id: string, memberName: (personId: string) => string | undefined): Promise<{ id: string; revision: number } | null> {
+  // Its embeds are converted first, as their own change, so a note reads the same whichever conversion
+  // a member's app asks for first: an old block's HTML or JSON is the block's, and holds no link of the note's.
+  const embeds = await convertEmbeds(ctx, id);
   let row: NoteRow;
   try {
     row = await loadNote(ctx, id, "edit", "refused");
@@ -702,16 +706,16 @@ async function convertLinks(ctx: Context, id: string, memberName: (personId: str
   }
   // Claimed before it is converted, so two members coming in at once convert it once.
   const claimed = await ctx.db.prepare("UPDATE notes SET links_converted = 1 WHERE id = ? AND links_converted = 0").bind(id).run();
-  if (claimed.meta.changes !== 1) return null;
+  if (claimed.meta.changes !== 1) return embeds;
   const text = linksConverted(row.text, memberName);
-  if (text === row.text) return null;
+  if (text === row.text) return embeds;
   let written: Written;
   try {
     written = await commitNote(ctx, { id, baseRevision: row.revision, text, linkTitles: "keep", mentionNames: "keep" });
   } catch (err) {
     // Left for the next asking, unless the note can't take the change at all.
     if (!(err instanceof OpError && err.code === "invalid")) await ctx.db.prepare("UPDATE notes SET links_converted = 0 WHERE id = ?").bind(id).run();
-    if (err instanceof OpError) return null;
+    if (err instanceof OpError) return embeds;
     throw err;
   }
   await ctx.db
@@ -1033,9 +1037,9 @@ function recording(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision:
     statements: [
       insertChange(ctx, row.id, revision, baseRevision, row.text, changes, recorded),
       ctx.db
-        // A text that holds what notes wrote before people and events were links, put back or written by an app or an agent from before, is converted again.
-        .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, updated_by_owner = ?, indexed = ?, links_converted = links_converted * ? WHERE id = ? AND revision = ?")
-        .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, next.updated_by_owner, MADE, holdsOldLinks(text) ? 0 : 1, row.id, row.revision),
+        // A text that holds what notes wrote before people and events were links, or embeds written the old way, put back or written by an app or an agent from before, is converted again.
+        .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, updated_by_owner = ?, indexed = ?, links_converted = links_converted * ?, embeds_converted = embeds_converted * ? WHERE id = ? AND revision = ?")
+        .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, next.updated_by_owner, MADE, holdsOldLinks(text) ? 0 : 1, holdsOldEmbeds(text) ? 0 : 1, row.id, row.revision),
       ...deriving(ctx, row.id, text, was),
     ],
   };
@@ -1180,10 +1184,10 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
       ...(folder.id ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, NULL, ?, ?)").bind(folderId, ctx.workspaceId, folder.name, folderKey(folder.name))]),
       ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, private_owner, indexed, dates_linked, links_converted)
-           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, private_owner, indexed, dates_linked, links_converted, embeds_converted)
+           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         )
-        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.private_owner, row.indexed, holdsOldLinks(row.text) ? 0 : 1),
+        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.private_owner, row.indexed, holdsOldLinks(row.text) ? 0 : 1, holdsOldEmbeds(row.text) ? 0 : 1),
       insertChange(ctx, id, 1, 0, "", changesBetween("", text), { made: true }),
       ...(stale ? [ctx.db.prepare("DELETE FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ? AND note_id = ?").bind(ctx.workspaceId, ctx.personId, day, stale)] : []),
       ctx.db.prepare("INSERT INTO daily_notes (workspace_id, person_id, day, note_id) VALUES (?, ?, ?, ?)").bind(ctx.workspaceId, ctx.personId, day, id),
@@ -1946,6 +1950,7 @@ export const MAX_ANSWER_LINES = 2000;
  */
 function checkEmbeds(ctx: Context, text: string, was: string) {
   if (ctx.actor.kind !== "agent") return;
+  refuseOldEmbeds(text, was);
   // Counted, so a second copy of an embed the note already had wrong is a problem added.
   const had = new Map<string, number>();
   for (const p of embedProblemsIn(was)) {
@@ -1961,7 +1966,61 @@ function checkEmbeds(ctx: Context, text: string, was: string) {
     .filter((p) => p.problems.length);
   if (!added.length) return;
   const lines = added.map((p) => `Line ${p.line}, ${p.written}: ${p.problems.join(" ")}`);
-  throw new OpError("invalid", `${added.length === 1 ? "An embed has" : "Embeds have"} keys that aren't right, and nothing was written. note_syntax lists each embed's keys.\n${lines.join("\n")}`);
+  throw new OpError("invalid", `${added.length === 1 ? "An embed isn't" : "Embeds aren't"} written right, and nothing was written. note_syntax lists each embed's name and keys.\n${lines.join("\n")}`);
+}
+
+/** Refuses an agent's write that adds an embed written the old way, `::name{…}` or `:::name{…}`, saying what to write. One the note already had is left to the conversion. */
+function refuseOldEmbeds(text: string, was: string) {
+  const had = new Map<string, number>();
+  for (const form of oldEmbedLines(was).flatMap((l) => l.forms)) had.set(form, (had.get(form) ?? 0) + 1);
+  const added = oldEmbedLines(text).filter((l) =>
+    l.forms.some((form) => {
+      const left = had.get(form) ?? 0;
+      had.set(form, left - 1);
+      return left <= 0;
+    }),
+  );
+  if (!added.length) return;
+  const lines = added.map((l) => `Line ${l.line}, ${l.written}: write ${l.now}.`);
+  throw new OpError("invalid", `Embeds are written /name(args) now, with a block's content in a fenced block on the line under it, and nothing was written. note_syntax has each one.\n${lines.join("\n")}`);
+}
+
+/** The label of the change that wrote a note's embeds the way they are written now. */
+export const EMBEDS_CONVERTED = "Embeds converted";
+
+/**
+ * Writes note `id`'s embeds as `embedsConverted` does, once, as a change of the asker's labeled
+ * {@link EMBEDS_CONVERTED}, and answers its new revision. Null where the asker may not change the
+ * note, which waits for someone who may, and where there was nothing to convert. One that fails is
+ * left for the next asking, unless the change can't be made to it at all, which is passed over.
+ */
+async function convertEmbeds(ctx: Context, id: string): Promise<{ id: string; revision: number } | null> {
+  let row: NoteRow;
+  try {
+    row = await loadNote(ctx, id, "edit", "refused");
+  } catch (err) {
+    if (err instanceof OpError) return null;
+    throw err;
+  }
+  // Claimed before it is converted, so two members coming in at once convert it once.
+  const claimed = await ctx.db.prepare("UPDATE notes SET embeds_converted = 1 WHERE id = ? AND embeds_converted = 0").bind(id).run();
+  if (claimed.meta.changes !== 1) return null;
+  const text = embedsConverted(row.text);
+  if (text === row.text) return null;
+  let written: Written;
+  try {
+    written = await commitNote(ctx, { id, baseRevision: row.revision, text, linkTitles: "keep", mentionNames: "keep" });
+  } catch (err) {
+    // Left for the next asking, unless the note can't take the change at all.
+    if (!(err instanceof OpError && err.code === "invalid")) await ctx.db.prepare("UPDATE notes SET embeds_converted = 0 WHERE id = ?").bind(id).run();
+    if (err instanceof OpError) return null;
+    throw err;
+  }
+  await ctx.db
+    .prepare("INSERT INTO labels (note_id, revision, name, author_kind, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")
+    .bind(id, written.revision, EMBEDS_CONVERTED, ctx.author.kind, authorId(ctx), ctx.now)
+    .run();
+  return { id, revision: written.revision };
 }
 
 /** Records `op.text` as a write of the note at `op.baseRevision`, merging edits made since. */
@@ -2040,10 +2099,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, indexed, dates_linked, links_converted)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, indexed, dates_linked, links_converted, embeds_converted)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         )
-        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed, holdsOldLinks(row.text) ? 0 : 1);
+        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed, holdsOldLinks(row.text) ? 0 : 1, holdsOldEmbeds(row.text) ? 0 : 1);
       const statements = text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text), { writeId: op.writeId, made: true }), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)];
       await intoFolder(ctx.db.batch(statements));
       ctx.usage.push({ ...usedBy(ctx), event: "note_created" });
@@ -2423,6 +2482,27 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const converted: { id: string; revision: number }[] = [];
       for (const { id } of asked) {
         const written = await convertLinks(ctx, id, (personId) => names.get(personId));
+        if (written) converted.push(written);
+      }
+      return { converted, next: results.length > CONVERTED_AT_ONCE ? asked.at(-1)!.id : null };
+    },
+  },
+
+  "note.convertEmbeds": {
+    needs: "view",
+    // The app's, as a member comes in: an agent writes embeds the new way itself, and a guest leaves the notes for a member's.
+    by: "member",
+    members: true,
+    changes: true,
+    async run(ctx, op) {
+      const { results } = await ctx.db
+        .prepare(`SELECT n.id FROM notes n WHERE n.workspace_id = ?1 AND n.embeds_converted = 0 AND n.id > ?3 AND ${SEEN("n", "?2", "any")} ORDER BY n.id LIMIT ?4`)
+        .bind(ctx.workspaceId, ctx.sight.bind, op.after ?? "", CONVERTED_AT_ONCE + 1)
+        .all<{ id: string }>();
+      const asked = results.slice(0, CONVERTED_AT_ONCE);
+      const converted: { id: string; revision: number }[] = [];
+      for (const { id } of asked) {
+        const written = await convertEmbeds(ctx, id);
         if (written) converted.push(written);
       }
       return { converted, next: results.length > CONVERTED_AT_ONCE ? asked.at(-1)!.id : null };
