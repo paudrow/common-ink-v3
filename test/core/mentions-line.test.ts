@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { linksIn } from "../../src/core/links.ts";
+import { kindOf, linkedEvent, linkedFolder, linkedPerson, linksIn, namesKind, writtenEventLink } from "../../src/core/links.ts";
 import { summarize } from "../../src/core/markdown.ts";
 import { mentionIndex, mentionsIn, rementioned, writtenMention } from "../../src/core/mentions.ts";
 import { parseTodo, rewriteTodo, tagsOn } from "../../src/core/todos.ts";
@@ -7,104 +7,128 @@ import { parseTodo, rewriteTodo, tagsOn } from "../../src/core/todos.ts";
 const ADA = "k3j5h8d9f0a1";
 const found = (text: string) => mentionsIn(text).map((m) => [text.slice(m.from, m.to), m.target, m.label]);
 
-describe("how a note writes a mention", () => {
-  it("reads a member by id with their name, and anyone else by name", () => {
-    expect(found(`Ask @[[${ADA}|Ada Lovelace]] and @[[Sam Okafor]], then (@[[${ADA}]]).`)).toEqual([
-      [`@[[${ADA}|Ada Lovelace]]`, ADA, "Ada Lovelace"],
-      ["@[[Sam Okafor]]", "Sam Okafor", null],
-      [`@[[${ADA}]]`, ADA, null],
+describe("what a link is to", () => {
+  it("is named by its kind for a folder, an event and a person, and a note's id or a title has none", () => {
+    expect([`folder:${ADA}`, `event:${ADA}`, `person:${ADA}`, "person:Sam Okafor", ADA, "Plans", "2026-10-23"].map(kindOf)).toEqual([
+      { kind: "folder", to: ADA },
+      { kind: "event", to: ADA },
+      { kind: "person", to: ADA },
+      { kind: "person", to: "Sam Okafor" },
+      null,
+      null,
+      null,
     ]);
   });
 
-  it("takes nothing else that has an @ in it for one", () => {
+  it("names a folder or an event by an id alone, and nothing that isn't one of the kinds", () => {
+    expect([kindOf("folder:Plans"), kindOf("event:Lunch with Sam"), kindOf("person: "), kindOf("place:Paris"), kindOf("Person:Ada")]).toEqual([null, null, null, null, null]);
+    expect([namesKind("event:Lunch with Sam"), namesKind("folder:Plans"), namesKind("place:Paris"), namesKind("Plans")]).toEqual([true, true, false, false]);
+    expect([linkedFolder(`folder:${ADA}`), linkedEvent(`event:${ADA}`), linkedPerson(`person:${ADA}`), linkedPerson(`event:${ADA}`)]).toEqual([ADA, ADA, ADA, null]);
+  });
+
+  it("is written with words of its own after a |", () => {
+    expect([writtenEventLink(ADA), writtenEventLink(ADA, "the lunch")]).toEqual([`[[event:${ADA}]]`, `[[event:${ADA}|the lunch]]`]);
+    const text = `[[person:${ADA}|Sammy]] [[2026-10-23|the trip]] [[folder:${ADA}|that folder]] [[event:${ADA}]]`;
+    expect(linksIn(text).map((l) => [l.target, l.display])).toEqual([
+      [`person:${ADA}`, "Sammy"],
+      ["2026-10-23", "the trip"],
+      [`folder:${ADA}`, "that folder"],
+      [`event:${ADA}`, null],
+    ]);
+  });
+});
+
+describe("how a note writes a mention", () => {
+  it("reads a member by id and anyone else by name, each with words of its own after a |", () => {
+    expect(found(`Ask [[person:${ADA}]] and [[person:Sam Okafor]], then ([[person:${ADA}|the Countess]]).`)).toEqual([
+      [`[[person:${ADA}]]`, ADA, null],
+      ["[[person:Sam Okafor]]", "Sam Okafor", null],
+      [`[[person:${ADA}|the Countess]]`, ADA, "the Countess"],
+    ]);
+  });
+
+  it("takes nothing else for one: no @, no address, nothing in code, no other kind of link", () => {
     const prose = [
-      "Write to ada@example.com or ada@[[Sam]].",
-      "Follow @audrow and @ada_l on the bird site, at 5 @ the cafe.",
-      "See https://example.com/@ada/posts and `@[[Sam Okafor]]` in code.",
-      "@@[[Sam]] and @[[]] and @[Sam] and @[[Sam]",
-      "```\n@[[Sam Okafor]]\n```",
+      "Write to ada@example.com, follow @audrow, and see https://example.com/@ada/posts.",
+      "Old forms are words now: @[[Sam Okafor]] is an @ and a link to a note titled Sam Okafor.",
+      "`[[person:Sam Okafor]]` in code, [[person:]] with nobody, [[person: ]] too, and [[people:Sam]].",
+      "```\n[[person:Sam Okafor]]\n```",
     ].join("\n");
     expect(found(prose)).toEqual([]);
   });
 
-  it("leaves the brackets to a link wherever the @ before them starts no mention", () => {
-    const text = `mail@[[${ADA}]] a_@[[Plan]] 9@[[Plan]] @@[[Plan|p]] (@[[Sam]]) @[[Sam]]`;
-    expect(linksIn(text).map((l) => text.slice(l.from, l.to))).toEqual([`[[${ADA}]]`, "[[Plan]]", "[[Plan]]", "[[Plan|p]]"]);
-    expect(found(text).map(([written]) => written)).toEqual(["@[[Sam]]", "@[[Sam]]"]);
-  });
-
   it("is not read inside a markdown link's address", () => {
-    expect(found("[site](https://example.com/ @[[Sam]]) and [x](@[[Sam]]) but @[[Lin Wei]]").map(([written]) => written)).toEqual(["@[[Lin Wei]]"]);
+    expect(found("[site](https://example.com/[[person:Sam]]) and [x]([[person:Sam]]) but [[person:Lin Wei]]").map(([written]) => written)).toEqual(["[[person:Lin Wei]]"]);
   });
 
   it("holds no character that doesn't show: a name of nothing else is no mention, and none is ever written", () => {
-    expect(found("@[[\u200b]] @[[\u202e\u2066]] @[[aaaaaaaaaaaa|\u200d]]").map(([, target, label]) => [target, label])).toEqual([["aaaaaaaaaaaa", null]]);
-    expect(found("@[[\u202eSam\u200b Okafor]]").map(([, target]) => target)).toEqual(["Sam Okafor"]);
-    expect(mentionIndex("- [ ] x @[[\u200b]] @[[\u202eSam Okafor]]")).toEqual([[0, "sam okafor", "Sam Okafor"]]);
-    expect(writtenMention({ name: "\u202eSam\u200b Okafor\u2069" })).toBe("@[[Sam Okafor]]");
-    expect(writtenMention({ name: "\u200b\u200d" })).toBe("");
-    expect(writtenMention({ id: ADA, name: "\u202e" })).toBe(`@[[${ADA}]]`);
+    expect(found(`[[person:​]] [[person:‮⁦]] [[person:${ADA}|‍]]`).map(([, target, label]) => [target, label])).toEqual([[ADA, null]]);
+    expect(found("[[person:‮Sam​ Okafor]]").map(([, target]) => target)).toEqual(["Sam Okafor"]);
+    expect(mentionIndex("- [ ] x [[person:​]] [[person:‮Sam Okafor]]")).toEqual([[0, "sam okafor", "Sam Okafor"]]);
+    expect(writtenMention({ name: "‮Sam​ Okafor⁩" })).toBe("[[person:Sam Okafor]]");
+    expect(writtenMention({ name: "​‍" })).toBe("");
+    expect(writtenMention({ id: ADA, name: "‮" })).toBe(`[[person:${ADA}]]`);
   });
 
-  it("is not a link to a note, and a link is not a mention", () => {
-    const text = `@[[${ADA}|Ada]] wrote [[${ADA}|the plan]] with @[[Plan]]`;
-    expect(linksIn(text).map((l) => text.slice(l.from, l.to))).toEqual([`[[${ADA}|the plan]]`]);
-    expect(found(text).map(([written]) => written)).toEqual([`@[[${ADA}|Ada]]`, "@[[Plan]]"]);
+  it("is a link of its own kind: a link to a note is no mention", () => {
+    const text = `[[person:${ADA}]] wrote [[${ADA}|the plan]] in [[folder:${ADA}]]`;
+    expect(linksIn(text).map((l) => text.slice(l.from, l.to))).toEqual([`[[person:${ADA}]]`, `[[${ADA}|the plan]]`, `[[folder:${ADA}]]`]);
+    expect(found(text).map(([written]) => written)).toEqual([`[[person:${ADA}]]`]);
   });
 
-  it("writes a name without what would end the mention early", () => {
-    expect(writtenMention({ id: ADA, name: "Ada [the] Countess|\nLovelace" })).toBe(`@[[${ADA}|Ada the Countess Lovelace]]`);
-    expect(writtenMention({ name: "  Sam   Okafor " })).toBe("@[[Sam Okafor]]");
-    expect(writtenMention({ id: ADA, name: "" })).toBe(`@[[${ADA}]]`);
+  it("writes a member by id alone, and a name or its own words without what would end the link early", () => {
+    expect(writtenMention({ id: ADA, name: "Ada Lovelace" })).toBe(`[[person:${ADA}]]`);
+    expect(writtenMention({ id: ADA, name: "Ada" }, "the [Countess]|\nof Lovelace")).toBe(`[[person:${ADA}|the Countess of Lovelace]]`);
+    expect(writtenMention({ name: "  Sam   Okafor " })).toBe("[[person:Sam Okafor]]");
     expect(writtenMention({ name: " ]] " })).toBe("");
   });
 
   it("rewrites only the mentions it is answered for, and leaves every other character", () => {
-    const text = `a @[[Sam]]  b\t@[[${ADA}|Ada]]\n\`@[[Sam]]\` c`;
-    expect(rementioned(text, (m) => (m.target === "Sam" ? "@[[Samuel]]" : undefined))).toBe(`a @[[Samuel]]  b\t@[[${ADA}|Ada]]\n\`@[[Sam]]\` c`);
+    const text = `a [[person:Sam]]  b\t[[person:${ADA}|Ada]]\n\`[[person:Sam]]\` c`;
+    expect(rementioned(text, (m) => (m.target === "Sam" ? "[[person:Samuel]]" : undefined))).toBe(`a [[person:Samuel]]  b\t[[person:${ADA}|Ada]]\n\`[[person:Sam]]\` c`);
     expect(rementioned(text, () => undefined)).toBe(text);
   });
 
-  it("indexes who each line mentions once, a member by id and anyone else by their name in lower case", () => {
-    expect(mentionIndex(`# Plan\n@[[${ADA}|Ada]] and @[[${ADA}|A. Lovelace]] and @[[Sam Okafor]]\n\n- [ ] call @[[SAM OKAFOR]]`)).toEqual([
-      [1, ADA, "Ada"],
+  it("indexes who each line mentions once, a member by id and anyone else by their name in lower case, with the name it is by", () => {
+    expect(mentionIndex(`# Plan\n[[person:${ADA}]] and [[person:${ADA}|A. Lovelace]] and [[person:Sam Okafor|Sammy]]\n\n- [ ] call [[person:SAM OKAFOR]]`)).toEqual([
+      [1, ADA, ""],
       [1, "sam okafor", "Sam Okafor"],
       [3, "sam okafor", "SAM OKAFOR"],
     ]);
   });
 
-  it("reads as the name in a snippet", () => {
-    expect(summarize(`# Plan\n\nAsk @[[${ADA}|Ada Lovelace]] or @[[Sam Okafor]].`).snippet).toBe("Ask @Ada Lovelace or @Sam Okafor.");
+  it("reads in a snippet as its own words or the name it is by, and a member's id alone as nothing", () => {
+    expect(summarize(`# Plan\n\nAsk [[person:${ADA}]], [[person:${ADA}|the Countess]] or [[person:Sam Okafor]].`).snippet).toBe("Ask, @the Countess or @Sam Okafor.");
   });
 });
 
 describe("a todo's assignees", () => {
-  const line = `- [ ] ! Call the bank @[[${ADA}|Ada Lovelace]] due:2026-10-14 @[[Sam Okafor]] +Home`;
+  const line = `- [ ] ! Call the bank [[person:${ADA}]] due:2026-10-14 [[person:Sam Okafor|Sam]] +Home`;
 
   it("are the people mentioned on its line, and are not among its words", () => {
     const todo = parseTodo(line)!;
     expect(todo.assignees.map((a) => [line.slice(a.from, a.to), a.target, a.label])).toEqual([
-      [`@[[${ADA}|Ada Lovelace]]`, ADA, "Ada Lovelace"],
-      ["@[[Sam Okafor]]", "Sam Okafor", null],
+      [`[[person:${ADA}]]`, ADA, null],
+      ["[[person:Sam Okafor|Sam]]", "Sam Okafor", "Sam"],
     ]);
     expect(todo.words).toBe("Call the bank +Home");
     expect(todo.due?.date).toBe("2026-10-14");
   });
 
   it("holds no token of its own: a name that reads as a due date or a tag is still a name", () => {
-    const todo = parseTodo("- [ ] Ring @[[Sam #home due:2026-10-14]]")!;
-    expect([todo.due, tagsOn("- [ ] Ring @[[Sam #home due:2026-10-14]]"), todo.assignees.map((a) => a.target)]).toEqual([null, [], ["Sam #home due:2026-10-14"]]);
+    const todo = parseTodo("- [ ] Ring [[person:Sam #home due:2026-10-14]]")!;
+    expect([todo.due, tagsOn("- [ ] Ring [[person:Sam #home due:2026-10-14]]"), todo.assignees.map((a) => a.target)]).toEqual([null, [], ["Sam #home due:2026-10-14"]]);
   });
 
   it("are assigned at the end of the line, once, and taken away with the space before", () => {
     const bare = "- [ ] Call the bank";
     const assigned = rewriteTodo(bare, { assign: { id: ADA, name: "Ada Lovelace" } });
-    expect(assigned).toBe(`- [ ] Call the bank @[[${ADA}|Ada Lovelace]]`);
+    expect(assigned).toBe(`- [ ] Call the bank [[person:${ADA}]]`);
     expect(rewriteTodo(assigned, { assign: { id: ADA, name: "Ada L." } })).toBe(assigned);
-    expect(rewriteTodo(assigned, { assign: { name: "Sam Okafor" } })).toBe(`${assigned} @[[Sam Okafor]]`);
-    expect(rewriteTodo(`${assigned} @[[Sam Okafor]] +Home`, { unassign: "sam okafor" })).toBe(`${assigned} +Home`);
+    expect(rewriteTodo(assigned, { assign: { name: "Sam Okafor" } })).toBe(`${assigned} [[person:Sam Okafor]]`);
+    expect(rewriteTodo(`${assigned} [[person:Sam Okafor]] +Home`, { unassign: "sam okafor" })).toBe(`${assigned} +Home`);
     expect(rewriteTodo(assigned, { unassign: ADA })).toBe(bare);
-    expect(rewriteTodo(assigned, { unassign: ADA, assign: { name: "Sam Okafor" } })).toBe(`${bare} @[[Sam Okafor]]`);
+    expect(rewriteTodo(assigned, { unassign: ADA, assign: { name: "Sam Okafor" } })).toBe(`${bare} [[person:Sam Okafor]]`);
     expect(() => rewriteTodo(bare, { assign: { name: "]]" } })).toThrow(RangeError);
   });
 });

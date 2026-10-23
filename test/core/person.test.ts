@@ -54,10 +54,10 @@ async function world() {
   const { sources, read } = contactsOf(byPerson);
   const inside = await perform(env.DB, ada, { type: "folder.create", name: "Inside" });
   const outside = await perform(env.DB, ada, { type: "folder.create", name: "Outside" });
-  const shared = await perform(env.DB, ada, { type: "note.create", folderId: inside.id, text: `# Boiler\n\n- [ ] Fix the boiler @[[Sam Okafor]]\n\nAsk @[[Grace Hopper]] how it went.` });
-  const secret = await perform(env.DB, ada, { type: "note.create", folderId: inside.id, text: `# Secret\n\nsecret-line about @[[Sam Okafor]]` });
+  const shared = await perform(env.DB, ada, { type: "note.create", folderId: inside.id, text: `# Boiler\n\n- [ ] Fix the boiler [[person:Sam Okafor]]\n\nAsk [[person:Grace Hopper]] how it went.` });
+  const secret = await perform(env.DB, ada, { type: "note.create", folderId: inside.id, text: `# Secret\n\nsecret-line about [[person:Sam Okafor]]` });
   await perform(env.DB, ada, { type: "note.setPrivate", id: secret.id, private: true });
-  const far = await perform(env.DB, ada, { type: "note.create", folderId: outside.id, text: `# Far\n\noutside-line with @[[Sam Okafor]] and @[[${grace.personId}]]` });
+  const far = await perform(env.DB, ada, { type: "note.create", folderId: outside.id, text: `# Far\n\noutside-line with [[person:Sam Okafor]] and [[person:${grace.personId}]]` });
   const page = (as: Actor, who: string) => perform(env.DB, as, { type: "person.read", who } satisfies OpInput, Date.now(), sources);
   return { ada, grace, bob, graceEmail, inside, outside, shared, secret, far, page, read };
 }
@@ -117,7 +117,7 @@ describe("a person's page", () => {
 
   it("holds the mentions written by name before someone joined, as the search its page makes finds them", async () => {
     const w = await world();
-    const early = await perform(env.DB, w.ada, { type: "note.create", text: "# Early\n\n- [ ] Welcome pack @[[Newt Joiner]]\n\nBefore @[[Newt Joiner]] joins." });
+    const early = await perform(env.DB, w.ada, { type: "note.create", text: "# Early\n\n- [ ] Welcome pack [[person:Newt Joiner]]\n\nBefore [[person:Newt Joiner]] joins." });
     const newt = await addMember(w.ada, "editor", "Newt Joiner");
     const byId = await w.page(w.ada, newt.personId);
     expect(byId).toMatchObject({ who: newt.personId, member: { personId: newt.personId }, query: 'mentions:"Newt Joiner"' });
@@ -141,18 +141,19 @@ describe("a person's page", () => {
     expect(w.read.length).toBe(before);
   });
 
-  it("tells a guest only what the note they were let into says: the name as written, and none of the members or anyone's contacts", async () => {
+  it("tells a guest only what the note they were let into says: someone, and none of the members or anyone's contacts", async () => {
     const w = await world();
     const email = `${crypto.randomUUID()}@example.com`;
     await perform(env.DB, w.ada, { type: "grant.set", noteId: w.shared.id, email, access: "view" });
     const { personId } = await signIn(env.DB, { email, name: "Gus Guest" });
     const gus: Actor = { kind: "member", personId, workspaceId: w.ada.workspaceId };
     const grace = await w.page(gus, w.grace.personId);
-    expect(grace).toMatchObject({ who: w.grace.personId, name: "Grace Hopper", member: null, contacts: [] });
-    expect(grace.mentionedIn.map((m) => [m.noteTitle, m.text])).toEqual([["Boiler", "Ask @Grace Hopper how it went."]]);
+    expect(grace).toMatchObject({ who: w.grace.personId, name: "Someone", member: null, contacts: [] });
+    expect(grace.mentionedIn.map((m) => [m.noteTitle, m.text])).toEqual([["Boiler", "Ask @Someone how it went."]]);
     const byName = await w.page(gus, "Grace Hopper");
     expect(byName).toMatchObject({ who: "Grace Hopper", member: null, mentionedIn: [] });
     expect(said(grace) + said(byName)).not.toMatch(/@example\.com|ada-|outside-line|secret-line/);
+    expect(said(grace)).not.toContain("Hopper");
   });
 
   it("is only the name for someone who is neither a member nor one of the asker's contacts", async () => {

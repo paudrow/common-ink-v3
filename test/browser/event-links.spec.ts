@@ -64,7 +64,7 @@ test("[[ finds a repeating event's occurrences after the notes, nearest first, e
   await expect(offered(page)).toHaveText(`Standup${longDay(day)} · ${timeIn(later.when.from as number, zone)} · Work`);
   await page.keyboard.press("Enter");
   const { text: reference } = await perform(page, { type: "record.refer", sourceId: later.sourceId, id: later.id });
-  expect(reference).toMatch(/^::event\{[a-z0-9]{12} Standup\}$/);
+  expect(reference).toMatch(/^\[\[event:[a-z0-9]{12}\]\]$/);
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(`# Standup notes\n\nBefore ${reference}`);
   // The cursor is after it, so typing goes on, and off its edge it is drawn as the event.
   await page.keyboard.type(" after");
@@ -82,7 +82,7 @@ test("[[ finds a repeating event's occurrences after the notes, nearest first, e
   await page.keyboard.press("Enter");
   await page.keyboard.press("Home");
   await page.keyboard.type("So ");
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toMatch(/\nSo Then ::event\{[a-z0-9]{12} Planning\}$/);
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toMatch(/\nSo Then \[\[event:[a-z0-9]{12}\]\]$/);
   await page.unroute("**/ops");
 
   // The occurrence lists the note; another occurrence of the same event doesn't.

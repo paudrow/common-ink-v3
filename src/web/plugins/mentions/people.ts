@@ -5,6 +5,8 @@ import { AT_ALONE, namable, sameName, startsWords } from "../lib/pointing.ts";
 /** The people a mention can be of, as the member's own browser knows them: the workspace's members, and the member's own contacts. */
 export interface People {
   members: ReadonlyMap<string, Member>;
+  /** Whether the reader is told who the members are, as a guest and a share link's reader aren't. */
+  told: boolean;
   /** Null until they are read, which is when the member first types `@`. */
   contacts: readonly Contact[] | null;
 }
@@ -63,17 +65,29 @@ export function offered(typed: string, { members, contacts }: People, meId: stri
   return [...found, { kind: "new", label: `Create contact “${name}”`, description: `New contact in ${adding.into}`, insert: () => adding.create(name) }];
 }
 
-/** How a mention is shown: a member by their name now, in the theme colour, and anyone else by the name as written, in gray. */
+/**
+ * How a mention is shown: as its own words where it has them, and otherwise a member by their name
+ * now, in the theme colour, and anyone else by the name written, in gray. An id that is no member's
+ * is someone who has left, to a reader who is told who the members are, and nobody named to anyone
+ * else. Hovering it says who it is.
+ */
 export interface Shown {
   text: string;
   member: boolean;
   hint: string;
 }
 
-export function shown(mention: Pick<WrittenMention, "target" | "label">, members: People["members"]): Shown {
+export function shown(mention: Pick<WrittenMention, "target" | "label">, { members, told }: Pick<People, "members" | "told">): Shown {
   const member = isPersonId(mention.target) ? members.get(mention.target) : undefined;
-  if (member) return { text: `@${member.name || "No name"}`, member: true, hint: `${member.name || "No name"}, a member of this workspace` };
-  return { text: `@${mentionName(mention)}`, member: false, hint: `${mentionName(mention)}, mentioned by name` };
+  if (member) {
+    const name = member.name || "No name";
+    return { text: `@${mention.label ?? name}`, member: true, hint: `${name}, a member of this workspace` };
+  }
+  const name = mentionName(mention);
+  if (name !== null) return { text: `@${mention.label ?? name}`, member: false, hint: `${name}, mentioned by name` };
+  return told
+    ? { text: `@${mention.label ?? "A former member"}`, member: false, hint: "Someone who is no longer a member of this workspace" }
+    : { text: `@${mention.label ?? "Someone"}`, member: false, hint: "Someone in this workspace, whom only its members are told of" };
 }
 
 /** The members among `now` that `before` didn't mention, each once: who a change to a note newly mentions. */

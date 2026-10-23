@@ -11,7 +11,7 @@ import { following as lineFollowing } from "./follow.ts";
 import { dayIn, dayStartIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
 import { newId } from "./ids.ts";
-import { isNoteId, linkedFolder, linkedIds, linksIn, retargeted } from "./links.ts";
+import { isNoteId, linkedIds, linksIn, namesKind, retargeted } from "./links.ts";
 import { datesAsLinks, linkedDay, linkedDayTargets } from "./dateLinks.ts";
 import { summarize } from "./markdown.ts";
 import { tagsCovering, todoTagIndex, type InheritedTag } from "./tagScope.ts";
@@ -534,15 +534,16 @@ export const DATES_LINKED = "Dates written as links";
  * and a writer is only ever refused for a link they wrote themselves. A new target is looked up as
  * an id and as a title: a note with that id is the one meant, and otherwise the one note so titled.
  * A note in Trash is never the one meant. An archived note is, by its id, and by its title when no
- * live note has that title. A link to a folder is a folder's, and one to a day is that day's, and
- * each is left as it is: a daily note is titled its date, and a date link isn't to it by its title.
+ * live note has that title. A link to a folder, an event or a person is that kind's, and one to a
+ * day is that day's, and each is left as it is: a daily note is titled its date, and a date link
+ * isn't to it by its title.
  * A target that is neither is left as written and named in `unresolved`, or refused when `how` is
  * `resolve-strict`.
  */
 async function linkedById(ctx: Context, text: string, base: string, how: LinkTitles): Promise<{ text: string; unresolved: UnresolvedLink[] }> {
   if (how === "keep") return { text, unresolved: [] };
   const had = new Set(linksIn(base).map((link) => link.target));
-  const introduced = [...new Set(linksIn(text).map((link) => link.target))].filter((target) => !had.has(target) && linkedFolder(target) === null && linkedDay(target) === null);
+  const introduced = [...new Set(linksIn(text).map((link) => link.target))].filter((target) => !had.has(target) && !namesKind(target) && linkedDay(target) === null);
   if (!introduced.length) return { text, unresolved: [] };
   // A title is looked up as it is made now, for a note last written under an older rule too.
   await mend(ctx);
@@ -558,7 +559,7 @@ async function linkedById(ctx: Context, text: string, base: string, how: LinkTit
   const byTitle = Map.groupBy(found, (row) => row.title.toLowerCase());
   const unresolved = new Map<string, UnresolvedLink>();
   const stored = retargeted(text, (target) => {
-    if (had.has(target) || ids.has(target) || linkedFolder(target) !== null || linkedDay(target) !== null) return undefined;
+    if (had.has(target) || ids.has(target) || namesKind(target) || linkedDay(target) !== null) return undefined;
     const titled = byTitle.get(target.toLowerCase()) ?? [];
     const live = titled.filter((n) => n.state === "live");
     const notes = live.length ? live : titled;
@@ -582,9 +583,10 @@ type Member = { id: string; name: string };
  * by a name that came back as an id any more than by a list. None for a plugin either, whatever it was
  * permitted: reading or writing notes is not being told who the members are.
  */
-async function membersMeant(ctx: Context, targets: readonly string[]): Promise<{ byId: Map<string, Member>; byName: Map<string, Member[]> }> {
+async function membersMeant(ctx: Context, targets: readonly string[]): Promise<Meant> {
   const asked = [...new Set(targets)];
-  if (!seesEveryFolder(ctx.sight) || ctx.shutOff || !asked.length) return { byId: new Map(), byName: new Map() };
+  const told = seesEveryFolder(ctx.sight) && !ctx.shutOff;
+  if (!told || !asked.length) return { byId: new Map(), byName: new Map(), told };
   // Each name as written and in lower case: the database folds case for unaccented letters only.
   const { results } = await ctx.db
     .prepare(
@@ -593,43 +595,56 @@ async function membersMeant(ctx: Context, targets: readonly string[]): Promise<{
     )
     .bind(ctx.workspaceId, JSON.stringify(asked.filter(isPersonId)), JSON.stringify(asked.flatMap((target) => [target, target.toLowerCase()])))
     .all<Member>();
-  return { byId: new Map(results.map((m) => [m.id, m])), byName: Map.groupBy(results, (m) => m.name.toLowerCase()) };
+  return { byId: new Map(results.map((m) => [m.id, m])), byName: Map.groupBy(results, (m) => m.name.toLowerCase()), told };
 }
 
+/** The members some targets meant, by id and by name, and whether the asker is told who the members are at all. */
+type Meant = { byId: Map<string, Member>; byName: Map<string, Member[]>; told: boolean };
+
 /** The one member a name or an id means, or undefined when it is nobody's. Refused when the name is several members'. */
-function memberMeant(found: Awaited<ReturnType<typeof membersMeant>>, target: string): Member | undefined {
+function memberMeant(found: Meant, target: string): Member | undefined {
   const byId = found.byId.get(target);
   if (byId) return byId;
   const members = found.byName.get(target.toLowerCase()) ?? [];
-  if (members.length > 1) throw new OpError("invalid", `${members.length} members are named ${quoted(target)}: ${members.map((m) => m.id).join(", ")}. Mention the one you mean as @[[id]], with ids from member.list.`);
+  if (members.length > 1) throw new OpError("invalid", `${members.length} members are named ${quoted(target)}: ${members.map((m) => m.id).join(", ")}. Mention the one you mean as [[person:id]], with ids from member.list.`);
   return members[0];
 }
 
-/** Who a mention is of, as the asker may be told: a member by their name now, and anyone else by the name as written. */
-const mentioned = (members: ReadonlyMap<string, Member>, who: string, name: string): Mentioned => {
-  const member = members.get(who);
-  return { id: isPersonId(who) ? who : null, name: member?.name ?? name, member: member !== undefined };
+/**
+ * The name of whoever an id is that isn't a member's: someone who has left, to an asker who is told
+ * who the members are, and nobody in particular to anyone else, who is told nothing of who is in the
+ * workspace by whether a name comes back.
+ */
+const nobodyNamed = (found: Pick<Meant, "told">) => (found.told ? "A former member" : "Someone");
+
+/** Who a mention is of, as the asker may be told: a member by their name now, anyone else by the name written, and an id that is no member's as {@link nobodyNamed}. */
+const mentioned = (found: Meant, who: string, name: string | null): Mentioned => {
+  const member = found.byId.get(who);
+  return { id: isPersonId(who) ? who : null, name: member?.name ?? (name || (isPersonId(who) ? nobodyNamed(found) : who)), member: member !== undefined };
 };
 
+/** The name a mention shows the asker: its own words, or the name of who it is of as {@link mentioned} tells it. */
+const shownName = (found: Meant, mention: WrittenMention) => mention.label ?? mentioned(found, mention.target, mentionName(mention)).name;
+
 /** Each person `mentions` are of, once, in the order they first appear. */
-function mentionedIn(members: ReadonlyMap<string, Member>, mentions: readonly WrittenMention[]): Mentioned[] {
+function mentionedIn(found: Meant, mentions: readonly WrittenMention[]): Mentioned[] {
   const first = new Map<string, WrittenMention>();
   for (const mention of mentions) if (!first.has(mentionKey(mention))) first.set(mentionKey(mention), mention);
-  return [...first].map(([who, mention]) => mentioned(members, who, mentionName(mention)));
+  return [...first].map(([who, mention]) => mentioned(found, who, mentionName(mention)));
 }
 
 /** Each person `text` mentions. */
 async function mentionsOf(ctx: Context, text: string): Promise<Mentioned[]> {
   const mentions = mentionsIn(text);
-  return mentionedIn((await membersMeant(ctx, mentions.map((m) => m.target).filter(isPersonId))).byId, mentions);
+  return mentionedIn(await membersMeant(ctx, mentions.map((m) => m.target).filter(isPersonId)), mentions);
 }
 
 /**
- * The text with each mention the write introduces that is of a member stored by that member's id,
- * with their name: `@[[Ada Lovelace]]` and `@[[id]]` both become `@[[id|Ada Lovelace]]`. As with a
- * link, a write introduces a mention when no mention in `base` has the same target as written, so
- * one the note already had is left exactly as it is. A name no member has is left too: it is a
- * mention of someone by name. Only a name several members have is refused.
+ * The text with each mention the write introduces that names a member by name stored by that
+ * member's id: `[[person:Ada Lovelace]]` becomes `[[person:id]]`, and keeps any words of its own
+ * after the `|`. As with a link, a write introduces a mention when no mention in `base` has the
+ * same target as written, so one the note already had is left exactly as it is. A name no member
+ * has is left too: it is a mention of someone by name. Only a name several members have is refused.
  */
 async function mentionedById(ctx: Context, text: string, base: string, how: "resolve" | "keep"): Promise<string> {
   if (how === "keep") return text;
@@ -640,8 +655,8 @@ async function mentionedById(ctx: Context, text: string, base: string, how: "res
   const stored = rementioned(text, (mention) => {
     if (had.has(mention.target)) return undefined;
     const member = memberMeant(found, mention.target);
-    if (!member || (member.id === mention.target && mention.label)) return undefined;
-    return writtenMention({ id: member.id, name: mention.label ?? member.name });
+    if (!member || member.id === mention.target) return undefined;
+    return writtenMention({ id: member.id, name: member.name }, mention.label);
   });
   if (stored.length > MAX_NOTE_LENGTH) throw new OpError("invalid", `With its mentions stored by id, the note would be over ${MAX_NOTE_LENGTH} characters`);
   return stored;
@@ -1788,10 +1803,10 @@ const MENTION_LINE = 300;
 const BLOCK_MARKS = new RegExp(`^\\s*(?:(?:[-*+]|\\d+[.)])\\s+(?:${BOX_PATTERN}\\s+)?|#{1,6}\\s+|>\\s*)`);
 
 /** The line's words with each mention written as the name it shows the asker, and no more of it than a page shows. */
-function lineAsShown(line: string, members: ReadonlyMap<string, Member>, keys: ReadonlySet<string>): string {
+function lineAsShown(line: string, found: Meant, keys: ReadonlySet<string>): string {
   const words = line.replace(BLOCK_MARKS, (marks) => " ".repeat(marks.length));
   const at = mentionsOn(words).find((m) => keys.has(mentionKey(m)))?.from ?? 0;
-  const shown = rementioned(words, (mention) => `@${members.get(mention.target)?.name ?? mentionName(mention)}`).trim();
+  const shown = rementioned(words, (mention) => `@${shownName(found, mention)}`).trim();
   if (shown.length <= MENTION_LINE) return shown;
   const from = Math.max(0, Math.min(at - MENTION_LINE / 3, shown.length - MENTION_LINE));
   return `${from > 0 ? "…" : ""}${shown.slice(Math.round(from), Math.round(from) + MENTION_LINE)}…`;
@@ -1828,14 +1843,16 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
     .all<{ note_id: string; line: number; name: string; title: string; text: string; updated_at: number }>();
   const listed = results.slice(0, op.limit).map((r) => ({ ...r, said: r.text.split("\n")[r.line] ?? "" }));
   const ids = listed.flatMap((r) => mentionsOn(r.said).map((m) => m.target)).filter(isPersonId);
-  const shown = (await membersMeant(ctx, ids)).byId;
-  const name = member?.name ?? (isPersonId(op.who) ? (results[0]?.name ?? op.who) : op.who);
+  const shown = await membersMeant(ctx, ids);
+  const name = member?.name ?? (isPersonId(op.who) ? nobodyNamed(meant) : op.who);
 
   // A contact is the asker's own, read from their data sources: an agent limited to folders is refused those, as contact.list is.
   const theirs = ctx.personId !== null && ctx.actor.kind !== "visitor" && !ctx.sight.within;
   // Matched by the member's email only for an asker the member list tells it to: for anyone else a match would confirm a guess.
   const emails = new Set(toldEmail ? [toldEmail.toLowerCase()] : []);
-  const contacts = theirs ? await contactCards(asker(ctx), (c) => folded(c.name) === folded(name) || c.emails.some((e) => emails.has(e.value.toLowerCase()))) : [];
+  // An id that is nobody's the asker is told of has no name to match a contact by.
+  const named = member || !isPersonId(op.who) ? name : null;
+  const contacts = theirs ? await contactCards(asker(ctx), (c) => (named !== null && folded(c.name) === folded(named)) || c.emails.some((e) => emails.has(e.value.toLowerCase()))) : [];
 
   const query = `mentions:${writtenValue(searchedAs)}`;
   const todoQuery = `assignee:${writtenValue(searchedAs)}`;
@@ -2026,7 +2043,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       ).all<{ note_id: string; line: number; state: TodoState; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
       const listed = pages.page(results, op.limit);
       const page = listed.page.map((r) => ({ r, todo: parseTodo(r.text) }));
-      const members = (await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []))).byId;
+      const members = await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []));
       const tagged = page.filter(({ r }) => r.tags !== "[]").map(({ r }) => r.note_id);
       const ticked = await tickedIn(ctx, new Map(page.filter(({ r }) => r.state === "done").map(({ r }) => [r.note_id, r.revision])));
       const texts = new Map(
@@ -2081,7 +2098,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           )
           .bind(ctx.workspaceId, ctx.sight.bind),
       ]);
-      const members = (await membersMeant(ctx, assigned!.results.map((r) => r.who!).filter(isPersonId))).byId;
+      const members = await membersMeant(ctx, assigned!.results.map((r) => r.who!).filter(isPersonId));
       const assignees = assigned!.results.map((r) => mentioned(members, r.who!, r.name));
       // Members first, then everyone else, each by name.
       assignees.sort((a, b) => Number(b.member) - Number(a.member) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || (a.id ?? "").localeCompare(b.id ?? ""));
@@ -2097,7 +2114,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, assign, unassign, done, newTags, ...rest } = op;
         // done is the older way to say a state, which agents still pass.
         if (done !== undefined && rest.state !== undefined && done !== (rest.state === "done")) throw new OpError("invalid", `done: ${done} and state: ${rest.state} say different things. Pass state alone`);
-        // A member is assigned by their id with their name, whichever they were named by, as a mention a write introduces is stored.
+        // A member is assigned by their id, whichever they were named by, as a mention a write introduces is stored.
         // Taking a todo from a name takes it from the member so named too, whom the line holds by their id.
         const meant = await membersMeant(ctx, [assign, unassign].filter((who) => who !== undefined));
         const theirs = assign === undefined ? undefined : memberMeant(meant, assign);
@@ -2108,9 +2125,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         const mine = change.state === "done" || change.skip ? await completing(ctx, on) : null;
         let wanted: Completed;
         try {
-          // Someone who isn't told the members assigns by an id the note already holds, as the Todos page does: the name is the one the note calls them.
-          const called = assign === undefined || theirs ? undefined : mentionsIn(row.text).find((m) => m.target === assign && m.label)?.label;
-          wanted = changeTodo(listedAs, assign === undefined ? change : { ...change, assign: theirs ?? (called ? { id: assign, name: called } : { name: assign }) }, mine?.day ?? "");
+          // Someone who isn't told the members assigns by an id the note already holds, as the Todos page does.
+          wanted = changeTodo(listedAs, assign === undefined ? change : { ...change, assign: theirs ?? (isPersonId(assign) ? { id: assign, name: "" } : { name: assign }) }, mine?.day ?? "");
         } catch (err) {
           throw err instanceof RangeError ? new OpError("invalid", err.message) : err;
         }

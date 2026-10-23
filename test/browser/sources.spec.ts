@@ -334,7 +334,7 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await runCommand(page, "Copy event reference");
   await expect(page.locator(".toast-card").last()).toContainText(/^Copied the reference to Lunch with Sam, \w{3} \d{1,2}\. Paste it into a note\.$/);
   const written = await page.evaluate(() => navigator.clipboard.readText());
-  expect(written).toMatch(/^::event\{[a-z0-9]{12} Lunch with Sam\}$/);
+  expect(written).toMatch(/^\[\[event:[a-z0-9]{12}\]\]$/);
 
   await openNote(page, note.id, "We meet at");
   await writeAtEnd(page, written);
@@ -419,7 +419,7 @@ interface Place {
 }
 
 /** Where each of these words is: the left edge of its first letter, and the top and height of the line it is on. */
-test("whoever opens a link to a note sees a reference as its label, in gray, and their page asks nothing about it", async ({ page }) => {
+test("whoever opens a link to a note sees a link to an event as an event and a reference as its label, in gray, and their page asks nothing about it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await connectSample(page);
   const lunch = await perform(page, { type: "record.refer", ...(({ sourceId, id }) => ({ sourceId, id }))(await eventNamed(page, "Lunch with Sam")) });
@@ -434,8 +434,8 @@ test("whoever opens a link to a note sees a reference as its label, in gray, and
     if (new URL(request.url()).pathname.startsWith("/api/")) asked.push(new URL(request.url()).pathname);
   });
   await anyone.goto(`/s/${link.to.token}`);
-  await expect(chips(anyone)).toHaveText(["Lunch with Sam", "Sam Okafor"]);
-  await expect(editor(anyone)).not.toContainText("::event");
+  await expect(chips(anyone)).toHaveText(["Event", "Sam Okafor"]);
+  await expect(editor(anyone)).not.toContainText("[[event");
   await expect(editor(anyone)).not.toContainText(lunch.ref);
   for (const chip of await chips(anyone).all()) {
     await expect(chip).toHaveAttribute("data-state", "private");

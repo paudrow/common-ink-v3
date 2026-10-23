@@ -22,7 +22,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { isNoteId, linkedFolder, linksIn, retargeted } from "../src/core/links.ts";
+import { isNoteId, linksIn, namesKind, retargeted, writtenEventLink } from "../src/core/links.ts";
 import { linkedDay } from "../src/core/dateLinks.ts";
 import { allPages } from "../src/core/allPages.ts";
 import type { CalendarEvent, Contact, MailThread, Reference, Source, Upload } from "../src/core/protocol.ts";
@@ -61,8 +61,8 @@ type Summary = { id: string; title: string; slug: string; revision: number };
 const notes = await allPages((after) => op<{ notes: Summary[]; next: string | null }>({ type: "note.list", limit: 1000, after }), (page) => page.notes);
 
 const idOf = new Map<string, string>();
-// A link to a day or a folder is that day's or folder's, and names no note.
-for (const title of new Set(linksIn(text).map((link) => link.target).filter((target) => !isNoteId(target) && linkedDay(target) === null && linkedFolder(target) === null))) {
+// A link to a day, a folder, an event or a person is that one's, and names no note.
+for (const title of new Set(linksIn(text).map((link) => link.target).filter((target) => !isNoteId(target) && linkedDay(target) === null && !namesKind(target)))) {
   const titled = notes.filter((n) => n.title.toLowerCase() === title.toLowerCase());
   if (titled.length > 1) throw new Error(`${titled.length} notes are titled ${JSON.stringify(title)}, so [[${title}]] could mean any of them`);
   // A link to this note itself has nothing to point at until the note is there, and making a second note of its title would leave two.
@@ -87,10 +87,11 @@ async function referring(written: string): Promise<string> {
   const records = { event: events.filter((e) => sample({ id: e.sourceId })).map((e) => ({ ...e, name: e.title })), contact: contacts.filter((c) => sample({ id: c.sourceId })), email: threads.map((t) => ({ ...t, name: t.subject })) };
   let out = "";
   let at = 0;
-  for (const { kind, name, from: start, to } of named) {
+  for (const { kind, name, display, from: start, to } of named) {
     const record = records[kind].find((r) => r.name.toLowerCase() === name.toLowerCase());
     if (!record) continue;
-    out += written.slice(at, start) + (await op<Reference>({ type: "record.refer", sourceId: record.sourceId, id: record.id })).text;
+    const reference = await op<Reference>({ type: "record.refer", sourceId: record.sourceId, id: record.id });
+    out += written.slice(at, start) + (kind === "event" ? writtenEventLink(reference.ref, display) : reference.text);
     at = to;
   }
   return out + written.slice(at);

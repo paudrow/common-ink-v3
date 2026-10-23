@@ -10,6 +10,7 @@ const GRACE: Member = { personId: "gggggggggggg", name: "Grace Hopper", role: "e
 const contact = (name: string, more: Partial<Contact> = {}): Contact => ({ sourceId: "sample-contacts", id: name, name, emails: [], phones: [], organization: null, url: null, ...more });
 const PEOPLE: People = {
   members: new Map([ADA, GRACE].map((m) => [m.personId, m])),
+  told: true,
   contacts: [contact("Ada Lovelace", { emails: [{ value: "ADA@example.com", type: null }] }), contact("Grace Hopper", { emails: [{ value: "grace@navy.example", type: null }] }), contact("Sam Okafor", { organization: "Okafor Plumbing" }), contact("Zoë Álvarez", { emails: [{ value: "zoe@example.com", type: null }] }), contact("  ")],
 };
 const labels = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId).map((item) => `${item.label} (${item.description}, ${item.tone})`);
@@ -23,7 +24,7 @@ describe("what @ offers", () => {
   it("alone, is three people, the member first wherever the members list them", () => {
     const graceFirst = { ...PEOPLE, members: new Map([GRACE, ADA].map((m) => [m.personId, m])) };
     expect(labels("", graceFirst)).toEqual(["Ada Lovelace (You, accent)", "Grace Hopper (Member, accent)", "Grace Hopper (Contact, muted)"]);
-    expect(labels("", { members: new Map(), contacts: PEOPLE.contacts })).toEqual(["Ada Lovelace (Contact, muted)", "Grace Hopper (Contact, muted)", "Sam Okafor (Contact · Okafor Plumbing, muted)"]);
+    expect(labels("", { members: new Map(), told: false, contacts: PEOPLE.contacts })).toEqual(["Ada Lovelace (Contact, muted)", "Grace Hopper (Contact, muted)", "Sam Okafor (Contact · Okafor Plumbing, muted)"]);
   });
 
   it("puts no contact's email on the page, which any plugin in it could read", () => {
@@ -52,9 +53,9 @@ describe("what @ offers", () => {
     expect(labels("ada is at the office today")).toEqual([]);
   });
 
-  it("writes a member by id and name, and a contact by name alone: no email, organization, or id of theirs", () => {
+  it("writes a member by id, and a contact by name alone: no email, organization, or id of theirs", () => {
     const written = ["", "sam"].flatMap((typed) => offered(typed, PEOPLE, ADA.personId)).map((item) => item.insert);
-    expect(written).toEqual(["@[[aaaaaaaaaaaa|Ada Lovelace]]", "@[[gggggggggggg|Grace Hopper]]", "@[[Grace Hopper]]", "@[[Sam Okafor]]"]);
+    expect(written).toEqual(["[[person:aaaaaaaaaaaa]]", "[[person:gggggggggggg]]", "[[person:Grace Hopper]]", "[[person:Sam Okafor]]"]);
   });
 
   it("offers the members alone until the contacts are read", () => {
@@ -64,7 +65,7 @@ describe("what @ offers", () => {
 
 describe("what @ offers where nobody is named what was typed", () => {
   /** Adding to the sample contacts, keeping each name it is asked to create. */
-  const adding = (created: string[] = []): Adding => ({ into: "Sample contacts", create: async (name) => (created.push(name), `@[[${name}]]`) });
+  const adding = (created: string[] = []): Adding => ({ into: "Sample contacts", create: async (name) => (created.push(name), `[[person:${name}]]`) });
   const offeredNew = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId, adding()).map((item) => `${item.label} (${item.description}, ${item.kind})`);
 
   it("is to create a contact of the name typed, in the contacts it would be added to, as a kind of its own", () => {
@@ -82,7 +83,7 @@ describe("what @ offers where nobody is named what was typed", () => {
 
   it("is nothing where there is nowhere to add one, nothing typed, no letter, or no name", () => {
     expect(offered("Zelda Fitz", PEOPLE, ADA.personId, null)).toEqual([]);
-    expect(offeredNew("", { members: new Map(), contacts: [] })).toEqual([]);
+    expect(offeredNew("", { members: new Map(), told: true, contacts: [] })).toEqual([]);
     expect(offeredNew("2026-10-21")).toEqual([]);
     expect(offeredNew("zelda is at the office today")).toEqual([]);
     expect(offeredNew("Zelda]] Fitz")).toEqual([]);
@@ -92,7 +93,7 @@ describe("what @ offers where nobody is named what was typed", () => {
     const created: string[] = [];
     const [item] = offered("Zelda  Fitz", PEOPLE, ADA.personId, adding(created));
     const insert = item!.insert as (at: { noteId: string }) => Promise<string | null>;
-    expect(await insert({ noteId: "n" })).toBe("@[[Zelda Fitz]]");
+    expect(await insert({ noteId: "n" })).toBe("[[person:Zelda Fitz]]");
     expect(created).toEqual(["Zelda Fitz"]);
   });
 
@@ -106,20 +107,26 @@ describe("what @ offers where nobody is named what was typed", () => {
 
 describe("how a mention is shown", () => {
   it("is a member's name as it is now, and anyone else's as written", () => {
-    expect(shown({ target: GRACE.personId, label: "G. Hopper" }, PEOPLE.members)).toEqual({ text: "@Grace Hopper", member: true, hint: "Grace Hopper, a member of this workspace" });
-    expect(shown({ target: "Sam Okafor", label: null }, PEOPLE.members)).toEqual({ text: "@Sam Okafor", member: false, hint: "Sam Okafor, mentioned by name" });
+    expect(shown({ target: GRACE.personId, label: null }, PEOPLE)).toEqual({ text: "@Grace Hopper", member: true, hint: "Grace Hopper, a member of this workspace" });
+    expect(shown({ target: "Sam Okafor", label: null }, PEOPLE)).toEqual({ text: "@Sam Okafor", member: false, hint: "Sam Okafor, mentioned by name" });
   });
 
-  it("is the name as written for someone who was a member, and for a reader who isn't told who is one", () => {
-    expect(shown({ target: "zzzzzzzzzzzz", label: "Zed Zimmer" }, PEOPLE.members)).toMatchObject({ text: "@Zed Zimmer", member: false });
-    expect(shown({ target: GRACE.personId, label: "Grace Hopper" }, new Map())).toMatchObject({ text: "@Grace Hopper", member: false });
+  it("is its own words where it has them, and hovering it still says who it is", () => {
+    expect(shown({ target: GRACE.personId, label: "the Admiral" }, PEOPLE)).toEqual({ text: "@the Admiral", member: true, hint: "Grace Hopper, a member of this workspace" });
+    expect(shown({ target: "Sam Okafor", label: "Sammy" }, PEOPLE)).toEqual({ text: "@Sammy", member: false, hint: "Sam Okafor, mentioned by name" });
+  });
+
+  it("is a former member for an id that is no member's, and someone to a reader who isn't told who the members are", () => {
+    expect(shown({ target: "zzzzzzzzzzzz", label: null }, PEOPLE)).toMatchObject({ text: "@A former member", member: false });
+    expect(shown({ target: "zzzzzzzzzzzz", label: "Zed Zimmer" }, PEOPLE)).toMatchObject({ text: "@Zed Zimmer", member: false });
+    expect(shown({ target: GRACE.personId, label: null }, { members: new Map(), told: false })).toMatchObject({ text: "@Someone", member: false });
   });
 });
 
 describe("who a change newly mentions", () => {
   it("is each member the note didn't mention before, once, and never someone mentioned by name", () => {
-    const before = mentionsIn("@[[aaaaaaaaaaaa|Ada]] and @[[Sam Okafor]]");
-    const now = mentionsIn("@[[aaaaaaaaaaaa|Ada]] and @[[Sam Okafor]] and @[[gggggggggggg|Grace]] @[[gggggggggggg]] @[[Lin Wei]] @[[zzzzzzzzzzzz|Gone]]");
+    const before = mentionsIn("[[person:aaaaaaaaaaaa]] and [[person:Sam Okafor]]");
+    const now = mentionsIn("[[person:aaaaaaaaaaaa|Ada]] and [[person:Sam Okafor]] and [[person:gggggggggggg|Grace]] [[person:gggggggggggg]] [[person:Lin Wei]] [[person:zzzzzzzzzzzz]]");
     expect(newlyMentioned(before, now, PEOPLE.members)).toEqual([GRACE]);
     expect(newlyMentioned(now, now, PEOPLE.members)).toEqual([]);
   });

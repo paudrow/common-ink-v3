@@ -50,11 +50,12 @@ const plainText = (line: string) =>
       .replace(/:{2,3}[a-z][a-z0-9-]*\{[^{}]*\}/g, "")
       .replace(new RegExp(`!${TEXT}${ADDRESS_IN}`, "g"), "")
       .replace(/^(?::::|\$\$)\s*$/, "")
-      // A mention reads as the name it was written with.
-      .replace(/@\[\[(?:[^[\]|]*\|)?([^[\]|]+)\]\]/g, "@$1")
+      // A mention reads as `@` and its own words, or the name it is by.
+      .replace(/\[\[person:[^[\]|]*\|([^[\]]*)\]\]/g, "@$1")
+      .replace(/\[\[person:(?![a-z0-9]{12}\]\])([^[\]|]+)\]\]/g, "@$1")
       .replace(/\[\[[^[\]|]*\|([^[\]]*)\]\]/g, "$1")
-      // A link with no words of its own shows its note's title, which isn't this note's to keep.
-      .replace(/(?<!\s)\s*\[\[[a-z0-9]{12}\]\]/g, "")
+      // A link with no words of its own shows what it is to as it is called now, which isn't this note's to keep.
+      .replace(/(?<!\s)\s*\[\[(?:(?:folder|event|person):)?[a-z0-9]{12}\]\]/g, "")
       .replace(/\[\[([^[\]]*)\]\]/g, "$1")
       .replace(new RegExp(`${TEXT}${ADDRESS_IN}`, "g"), "$1")
       .replace(/<(https?:\/\/[^<>\s]+)>/g, "$1"),

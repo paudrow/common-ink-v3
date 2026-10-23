@@ -38,8 +38,8 @@ const classOf = (member: boolean) => (member ? "md-mention-member" : "md-mention
 export type OpenPerson = ((target: string) => void) | null;
 
 /**
- * Draws a mention as `@` and a name: a member's as it is now, in the theme colour, and anyone
- * else's as written, in gray. On a todo it is a chip, as the todo's other options are. It is shown
+ * Draws a mention as `@` and its own words or a name: a member's as it is now, in the theme colour,
+ * and anyone else's as written, in gray. On a todo it is a chip, as the todo's other options are. It is shown
  * as written only while the cursor is inside it, since what is written holds an id. A click opens
  * the person's page; the keys go into it to change it.
  */
@@ -50,9 +50,9 @@ function mentionChip(people: () => People, open: () => OpenPerson): Chip<Drawn> 
     written: "within",
     inCode: true,
     skip: (state, mention) => !isMention(state, mention),
-    key: (mention) => JSON.stringify(shown(mention, people().members)),
+    key: (mention) => JSON.stringify(shown(mention, people())),
     draw(el, mention, source) {
-      const { text, member, hint } = shown(mention, people().members);
+      const { text, member, hint } = shown(mention, people());
       el.textContent = text;
       el.title = mention.assignee ? `Assigned to ${hint}` : hint;
       el.classList.add(classOf(member));
@@ -79,7 +79,7 @@ const asWritten = (people: () => People) =>
       const line = state.doc.lineAt(range.head);
       for (const mention of mentionsOn(line.text, line.from)) {
         if (!within(state, mention.from, mention.to) || !isMention(state, mention)) continue;
-        drawn.push(Decoration.mark({ class: `md-mention ${classOf(shown(mention, people().members).member)}` }).range(mention.from, mention.to));
+        drawn.push(Decoration.mark({ class: `md-mention ${classOf(shown(mention, people()).member)}` }).range(mention.from, mention.to));
       }
     }
     return drawn;

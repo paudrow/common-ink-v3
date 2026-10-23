@@ -169,7 +169,7 @@ test("a member who isn't in my contacts is added to them from their page; their 
   expect((await perform(page, { type: "contact.list", query: "rosa" })).contacts.map((c) => c.name)).toEqual(["Rosa Parks"]);
 
   // On her own page Rosa sees her member card and nothing of my contact, and nothing to edit.
-  const note = await perform(page, { type: "note.create", text: `# Ask\n\nAsk @[[${rosaMe.id}|Rosa Parks]] about it.` });
+  const note = await perform(page, { type: "note.create", text: `# Ask\n\nAsk [[person:${rosaMe.id}]] about it.` });
   await rosa.goto(`/note/${note.id}`);
   await rosa.getByRole("textbox", { name: "Note text" }).locator(".md-chip-mention").click();
   await expect(rosa).toHaveURL(new RegExp(`/person/${rosaMe.id}$`));
@@ -188,7 +188,7 @@ test("a member who isn't in my contacts is added to them from their page; their 
 
 test("a person's open todos are the Todos page's rows: checked off there, a chip changed there, and a tag opening the Todos page narrowed to them", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  await perform(page, { type: "note.create", text: "# Boiler\n\n- [ ] !!! Fix the boiler @[[Sam Okafor]] #home\n- [ ] Bleed the radiators @[[Sam Okafor]]\n- [ ] Not his @[[Lin Wei]]" });
+  await perform(page, { type: "note.create", text: "# Boiler\n\n- [ ] !!! Fix the boiler [[person:Sam Okafor]] #home\n- [ ] Bleed the radiators [[person:Sam Okafor]]\n- [ ] Not his [[person:Lin Wei]]" });
   await page.goto("/person/Sam%20Okafor");
   const todos = page.getByRole("list", { name: "Open todos assigned to Sam Okafor" });
   const rows = todos.locator(".todo-row");
@@ -206,12 +206,12 @@ test("a person's open todos are the Todos page's rows: checked off there, a chip
   await boiler.getByRole("checkbox", { name: "Not done" }).check();
   await expect.poll(async () => (await perform(page, { type: "todo.list", query: "assignee:\"Sam Okafor\"" })).todos.map((t) => t.words)).toEqual(["Bleed the radiators"]);
   const note = (await perform(page, { type: "note.list" })).notes.find((n) => n.title === "Boiler")!;
-  expect((await perform(page, { type: "note.read", id: note.id })).text).toMatch(/- \[x\] !!! Fix the boiler @\[\[Sam Okafor\]\] #home/);
-  expect((await perform(page, { type: "note.read", id: note.id })).text).toContain("- [ ] ! Bleed the radiators @[[Sam Okafor]]");
+  expect((await perform(page, { type: "note.read", id: note.id })).text).toMatch(/- \[x\] !!! Fix the boiler \[\[person:Sam Okafor\]\] #home/);
+  expect((await perform(page, { type: "note.read", id: note.id })).text).toContain("- [ ] ! Bleed the radiators [[person:Sam Okafor]]");
 
   await page.reload();
   await expect(rows).toHaveCount(1);
-  await perform(page, { type: "note.create", text: "# More\n\n- [ ] Order parts @[[Sam Okafor]] #home" });
+  await perform(page, { type: "note.create", text: "# More\n\n- [ ] Order parts [[person:Sam Okafor]] #home" });
   await page.reload();
   await rows.filter({ hasText: "Order parts" }).getByRole("button", { name: "#home", exact: true }).click();
   await expect(page).toHaveURL(/\/todos\?q=/);

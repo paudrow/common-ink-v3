@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { App, CalendarEvent, ListedFolder, NoteAbout, PluginHost } from "../../plugin-api.ts";
+import type { App, CalendarEvent, ListedFolder, NoteAbout, PluginHost, Reference } from "../../plugin-api.ts";
 import { dayIn, dayLabel } from "./dates.ts";
 
 const AUDIENCE: Record<NoteAbout["audience"], { label: string; title: string }> = {
@@ -42,13 +42,12 @@ function foldersFor(app: App): { id: string; name: string }[] {
 }
 
 /**
- * What a note about an event starts with: its title and day as the heading, and a reference to it.
+ * What a note about an event starts with: its title and day as the heading, and a link to it.
  * The title is the reference's label, which the server wrote: a title someone else gave the event
  * writes no link, embed, code or line of its own into the note.
  */
-export function noteAbout(event: CalendarEvent, reference: string, timeZone: string): string {
-  const label = /^::event\{[a-z0-9]{12} ?(.*)\}$/.exec(reference)?.[1] || "Untitled";
-  return `# ${label}, ${dayLabel(event.when.allDay ? event.when.from : dayIn(event.when.from, timeZone), "short")}\n\n${reference}\n\n`;
+export function noteAbout(event: CalendarEvent, reference: Pick<Reference, "text" | "label">, timeZone: string): string {
+  return `# ${reference.label || "Untitled"}, ${dayLabel(event.when.allDay ? event.when.from : dayIn(event.when.from, timeZone), "short")}\n\n${reference.text}\n\n`;
 }
 
 interface Props {
@@ -84,8 +83,8 @@ export function NewNoteAbout({ host, app, event, timeZone, close, starter = star
   const make = async () => {
     setMaking({ busy: true });
     try {
-      const { text } = await host.perform({ type: "record.refer", sourceId: event.sourceId, id: event.id });
-      const note = await host.perform({ type: "note.create", folderId: folder || undefined, text: noteAbout(event, text, timeZone) });
+      const reference = await host.perform({ type: "record.refer", sourceId: event.sourceId, id: event.id });
+      const note = await host.perform({ type: "note.create", folderId: folder || undefined, text: noteAbout(event, reference, timeZone) });
       host.storage.set("noteFolder", note.folderId);
       app.noteChanged(note);
       close();

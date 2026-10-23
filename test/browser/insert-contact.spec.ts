@@ -43,7 +43,7 @@ test("@ and a name nobody has offers to create the contact; picking it adds them
   await expect(options(page)).toHaveText(["Create contact “Zelda Fitz”New contact in Sample contacts", "Create note “Zelda Fitz”New note in Unsorted", "Create folder “Zelda Fitz”New folder at the top"]);
   await page.keyboard.press("Tab");
 
-  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nMet @[[Zelda Fitz]]");
+  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nMet [[person:Zelda Fitz]]");
   await expect(editor(page).locator(".md-chip-mention")).toHaveText(["@Zelda Fitz"]);
   expect(await contactNames(page, "zelda")).toEqual(["Zelda Fitz"]);
 
@@ -87,7 +87,7 @@ test("creating a contact is never highlighted of itself: Enter is a new line unt
   await page.keyboard.press("ArrowDown");
   await expect(options(page).first()).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nMet @Zelda Fitz\nThen @[[Zelda Fitz]]");
+  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nMet @Zelda Fitz\nThen [[person:Zelda Fitz]]");
 });
 
 test("picking Create contact again while it is being created creates it once", async ({ page }) => {
@@ -100,7 +100,7 @@ test("picking Create contact again while it is being created creates it once", a
   await expect(options(page)).toHaveText(["Create contact “Zelda Fitz”New contact in Sample contacts", "Create note “Zelda Fitz”New note in Unsorted", "Create folder “Zelda Fitz”New folder at the top"]);
   await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
-  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nMet @[[Zelda Fitz]]");
+  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nMet [[person:Zelda Fitz]]");
   expect(await contactNames(page, "zelda")).toEqual(["Zelda Fitz"]);
 });
 

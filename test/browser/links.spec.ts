@@ -305,7 +305,7 @@ test("in vim, gd on a mention opens the person's page, and gd on a reference or 
     const res = await fetch(`/api/workspaces/${id}/uploads`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name: "minutes.txt" })) }, body: "What was said.\n" });
     return ((await res.json()) as { id: string }).id;
   });
-  const note = await create(page, `# Boiler\n\nCalled @[[Sam Okafor]] about it\n\nAsk @[[${adaId}|Ada]] too\n\nCall ${sam} back\n\nRead ::file{${minutes}} first`);
+  const note = await create(page, `# Boiler\n\nCalled [[person:Sam Okafor]] about it\n\nAsk [[person:${adaId}|Ada]] too\n\nCall ${sam} back\n\nRead ::file{${minutes}} first`);
   const goTo = async (...presses: string[]) => {
     await page.goto(`/note/${note.id}`);
     await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");

@@ -2,10 +2,13 @@ import { linesOutsideCode } from "./lines.ts";
 import { blanked, codeSpans } from "./spans.ts";
 
 /**
- * A link as a note writes it: `[[target]]` or `[[target|display text]]`. A note stores the target
- * as the linked note's id, which never changes, so a link follows its note through every rename.
- * A link to a folder is `[[folder:id]]` the same way. A target that is neither is a title somebody
- * wrote by hand, and links nothing until it is resolved.
+ * A link as a note writes it: `[[target]]` or `[[target|display text]]`, for anything a note opens.
+ * A note stores the target as the linked note's id, which never changes, so a link follows its note
+ * through every rename. A day is `[[2026-10-23]]` (dateLinks.ts), and everything else is named by
+ * its kind: `[[folder:id]]`, `[[event:ref]]`, and `[[person:id]]` for a member or `[[person:Name]]`
+ * for anyone else (mentions.ts). Without display text a link shows what it is to as it is called
+ * now. A target that is none of these is a title somebody wrote by hand, and links nothing until it
+ * is resolved. docs/adr/0019-everything-a-note-opens-is-a-link.md has why.
  */
 export interface WrittenLink {
   from: number;
@@ -15,19 +18,46 @@ export interface WrittenLink {
   display: string | null;
 }
 
-// `@[[` is a mention of a person, which mentions.ts reads, where the `@` starts one: after anything but a letter, a digit, `_` or `@`.
-const LINK = /(?<!(?<![\p{L}\p{N}_@])@)\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/gu;
+const LINK = /\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/g;
 const ID = /^[a-z0-9]{12}$/;
 
 export const isNoteId = (target: string) => ID.test(target);
 
-const FOLDER = /^folder:([a-z0-9]{12})$/;
+/** What may follow each kind's prefix: a folder's or an event reference's id, and a person's id or name. */
+const KINDS = { folder: ID, event: ID, person: /\S/ } as const;
+
+type Kind = keyof typeof KINDS;
+
+const KIND = /^([a-z]+):(.+)$/;
+
+/** The kind a link's target names and what it names it by, as `[[event:ref]]` writes it, or null for a target that names no kind. */
+export function kindOf(target: string): { kind: Kind; to: string } | null {
+  const [, kind, to] = KIND.exec(target) ?? [];
+  return kind && Object.hasOwn(KINDS, kind) && KINDS[kind as Kind].test(to!) ? { kind: kind as Kind, to: to!.trim() } : null;
+}
+
+/** Whether a link's target starts with a kind's prefix, as `[[event:Lunch]]` does: what it is to is that kind's, and it is never a note's title. */
+export const namesKind = (target: string) => Object.hasOwn(KINDS, KIND.exec(target)?.[1] ?? "");
+
+const linked = (kind: Kind) => (target: string) => {
+  const found = kindOf(target);
+  return found?.kind === kind ? found.to : null;
+};
 
 /** The folder a link's target is to, as `[[folder:id]]` writes it, or null where it is to no folder. */
-export const linkedFolder = (target: string): string | null => FOLDER.exec(target)?.[1] ?? null;
+export const linkedFolder = linked("folder");
+
+/** The event reference a link's target is to, as `[[event:ref]]` writes it, or null where it is to no event. */
+export const linkedEvent = linked("event");
+
+/** Who a link's target is to, a person's id or a name, as `[[person:…]]` writes it, or null where it is to nobody. */
+export const linkedPerson = linked("person");
 
 /** How a link to a folder is written: by the folder's id, so it follows the folder through every rename. */
 export const writtenFolderLink = (folderId: string) => `[[folder:${folderId}]]`;
+
+/** How a link to an event is written: by the reference record.refer made, with words of its own to show where it has them. */
+export const writtenEventLink = (ref: string, display?: string | null) => writtenLink(`event:${ref}`, display);
 
 /** How a link is written. */
 export const writtenLink = (target: string, display?: string | null) => (display ? `[[${target}|${display}]]` : `[[${target}]]`);

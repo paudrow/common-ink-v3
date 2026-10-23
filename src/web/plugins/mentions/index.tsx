@@ -49,7 +49,8 @@ export const mentions: Plugin = {
   },
   activate(host) {
     const editors = new Map<string, EditorView>();
-    let people: People = { members: new Map(), contacts: null };
+    // Nobody is told who the members are until the list of them is read: an id is drawn as someone until then.
+    let people: People = { members: new Map(), told: false, contacts: null };
     /** Where a contact created from `@` goes: known once the contacts are read whole, so that finding nobody among them means there is nobody. */
     let addTo: Source | null = null;
     /** Whether the members are known, or known to be none this member is told of: until then a member's name would find nobody. */
@@ -86,16 +87,17 @@ export const mentions: Plugin = {
     let membersAt = 0;
     const readMembers = () => {
       membersAt = Date.now();
-      // A guest is told nothing of who is in the workspace, and a refusal reads again who they are: every mention is then a name as written.
+      // A guest is told nothing of who is in the workspace, and a refusal reads again who they are: every mention is then a name as written, or someone.
       if (host.workspace.role === "guest") return;
       host.perform({ type: "member.list" }).then(
         (list) => {
           const was = JSON.stringify([...people.members.values()]);
           // A list shut with Escape stays shut. Only one that offered nobody opens for the members.
           const before = offeredNow()?.items.length;
-          people = { ...people, members: new Map(list.map((m) => [m.personId, m])) };
+          const told = people.told;
+          people = { ...people, members: new Map(list.map((m) => [m.personId, m])), told: true };
           membersKnown = true;
-          if (JSON.stringify(list) === was) return;
+          if (told && JSON.stringify(list) === was) return;
           for (const view of editors.values()) view.dispatch({ effects: redraw.of(null) });
           offerArrived((first) => !before && first.tone === "accent");
         },

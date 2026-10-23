@@ -638,7 +638,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
       expect(await claude.call("update_event", { sourceId: "cal", id: "a1", etag: "e1", title: "Taken" })).toEqual(changes("event.update"));
       expect(await claude.call("create_event", { sourceId: "cal", calendarId: "mine", title: "Taken", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } })).toEqual(changes("event.create"));
       // What its note says of them is what every reader of the note is told: the reference and its label.
-      expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n::event{${event.ref} Lunch with Sam} with ::contact{${contact.ref} Sam Okafor}`);
+      expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n[[event:${event.ref}]] with ::contact{${contact.ref} Sam Okafor}`);
       await claude.json("search", { query: "Lunch" });
       await claude.json("note_history", { id: w.deep.id });
       // Sam's page tells it the name it asked by and nothing of its member's contact.
@@ -659,29 +659,29 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const twin = await addMember(w.ada, "editor", "Twin-outside");
     const twin2 = await addMember(w.ada, "editor", "Twin-outside");
     // Bob is renamed after he is mentioned inside, and is assigned a todo outside.
-    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Chores-outside\n\n- [ ] buy-outside @[[${bob.personId}|Bob-outside-only]] @[[Carol-outside]]` });
-    const sprint = await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: `# Sprint\n\n- [ ] ship-inside @[[Robert]] @[[Dana-inside]]\n\nAsk @[[${bob.personId}|Robert]].` });
-    expect(sprint.text).toContain("@[[Dana-inside]]");
+    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Chores-outside\n\n- [ ] buy-outside [[person:${bob.personId}|Bob-outside-only]] [[person:Carol-outside]]` });
+    const sprint = await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: `# Sprint\n\n- [ ] ship-inside [[person:Robert]] [[person:Dana-inside]]\n\nAsk [[person:${bob.personId}|Robert]].` });
+    expect(sprint.text).toContain("[[person:Dana-inside]]");
     const claude = await asAgent(w.limited.token);
 
-    // What its note says of a mention is the note's text, and nothing is added from who is a member now.
+    // What its note says of a mention is the note's text, and nothing is added from who is a member now: an id is someone.
     const read = await claude.json<{ mentions: unknown[] }>("read_note", { id: sprint.id });
-    expect(read.mentions).toEqual([{ id: null, name: "Robert", member: false }, { id: null, name: "Dana-inside", member: false }, { id: bob.personId, name: "Robert", member: false }]);
+    expect(read.mentions).toEqual([{ id: null, name: "Robert", member: false }, { id: null, name: "Dana-inside", member: false }, { id: bob.personId, name: "Someone", member: false }]);
     expect(await claude.json("todo_filters")).toEqual({ tags: [], assignees: [{ id: null, name: "Dana-inside", member: false }, { id: null, name: "Robert", member: false }] });
     for (const assignee of [bob.personId, "Carol-outside", "Bob-outside-only"]) expect((await claude.json<{ todos: unknown[] }>("list_todos", { assignee })).todos, assignee).toEqual([]);
     expect((await claude.json<{ todos: unknown[] }>("list_todos", { assignedToMe: true })).todos).toEqual([]);
 
     // A member's name, a name two members have, a member's id, and a name nobody has are all written as they were given.
-    const written = `# Sprint\n\n- [ ] ship-inside @[[Robert]] @[[Dana-inside]]\n\nAsk @[[${bob.personId}|Robert]].\n\n@[[Bob-outside-only]] @[[Twin-outside]] @[[${twin.personId}]] @[[Nobody-at-all]]`;
+    const written = `# Sprint\n\n- [ ] ship-inside [[person:Robert]] [[person:Dana-inside]]\n\nAsk [[person:${bob.personId}|Robert]].\n\n[[person:Bob-outside-only]] [[person:Twin-outside]] [[person:${twin.personId}]] [[person:Nobody-at-all]]`;
     const wrote = await claude.json<Note>("write_note", { id: sprint.id, baseRevision: sprint.revision, text: written });
     expect(wrote.text).toBe(written);
-    const set = await claude.json<{ text: string }>("set_todo", { id: sprint.id, revision: wrote.revision, line: 2, text: "- [ ] ship-inside @[[Robert]] @[[Dana-inside]]", assign: "Twin-outside" });
-    expect(set.text).toContain("- [ ] ship-inside @[[Robert]] @[[Dana-inside]] @[[Twin-outside]]");
+    const set = await claude.json<{ text: string }>("set_todo", { id: sprint.id, revision: wrote.revision, line: 2, text: "- [ ] ship-inside [[person:Robert]] [[person:Dana-inside]]", assign: "Twin-outside" });
+    expect(set.text).toContain("- [ ] ship-inside [[person:Robert]] [[person:Dana-inside]] [[person:Twin-outside]]");
     expect(claude.said.join("\n")).not.toMatch(new RegExp(`${twin2.personId}|members are named|Chores-outside|buy-outside|Carol-outside`));
     // Her agent that sees everything is told, as she is.
     const scribe = await asAgent(w.scribe.token);
     expect((await scribe.json<{ mentions: { name: string; member: boolean }[] }>("read_note", { id: sprint.id })).mentions).toContainEqual({ id: bob.personId, name: "Bob-outside-only", member: true });
-    expect(await scribe.call("write_note", { id: sprint.id, baseRevision: wrote.revision + 1, text: `${set.text}\n\n@[[twin-OUTSIDE]]` })).toMatchObject({ isError: true, text: expect.stringContaining("2 members are named") });
+    expect(await scribe.call("write_note", { id: sprint.id, baseRevision: wrote.revision + 1, text: `${set.text}\n\n[[person:twin-OUTSIDE]]` })).toMatchObject({ isError: true, text: expect.stringContaining("2 members are named") });
   });
 
   it("isn't told who is in the workspace, some of whom have only written outside its folders", async () => {

@@ -629,17 +629,17 @@ test("New note about this event makes a note in the folder picked, last used fir
   const { ref } = await perform(page, { type: "record.refer", sourceId: lunch.sourceId, id: lunch.id });
   const made = await perform(page, { type: "note.read", id: /([a-z0-9]{12})$/.exec(new URL(page.url()).pathname)![1]! });
   expect(made.folderId).toBe(meetings.id);
-  expect(made.text).toBe(`# Lunch with Sam, ${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(Date.parse(`${week[1]}T00:00:00Z`))}\n\n::event{${ref} Lunch with Sam}\n\n`);
+  expect(made.text).toBe(`# Lunch with Sam, ${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(Date.parse(`${week[1]}T00:00:00Z`))}\n\n[[event:${ref}]]\n\n`);
   await expect(page.locator(".cm-content")).toContainText("Lunch with Sam");
 
   // A private note of Ada's that references it too.
-  const own = await perform(page, { type: "note.create", text: `# Ada-private-thoughts\n\n::event{${ref} Lunch with Sam}\n` });
+  const own = await perform(page, { type: "note.create", text: `# Ada-private-thoughts\n\n[[event:${ref}]]\n` });
   await perform(page, { type: "note.setPrivate", id: own.id, private: true });
 
   // Eve, another member, copies Ada's reference into a private note of her own.
   const eve = await anotherPerson(page, "Eve Example");
   const { workspaceId } = await join(eve, page, "editor");
-  const hers = await perform(eve, { type: "note.create", text: `# Eve-secret-plans\n\n::event{${ref} Lunch with Sam}\n` }, workspaceId);
+  const hers = await perform(eve, { type: "note.create", text: `# Eve-secret-plans\n\n[[event:${ref}]]\n` }, workspaceId);
   await perform(eve, { type: "note.setPrivate", id: hers.id, private: true }, workspaceId);
 
   const notesOf = async () => {

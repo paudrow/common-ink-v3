@@ -72,7 +72,7 @@ describe("which lines a tag covers", () => {
   });
 
   it("names an item by its words, without a todo's tokens or the tags it ends in", () => {
-    expect(covered(["- [ ] !! Ship it due:2026-10-30 @[[Ada]] #launch", "  - [ ] Write the notes"])).toEqual({ "  - [ ] Write the notes": ["launch, item Ship it, 0"] });
+    expect(covered(["- [ ] !! Ship it due:2026-10-30 [[person:Ada]] #launch", "  - [ ] Write the notes"])).toEqual({ "  - [ ] Write the notes": ["launch, item Ship it, 0"] });
   });
 
   it("gives a line at most ten tags from other lines, the nearest, and a todo its own besides", () => {
