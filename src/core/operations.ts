@@ -84,7 +84,7 @@ import { linkHash } from "./linkSeal.ts";
 import { applyChanges, blank, changesBetween } from "./text.ts";
 import { HOLD_MS, discard, hold, neverWritten } from "./discard.ts";
 import { ruleLabel } from "./recurrence.ts";
-import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, nameKey, parseTodo, renamedTag, renamedTags, rolledForward, tagsAdded, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
+import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, deletedTags, nameKey, parseTodo, renamedTag, renamedTags, rolledForward, tagsAdded, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
 
 /** The note an author already made with a write id, so a create sent again makes one note. Served by changes_by_author_write. */
 export const PRIOR_WRITE = `SELECT c.note_id AS id FROM changes c JOIN notes n ON n.id = c.note_id
@@ -291,7 +291,7 @@ export interface NoteRow extends SummaryRow {
 }
 
 /** What a note's `indexed` is once its title and snippet, its links, todos, tags, mentions, search text and the uploads it refers to have been made from its text as they are made now. */
-const MADE = 9;
+const MADE = 10;
 
 /** A note as it is made: live. */
 const NEW = { state: "live", state_at: null } as const;
@@ -2883,6 +2883,72 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       }
       const under = [...moving].filter((key) => key !== from).sort().map((key) => seenTags.results.find((t) => t.tag === key)?.name ?? descriptions.find((d) => nameKey(d.name) === key)!.name);
       return { name: op.name, to: op.to, merged: merging !== null, renamed, skipped: having.length - mine.length, failed: written.filter((note) => note === "failed").length, under, descriptions };
+    },
+  },
+
+  // People alone delete a tag, as they alone rename one: it rewrites every note that has it.
+  "tag.delete": {
+    needs: "edit",
+    by: "member",
+    members: true,
+    async run(ctx, op) {
+      if (!(await mend(ctx))) throw new OpError("unavailable", "Notes are still being read in, so deleting now could miss some with the tag. Try again in a moment");
+      const tag = nameKey(op.name);
+      const within = (column: string) => tagWithin(column, "?2");
+      const [having, seenTags, rows] = await Promise.all([
+        seenAmong(ctx, "kept", `SELECT note_id FROM note_tags WHERE ${within("tag")}`, tag),
+        ctx.db
+          .prepare(`SELECT g.tag, MIN(g.name) AS name FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?3", "kept")} AND ${within("g.tag")} GROUP BY g.tag`)
+          .bind(ctx.workspaceId, tag, ctx.sight.bind)
+          .all<{ tag: string; name: string }>(),
+        ctx.db.prepare(`SELECT tag, name, description FROM tag_descriptions WHERE workspace_id = ?1 AND ${within("tag")}`).bind(ctx.workspaceId, tag).all<{ tag: string; name: string | null; description: string }>(),
+      ]);
+      // Asked of each note, as `loadNote` asks it of one: a role that may edit doesn't say this note may be.
+      const mine = having.filter((row) => allows(itemLevel(ctx.sight, row), "edit"));
+      const label = `Deleted #${op.name}`.slice(0, 60);
+      const deleteOne = async (id: string) => {
+        try {
+          // One written by someone else meanwhile is read again and the tag deleted from what it says now.
+          return await settle(async () => {
+            const row = await loadNote(ctx, id, "edit", "refused");
+            const changes = changesBetween(row.text, deletedTags(row.text, op.name));
+            if (changes.empty) return { ...titled(row), revision: null };
+            if (op.preview) return { ...titled(row), revision: row.revision };
+            const { next, statements } = recording(ctx, row, changes, row.revision);
+            // The label names the change in history. A note's labels are each named once, so one from deleting the tag before moves here.
+            const labeled = [
+              ctx.db.prepare("DELETE FROM labels WHERE note_id = ? AND name = ? COLLATE NOCASE").bind(row.id, label),
+              ctx.db.prepare("INSERT INTO labels (note_id, revision, name, author_kind, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(row.id, next.revision, label, ctx.author.kind, authorId(ctx), ctx.now),
+            ];
+            return (await landed(ctx, [...statements, ...labeled])) ? { ...titled(row), revision: next.revision } : null;
+          });
+        } catch (err) {
+          if (!(err instanceof OpError)) throw err;
+          return "failed" as const;
+        }
+      };
+      // As many notes at once as a revert takes, so a tag on hundreds of notes doesn't write them all in one go.
+      const written: Awaited<ReturnType<typeof deleteOne>>[] = [];
+      for (let at = 0; at < mine.length; at += MAX_NOTES_AT_ONCE) written.push(...(await Promise.all(mine.slice(at, at + MAX_NOTES_AT_ONCE).map((row) => deleteOne(row.id)))));
+      const deleted = written.flatMap((note) => (note === "failed" || note.revision === null ? [] : [{ ...note, revision: note.revision }]));
+      // A description goes with the last note that has its tag, seen by the asker or not, which is only ever told as which descriptions go. Previewed, the notes it would write have it no more.
+      const { results: left } = await ctx.db
+        .prepare(`SELECT DISTINCT g.tag FROM note_tags g JOIN notes n ON n.id = g.note_id WHERE n.workspace_id = ?1 AND n.state != 'trashed' AND ${within("g.tag")} AND n.id NOT IN (SELECT value FROM json_each(?3))`)
+        .bind(ctx.workspaceId, tag, JSON.stringify(op.preview ? deleted.map((note) => note.noteId) : []))
+        .all<{ tag: string }>();
+      const still = new Set(left.map((r) => r.tag));
+      const going = rows.results.filter((row) => !still.has(row.tag));
+      if (!op.preview && going.length) await ctx.db.batch(going.map((row) => ctx.db.prepare("DELETE FROM tag_descriptions WHERE workspace_id = ? AND tag = ?").bind(ctx.workspaceId, row.tag)));
+      const named = new Map([...rows.results.map((row) => [row.tag, row.name ?? row.tag] as const), ...seenTags.results.map((t) => [t.tag, t.name] as const)]);
+      const under = [...named.keys()].filter((key) => key !== tag).sort().map((key) => named.get(key)!);
+      return {
+        name: op.name,
+        deleted,
+        skipped: having.length - mine.length,
+        failed: written.filter((note) => note === "failed").length,
+        under,
+        descriptions: going.map((row) => ({ name: row.name ?? row.tag, description: row.description })),
+      };
     },
   },
 

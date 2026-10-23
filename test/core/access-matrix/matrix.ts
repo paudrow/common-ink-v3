@@ -313,6 +313,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "tag.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
   "tag.describe": { on: "workspace", who: ["admin", "editor"], args: () => ({ name: "matrix", description: "For the matrix." }) },
   "tag.rename": { on: "workspace", who: ["admin", "editor"], args: () => ({ name: "matrix", to: "matrices" }) },
+  "tag.delete": { on: "workspace", who: ["admin", "editor"], args: () => ({ name: "matrix" }) },
   search: { on: "everything", covers: "live", archived: true, only: true, args: () => ({ query: "body", limit: 50 }) },
   "note.label": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revision: 1, name: "Start" }) },
   "note.revert": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
