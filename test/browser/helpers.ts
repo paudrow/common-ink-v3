@@ -1,4 +1,4 @@
-import { test as base, expect, type Frame, type Locator, type Page, type Request } from "@playwright/test";
+import { test as base, expect, type Frame, type Locator, type Page, type Request, type Route } from "@playwright/test";
 import type { Me, OpInput, Results, Role } from "../../src/core/protocol.ts";
 
 /** Playwright's `test`, which closes at the end of each test every browser context it opened beside its own: another person's, a visitor's. */
@@ -188,6 +188,49 @@ export async function openKept(page: Page, title: string) {
   const card = noteCard(page, title);
   await card.getByRole("link", { name: "Edit" }).click({ modifiers: ["ControlOrMeta"] });
   await card.locator("xpath=ancestor::section[@data-region][1]").getByRole("tab", { name: title, exact: true }).click();
+}
+
+/**
+ * Where HTML embeds' and plugins' frames are served from: the app's own address, or the host the
+ * server keeps for them (`EMBED_ORIGIN`), as the dev server does at `embed.localhost`.
+ */
+export async function frameOrigin(page: Page): Promise<string> {
+  const res = await page.request.get("/embed-frame", { maxRedirects: 0 });
+  return new URL(res.headers().location ?? res.url()).origin;
+}
+
+/**
+ * An address as Node can ask for it: the browser takes `embed.localhost` to this machine and Node
+ * doesn't, so such an address is asked of `localhost` with its host named.
+ */
+function onLocalhost(address: string): { url: string; host?: string } {
+  const url = new URL(address);
+  if (!url.hostname.endsWith(".localhost")) return { url: address };
+  const host = url.host;
+  url.hostname = "localhost";
+  return { url: url.href, host };
+}
+
+/**
+ * `route.fetch()`, for an address on `embed.localhost` too, and through a redirect there, as the
+ * app's address for a frame's document is sent on to the host kept for embeds. The browser doesn't
+ * route the request it is redirected to, so what it is answered is fetched here.
+ */
+export async function fetched(route: Route) {
+  let address = route.request().url();
+  for (;;) {
+    const { url, host } = onLocalhost(address);
+    const res = await route.fetch({ url, maxRedirects: 0, ...(host && { headers: { ...route.request().headers(), host } }) });
+    const location = res.headers().location;
+    if (res.status() < 300 || res.status() >= 400 || !location) return res;
+    address = new URL(location, address).href;
+  }
+}
+
+/** `page.request.get()`, for an address on `embed.localhost` too. */
+export function getFrom(page: Page, address: string) {
+  const { url, host } = onLocalhost(address);
+  return page.request.get(url, host ? { headers: { host } } : {});
 }
 
 /** Whether a frame is one of Common Ink's own plugins', which run shut off as a workspace's do and are no part of what a test installs. */

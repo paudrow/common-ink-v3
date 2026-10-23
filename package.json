@@ -19,7 +19,7 @@
     "ink": "node scripts/ink.ts",
     "cli:build": "node cli/build.ts",
     "site": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/site.ts",
-    "deploy": "npm run build && wrangler d1 migrations apply DB --remote && wrangler deploy"
+    "deploy": "npm run build && wrangler d1 migrations apply DB --remote && wrangler deploy --var EMBED_ORIGIN:https://common-ink-v3.draftox.workers.dev"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

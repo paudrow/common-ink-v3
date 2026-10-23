@@ -1,6 +1,6 @@
 import { expect, type Frame, type Page } from "@playwright/test";
 import type { Capability } from "../../src/core/plugins.ts";
-import { anotherPerson, editOf, join, me, openAllNotes, ownFrame, panelIcon, perform, pinPanel, showPanel, signInAsNewPerson, test, THEIR_FRAMES } from "./helpers.ts";
+import { anotherPerson, editOf, frameOrigin, getFrom, join, me, openAllNotes, ownFrame, panelIcon, perform, pinPanel, showPanel, signInAsNewPerson, test, THEIR_FRAMES } from "./helpers.ts";
 import { asPlugin, codeHashOf, frameFor, install, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn } from "./third-party-helpers.ts";
 import { hostileCode, hostileManifest, VICTIM, VICTIM_CODE } from "./third-party-hostile.ts";
 
@@ -242,7 +242,8 @@ test("a plugin can't read another plugin's frames, hand one a port or a document
   for (const other of outside(page)) expect(await other.locator("#pwned").count(), `no document of its writing in ${other.url()}`).toBe(0);
   expect(got.some((data) => data.includes("pwned"))).toBe(false);
   // The app took none of what was posted at it for a frame's or a plugin's: every frame is one the app made, and nothing was done.
-  expect(outside(page).map((f) => f.url()).sort()).toEqual(["/embed-frame", "/embed-frame", "/embed-frame", "about:srcdoc", "about:srcdoc", "about:srcdoc"].map((url) => (url.startsWith("/") ? new URL(url, baseURL).href : url)).sort());
+  const served = await frameOrigin(page);
+  expect(outside(page).map((f) => f.url()).sort()).toEqual(["/embed-frame", "/embed-frame", "/embed-frame", "about:srcdoc", "about:srcdoc", "about:srcdoc"].map((url) => (url.startsWith("/") ? new URL(url, served).href : url)).sort());
   await expect(page.getByText("from the window")).toHaveCount(0);
   // Still each its own plugin, on its own port.
   await expect.poll(() => embed.evaluate(() => (window as unknown as { ink: { plugin: { name: string }; context: { kind: string } } }).ink.plugin.name)).toBe("Victim");
@@ -256,7 +257,9 @@ test("a plugin can't send its frame, the frame around it, or the app anywhere, o
   const asked: string[] = [];
   const app = new URL(baseURL!).origin;
   const { reached, note } = await withHostile(page, baseURL!, { text });
-  page.on("request", (request) => request.frame() !== page.mainFrame() && request.url().startsWith(app) && asked.push(request.url().slice(app.length)));
+  // The frames' documents come from the app's own address, or from the host kept for embeds, which the app sends them to.
+  const served = await frameOrigin(page);
+  page.on("request", (request) => request.frame() !== page.mainFrame() && [app, served].some((host) => request.url().startsWith(host) && asked.push(request.url().slice(host.length))));
   await page.reload();
   await expect(page.locator(".embed-below iframe")).toHaveCount(tries.length);
   await expect.poll(() => outside(page).length, "each has the app's document and its own inside it").toBe(tries.length * 2);
@@ -264,8 +267,8 @@ test("a plugin can't send its frame, the frame around it, or the app anywhere, o
   await page.waitForTimeout(2500);
 
   const frames = outside(page);
-  expect(frames.map((f) => f.url()).filter((url) => !url.startsWith(`${app}/embed-frame`) && url !== "about:srcdoc" && url !== "about:blank" && !url.startsWith("chrome-error:")), "no frame is anywhere but its own document, or an error").toEqual([]);
-  expect(frames.filter((f) => f.url().startsWith(`${app}/embed-frame`)).map((f) => f.url()), "the frames the app made are where it put them").toEqual(tries.map(() => `${app}/embed-frame`));
+  expect(frames.map((f) => f.url()).filter((url) => !url.startsWith(`${served}/embed-frame`) && url !== "about:srcdoc" && url !== "about:blank" && !url.startsWith("chrome-error:")), "no frame is anywhere but its own document, or an error").toEqual([]);
+  expect(frames.filter((f) => f.url().startsWith(`${served}/embed-frame`)).map((f) => f.url()), "the frames the app made are where it put them").toEqual(tries.map(() => `${served}/embed-frame`));
   const did: Record<string, string> = {};
   for (const frame of running(page)) {
     const [what, outcome, opened] = await frame.evaluate(() => {
@@ -436,7 +439,8 @@ test("a plugin reaches no site until an admin allows its network, then the sites
 
   // Not allowed: the frame's document is the one with no network, and nothing leaves it.
   const before = await background(page);
-  expect(outside(page).map((f) => f.url())).toEqual([`${app}/embed-frame`, "about:srcdoc"]);
+  const served = await frameOrigin(page);
+  expect(outside(page).map((f) => f.url())).toEqual([`${served}/embed-frame`, "about:srcdoc"]);
   expect(await before.evaluate(tries, app)).toEqual({
     "a listed site": "refused: TypeError",
     "a listed site, asking for the session": "refused: TypeError",
@@ -457,7 +461,7 @@ test("a plugin reaches no site until an admin allows its network, then the sites
   // Allowed, the plugin starts again, in a frame opened with a token of its own.
   await expect.poll(() => before.isDetached()).toBe(true);
   const after = await background(page);
-  const shell = outside(page).map((f) => f.url()).find((url) => url.startsWith(`${app}/embed-frame/g/`));
+  const shell = outside(page).map((f) => f.url()).find((url) => url.startsWith(`${served}/embed-frame/g/`));
   expect(shell).toMatch(/\/embed-frame\/g\/[\w-]{20,}$/);
   expect(await after.evaluate(tries, app)).toEqual({
     "a listed site": "opaque",
@@ -479,9 +483,10 @@ test("a plugin reaches no site until an admin allows its network, then the sites
   await expect.poll(() => sent.find((request) => request.url === "/sw.js?from=app")?.cookie).toMatch(/\S/);
 
   // The address the frame was opened at is spent: asked for again, by the member or by anyone, there is nothing there.
-  await expect.poll(async () => (await page.request.get(shell!)).status()).toBe(404);
-  await expect.poll(async () => (await page.request.get(`${app}/embed-frame/g/${"A".repeat(43)}`)).status()).toBe(404);
-  await expect.poll(() => after.evaluate(async (address) => fetch(address, { mode: "no-cors" }).then((r) => r.type, (err: Error) => `refused: ${err.name}`), shell!)).toBe("opaque");
+  await expect.poll(async () => (await getFrom(page, shell!)).status()).toBe(404);
+  await expect.poll(async () => (await getFrom(page, `${served}/embed-frame/g/${"A".repeat(43)}`)).status()).toBe(404);
+  // The frame itself can ask only the listed site: its own address, where that is the app's, answers it nothing it can read, and a host kept for embeds isn't listed.
+  await expect.poll(() => after.evaluate(async (address) => fetch(address, { mode: "no-cors" }).then((r) => r.type, (err: Error) => `refused: ${err.name}`), shell!)).toBe(served === app ? "opaque" : "refused: TypeError");
   const frames = outside(page).length;
   await expect.poll(() => after.evaluate((address) => new Promise<string>((done) => document.body.append(Object.assign(document.createElement("iframe"), { src: address, onload: () => done("made"), onerror: () => done("refused") }))), shell!)).toBe("made");
   expect(outside(page).filter((f) => f.url().includes("/embed-frame/g/")), "a frame it makes for itself gets no document, with network or without").toHaveLength(1);
@@ -507,6 +512,8 @@ test("HTML embeds reach no site until an admin lists one, and then the Run butto
 })();
 </script>`;
   await signInAsNewPerson(page, "Ada Lovelace");
+  // Asked first, whether or not this server has a site of HTML embeds' own, so the Run button says what it would reach.
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "html.run": "ask first" }), baseRevision: 0 });
   const note = await perform(page, { type: "note.create", text: `# Reaching\n\n:::html{height=80}\n${html}\n:::\n\nend\n` });
   const run = page.locator('.embed-below[data-embed="html"]').getByRole("button", { name: "Run HTML" });
   const found = () => running(page)[0]!.evaluate(() => (window as unknown as { found: Record<string, string> }).found);

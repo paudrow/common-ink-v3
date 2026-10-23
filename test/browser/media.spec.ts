@@ -1,5 +1,5 @@
 import { expect, type Frame, type Page, type Request } from "@playwright/test";
-import { ownFrame, perform, signInAsNewPerson, test, THEIR_FRAMES } from "./helpers.ts";
+import { fetched, frameOrigin, ownFrame, perform, signInAsNewPerson, test, THEIR_FRAMES } from "./helpers.ts";
 import { PLAYER, standIns } from "./media-helpers.ts";
 
 let errors: string[];
@@ -20,7 +20,7 @@ const settled = (page: Page) => page.evaluate(() => new Promise((done) => setTim
 
 /**
  * Signs in and opens a note with this text, with the cursor at its start. The member has chosen to run HTML by itself unless
- * `settings` say otherwise: this server has no site of HTML embeds' own, where they ask first until the member chooses.
+ * `settings` say otherwise: a server with no site of HTML embeds' own, as a built Worker, asks first until the member chooses.
  */
 async function open(page: Page, text: string, settings: Record<string, unknown> = { "html.run": "automatically" }) {
   await signInAsNewPerson(page, "Ada Lovelace");
@@ -86,7 +86,9 @@ async function expectOverItsRoom(page: Page, embed: string, when: string) {
 
 test("a note that writes `::youtube{}`, `::social{}` or `::link{}` shows them as the text they are, the insert menu offers none of them, and nothing is asked of another site", async ({ page, baseURL }) => {
   const outside: string[] = [];
-  page.on("request", (request) => !request.url().startsWith(new URL(baseURL!).origin) && outside.push(request.url()));
+  // Frames the app makes for its own plugins come from where frames are served, which is no other site.
+  const frames = await frameOrigin(page);
+  page.on("request", (request) => !request.url().startsWith(new URL(baseURL!).origin) && !request.url().startsWith(`${frames}/embed-frame`) && outside.push(request.url()));
   const old = "# Old\n\nOne ::youtube{https://youtu.be/dQw4w9WgXcQ} two\n\n::social{https://x.com/jack/status/20}\n\n::link{https://example.com/docs The docs}\n\nlast";
   const note = await open(page, old);
   await expect(line(page, "One")).toHaveText("One ::youtube{https://youtu.be/dQw4w9WgXcQ} two");
@@ -352,7 +354,7 @@ test("an HTML embed is picked from the insert menu, runs by itself in its room w
   await expect(below(page, "html").locator("iframe")).not.toHaveAttribute("sandbox");
   // The card has the block's name and its options, and no button of its own to show the block as written: the cursor does that.
   await expect(editor(page).locator(".embed-joined").getByRole("button")).toHaveCount(1);
-  await expect(editor(page).getByRole("button", { name: "Options for HTML" })).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "Settings for HTML" })).toBeVisible();
 
   // The block as written, with a counter in it. Its body changed, so what was running is gone and the new body runs.
   await goTo(page, 6);
@@ -571,8 +573,10 @@ test("an HTML embed can't send its frame, or any frame, anywhere: not to a site 
       return route.fulfill({ status: 200, contentType: "text/html", body: "<title>reached</title>" });
     });
   }
+  // Its document comes from the app's own address, or from the host kept for embeds, which the app sends it to.
+  const shell = await frameOrigin(page);
   const asked: string[] = [];
-  page.on("request", (request) => request.frame() !== page.mainFrame() && request.url().startsWith(app) && asked.push(request.url().slice(app.length)));
+  page.on("request", (request) => request.frame() !== page.mainFrame() && [app, shell].some((host) => request.url().startsWith(host) && asked.push(request.url().slice(host.length))));
 
   const named = (name: string, body: string) => `:::html{height=60}\n<script>window.probe = ${JSON.stringify(name)};</script>${body}\n:::\n\n`;
   const later = (run: string) => `<script>setTimeout(() => { try { ${run}; window.did = "ran"; } catch (err) { window.did = "refused: " + err.name; } }, 200);</script>`;
@@ -597,8 +601,8 @@ test("an HTML embed can't send its frame, or any frame, anywhere: not to a site 
   await page.waitForTimeout(2500);
 
   const frames = page.frames().filter((f) => f !== page.mainFrame() && !ownFrame(f));
-  expect(frames.map((f) => f.url()).filter((url) => !url.startsWith(`${app}/embed-frame`) && url !== "about:srcdoc" && url !== "about:blank" && !url.startsWith("chrome-error:")), "no frame is anywhere but its own document, or an error").toEqual([]);
-  expect(frames.filter((f) => f.url().startsWith(`${app}/embed-frame`)).map((f) => f.url()), "the frames the app made are where it put them").toEqual(embeds.map(() => `${app}/embed-frame`));
+  expect(frames.map((f) => f.url()).filter((url) => !url.startsWith(`${shell}/embed-frame`) && url !== "about:srcdoc" && url !== "about:blank" && !url.startsWith("chrome-error:")), "no frame is anywhere but its own document, or an error").toEqual([]);
+  expect(frames.filter((f) => f.url().startsWith(`${shell}/embed-frame`)).map((f) => f.url()), "the frames the app made are where it put them").toEqual(embeds.map(() => `${shell}/embed-frame`));
   expect(reached, "nothing reached a site the app frames, or any other").toEqual([]);
   expect([...new Set(asked)], "the app was asked for nothing but the empty document, as the app asked for it").toEqual(["/embed-frame"]);
   expect(new URL(page.url()).origin).toBe(app);
@@ -849,9 +853,9 @@ for (const scheme of ["light", "dark"] as const) {
 }
 
 test("HTML is not handed to a frame whose document came without what shuts it in, and the member is told that nothing ran", async ({ page }) => {
-  // The shell as the Worker serves it, but with no policy: its origin is then the app's own.
+  // The shell as the Worker serves it, but with no policy: its origin is then the app's own, or the embeds' host's.
   await page.route("**/embed-frame", async (route) => {
-    const served = await route.fetch();
+    const served = await fetched(route);
     const headers = { ...served.headers() };
     delete headers["content-security-policy"];
     await route.fulfill({ response: served, headers });
@@ -869,7 +873,13 @@ test("HTML asks first where embeds have no site of their own, runs by itself onc
   const choice = page.getByLabel("Run HTML embeds", { exact: true });
   const settings = async () => JSON.parse((await perform(page, { type: "settings.read" })).text);
 
-  // This server has no site of HTML embeds' own, as no machine and no Preview has: a member who hasn't chosen is asked first.
+  // A server with no site of HTML embeds' own, as no Preview has: a member who hasn't chosen is asked first.
+  const embedSite = (site: boolean) =>
+    page.route("**/api/me", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...(await response.json()), setup: { embedSite: site } } });
+    });
+  await embedSite(false);
   await open(page, "# Asked\n\n:::html{height=80}\n<p>asked</p>\n:::\n\nlast\n", {});
   await expect(runHtml(page)).toBeVisible();
   await settled(page);
@@ -892,10 +902,7 @@ test("HTML asks first where embeds have no site of their own, runs by itself onc
   await expect(runHtml(page)).toHaveCount(0);
 
   // A server whose embeds have a site of their own says so, and there a member who hasn't chosen isn't asked. Asking first is theirs to choose.
-  await page.route("**/api/me", async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response, json: { ...(await response.json()), setup: { embedSite: true } } });
-  });
+  await embedSite(true);
   await open(page, "# Apart\n\n:::html{height=80}\n<p>apart</p>\n:::\n\nlast\n", {});
   await expect(framed.getByText("apart")).toBeVisible();
   await expect(runHtml(page)).toHaveCount(0);
@@ -911,16 +918,21 @@ test("HTML asks first where embeds have no site of their own, runs by itself onc
 });
 
 /** Counts each time an HTML embed's shell is asked for, from here on. */
-/** The HTML embeds' documents asked for so far. Common Ink's own plugins that run shut off load the same document, in frames of their own name, which a frame has once it is there. */
-function shells(page: Page) {
+/**
+ * The HTML embeds' documents asked for so far, where they are served from, and not the app's address
+ * that sends them there. Common Ink's own plugins that run shut off load the same document, in frames
+ * of their own name, which a frame has once it is there.
+ */
+async function shells(page: Page) {
+  const served = await frameOrigin(page);
   const asked: Request[] = [];
-  page.on("request", (request) => void (new URL(request.url()).pathname === "/embed-frame" && asked.push(request)));
+  page.on("request", (request) => void (request.url() === `${served}/embed-frame` && asked.push(request)));
   return () => asked.filter((request) => request.frame().name() !== "ink-own-plugin").map((request) => request.url());
 }
 
 test("an HTML body being written runs nothing at each key: what was written runs once the cursor has left the block", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1200 });
-  const asked = shells(page);
+  const asked = await shells(page);
   await open(page, "# Writing\n\n:::html{height=80}\n<p>first</p>\n:::\n\nafter\n");
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
   await expect(framed.getByText("first")).toBeVisible();

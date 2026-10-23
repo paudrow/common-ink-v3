@@ -347,7 +347,7 @@ test("a note opened again in its tab, and in a split, shows its embeds drawn fro
   expect(split.embeds.filter((e) => new Set(e.boxes.map((b) => b.split(",").slice(3).join(","))).size !== 1)).toEqual([]);
 });
 
-test("a line with a clock, and a board, have the same room above and below them with the cursor on them as off, and what is shown as written is above them and all that is added", async ({ page }) => {
+test("a line with a clock, and a board, have the same room above and below them with the cursor on them as off: a clock's text is shown in its line, and a board's above it and all that is added", async ({ page }) => {
   await open(page, "# Steady\n\nwords before\nTea ::timer{5m} here.\nwords after\n\n:::kanban{}\n## To do\n- write\n\n## Done\n:::\n\nThe last line.\n");
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const box = async (locator: Locator) => (await locator.first().boundingBox())!;
@@ -357,12 +357,10 @@ test("a line with a clock, and a board, have the same room above and below them 
   /** The room between each embed's card and the text above and below it, and where the lines around them are. */
   const measure = async () => {
     const [before, tea, card, after, drawn, last] = [await box(line("words before")), await box(line("Tea")), await box(clock), await box(line("words after")), await box(board), await box(line("The last line."))];
-    const rows = (await editor(page).locator(".embed-source-rows").count()) ? (await box(editor(page).locator(".embed-source-rows"))).height : 0;
     const shown = (await line(":::kanban").count()) ? (await box(lines(page).filter({ hasText: /^:::$/ }))).y + (await box(lines(page).filter({ hasText: /^:::$/ }))).height - (await box(line(":::kanban"))).y : 0;
     return {
-      rows,
       shown,
-      aboveClock: card.y - (tea.y + rows),
+      aboveClock: card.y - tea.y,
       belowClock: after.y - (card.y + card.height),
       aboveBoard: drawn.y - shown - (await box(lines(page).nth(5))).y,
       belowBoard: last.y - (drawn.y + drawn.height),
@@ -372,7 +370,7 @@ test("a line with a clock, and a board, have the same room above and below them 
     };
   };
   const off = await measure();
-  expect([off.rows, off.shown]).toEqual([0, 0]);
+  expect(off.shown).toBe(0);
   // About half a line of room: more than a quarter of a line of text, and less than a whole one.
   const text = (await box(line("words before"))).height;
   for (const room of [off.aboveClock, off.belowClock]) expect(room).toBeGreaterThan(text / 4);
@@ -383,9 +381,7 @@ test("a line with a clock, and a board, have the same room above and below them 
   await line("Tea").click({ position: { x: 2, y: 5 } });
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowRight");
   await expect(editor(page).locator(".embed-source")).toHaveText("::timer{5m}");
-  const onClock = await measure();
-  expect(onClock.rows).toBeGreaterThan(10);
-  expect(onClock).toEqual({ ...off, rows: onClock.rows });
+  expect(await measure()).toEqual(off);
 
   await line("words after").click();
   await page.keyboard.press("ArrowDown");

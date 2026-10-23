@@ -2,7 +2,8 @@ import { syntaxTree } from "@codemirror/language";
 import { EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { keep } from "./belowIdentity.ts";
-import { inlineIn, rewriteOf, type Written } from "./embedSyntax.ts";
+import { inlineIn, rewriteOf, type Written } from "../core/embedSyntax.ts";
+import { closeOptions, fitSettingsButton, optionsOn, settingsOf, type Options } from "./embedOptions.ts";
 import { guardFrames } from "./frameGuard.ts";
 import type { AddressEmbed, Below, BelowBox, BelowDrawn, BelowEmbedded, Embed } from "./plugin-api.ts";
 
@@ -22,6 +23,12 @@ interface Shown {
   bare: boolean;
   /** Whether its line holds it and nothing else, which takes no room while the cursor is elsewhere: what is drawn is where that line was. */
   alone: boolean;
+  /**
+   * What is wrong with an embed drawn only below its line that has nothing to draw for what its
+   * config says, as a picture with no upload's id: its room says this in place of it, while the
+   * cursor is off its line.
+   */
+  wrong?: readonly string[];
 }
 
 /** An embed with something to keep below its line, however the note writes it. */
@@ -37,6 +44,8 @@ let ids = 0;
 const GAP = 6;
 /** About what the card's own padding above it is, which is in the note's ems and set in the stylesheet: this is only for estimates. */
 const UNDER_CARD = 13;
+/** The room that says what is wrong with an embed, about a line's height, with its settings button in it. */
+const WRONG_HEIGHT = 36;
 
 const sameBox = (a: BelowBox, b: BelowBox) => a.maxWidth === b.maxWidth && a.share === b.share && ("ratio" in a ? "ratio" in b && a.ratio === b.ratio : "height" in b && a.height === b.height);
 
@@ -182,7 +191,10 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
     const embed = bare.get(written) ?? (embeds.get(written.name) as Embed & { below: Below });
     const box = boxOf(embed, written);
     const alone = bare.has(written) || (!written.block && aloneIn(state, written));
-    return box ? [{ written, embed, box, from: written.from, name: written.name, source: `${written.config}\n${written.body}`, bare: bare.has(written), alone }] : [];
+    const one = { written, embed, from: written.from, name: written.name, source: `${written.config}\n${written.body}`, bare: bare.has(written), alone };
+    if (box) return [{ ...one, box }];
+    const wrong = "claims" in embed || embed.render ? [] : (settingsOf(embed)?.problems(written) ?? []);
+    return wrong.length ? [{ ...one, box: { height: WRONG_HEIGHT }, wrong }] : [];
   });
   // An embed another plugin now draws is not the one that was there, whatever the note says.
   const same = before.filter((was) => ("claims" in was.embed ? addresses.includes(was.embed) : embeds.get(was.embed.name) === was.embed));
@@ -194,6 +206,13 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
     return { ...one, box, id, at: state.doc.lineAt(one.written.to).to };
   });
 }
+
+/**
+ * Whether what is kept here opens its settings from a button in its own corner: an embed with nothing
+ * of it drawn in its line, as an uploaded picture. A block's, and one drawn in its line, open from its card.
+ */
+const cornered = (shown: Shown): shown is Shown & { embed: Embed & { below: Below } } =>
+  !shown.bare && !shown.written.block && !("claims" in shown.embed) && (!shown.embed.render || (shown.alone && !!shown.embed.below.alone));
 
 /** Whether the cursor is in what the note writes for an embed, or at its edge. */
 const within = (state: EditorState, written: Written) => state.selection.ranges.some((r) => r.from <= written.to && r.to >= written.from);
@@ -252,7 +271,11 @@ function aloneLines(state: EditorState, shown: readonly Shown[], written: boolea
  * blocks the note writes.
  */
 export function keptBelow(reading: (state: EditorState) => Reading): Extension {
-  const rooms = (shown: readonly Shown[]) => Decoration.set(shown.map((s): Range<Decoration> => Decoration.widget({ widget: new BoxWidget(s.id, s.box, s.written.block, s.alone), block: true, side: 1 }).range(s.at)), true);
+  const rooms = (state: EditorState, shown: readonly Shown[], written: boolean) =>
+    Decoration.set(
+      shown.filter((s) => !s.wrong || !aloneOn(state, s.from, written)).map((s): Range<Decoration> => Decoration.widget({ widget: new BoxWidget(s.id, s.box, s.written.block, s.alone), block: true, side: 1 }).range(s.at)),
+      true,
+    );
 
   interface Value {
     shown: readonly Shown[];
@@ -267,7 +290,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     create(state) {
       const now = reading(state);
       const shown = read(state, now, [], (pos) => pos, new Map());
-      return { shown, rooms: rooms(shown), lines: aloneLines(state, shown, now.written), reading: now, sized: new Map() };
+      return { shown, rooms: rooms(state, shown, now.written), lines: aloneLines(state, shown, now.written), reading: now, sized: new Map() };
     },
     update(value, tr) {
       const now = reading(tr.state);
@@ -279,7 +302,9 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
       if (!reread && !tr.selection && now.written === value.reading.written) return value;
       const shown = reread ? read(tr.state, now, value.shown, (pos) => tr.changes.mapPos(pos, 1), sized) : value.shown;
       if (reread && sized.size) sized = new Map([...sized].filter(([id]) => shown.some((s) => s.id === id)));
-      return { shown, rooms: reread ? rooms(shown) : value.rooms, lines: aloneLines(tr.state, shown, now.written), reading: now, sized };
+      // A room that says what is wrong comes and goes with the cursor.
+      const roomsNow = reread || shown.some((s) => s.wrong) ? rooms(tr.state, shown, now.written) : value.rooms;
+      return { shown, rooms: roomsNow, lines: aloneLines(tr.state, shown, now.written), reading: now, sized };
     },
     provide: (f) => [EditorView.decorations.from(f, (value) => value.rooms), EditorView.decorations.from(f, (value) => value.lines)],
   });
@@ -300,6 +325,8 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     made: BelowDrawn;
     unguard: () => void;
     place?: Place;
+    /** What the note said of it, and whether it could be changed, when its settings button was last fitted to that. */
+    fitted?: string;
   }
 
   const layer = ViewPlugin.fromClass(
@@ -331,6 +358,8 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
       }
 
       drop(id: number, live: Live) {
+        const button = live.el.querySelector<HTMLElement>(":scope > .embed-options");
+        if (button) closeOptions(button);
         this.stop(live);
         live.unguard();
         live.el.remove();
@@ -390,17 +419,33 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           // With no room, as inside something else that is drawn, it is kept and not shown.
           live.el.style.visibility = place ? "" : "hidden";
           live.el.classList.toggle("embed-below-on", shown.alone && aloneOn(view.state, shown.from, view.state.field(field).reading.written));
-          if (!place) continue;
           const was = live.place;
-          if (was && was.left === place.left && was.top === place.top && was.width === place.width && was.height === place.height) continue;
-          live.place = { left: place.left, top: place.top, width: place.width, height: place.height };
-          Object.assign(live.el.style, { left: `${place.left}px`, top: `${place.top}px`, width: `${place.width}px`, height: `${place.height}px` });
+          const moved = !!place && !(was && was.left === place.left && was.top === place.top && was.width === place.width && was.height === place.height);
+          if (place && moved) {
+            live.place = { left: place.left, top: place.top, width: place.width, height: place.height };
+            Object.assign(live.el.style, { left: `${place.left}px`, top: `${place.top}px`, width: `${place.width}px`, height: `${place.height}px` });
+          }
+          // Once it is where it now is, so settings open beneath it are put beneath where it is.
+          const fitted = `${shown.source}\n${view.state.readOnly}`;
+          if (live.fitted !== fitted || moved) {
+            live.fitted = fitted;
+            this.fitSettings(live, shown, view);
+          }
         }
       }
 
       /** Draws an embed in its element, or has it change what it drew to fit what the note says of it now, where it knows how. */
-      draw(live: Live, { id, embed, written, source }: Shown, view: EditorView) {
+      draw(live: Live, { id, embed, written, source, wrong }: Shown, view: EditorView) {
         live.source = source;
+        live.el.classList.toggle("embed-below-wrong", !!wrong);
+        if (wrong) {
+          this.stop(live);
+          const said = document.createElement("p");
+          said.className = "embed-problems";
+          said.textContent = said.title = wrong.join(" ");
+          live.drawn.replaceChildren(said);
+          return;
+        }
         let drawing = true;
         /** Rewrites the embed in the note, if the note still says of it what this was drawn from. */
         const rewrite = (next: { config?: string; body?: string }) => {
@@ -441,6 +486,26 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
         } finally {
           drawing = false;
         }
+      }
+
+      /** The settings of what is kept, as the note writes it now, which set and clear by rewriting it there: for one whose settings open from its corner, while the note can be changed. */
+      optionsOf(now: Shown | undefined, view: EditorView, settings = now && settingsOf(now.embed)): Options | null {
+        if (!now || !settings || !cornered(now) || view.state.readOnly) return null;
+        return optionsOn(now.embed.title, settings, now.written, (next) => {
+          const changes = rewriteOf(now.written, next);
+          if (changes.length) view.dispatch({ changes, userEvent: "input.embed" });
+        });
+      }
+
+      /** Gives what is kept a red edge for what is wrong with it, and its settings button in its corner, or takes that away, to fit what the note says of it now. */
+      fitSettings(live: Live, shown: Shown, view: EditorView) {
+        const settings = shown.bare || "claims" in shown.embed ? undefined : settingsOf(shown.embed);
+        // The rest of a block's card, and the room of an embed drawn in its line, are edged in red as its card is.
+        live.el.classList.toggle("embed-invalid", !!settings?.problems(shown.written).length);
+        fitSettingsButton(live.el, "embed-options embed-options-corner", this.optionsOf(shown, view, settings), {
+          under: () => live.el,
+          read: () => this.optionsOf(view.state.field(field, false)?.shown.find((s) => s.id === shown.id), view),
+        });
       }
 
       /** A frame in it took the keyboard from the member: it is stopped, and says so, until the member asks for it again. */

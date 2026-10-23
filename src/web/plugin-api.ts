@@ -711,15 +711,16 @@ export interface Embed {
   /** What it keeps below the line that writes it, such as a video. */
   below?: Below;
   /**
-   * What a member can adjust about it without reading its config. The host draws one options button
-   * in the embed's card, and opens beneath the card a field for each of these. An embed that has
-   * none, or gives none for what the note says of it now, has no button, and neither has a member
-   * who can't change the note.
+   * What a member can adjust about it without reading its config. The host draws one settings button
+   * in the embed's card, and opens beneath the card a field for each key of a built-in embed's
+   * schema (`src/core/embedSchema.ts`) and then one for each of these. An embed that has none, or
+   * gives none for what the note says of it now, has no button, and neither has a member who can't
+   * change the note.
    *
    * Declared as data, a list of {@link DeclaredOption}s, the host reads each from the config as
    * `id=value` and writes it back there, and draws the field for its type: no code at all. That is
-   * how a third-party plugin's manifest declares them. `fields` and `set` are for options that live
-   * anywhere else in what the note says, as the timer's length and a board's column colours do.
+   * how a third-party plugin's manifest declares them. `fields` and `set` are for settings that live
+   * anywhere else in what the note says, as a stopwatch's time so far and a board's column colours do.
    */
   options?: EmbedOptions | readonly DeclaredOption[];
 }
@@ -739,14 +740,22 @@ export interface EmbedOptions {
 /**
  * One thing to adjust: text that is typed and taken on Enter or when the keyboard leaves it, or one
  * of a few choices. A choice with a `swatch` is drawn as a dot of that colour and not as its label:
- * one of {@link SWATCHES}, or `""` for no colour.
+ * one of {@link SWATCHES}, or `""` for no colour. A duration is set in hours, minutes and seconds,
+ * and its value is the duration as written, as `1h30m`. `written` says whether the note writes it, for one
+ * the host can take out of the note: a Clear button beside it is shown while it does.
  */
-export type EmbedField =
-  | { id: string; label: string; kind: "text"; value: string; placeholder?: string; hint?: string }
-  | { id: string; label: string; kind: "choice"; value: string; choices: readonly { value: string; label: string; swatch?: Swatch | "" }[] };
+export type EmbedField = (
+  | { id: string; label: string; kind: "text"; value: string; placeholder?: string; hint?: string; written?: boolean }
+  | { id: string; label: string; kind: "choice"; value: string; choices: readonly { value: string; label: string; swatch?: Swatch | "" }[]; written?: boolean }
+  | { id: string; label: string; kind: "duration"; value: string; written?: boolean }
+) & {
+  /** What is wrong with what the note writes for it, shown under it. */
+  error?: string;
+};
 
 /** An embed's options declared as data, which the host reads from and writes into its config as `key=value` words. */
-export { SWATCHES, optionValues, type DeclaredOption, type OptionValue, type Swatch } from "../core/embedOptions.ts";
+export { SWATCHES, type DeclaredOption, type OptionValue, type Swatch } from "../core/embedOptions.ts";
+export { EMBED_SCHEMAS, optionValues } from "../core/embedSchema.ts";
 
 /** What an embed can give back from `render`. */
 export interface Drawn {

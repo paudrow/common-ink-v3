@@ -201,7 +201,7 @@ describe("a host given to HTML embeds alone", () => {
     const frame = await withEmbedHost("https://embed.commonink.app/embed-frame");
     expect(frame.status).toBe(200);
     expect(directives(frame.headers.get("Content-Security-Policy")!)).toMatchObject({ sandbox: "allow-scripts", "default-src": "'none'", "frame-ancestors": "*" });
-    for (const path of ["/", "/api/me", "/auth/dev?email=a@example.com", "/mcp", "/note/plan-3k2j5h8d9f0a", "/sw.js", "/api/agents"]) {
+    for (const path of ["/", "/health", "/api/me", "/auth/dev?email=a@example.com", "/auth/google/callback", "/mcp", "/note/plan-3k2j5h8d9f0a", "/sw.js", "/api/agents"]) {
       expect((await withEmbedHost(`https://embed.commonink.app${path}`)).status, path).toBe(404);
     }
   });
@@ -210,6 +210,14 @@ describe("a host given to HTML embeds alone", () => {
     const sent = await withEmbedHost("https://commonink.app/embed-frame");
     expect([sent.status, sent.headers.get("Location")]).toEqual([302, "https://embed.commonink.app/embed-frame"]);
     expect(framedAt("https://commonink.app/", { EMBED_ORIGIN: "https://embed.commonink.app" })).toBe(`https://commonink.app/embed-frame https://commonink.app/embed-frame/g/ https://embed.commonink.app/embed-frame https://embed.commonink.app/embed-frame/g/ ${FRAME_ORIGINS.join(" ")}`);
+  });
+
+  it("is production's workers.dev address, which answers nothing of the app's even where a deploy didn't name it, while a Preview's still does", async () => {
+    const bare = (url: string) => worker.fetch(new Request(url) as never, { ...env, EMBED_ORIGIN: undefined });
+    for (const path of ["/", "/api/me", "/s/x"]) {
+      expect((await bare(`https://common-ink-v3.draftox.workers.dev${path}`)).status, path).toBe(404);
+    }
+    expect((await bare("https://pr-12-common-ink-v3-previews.draftox.workers.dev/api/me")).status).toBe(401);
   });
 
   it("must be an https address", async () => {

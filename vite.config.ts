@@ -85,18 +85,41 @@ const excalidrawFonts = (): Plugin => {
   };
 };
 
+/** What follows `name` among the dev server's arguments, as `--port 5276` or `--port=5276`, or undefined. */
+const argument = (name: string) => {
+  const args = process.argv;
+  const at = args.findIndex((arg) => arg === name || arg.startsWith(`${name}=`));
+  return at === -1 ? undefined : args[at] === name ? args[at + 1] : args[at]!.slice(name.length + 1);
+};
+
 /**
- * The Worker as this machine runs it: dev sign-in on, and without Workers AI, which always runs on
- * Cloudflare and is paid for, unless `npm run dev -- --ai` asked for it (it needs `wrangler login`).
- * Without it, transcribing a recording says how to turn it on.
+ * The dev server's port: what `--port` says, or Vite's own. It is strict, as HTML embeds are given
+ * an address on it, which a server that moved to another port wouldn't answer.
+ */
+const PORT = Number(argument("--port") ?? 5173);
+
+/**
+ * HTML embeds' own address on this machine: `embed.localhost`, which the browser takes to this
+ * machine and Vite answers as it does `localhost`, on the dev server's port. The Worker answers only
+ * the embed's frame there, so HTML runs by itself, apart from the app, as on a server with an embed
+ * site. With `--host`, other machines reach the server, and to them `embed.localhost` is themselves,
+ * so HTML asks first as before.
+ */
+const embedSite = (): Record<string, string> => (process.argv.some((arg) => arg === "--host" || arg.startsWith("--host=")) ? {} : { EMBED_ORIGIN: `http://embed.localhost:${PORT}` });
+
+/**
+ * The Worker as this machine runs it: dev sign-in on, HTML embeds on a site of their own, and without
+ * Workers AI, which always runs on Cloudflare and is paid for, unless `npm run dev -- --ai` asked for
+ * it (it needs `wrangler login`). Without it, transcribing a recording says how to turn it on.
  */
 const devConfig = (config: { ai?: unknown }) => {
   if (!process.env.INK_AI) delete config.ai;
-  return { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } };
+  return { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId(), ...embedSite() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } };
 };
 
 // Builds only the web app; wrangler bundles the Worker, so one wrangler.jsonc serves dev, deploys, and Previews.
 export default defineConfig(({ command }) => ({
   plugins: [thisMachine, react(), clipperDownload, excalidrawFonts(), command === "serve" && cloudflare({ persistState: { path: process.env.INK_STATE ?? ".wrangler/state" }, config: devConfig })],
+  server: { port: PORT, strictPort: true },
   build: { outDir: "dist", emptyOutDir: true },
 }));

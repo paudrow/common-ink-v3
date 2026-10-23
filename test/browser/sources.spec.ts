@@ -473,7 +473,7 @@ function expectUnmoved(now: Record<string, Place>, before: Record<string, Place>
   }
 }
 
-test("nothing moves when a reference's details arrive or the cursor comes to its line, and with the cursor in it it stays drawn, with what the note says above it", async ({ page }) => {
+test("nothing moves when a reference's details arrive or the cursor comes to its line, and with the cursor in it it stays drawn, with what the note says after it", async ({ page }) => {
   // Wide enough that a line still fits on one row with its reference shown as written, which is longer than the chip.
   await page.setViewportSize({ width: 1700, height: 900 });
   await signInAsNewPerson(page, "Ada Lovelace");
@@ -512,14 +512,18 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   await expect(chips(page)).toHaveCount(3);
   expectUnmoved(await places(page, [...fixed, "trailing"]), drawn, "with the cursor on the line");
 
-  // The cursor in the first reference: it stays drawn, what the note says of it is shown above the line, and nothing before it moves or shifts sideways.
+  // The cursor in the first reference: it stays drawn, what the note says of it is shown right after it in its line, and nothing before it moves or shifts sideways.
   await page.keyboard.press("Home");
   for (let i = 0; i < "Before ::".length; i++) await page.keyboard.press("ArrowRight");
-  await expect(editor(page).locator(".embed-source")).toHaveText(lunch.text);
+  const source = editor(page).locator(".embed-source");
+  await expect(source).toHaveText(lunch.text);
   await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
   const written = await places(page, [...fixed, "trailing"]);
-  expectUnmoved({ "plain line above": written["plain line above"]! }, { "plain line above": drawn["plain line above"]! }, "with the first reference shown as written above its line");
-  for (const word of [...fixed, "trailing"]) expect(Math.abs(written[word]!.x - drawn[word]!.x), `x of "${word}" with the first reference shown as written above its line`).toBeLessThanOrEqual(0.5);
+  expectUnmoved({ "plain line above": written["plain line above"]! }, { "plain line above": drawn["plain line above"]! }, "with the first reference shown as written in its line");
+  for (const word of fixed) expect(Math.abs(written[word]!.x - drawn[word]!.x), `x of "${word}" with the first reference shown as written in its line`).toBeLessThanOrEqual(0.5);
+  const [chip, text] = [(await chips(page).first().boundingBox())!, (await source.boundingBox())!];
+  expect(text.x, "the reference as written is after its chip").toBeGreaterThanOrEqual(chip.x + chip.width);
+  expect(written.trailing!.x, "and before the rest of its line").toBeGreaterThanOrEqual(text.x + text.width);
 
   await page.keyboard.press("ControlOrMeta+End");
   await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);

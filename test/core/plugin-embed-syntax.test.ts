@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blocksIn, inlineIn, rewriteOf, type Rewrite, type Written } from "../../src/web/embedSyntax.ts";
+import { blocksIn, inlineIn, rewriteOf, type Rewrite, type Written } from "../../src/core/embedSyntax.ts";
 
 const apply = (text: string, edits: readonly Rewrite[]) => [...edits].sort((a, b) => b.from - a.from).reduce((t, e) => t.slice(0, e.from) + e.insert + t.slice(e.to), text);
 const only = (found: Written[]) => {

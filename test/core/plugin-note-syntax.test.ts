@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { NOTE_SYNTAX } from "../../src/core/noteSyntax.ts";
-import { blocksIn, inlineIn } from "../../src/web/embedSyntax.ts";
+import { EMBED_SCHEMAS, keysText, problemText, readConfig } from "../../src/core/embedSchema.ts";
+import { NOTE_SYNTAX, syntaxText } from "../../src/core/noteSyntax.ts";
+import { blocksIn, inlineIn } from "../../src/core/embedSyntax.ts";
 import { parseForm } from "../../src/web/plugins/forms/form.ts";
 import { parseBoard } from "../../src/web/plugins/kanban/board.ts";
 import { readClock } from "../../src/web/plugins/lib/clock.ts";
@@ -42,6 +43,20 @@ describe("what a note can hold", () => {
     const fromApp = added.plugins.flatMap((plugin) => plugin.adds?.embeds ?? []).map((embed) => key(embed.name, !!embed.address)).sort();
     const fromTable = NOTE_SYNTAX.filter((row) => row.kind !== "prose").map((row) => key(row.name, row.kind === "address")).sort();
     expect(fromTable, "an embed shipped with no row in src/core/noteSyntax.ts, or a row names an embed that is gone").toEqual(fromApp);
+  });
+
+  it("has a schema for every embed the app's plugins register, and none for one they don't", () => {
+    const fromApp = contributions().plugins.flatMap((plugin) => plugin.adds?.embeds ?? []).filter((embed) => !embed.address).map((embed) => embed.name).sort();
+    expect(Object.keys(EMBED_SCHEMAS).sort(), "an embed shipped with no schema in src/core/embedSchema.ts, or a schema names an embed that is gone").toEqual(fromApp);
+  });
+
+  it("writes each embed's example with no word its schema refuses, and says each embed's keys", () => {
+    const text = syntaxText();
+    for (const row of NOTE_SYNTAX.filter((r) => r.kind === "embed")) {
+      const schema = EMBED_SCHEMAS[row.name]!;
+      for (const written of [...inlineIn(row.example), ...blocksIn(row.example)]) expect(readConfig(schema, written.config).problems.map((p) => problemText(schema, p)), row.example).toEqual([]);
+      expect(text).toContain(`${row.about}\n${keysText(schema)}\n\n${row.example}`);
+    }
   });
 
   it("writes each example so the note reads it as that thing", () => {

@@ -70,6 +70,7 @@ import { openExport, planExport } from "./export.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
 import { readVocabulary, transcribeUpload, writeVocabulary } from "./transcripts.ts";
+import { embedProblemsIn } from "./embedSchema.ts";
 import { NO_FILES, abortUpload, archiveUpload, createUpload, finishUpload, listUploads, moveUpload, openUpload, placeUpload, purgeUpload, putPart, readUpload, referred, restoreUpload, resumeUpload, startUpload, trashUpload, trashedUploads, uploadStorage, type Files } from "./uploads.ts";
 import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
 import { asc, desc, type Order } from "./order.ts";
@@ -1847,6 +1848,32 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
 
 export const MAX_ANSWER_LINES = 2000;
 
+/**
+ * Refuses an agent's write that writes a built-in embed with a key wrong, saying which and how, so
+ * it is put right before a member sees it. What the note had wrong already doesn't stop a write of
+ * anything else: an embed whose words are the same and wrong the same way was there before. A
+ * member's own writes are never refused: the editor shows them what is wrong.
+ */
+function checkEmbeds(ctx: Context, text: string, was: string) {
+  if (ctx.actor.kind !== "agent") return;
+  // Counted, so a second copy of an embed the note already had wrong is a problem added.
+  const had = new Map<string, number>();
+  for (const p of embedProblemsIn(was)) {
+    for (const problem of p.problems) had.set(`${p.written}\n${problem}`, (had.get(`${p.written}\n${problem}`) ?? 0) + 1);
+  }
+  const isNew = (said: string) => {
+    const left = had.get(said) ?? 0;
+    had.set(said, left - 1);
+    return left <= 0;
+  };
+  const added = embedProblemsIn(text)
+    .map((p) => ({ ...p, problems: p.problems.filter((problem) => isNew(`${p.written}\n${problem}`)) }))
+    .filter((p) => p.problems.length);
+  if (!added.length) return;
+  const lines = added.map((p) => `Line ${p.line}, ${p.written}: ${p.problems.join(" ")}`);
+  throw new OpError("invalid", `${added.length === 1 ? "An embed has" : "Embeds have"} keys that aren't right, and nothing was written. note_syntax lists each embed's keys.\n${lines.join("\n")}`);
+}
+
 /** Records `op.text` as a write of the note at `op.baseRevision`, merging edits made since. */
 async function commitNote(ctx: Context, op: { id: string; baseRevision: number; text: string; writeId?: string; linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; newTags?: readonly string[]; on?: string }) {
   let unresolved: UnresolvedLink[] = [];
@@ -1860,6 +1887,7 @@ async function commitNote(ctx: Context, op: { id: string; baseRevision: number; 
     const base = op.baseRevision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, op.baseRevision, row.revision);
     const resolved = await storedAs(ctx, op.text, base.text, op);
     const stored = resolved.text;
+    checkEmbeds(ctx, stored, base.text);
     unresolved = resolved.unresolved;
     const changes = base.since ? rebased(base.text, stored, base.since) : changesBetween(base.text, stored);
     if (changes.empty) return toNote(ctx, row);
@@ -1918,6 +1946,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const id = newId();
       const revision = op.text ? 1 : 0;
       const { text, unresolved } = await storedAs(ctx, op.text, "", op);
+      checkEmbeds(ctx, text, "");
       const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(

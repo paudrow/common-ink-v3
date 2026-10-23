@@ -41,6 +41,8 @@ Then revert the bad commit on `main`. Otherwise, the next push deploys it again.
 
 Cloudflare refuses a rollback to a version whose R2 bucket or KV namespace no longer exists. It keeps the 100 most recent versions.
 
+A rollback leaves production's workers.dev address (`https://common-ink-v3.draftox.workers.dev`) on. A version from before HTML embeds moved there serves the whole app at that address until you roll forward.
+
 A version carries its own settings, so a rollback to one made before a secret was rotated, or before `SENTRY_DSN` was set, may bring the old one back with it. Check the secrets after a rollback (`npx wrangler secret list`), and put any back that changed since.
 
 ## 3. When a migration has already run

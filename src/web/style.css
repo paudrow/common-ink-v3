@@ -2276,33 +2276,140 @@ button.link:hover {
   outline-offset: 1px;
 }
 
-/*
- * An inline embed as the note writes it, shown while the cursor is on it in rows of its own at the
- * top of its line. The rows are made by an unseen copy of the text, and the text is laid over them,
- * under the rows of any embed before it on the line, which it is told of in `data-above`. Both wrap
- * the same way at the same width, so the rows are as tall as the text needs at any width and in any font.
- */
-.cm-line.embed-sourced {
-  position: relative;
+/* The settings of what is all below its line, as an uploaded picture, laid over its top right corner and seen as its crop button is. */
+.embed-options.embed-options-corner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid rgb(255 255 255 / 0.9);
+  border-radius: 6px;
+  background: rgb(30 30 36 / 0.7);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.12s;
 }
 
-.embed-source-rows,
-.embed-source,
+.embed-below:hover > .embed-options-corner,
+.embed-options-corner:focus-visible,
+.embed-options-corner[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.embed-options-corner:hover,
+.embed-options-corner:focus-visible,
+.embed-options-corner[aria-expanded="true"] {
+  border-color: var(--accent);
+  outline: none;
+  background: var(--accent);
+  color: #fff;
+}
+
+.embed-below:has(> .embed-options-corner) :is(.upload-crop, .upload-edit) {
+  right: 46px;
+}
+
+/* An embed whose config has a key wrong: a red edge, and its settings button a warning that says what is wrong. It is drawn all the same. */
+.embed-card.embed-invalid,
+.embed-below.embed-invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
+}
+
+.embed-problems {
+  margin: 4px 12px 0;
+  color: var(--danger);
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+}
+
+.embed-warning {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+/* A warning sign, drawn here and not written in the mark, so it adds no text to its line. */
+.embed-warning::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* In a block's head, the warning and the settings button are together at its right. */
+.embed-head > .embed-warning {
+  margin-left: auto;
+}
+
+/* Beside the settings button in the corner of what is all below its line, seen without the pointer on it, as that button is then too. */
+.embed-warning.embed-warning-corner {
+  position: absolute;
+  top: 8px;
+  right: 46px;
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--danger);
+  border-radius: 6px;
+  background: var(--danger);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  color: #fff;
+}
+
+.embed-below.embed-invalid > .embed-options-corner {
+  opacity: 1;
+}
+
+.embed-below:has(> .embed-warning-corner) :is(.upload-crop, .upload-edit) {
+  right: 84px;
+}
+
+/* A room that says what is wrong with an embed that has nothing else to draw: one line of it, beside its settings button. */
+.embed-below-wrong > .embed-below-drawn {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding-inline: 12px 82px;
+}
+
+.embed-below-wrong .embed-problems {
+  margin: 0;
+  font-family: var(--prose);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.embed-below-wrong > .embed-options-corner {
+  top: 2px;
+  right: 2px;
+}
+
+.embed-below-wrong > .embed-warning-corner {
+  top: 2px;
+  right: 40px;
+}
+
+/* A block's lines, shown above its card while the cursor is in them, drawn as an inline embed's text is. */
 .cm-line.embed-source-line {
   font: calc(12.5px * var(--text-scale))/1.6 var(--mono);
   letter-spacing: 0;
   text-indent: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-/* A block's lines, shown above its card while the cursor is in them, are drawn as an inline embed's text is. */
-.cm-line.embed-source-line {
   color: var(--accent);
 }
 
-/* Whatever the text would be drawn as in the note, a heading or bold, as written it is all one size, the size its rows were made for. */
-.embed-source *,
+/* Whatever the text would be drawn as in the note, a heading or bold, as written it is all one size. */
 .cm-line.embed-source-line * {
   font: inherit !important;
   color: inherit !important;
@@ -2310,33 +2417,13 @@ button.link:hover {
   text-decoration: none;
 }
 
-.embed-source-rows {
-  display: block;
-  visibility: hidden;
-}
-
-.embed-source-rows::before {
-  content: attr(data-rows);
-}
-
+/*
+ * An embed as written, where it is written, while the cursor is on it: after its drawing, or, for one
+ * that is all below its line, in place of nothing, so its line is as tall with it as with nothing. A
+ * line with nothing else on it, shown only with the cursor on it, is as tall as that text.
+ */
+.embed-written,
 .embed-source {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  box-sizing: border-box;
-  padding: inherit;
-  color: var(--accent);
-}
-
-.embed-source::before {
-  content: attr(data-above);
-  display: block;
-  visibility: hidden;
-}
-
-/* An embed that is all below its line, as written, where it is written: its line is as tall with it as with nothing. A line with nothing else on it, shown only with the cursor on it, is as tall as that text. */
-.embed-written {
   color: var(--accent);
   font-family: var(--mono);
   font-size: calc(12.5px * var(--text-scale));
@@ -2346,7 +2433,10 @@ button.link:hover {
   font-size: calc(12.5px * var(--text-scale));
 }
 
-.embed-written * {
+/* Whatever the text would be drawn as in the note, a heading or bold, as written it is all one size. */
+.embed-written *,
+.embed-source * {
+  font: inherit !important;
   color: inherit !important;
   text-decoration: none !important;
 }
@@ -2367,6 +2457,37 @@ button.link:hover {
   grid-template-columns: minmax(5rem, 110px) minmax(0, 1fr);
   align-items: center;
   gap: 3px 12px;
+}
+
+/* Takes the setting out of the note, shown only while the note writes it. Its column is kept while it is hidden, so every field in a panel is as wide. */
+.embed-options-panel:has(.embed-option-clear) .embed-option {
+  grid-template-columns: minmax(5rem, 110px) minmax(0, 1fr) 24px;
+}
+
+.embed-option-clear[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
+.embed-option-clear {
+  grid-column: 3;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(16px * var(--text-scale));
+  line-height: 1;
+  cursor: pointer;
+}
+
+.embed-option-clear:hover,
+.embed-option-clear:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .embed-option-hint {
@@ -2392,6 +2513,29 @@ button.link:hover {
   outline: none;
 }
 
+/* A duration: hours, minutes and seconds side by side, each a number with its unit after it. */
+.embed-option-duration {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.embed-option-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.embed-option-part input {
+  box-sizing: border-box;
+  width: 3.6em;
+  padding-inline: 6px 2px;
+  font-size: calc(14px * var(--text-scale));
+  font-variant-numeric: tabular-nums;
+}
+
 .embed-option-hint {
   color: var(--faint);
   font-size: calc(12px * var(--text-scale));
@@ -2399,6 +2543,27 @@ button.link:hover {
 
 .embed-option-error {
   margin: 0;
+  color: var(--danger);
+  font-size: calc(12px * var(--text-scale));
+}
+
+/* What is wrong with a field, under it. */
+.embed-option-field-error {
+  grid-column: 2;
+}
+
+.embed-option-field-error[hidden],
+.embed-option-hint[hidden] {
+  display: none;
+}
+
+.embed-option input[aria-invalid="true"],
+.embed-option [aria-invalid="true"] input {
+  border-color: var(--danger);
+}
+
+/* A word no key takes: what it is, then what can be done with it. */
+.embed-option-stray-text {
   color: var(--danger);
   font-size: calc(12px * var(--text-scale));
 }
@@ -13235,7 +13400,7 @@ button.crumb[aria-expanded="true"] {
   background: rgb(0 0 0 / 0.7);
 }
 
-:root[data-night-shift] :is(.upload-crop, .upload-edit):not(:hover, :focus-visible) {
+:root[data-night-shift] :is(.upload-crop, .upload-edit, .embed-options-corner):not(:hover, :focus-visible, [aria-expanded="true"]) {
   border-color: var(--ink);
   background: rgb(0 0 0 / 0.7);
   color: var(--ink);

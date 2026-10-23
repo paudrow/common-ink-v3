@@ -117,8 +117,8 @@ describe("what a client finds out before it signs in", () => {
   });
 
   it("is told the host it asked, so a Preview signs in on its own address", async () => {
-    const res = await worker.fetch(new Request("https://preview.example.workers.dev/.well-known/oauth-protected-resource") as never, { ...env, SESSION_SECRET: SECRET });
-    expect(await res.json()).toMatchObject({ resource: "https://preview.example.workers.dev/mcp", authorization_servers: ["https://preview.example.workers.dev"] });
+    const res = await worker.fetch(new Request("https://pr-12-common-ink-v3-previews.draftox.workers.dev/.well-known/oauth-protected-resource") as never, { ...env, SESSION_SECRET: SECRET });
+    expect(await res.json()).toMatchObject({ resource: "https://pr-12-common-ink-v3-previews.draftox.workers.dev/mcp", authorization_servers: ["https://pr-12-common-ink-v3-previews.draftox.workers.dev"] });
   });
 });
 

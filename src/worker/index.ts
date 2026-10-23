@@ -18,7 +18,7 @@ import { handleOAuthConsent } from "./oauthConsent.ts";
 import { fileOrigin, fileSiteResponse, handleFiles } from "./files.ts";
 import { embedOrigin, embedResponse } from "./frames.ts";
 import { crossOrigin, secured } from "./headers.ts";
-import { redirectFor } from "./hosts.ts";
+import { PREVIEW_HOSTS, redirectFor } from "./hosts.ts";
 import { addressOf, limitByAddress, overLimit, tokenKey } from "./limits.ts";
 import { listenerOf } from "./listen.ts";
 import { bearerToken } from "./mcp/mcp.ts";
@@ -173,14 +173,18 @@ async function health(env: Env, trace: Trace): Promise<Response> {
 }
 
 async function route(req: Request, env: Env, url: URL, trace: Trace, tell: (report: Report) => void): Promise<Response> {
+  // First, so the embeds' own host answers with their frame and nothing else of the app's.
+  const embed = await embedResponse(url, env, (token) => redeemFrame(env.DB, token, Date.now()));
+  if (embed) return embed;
+  // Production's workers.dev address is HTML embeds' alone, so a version deployed without EMBED_ORIGIN naming it
+  // (a bare `wrangler deploy`, or a rollback) answers nothing of the app's there either.
+  if (url.hostname.endsWith(".workers.dev") && !PREVIEW_HOSTS.test(url.hostname)) return new Response("Not found", { status: 404 });
   const moved = redirectFor(url);
   if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
   const byAddress = limitByAddress(url.pathname);
   const limited = byAddress && (await overLimit(env, url, byAddress, addressOf(req)));
   if (limited) return limited;
   if (url.pathname === "/health" && (req.method === "GET" || req.method === "HEAD")) return health(env, trace);
-  const embed = await embedResponse(url, env, (token) => redeemFrame(env.DB, token, Date.now()));
-  if (embed) return embed;
   const fileSite = fileSiteResponse(req, env, url);
   if (fileSite) return fileSite;
   if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
