@@ -13,8 +13,12 @@ export function* linesOutsideCode(text: string): Generator<{ line: string; from:
   let fence: string | null = null;
   let from = 0;
   let index = 0;
+  // The forms come in order, so the one a line may be in is the first that doesn't end before it:
+  // looking through every form for each line took seconds on a note of many.
+  let form = 0;
   for (const line of text.split("\n")) {
-    const inside = forms.some((span) => from >= span.from && from <= span.to);
+    while (form < forms.length && forms[form]!.to < from) form++;
+    const inside = form < forms.length && from >= forms[form]!.from;
     const marker = !inside ? FENCE.exec(line)?.[1]?.[0] : undefined;
     if (marker) {
       if (!fence) fence = marker;

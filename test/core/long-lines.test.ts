@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { linesOutsideCode } from "../../src/core/lines.ts";
 import { linksOn } from "../../src/core/links.ts";
 import { summarize } from "../../src/core/markdown.ts";
 import { mentionsOn } from "../../src/core/mentions.ts";
@@ -78,5 +79,24 @@ describe("inline code and addresses on a line", () => {
     expect(summarize("# A `code` [link](https://x.y) and [[abcdefghijkl]] and [[Note|shown]] ![pic](p.png)").title).toBe("A code link and and shown");
     expect(summarize("# See [Foo [1]](https://en.wikipedia.org/wiki/Foo_(bar)) here ![p](a_(b).png) ##").title).toBe("See Foo [1] here");
     expect(["# Title ##  ", "# C#", "#   spaced"].map((text) => summarize(text).title)).toEqual(["Title", "C#", "spaced"]);
+  });
+});
+
+describe("a note of many forms", () => {
+  // A form is one line to open it and one to close it, so a note as long as a note can be has some twenty thousand, and as many lines again.
+  const forms = 18_000;
+  const text = ":::form{}\n:::\n".repeat(forms) + "\nword".repeat(48_000);
+
+  it("is read in one pass: its lines outside the forms in under 200 ms", () => {
+    const start = performance.now();
+    const lines = [...linesOutsideCode(text)];
+    expect(Math.round(performance.now() - start)).toBeLessThan(200);
+    expect(lines).toHaveLength(48_001);
+    expect(lines.at(-1)).toEqual({ line: "word", from: text.length - 4, index: forms * 2 + 48_000 });
+  });
+
+  it("still leaves out each form's lines, and the lines between them stay", () => {
+    expect([...linesOutsideCode("a\n:::form{}\n{}\n:::\nb\n:::form{}\n:::\nc")].map((l) => l.line)).toEqual(["a", "b", "c"]);
+    expect([...linesOutsideCode(":::form{}\nnever closed")].map((l) => l.line)).toEqual([":::form{}", "never closed"]);
   });
 });
