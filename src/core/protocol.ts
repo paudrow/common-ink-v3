@@ -2031,7 +2031,7 @@ export interface MailSender {
 }
 
 export interface MailSenders {
-  /** Where mail is sent to be kept, such as notes@commonink.app; null where nothing receives it. */
+  /** Where mail is sent to be kept, such as notes@in.commonink.app; null where nothing receives it. */
   address: string | null;
   senders: MailSender[];
 }

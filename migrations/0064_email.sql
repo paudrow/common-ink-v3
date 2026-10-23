@@ -1,4 +1,4 @@
--- Email: mail a person sends or forwards to notes@commonink.app, kept for them alone, in no workspace.
+-- Email: mail a person sends or forwards to notes@in.commonink.app, kept for them alone, in no workspace.
 -- Unlike a calendar or contacts, it has nowhere else to be read from, so it is kept here
 -- (docs/adr/0018-email-is-kept-because-it-has-nowhere-else-to-be.md). Every row is one person's.
 

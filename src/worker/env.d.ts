@@ -18,7 +18,7 @@ interface InkSettings {
   FILE_ORIGIN?: string;
   /** The Chrome extension ids the clipper may sign in from, separated by commas. Without one no clipper signs in. */
   CLIPPER_EXTENSION_IDS?: string;
-  /** Where mail is sent to be kept in the Email data source. Without it, notes@commonink.app. */
+  /** Where mail is sent to be kept in the Email data source. Without it, notes@in.commonink.app. */
   MAIL_ADDRESS?: string;
   /** Whose Authentication-Results header the Worker trusts on incoming mail. Without it, mx.cloudflare.net: Cloudflare Email Routing's. */
   MAIL_AUTHSERV?: string;

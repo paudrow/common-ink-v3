@@ -199,6 +199,7 @@ const PAGES: Record<string, ((made: { uploadId: string; tag: string }) => { addr
   Calendar: () => ({ address: "/calendar?view=month&day=2026-03-10" }),
   Contacts: () => ({ address: "/contacts" }),
   Person: () => ({ address: "/person/Ada Lovelace" }),
+  Email: () => ({ address: "/email" }),
   Uploads: ({ uploadId }) => ({ address: `/uploads/${uploadId}` }),
   File: ({ uploadId }) => ({ address: `/file/${uploadId}` }),
   Tags: ({ tag }) => ({ address: `/tags/${tag}` }),

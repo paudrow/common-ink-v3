@@ -2,14 +2,14 @@ import { MAX_RAW_BYTES, normalAddress } from "../core/mail.ts";
 import { receive, type Received } from "../core/mailbox.ts";
 
 /*
- * Mail to notes@commonink.app, as Cloudflare Email Routing hands it to the Worker's `email` handler.
+ * Mail to notes@in.commonink.app, as Cloudflare Email Routing hands it to the Worker's `email` handler.
  * Whatever becomes of a message, nothing is said to its sender: no message is rejected or answered,
  * so mail from someone with no account here, or that failed its domain's checks, reads to them
  * exactly as mail that was kept. docs/email.md has the routing and DNS this needs.
  */
 
 /** Where mail is sent to be kept. MAIL_ADDRESS names another, as a staging Worker would. */
-export const mailAddress = (env: Env) => normalAddress(env.MAIL_ADDRESS || "notes@commonink.app");
+export const mailAddress = (env: Env) => normalAddress(env.MAIL_ADDRESS || "notes@in.commonink.app");
 
 /** Whose Authentication-Results header is read: the server that received the message for us. */
 export const mailAuthserv = (env: Env) => (env.MAIL_AUTHSERV || "mx.cloudflare.net").trim().toLowerCase();

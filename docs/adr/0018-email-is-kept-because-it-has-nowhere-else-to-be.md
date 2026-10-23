@@ -4,7 +4,7 @@ Status: proposed on 2026-10-22 with the Email data source (branch `inbound-email
 
 ## Context
 
-People want the mail around their work next to their notes: a thread with a client, a receipt, a reply they sent. Common Ink should offer this without asking anyone for their mailbox. The way in is an address: mail sent, copied (BCC) or forwarded to notes@commonink.app shows up for the person who sent it.
+People want the mail around their work next to their notes: a thread with a client, a receipt, a reply they sent. Common Ink should offer this without asking anyone for their mailbox. The way in is an address: mail sent, copied (BCC) or forwarded to notes@in.commonink.app shows up for the person who sent it.
 
 ADR 0006 says a data source is one person's, read live where it is kept, with only a reference held in a note. A calendar and contacts live at Google. Mail sent to notes@ lives nowhere but the message Cloudflare hands the Worker once.
 

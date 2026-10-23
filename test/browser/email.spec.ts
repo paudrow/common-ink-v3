@@ -27,7 +27,7 @@ test("mail sent to notes@ is kept as a thread for its sender alone, drawn safely
     await send(page, [
       vouched(domain),
       `From: Ada Lovelace <${email}>`,
-      "To: Grace <grace@example.org>, notes@commonink.app",
+      "To: Grace <grace@example.org>, notes@in.commonink.app",
       "Subject: Engine plans",
       "Message-ID: <plans-1@example.com>",
       "Date: Thu, 22 Oct 2026 12:00:00 +0000",
@@ -46,7 +46,7 @@ test("mail sent to notes@ is kept as a thread for its sender alone, drawn safely
     ]),
   ).toHaveProperty("kept");
   // Mail whose domain didn't vouch for it is dropped, and nothing of it shows.
-  expect(await send(page, [`From: ${email}`, "To: notes@commonink.app", "Subject: Forged", "", "Not me."])).toMatchObject({ dropped: "unauthenticated" });
+  expect(await send(page, [`From: ${email}`, "To: notes@in.commonink.app", "Subject: Forged", "", "Not me."])).toMatchObject({ dropped: "unauthenticated" });
 
   await page.reload();
   const threads = page.getByRole("list", { name: "Threads" });
@@ -86,7 +86,7 @@ test("an address is trusted only once mail from it carries its code", async ({ p
   const code = (await page.locator(".email-code-value code").textContent())!;
   expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 
-  const from = (subject: string) => [vouched("navy.example"), `From: ${work}`, "To: notes@commonink.app", `Subject: ${subject}`, "", "Hi."];
+  const from = (subject: string) => [vouched("navy.example"), `From: ${work}`, "To: notes@in.commonink.app", `Subject: ${subject}`, "", "Hi."];
   expect(await send(page, from("Before verifying"))).toEqual({ dropped: "unknown" });
   expect(await send(page, from(`Verify ${code}`))).toEqual({ verified: work });
   expect(await send(page, from("After verifying"))).toHaveProperty("kept");

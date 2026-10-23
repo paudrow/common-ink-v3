@@ -44,7 +44,7 @@ function mail(m: Mail): string {
     ...(auth === null ? [] : [`Authentication-Results: ${auth}`]),
     ...(m.sent ?? []),
     `From: ${m.from}`,
-    `To: ${m.to ?? "notes@commonink.app"}`,
+    `To: ${m.to ?? "notes@in.commonink.app"}`,
     ...(m.cc ? [`Cc: ${m.cc}`] : []),
     `Subject: ${m.subject ?? "Hello"}`,
     `Date: ${m.date ?? new Date(T0).toUTCString()}`,
@@ -416,7 +416,7 @@ describe("the email data source", () => {
 
   it("is read-only, and forgets everything kept when disconnected", async () => {
     const { actor, email } = await connected();
-    expect((await as(actor, { type: "source.list" })).sources.find((s) => s.kind === "email")).toMatchObject({ id: "email", state: "connected", writable: false, account: "notes@commonink.app" });
+    expect((await as(actor, { type: "source.list" })).sources.find((s) => s.kind === "email")).toMatchObject({ id: "email", state: "connected", writable: false, account: "notes@in.commonink.app" });
     await got({ from: email });
     await as(actor, { type: "source.disconnect", id: "email" });
     expect(await got({ from: email })).toEqual({ dropped: "not_connected" });
@@ -449,11 +449,13 @@ describe("mail from Email Routing", () => {
     const { actor, email } = await connected();
     const raw = mail({ from: email, subject: "Through the Worker" });
     let rejected = false;
-    const message = { from: email, to: "notes@commonink.app", raw: new Response(raw).body!, rawSize: raw.length, headers: new Headers(), setReject: () => void (rejected = true), forward: async () => ({ messageId: "" }), reply: async () => ({ messageId: "" }) };
+    const message = { from: email, to: "notes@in.commonink.app", raw: new Response(raw).body!, rawSize: raw.length, headers: new Headers(), setReject: () => void (rejected = true), forward: async () => ({ messageId: "" }), reply: async () => ({ messageId: "" }) };
     await worker.email!(message as unknown as ForwardableEmailMessage, env, { waitUntil: () => {}, passThroughOnException: () => {}, props: {} } as unknown as ExecutionContext);
     expect(rejected).toBe(false);
     expect((await threads(actor)).map((t) => t.subject)).toContain("Through the Worker");
-    // Mail to another address at the domain is dropped there too.
-    expect(await handleEmail({ to: "else@commonink.app", raw: new Response(raw).body!, rawSize: raw.length }, env)).toEqual({ dropped: "unknown" });
+    // Mail to another address at the domain is dropped there too, and so is notes@ at the apex, whose mail is Google Workspace's.
+    for (const to of ["else@in.commonink.app", "notes@commonink.app"]) {
+      expect(await handleEmail({ to, raw: new Response(raw).body!, rawSize: raw.length }, env)).toEqual({ dropped: "unknown" });
+    }
   });
 });

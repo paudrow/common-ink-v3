@@ -117,7 +117,7 @@ _Avoid_: Link, sync, authorize
 One thing in a data source: an event, a contact, or an email thread.
 
 **Email**:
-A data source of the mail a member sends, copies (BCC) or forwards to notes@commonink.app, kept for them as threads. Unlike a calendar or contacts it is kept in Common Ink, since there is nowhere else to read it from, and it is read-only. A message is kept only when it comes from one of the member's sending addresses and its domain vouches for it (DMARC, or DKIM aligned with its From). Anything else is dropped, and its sender is told nothing. Connecting it is saying so on the Email page, and disconnecting it deletes every message kept. A forwarded message is kept as its sender wrote it. See `docs/email.md` and `docs/adr/0018-email-is-kept-because-it-has-nowhere-else-to-be.md`.
+A data source of the mail a member sends, copies (BCC) or forwards to notes@in.commonink.app, kept for them as threads. Unlike a calendar or contacts it is kept in Common Ink, since there is nowhere else to read it from, and it is read-only. A message is kept only when it comes from one of the member's sending addresses and its domain vouches for it (DMARC, or DKIM aligned with its From). Anything else is dropped, and its sender is told nothing. Connecting it is saying so on the Email page, and disconnecting it deletes every message kept. A forwarded message is kept as its sender wrote it. See `docs/email.md` and `docs/adr/0018-email-is-kept-because-it-has-nowhere-else-to-be.md`.
 _Avoid_: Inbox, mailbox (nothing is fetched from one)
 
 **Thread**:

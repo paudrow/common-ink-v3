@@ -56,6 +56,9 @@
   // Which version of the Worker is answering: /health says its id, and a fault sent to Sentry names it as the release,
   // the same id `wrangler versions list` and `wrangler rollback` use (docs/runbooks/rollback.md).
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  // Mail is kept from notes@ at in.commonink.app, the subdomain Cloudflare Email Routing receives for: the apex's
+  // MX stays with Google Workspace (docs/email.md).
+  "vars": { "MAIL_ADDRESS": "notes@in.commonink.app" },
   // The optional settings are typed in src/worker/env.d.ts.
   "secrets": { "required": ["SESSION_SECRET"] }
   // Previews run on their own Worker, common-ink-v3-previews. scripts/preview.ts writes their settings: their own D1

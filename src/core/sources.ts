@@ -68,7 +68,7 @@ export interface ContactsSource {
 export interface MailSource {
   kind: "email";
   info: Described;
-  /** Where mail is sent to be kept, such as notes@commonink.app. */
+  /** Where mail is sent to be kept, such as notes@in.commonink.app. */
   address: string;
   list(ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; more: boolean }>;
   /** The thread an id names: a thread's, or one of its messages'. */
