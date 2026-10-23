@@ -7,7 +7,7 @@ A todo is a checkbox line in a note, with its priority, due date, repeat, assign
 Start a list item with a checkbox anywhere in a note outside a code block:
 
 ```markdown
-- [ ] !! Call the bank due:2026-10-14 every:1m @[[Sam Okafor]] #money
+- [ ] !! Call the bank due:2026-10-14 every:1m [[person:Sam Okafor]] #money
 ```
 
 Any list mark works (`-`, `*`, `+`, `1.`), at any indent. `- [x]` is a done todo, `- [-]` one you won't do, and `- [>]` one put off in the backlog. An abandoned todo is struck through and a backlogged one is dimmed. Both stay in their note and leave the Todos page until you ask for them with `is:abandoned` or `is:backlog`. Click either one's box to open it again. The editor draws each option as a chip. Click a chip to change it from a popover instead of typing.
@@ -17,7 +17,7 @@ Any list mark works (`-`, `*`, `+`, `1.`), at any indent. `- [x]` is a done todo
 | Priority | `!`, `!!`, `!!!` | Low, Medium, High. Right after the checkbox. With none it is None |
 | Due date | `due:2026-10-14` | A calendar date as `YYYY-MM-DD`, with no time. Typing `due:` offers the days ahead |
 | Repeat | `every:2w` | One of the rules below |
-| Assignee | `@` and a name | A mention on the line. A todo can have several |
+| Assignee | `[[person:Sam Okafor]]` | A mention on the line. Type `@` and a name to write one. A todo can have several |
 | Tag | `#money` | Tags the todo, and its note. A todo also has the tags over it: see below |
 
 A todo has the tags written on its line and the ones over it, and no other tag of its note:

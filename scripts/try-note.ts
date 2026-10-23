@@ -9,11 +9,14 @@
 // there is none, so the links are drawn in any workspace the note is written to. Titles are matched
 // as the server matches them, whatever their case. A target of twelve lowercase letters and digits
 // is an id, as it is everywhere, and is left as written: that is how a link to a note that is gone is shown.
+// A folder is written by its name too, [[folder:Plans]], and is stored by the id of the folder of that
+// name at the top, made where there is none.
 //
-// A reference to an event or a contact is written by its record's name, ::event{Lunch with Sam} or
-// ::contact{Sam Okafor}, and is stored as the reference of the sample record of that name, which is
-// made for the dev user as the Calendar page makes one. The sample calendar and contacts are connected
-// for that first. Only the sample data is read: no calendar or contacts that anyone connected is.
+// A reference to an event or a contact is written by its record's name, [[event:Lunch with Sam]]
+// (or [[event:Lunch with Sam|words]], whose words are kept) or ::contact{Sam Okafor}, and is stored
+// as the reference of the sample record of that name, which is made for the dev user as the Calendar
+// page makes one. The sample calendar and contacts are connected for that first. Only the sample data
+// is read: no calendar or contacts that anyone connected is.
 //
 // An upload is written by a sample file's name, ::image{sample.png}, ::audio{sample.wav},
 // ::video{sample.webm}, or ::file{sample.pdf} (and sample.csv, sample.txt, sample.md), and is
@@ -68,6 +71,10 @@ for (const title of new Set(linksIn(text).map((link) => link.target).filter((tar
   // A link to this note itself has nothing to point at until the note is there, and making a second note of its title would leave two.
   if (!titled.length && title.toLowerCase() === "try in this pr") continue;
   idOf.set(title, (titled[0] ?? (await op<Summary>({ type: "note.create", text: `# ${title}\n\nA sample note, here so that Try in this PR has a note to link to.` }))).id);
+}
+for (const target of new Set(linksIn(text).map((link) => link.target))) {
+  const name = /^folder:(.+)$/.exec(target)?.[1]?.trim();
+  if (name && !isNoteId(name)) idOf.set(target, `folder:${(await op<{ id: string }>({ type: "folder.create", name, ifExists: "return" })).id}`);
 }
 const linked = retargeted(text, (target) => idOf.get(target));
 

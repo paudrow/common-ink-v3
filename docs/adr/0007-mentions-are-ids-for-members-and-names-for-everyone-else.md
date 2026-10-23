@@ -1,6 +1,8 @@
 # 7. A mention is `@[[id|name]]` for a member and `@[[name]]` for anyone else
 
-Status: accepted by the owner of #19 on 2026-10-11, without the maintainer. Overrule it here if it is wrong.
+Status: replaced on 2026-10-23 by `docs/adr/0019-everything-a-note-opens-is-a-link.md`, where a mention is a link to a person, `[[person:id]]` or `[[person:Name]]`. What follows is kept as it was decided.
+
+Formerly: accepted by the owner of #19 on 2026-10-11, without the maintainer.
 
 ## Context
 

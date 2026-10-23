@@ -190,7 +190,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   thread ID                           an email thread with every message in it, by its id or one of its messages'
   person WHO [--limit N]              a person's page: the member they are, your member's contacts that are
                                       them, their open todos, and the lines that mention them
-  refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
+  refer SOURCE RECORD                 the [[event:...]] or ::contact{...} a note writes to reference a record
   record REF                          the event or contact a reference stands for, as it is now
   notes-about SOURCE RECORD           the notes that reference a record, by your member's reference or a teammate's to the same event, and who sees each
 
@@ -203,13 +203,14 @@ from authors, such as agent:abc123def456. NEXT is the next of the page before, a
 A link to a note is [[ID]] or [[ID|display text]]. Write [[Title]] and create and write store it by
 the id of the one note with that title. When none or several have it, the link stays as written and
 the answer lists it in "unresolved"; --link-titles resolve-strict refuses instead, and keep leaves
-every link as written.
+every link as written. A day is [[YYYY-MM-DD]], a folder [[folder:ID]], an event [[event:REF]] and a
+person [[person:ID]] or [[person:Name]], each with |display text to show other words.
 
 Times in answers are ISO 8601 with your member's time zone offset, such as 2026-10-15T09:30:00.000-07:00.
 
-A mention of a person is @[[ID|Name]] for a member, with ids from members, or @[[Name]] for anyone
-else. Write @[[Name]] for a member and create and write store it by their id, or refuse when several
-members have the name. --mention-names keep leaves every mention as written. On a todo's line a
+A mention of a person is [[person:ID]] for a member, with ids from members, or [[person:Name]] for
+anyone else. Write [[person:Name]] for a member and create and write store it by their id, or refuse
+when several members have the name. --mention-names keep leaves every mention as written. On a todo's line a
 mention assigns the todo. WHO is a member's id or a name. A mention gives nobody access.
 
 A #tag tags the note it is in. Use the tags that tags lists: create, write, edit and todo refuse a tag

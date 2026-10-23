@@ -698,7 +698,7 @@ export interface Embed {
   pick?: EmbedPick | readonly EmbedPick[];
   /**
    * False for an embed no menu lists by itself: one another embed's `pick` writes, as "Upload an
-   * image" writes a picture, or one written another way, as `@` writes a reference to an event.
+   * image" writes a picture, or one written another way, as `@` writes a reference to a contact.
    * `host.embeds.list()` leaves it out.
    */
   menu?: boolean;

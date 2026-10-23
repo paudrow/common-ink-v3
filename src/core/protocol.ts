@@ -143,12 +143,12 @@ export type LinkTitles = z.output<typeof LinkTitles>;
 const IfExists = z.enum(["return", "error"]).default("error");
 
 /**
- * What a write does with a mention it introduces, `@[[Name]]` or `@[[id]]`, outside code. `resolve`
+ * What a write does with a mention it introduces by name, `[[person:Name]]`, outside code. `resolve`
  * stores a mention of the one member with that name, ignoring case, by their id, as
- * `@[[id|Name]]`, and refuses the write when several members have the name. A name no member has is
- * left as written: a mention of someone by name, who is told nothing and given nothing. `keep`
- * leaves every mention as written. A writer who isn't a member is never told who is one, so theirs
- * are kept.
+ * `[[person:id]]` with any words after the `|` kept, and refuses the write when several members have
+ * the name. A name no member has is left as written: a mention of someone by name, who is told
+ * nothing and given nothing. `keep` leaves every mention as written. A writer who isn't a member is
+ * never told who is one, so theirs are kept.
  */
 const MentionNames = z.enum(["resolve", "keep"]).default("resolve");
 /**

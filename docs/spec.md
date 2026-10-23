@@ -67,10 +67,10 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 ### Mentions and contacts
 
-40. As a member, I want `@` to open an autocomplete that filters as I type, so that I can mention people quickly, and point at a note, an upload, an event or a day from the same list, grouped by kind, each with a line that says what it is and a preview. `@` alone shows a few of each kind: people, me first, today and tomorrow, the notes I edited last, the latest uploads and my next events. `@today`, `@next friday`, `@oct 21`, `@3pm` or `@tomorrow 3pm` writes the date (`2026-10-21`, with `15:00` for a time), and Pick a date… picks any day; a date in a note reads in words, such as Wed, Oct 21, and opens that day's daily note. Clicking a mention opens that person's page: what I may see of them, their todos, and the notes that mention them.
+40. As a member, I want `@` to open an autocomplete that filters as I type, so that I can mention people quickly, and point at a note, an upload, an event or a day from the same list, grouped by kind, each with a line that says what it is and a preview. `@` alone shows a few of each kind: people, me first, today and tomorrow, the notes I edited last, the latest uploads and my next events. `@today`, `@next friday`, `@oct 21`, `@3pm` or `@tomorrow 3pm` writes the date (`2026-10-21`, with `15:00` for a time), and Pick a date… picks any day; a date in a note reads in words, such as Wed, Oct 21, and opens that day's daily note. Clicking a mention opens that person's page: what I may see of them, their todos, and the notes that mention them. A mention is written as any link is, `[[person:…]]`, and `|` gives it my own words, as it does a link to a note, a day, a folder or an event.
 41. As a member, I want current workspace members to appear in the theme color and everyone else in gray, so that I can tell who has an account in this workspace.
 42. As a member, I want to mention a contact who has no Common Ink account, such as my plumber, so that my notes record who said what, and where `@` finds nobody by the name I typed, to create them as a contact from the list, so that the person I just met is one of my contacts without leaving the note.
-43. As a member reading someone else's note, I want to see a mentioned contact's name in gray, so that I understand the note without seeing their contact list. Guests and share-link readers see every mention in gray.
+43. As a member reading someone else's note, I want to see a mentioned contact's name in gray, so that I understand the note without seeing their contact list. Guests and share-link readers see every mention in gray, and a member mentioned by id as Someone.
 44. As a member, I want mentioning a contact never to give them access, so that recording a name is not sharing.
 
 ### Todos
@@ -239,8 +239,8 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 ### Notes, links, and folders
 
 - A note has a stable id. Its title is the first `#` heading, or its first line of words when it has none (a line that is only a web address is skipped), or Untitled. The slug comes from the title only, and is `untitled` when there is none.
-- A link is written `[[id]]` or `[[id|display text]]`. The note holds the target's id and never its title, so a rename changes no other note (ADR 1). Its visible text follows the target's title unless it sets display text with `|`.
-- A mention is `@[[id|name]]` for a member and `@[[name]]` for anyone else (ADR 7).
+- Anything a note opens is a link, `[[target]]` or `[[target|display text]]` (ADR 19): a note `[[id]]`, a day `[[2026-10-23]]`, a folder `[[folder:id]]`, an event `[[event:ref]]`, and a person `[[person:id]]` for a member or `[[person:Name]]` for anyone else. The note holds the target's id and never its title or name, so a rename changes no other note (ADR 1). Its visible text follows what the target is called now unless it sets display text with `|`. A click, a ⌘-click and vim's `gd` open it.
+- A mention is a link to a person (ADR 19). `@` writes one. A link by name is stored by id when the write finds exactly one member with that name.
 - Every note and upload has exactly one parent folder. Unsorted is a real folder.
 - A folder can be deleted only when it holds nothing its deleter can see. What they can't see, and its trashed items, move to Unsorted. A note restored after its folder is gone goes to Unsorted.
 
@@ -261,7 +261,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 - A data source belongs to the member who connected it and is visible only to them. Records are not notes.
 - Read-write sources write edits back to the external system, attributed to the member. Read-only sources refuse edits.
-- Notes reference records without copying them, as `::event{ref label}` and `::contact{ref label}`; the label is only a fallback for readers who can't see the record.
+- Notes reference records without copying them, as `[[event:ref]]` and `::contact{ref label}`; a contact's label is only a fallback for readers who can't see the record, and an event is "Event" to them.
 
 ### Plugins
 

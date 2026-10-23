@@ -37,7 +37,7 @@ A member's Google Calendar and Google Contacts are the first data sources (issue
 
 **Outbound requests.** The Worker fetches on a member's behalf, so where it fetches must not be up to a member, a note or an agent. Every address is built in `src/worker/sources/google.ts` from two constants, `https://www.googleapis.com/calendar/v3` and `https://people.googleapis.com/v1`, and checked against those origins as it is sent. A record's id is only ever one percent-encoded path segment (a contact's must match `people/<letters and digits>`), a redirect is not followed, and no operation takes an address.
 
-**A reference in a note.** A note references a record as an inline embed, `::event{<ref> <label>}` or `::contact{<ref> <label>}`.
+**A reference in a note.** A note references a record as an inline embed, `::event{<ref> <label>}` or `::contact{<ref> <label>}`. An event is now written `[[event:<ref>]]` instead, with no label: a link's target may now name a kind, so the first point below no longer holds for it, and anyone but its owner sees "Event" (`docs/adr/0019-everything-a-note-opens-is-a-link.md`). What follows is kept as it was decided.
 
 - It is an embed and not a `[[link]]`: a link's target is a note id or a title, and `[[event:…]]` would be looked up as a title and refused by `note.write`. The embed form already means "a plugin draws this", and its name says the kind without a sigil.
 - `<ref>` is twelve characters that say nothing. `record.refer` makes it and keeps beside the person which record it stands for (`source_refs`). Google's own ids are not written into notes: a calendar's id is usually an email address, sometimes a colleague's.

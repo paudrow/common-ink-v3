@@ -22,7 +22,7 @@ Click a link to open its note, or `mod`-click to open it in a tab behind. A link
 
 ## Mentions
 
-Type `@` to list people, days, notes, uploads and events: alone, it shows a few of each, and typing narrows them. The people are the workspace's members and your own contacts. A member's mention is stored by their id and shows their current name in the theme colour. Anyone else's is stored by name and shows in gray.
+Type `@` to list people, days, notes, uploads and events: alone, it shows a few of each, and typing narrows them. The people are the workspace's members and your own contacts. A member's mention is stored by their id, as `[[person:k3j5h8d9f0a1]]`, and shows their current name in the theme colour. Anyone else's is stored by name, as `[[person:Sam Okafor]]`, and shows in gray. To show words of your own instead of the name, type `|` and the words, as a link does. A guest, or anyone opening the note from a share link, sees a member's mention as "Someone".
 
 A mention gives nobody access to the note and notifies nobody. Click a mention to open the person's page. A mention on a todo's line assigns the todo. See [Todos](/docs/todos).
 
