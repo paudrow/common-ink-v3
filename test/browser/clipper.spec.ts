@@ -45,6 +45,56 @@ test("an extension that isn't the clipper can't sign in", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Allow" })).toHaveCount(0);
 });
 
+test("the clipper says why sign-in failed: a closed window, a host that refuses it, and one that doesn't answer", async ({ baseURL }) => {
+  test.setTimeout(90_000);
+  // An empty host is commonink.app to the clipper.
+  if (!baseURL) throw new Error("No baseURL to sign in to.");
+  execFileSync("node", ["--experimental-strip-types", "extension/build.ts"], { stdio: "inherit" });
+  const extension = path.resolve("extension/dist");
+  // Answers as a Common Ink whose CLIPPER_EXTENSION_IDS leaves this extension out.
+  const refusing = createServer((_req, res) => {
+    res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+    res.end("<h1>That address can't receive a clipper</h1>");
+  });
+  const closed = createServer();
+  const port = async (server: ReturnType<typeof createServer>) => {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const bound = server.address();
+    if (!bound || typeof bound === "string") throw new Error("The server did not bind.");
+    return bound.port;
+  };
+  const refusingPort = await port(refusing);
+  const closedPort = await port(closed);
+  await new Promise<void>((resolve) => closed.close(() => resolve()));
+  const context = await chromium.launchPersistentContext(mkdtempSync(path.join(tmpdir(), "clipper-")), {
+    headless: false,
+    args: ["--headless=new", `--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+  });
+  try {
+    const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${new URL(worker.url()).host}/popup.html`);
+    const signIn = async (host: string) => {
+      await popup.locator("#host").fill(host);
+      await popup.getByRole("button", { name: "Sign in" }).click();
+    };
+
+    await signIn(`http://127.0.0.1:${refusingPort}`);
+    await expect(popup.locator(".notice")).toHaveText(`This clipper (ID ${EXTENSION}) isn't allowed to sign in to 127.0.0.1:${refusingPort}. Its CLIPPER_EXTENSION_IDS setting has to name that ID.`);
+
+    await signIn(`http://127.0.0.1:${closedPort}`);
+    await expect(popup.locator(".notice")).toHaveText(`Common Ink at 127.0.0.1:${closedPort} didn't answer. Check the host and that it is running.`);
+
+    const window = context.waitForEvent("page", (p) => p.url().includes("/clipper/connect"));
+    await signIn(baseURL);
+    await (await window).close();
+    await expect(popup.locator(".notice")).toHaveText("You closed the sign-in window before allowing the clipper.");
+  } finally {
+    await context.close();
+    refusing.close();
+  }
+});
+
 /** Saves a downloaded clipper and unzips it, and says the id its manifest gives it. */
 async function unzipped(file: Download): Promise<string> {
   expect(file.suggestedFilename()).toBe("common-ink-clipper-0.1.0.zip");

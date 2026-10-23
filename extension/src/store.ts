@@ -7,6 +7,7 @@ import type { Clip, ClipMode, Draft, Inline, PlacedMap } from "./clip/types.ts";
 import { createInk, InkError } from "./ink/client.ts";
 import { fetchDocument, urlLooksLikeDocument, type DownloadedFile } from "./clip/document.ts";
 import { reduce, settle, type Session } from "./session.ts";
+import { whySignInFailed } from "./signin.ts";
 import { clipFromTree } from "./clip/tree.ts";
 import { clipWithTweet, fetchOembed, tweetFromOembed, tweetTarget } from "./clip/tweet.ts";
 import { clipWithVideo, fetchWatch, thinVideo, watchTarget } from "./clip/video.ts";
@@ -317,12 +318,12 @@ export function createClipper(): Clipper {
         notice = "The host must be an http(s) address.";
         return view();
       }
-      const redirect = chrome.identity.getRedirectURL();
+      const connect = `${origin}/clipper/connect?redirect=${encodeURIComponent(chrome.identity.getRedirectURL())}`;
       let back: string | undefined;
       try {
-        back = await chrome.identity.launchWebAuthFlow({ url: `${origin}/clipper/connect?redirect=${encodeURIComponent(redirect)}`, interactive: true });
-      } catch {
-        notice = "Sign-in was cancelled.";
+        back = await chrome.identity.launchWebAuthFlow({ url: connect, interactive: true });
+      } catch (err) {
+        notice = await whySignInFailed(err, connect, chrome.runtime.id);
         return view();
       }
       let granted = "";

@@ -307,6 +307,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           ALLOWED_EMAILS: ${{ vars.ALLOWED_EMAILS }}
+          # The clipper extensions that may sign in. A deploy replaces the Worker's settings, so it is set here or nowhere.
+          CLIPPER_EXTENSION_IDS: ${{ vars.CLIPPER_EXTENSION_IDS }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           # Seals each person's Google tokens. Without it none is kept, and Calendar and Contacts aren't offered.
@@ -314,7 +316,10 @@ jobs:
         run: |
           # The list is who may use Common Ink at all, and an empty one would let nobody in, sessions and agents included.
           [ -n "$ALLOWED_EMAILS" ] || { echo "::error::Set the ALLOWED_EMAILS variable before deploying."; exit 1; }
+          # Left out when empty rather than set to nothing. Either way the deploy leaves the Worker without it, so it warns.
+          clipper=()
+          if [ -n "$CLIPPER_EXTENSION_IDS" ]; then clipper=(--var "CLIPPER_EXTENSION_IDS:$CLIPPER_EXTENSION_IDS"); else echo "::warning::CLIPPER_EXTENSION_IDS isn't set, so no clipper can sign in."; fi
           jq -n --arg g "$GOOGLE_CLIENT_SECRET" --arg s "$SESSION_SECRET" --arg t "$TOKEN_KEY" '{GOOGLE_CLIENT_SECRET: $g, SESSION_SECRET: $s, TOKEN_KEY: $t} | with_entries(select(.value != ""))' > "$RUNNER_TEMP/secrets.json"
           npm run deploy -- --domain "$PRODUCTION_DOMAIN" --domain "www.$PRODUCTION_DOMAIN" --secrets-file "$RUNNER_TEMP/secrets.json" \
-            --var "GOOGLE_CLIENT_ID:$GOOGLE_CLIENT_ID" --var "ALLOWED_EMAILS:$ALLOWED_EMAILS"
+            --var "GOOGLE_CLIENT_ID:$GOOGLE_CLIENT_ID" --var "ALLOWED_EMAILS:$ALLOWED_EMAILS" "${clipper[@]}"
           rm "$RUNNER_TEMP/secrets.json"
