@@ -114,11 +114,11 @@ test("an embed typed by hand past :: is left as typed, and neither a written one
   await settled(page);
   await expect(list(page)).toHaveCount(0);
   await page.keyboard.press("Enter");
-  // An event or a contact is in no menu, as `@` finds them, and is still written by hand.
-  await page.keyboard.type("::eve", { delay: 20 });
+  // A contact is in no menu, as `@` finds them, and is still written by hand.
+  await page.keyboard.type("::cont", { delay: 20 });
   await settled(page);
   await expect(options(page)).toHaveText(["No matches"]);
-  await page.keyboard.type("nt{", { delay: 20 });
+  await page.keyboard.type("act{", { delay: 20 });
   await settled(page);
   await expect(list(page)).toHaveCount(0);
   await page.keyboard.type("}\n:::html{}\n<b>hi</b>\n:::", { delay: 20 });
@@ -126,6 +126,6 @@ test("an embed typed by hand past :: is left as typed, and neither a written one
   await expect(list(page)).toHaveCount(0);
   await page.keyboard.press("Enter");
   await page.keyboard.type("x ::: y");
-  await expect.poll(() => text(page, note.id)).toBe("# Hand\n\n::image{abcdefabcdef} and ::timer{5m}\n::event{}\n:::html{}\n<b>hi</b>\n:::\nx ::: y");
-  await expect(editor(page).locator(".embed-unread", { hasText: /^Event: / })).toBeVisible();
+  await expect.poll(() => text(page, note.id)).toBe("# Hand\n\n::image{abcdefabcdef} and ::timer{5m}\n::contact{}\n:::html{}\n<b>hi</b>\n:::\nx ::: y");
+  await expect(editor(page).locator(".embed-unread", { hasText: /^Contact: / })).toBeVisible();
 });

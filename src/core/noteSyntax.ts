@@ -79,10 +79,10 @@ export const NOTE_SYNTAX: readonly NoteSyntax[] = [
   },
   {
     name: "event",
-    kind: "embed",
+    kind: "prose",
     called: "an event",
-    about: "An event is the id refer_record answered, then a space, then a label. Anyone but the member whose calendar it is sees only the label.",
-    example: "::event{aaaaaaaaaaaa Lunch}",
+    about: "A link to an event is [[event:ref]], with the ref refer_record answered. It shows the event's title as it is now to the member whose calendar it is, and Event to anyone else. [[event:ref|words]] shows the words instead.",
+    example: "Agenda for [[event:aaaaaaaaaaaa]].",
   },
   {
     name: "contact",

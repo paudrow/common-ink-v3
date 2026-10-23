@@ -562,3 +562,44 @@ test("on a line with a bold word and a link, only the one the cursor is on is sh
   await page.keyboard.press("ArrowLeft");
   await expect(line, "in the link, its id and not the bold word's marks").toHaveText(`A bold word, [[${plan.id}]] and an end`);
 });
+
+/** The colour and the line of each bracket of the one link on the line that starts with `label`, and whether its line is underlined. */
+const brackets = (page: Page, label: string) =>
+  editor(page)
+    .locator(".cm-line", { hasText: new RegExp(`^${label} `) })
+    .evaluate((line) => {
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      const chars: { char: string; el: Element }[] = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) for (const char of node.textContent ?? "") chars.push({ char, el: node.parentElement! });
+      const text = chars.map((c) => c.char).join("");
+      const [open, close] = [text.indexOf("[["), text.lastIndexOf("]]")];
+      return [open, open + 1, close, close + 1].map((i) => {
+        const style = getComputedStyle(chars[i]!.el);
+        return `${chars[i]!.char} ${style.color} ${style.textDecorationLine}`;
+      });
+    });
+
+test("every kind of link, shown as written, has all four brackets in one colour, and none is underlined until it is pointed at", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "source.connect", id: "sample-calendar", back: "/calendar" });
+  const plan = await create(page, "# Plan");
+  const folder = await perform(page, { type: "folder.create", name: "Plans" });
+  const note = await create(page, `# Kinds\n\nA [[${plan.id}]]\n\nB [[2026-10-23]]\n\nC [[folder:${folder.id}]]\n\nD [[event:abcdefghijkl]]\n\nE [[person:Sam Okafor]]`);
+  await page.goto(`/note/${note.id}`);
+  await expect(editor(page).locator(".md-chip")).toHaveCount(5);
+  for (const chip of await editor(page).locator(".md-chip").all()) await expect(chip).toHaveCSS("text-decoration-line", "none");
+  await editor(page).locator(".md-chip-link").nth(1).hover();
+  await expect(editor(page).locator(".md-chip-link").nth(1)).toHaveCSS("text-decoration-line", "underline");
+
+  for (const label of ["A", "B", "C", "D", "E"]) {
+    // Into the link from its end, where it is shown as written.
+    await editor(page).locator(".cm-line", { hasText: new RegExp(`^${label} `) }).click({ position: { x: 2, y: 5 } });
+    await keys(page, "End", "ArrowLeft", "ArrowLeft", "ArrowLeft");
+    await expect(editor(page).locator(".cm-line", { hasText: new RegExp(`^${label} \\[\\[`) })).toBeVisible();
+    const four = await brackets(page, label);
+    expect(new Set(four.map((each) => each.slice(2))).size, `${label}: ${four.join(", ")}`).toBe(1);
+    expect(four[0], label).not.toContain("underline");
+    const plain = await editor(page).locator(".cm-line", { hasText: new RegExp(`^${label} `) }).evaluate((line) => getComputedStyle(line).color);
+    expect(four[0], `${label}: tinted, not the line's own colour`).not.toContain(plain);
+  }
+});

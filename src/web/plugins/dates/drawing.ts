@@ -1,9 +1,10 @@
-import type { EditorState, Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import type { EditorState, Extension, Range } from "@codemirror/state";
+import { Decoration, EditorView } from "@codemirror/view";
 import { dayLinksOn, today, writtenDayLink, type DayLink } from "../../plugin-api.ts";
 import { chips, type Chip, type Source } from "../lib/chips.ts";
 import type { HoverCards } from "../lib/hoverCard.tsx";
-import { inCode } from "../lib/live.ts";
+import { linkLook, WRITTEN_LINK } from "../lib/linkLook.ts";
+import { drawnInView, inCode, touched } from "../lib/live.ts";
 import { openDayPicker } from "./picking.tsx";
 import { chipWords, fullWords } from "./when.ts";
 
@@ -89,11 +90,25 @@ function dateChip(open: () => OpenDay, cards: HoverCards, drawn: DrawnDates): Ch
   };
 }
 
+/** A date shown as written, with the cursor on it, still reads as a link: all of it in the theme colour. */
+const asWritten = drawnInView((view) => {
+  const { state } = view;
+  const drawn: Range<Decoration>[] = [];
+  for (const range of state.selection.ranges) {
+    const line = state.doc.lineAt(range.head);
+    for (const date of dayLinksOn(line.text, line.from)) {
+      if (touched(state, date.from, date.to) && !inCode(state, date.from)) drawn.push(Decoration.mark({ class: `${WRITTEN_LINK} md-date-written` }).range(date.from, date.to));
+    }
+  }
+  return drawn;
+});
+
 const look = EditorView.baseTheme({
+  ".md-date-written": { color: "var(--accent)" },
   // A tint behind the words and nothing around them, so a line is as tall with a date drawn as with it written.
   ".md-chip-date": { color: "var(--accent)", background: "var(--accent-soft)", borderRadius: "4px", padding: "0 0.2em", whiteSpace: "nowrap" },
   ".md-chip-date[role=button]": { cursor: "pointer" },
 });
 
 /** The editor extension that draws links to days, with `cards` the cards they show, each kept in `drawn`. */
-export const dateDrawing = (open: () => OpenDay, cards: HoverCards, drawn: DrawnDates): Extension => [chips(dateChip(open, cards, drawn)), look];
+export const dateDrawing = (open: () => OpenDay, cards: HoverCards, drawn: DrawnDates): Extension => [chips(dateChip(open, cards, drawn)), asWritten, look, linkLook];

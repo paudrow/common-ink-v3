@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Icon, MAX_SEARCH_LENGTH, TODO_SORT_WORDS, changeTodo, isNoteId, isPersonId, linksOn, mentionKey, mentionName, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useInspected, useNow, type App, type InheritedTag, type ListedTodo, type Mentioned, type PluginHost, type Results, type SortKey, type TodoChange, type TodoCompletion, type TodoSort, type WrittenLink } from "../../plugin-api.ts";
+import { Icon, MAX_SEARCH_LENGTH, TODO_SORT_WORDS, changeTodo, isNoteId, isPersonId, linkedEvent, linksOn, mentionKey, mentionName, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useInspected, useNow, type App, type InheritedTag, type ListedTodo, type Mentioned, type PluginHost, type Results, type SortKey, type TodoChange, type TodoCompletion, type TodoSort, type WrittenLink } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
 import { QueryBar } from "../lib/QueryBar.tsx";
@@ -111,7 +111,7 @@ function linkText(link: WrittenLink, titleOf: TitleOf): string {
   if (link.display) return link.display;
   const title = titleOf(link.target);
   if (title === undefined) return "…";
-  if (title === null) return isNoteId(link.target) ? "Unavailable note" : link.target;
+  if (title === null) return isNoteId(link.target) ? "Unavailable note" : linkedEvent(link.target) ? "Event" : link.target;
   return title || "Untitled";
 }
 

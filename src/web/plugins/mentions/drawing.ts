@@ -2,6 +2,7 @@ import { StateField, type EditorState, type Extension, type Range } from "@codem
 import { Decoration, EditorView } from "@codemirror/view";
 import { following, mentionsIn, mentionsOn, parseTodo, type WrittenMention } from "../../plugin-api.ts";
 import { chips, editWithin, unitAtCursor, type Chip } from "../lib/chips.ts";
+import { linkLook, WRITTEN_LINK } from "../lib/linkLook.ts";
 import { drawnInView, within } from "../lib/live.ts";
 import { shown, type People } from "./people.ts";
 
@@ -79,7 +80,7 @@ const asWritten = (people: () => People) =>
       const line = state.doc.lineAt(range.head);
       for (const mention of mentionsOn(line.text, line.from)) {
         if (!within(state, mention.from, mention.to) || !isMention(state, mention)) continue;
-        drawn.push(Decoration.mark({ class: `md-mention ${classOf(shown(mention, people()).member)}` }).range(mention.from, mention.to));
+        drawn.push(Decoration.mark({ class: `${WRITTEN_LINK} md-mention ${classOf(shown(mention, people()).member)}` }).range(mention.from, mention.to));
       }
     }
     return drawn;
@@ -109,5 +110,5 @@ const followed = (open: () => OpenPerson) =>
 /** The editor extension that draws mentions, a way to put the cursor inside the one it is at, and whether it is at one. */
 export function mentionDrawing(people: () => People, open: () => OpenPerson): { extension: Extension; edit: (view: EditorView) => void; canEdit: (view: EditorView) => boolean } {
   const chip = mentionChip(people, open);
-  return { extension: [noteMentions, chips(chip), asWritten(people), look, followed(open)], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
+  return { extension: [noteMentions, chips(chip), asWritten(people), look, linkLook, followed(open)], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
 }

@@ -1,5 +1,10 @@
+import type { Extension, Range } from "@codemirror/state";
+import { Decoration, EditorView } from "@codemirror/view";
 import type { ReactNode } from "react";
-import type { Embed, Plugin, PluginHost, SourceRecord } from "../../plugin-api.ts";
+import { following, linkedEvent, linksOn, type Embed, type Plugin, type PluginHost, type SourceRecord, type WrittenLink } from "../../plugin-api.ts";
+import { chips, type Chip } from "./chips.ts";
+import { linkLook, WRITTEN_LINK } from "./linkLook.ts";
+import { drawnInView, within } from "./live.ts";
 import { openPopover } from "./Popover.tsx";
 
 /**
@@ -39,6 +44,18 @@ export function writtenReference(config: string): { ref: string; label: string }
   return read && { ref: read[1]!, label: read[2]?.trim() || "" };
 }
 
+/** How a reading of a record is drawn where a note refers to it: whether it is live, what it says and what hovering adds, and the record, where it is one to open. */
+function readAs<K extends SourceRecord["kind"]>(read: Read | undefined, { kind, title, shown }: Pick<Kind<K>, "kind" | "title" | "shown">, label: string): { state: string; text: string; said: string; record?: Extract<SourceRecord, { kind: K }> } {
+  if (!read) return { state: "reading", text: label, said: title };
+  if (read.is === "private") return { state: "private", text: label, said: `Only the member who referenced this ${kind} sees its details` };
+  if (read.is === "reconnect") return { state: "stale", text: label, said: `${read.message} to see this ${kind} as it is now` };
+  if (read.is === "failed") return { state: "stale", text: label, said: `This ${kind} couldn't be read: ${read.message}` };
+  if (read.record.kind !== kind) return { state: "stale", text: label, said: `This is a reference to ${read.record.kind === "event" ? "an event" : read.record.kind === "contact" ? "a contact" : "an email"}` };
+  const record = read.record as Extract<SourceRecord, { kind: K }>;
+  const { text, title: said } = shown(record);
+  return { state: "live", text, said, record };
+}
+
 interface Kind<K extends SourceRecord["kind"]> {
   /** Absent where nobody has records to read: every reference is then drawn as its label, and nothing is asked. */
   host?: PluginHost;
@@ -54,10 +71,10 @@ interface Kind<K extends SourceRecord["kind"]> {
 }
 
 /**
- * An embed that stands for one event or contact: `::event{ref label}`. It is one chip in the line,
+ * An embed that stands for one contact or email: `::contact{ref label}`. It is one chip in the line,
  * drawn with the label the note holds and then, for the member whose record it is, with the record
  * as it is now. Anyone else is shown the label, which is all the note says. No menu lists it: `@`
- * finds events and people and writes their references, and one can be typed or pasted by hand.
+ * finds people and writes their references, and one can be typed or pasted by hand.
  */
 export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, title, hint, shown, details }: Kind<K>): Embed {
   return {
@@ -99,16 +116,9 @@ export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, tit
           unread.textContent = `${title}: ${hint}`;
           return el.replaceChildren(unread);
         }
-        const label = written.label || title;
         const show = (read: Read | undefined) => {
-          if (!read) return chip("reading", label, title);
-          if (read.is === "private") return chip("private", label, `Only the member who referenced this ${kind} sees its details`);
-          if (read.is === "reconnect") return chip("stale", label, `${read.message} to see this ${kind} as it is now`);
-          if (read.is === "failed") return chip("stale", label, `This ${kind} couldn't be read: ${read.message}`);
-          if (read.record.kind !== kind) return chip("stale", label, `This is a reference to ${read.record.kind === "event" ? "an event" : read.record.kind === "contact" ? "a contact" : "an email"}`);
-          const record = read.record as Extract<SourceRecord, { kind: K }>;
-          const { text, title: said } = shown(record);
-          chip("live", text, said, record);
+          const { state, text, said, record } = readAs(read, { kind, title, shown }, written.label || title);
+          chip(state, text, said, record);
         };
         if (!host) return show({ is: "private" });
         const reading = readOf(host, written.ref);
@@ -122,17 +132,104 @@ export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, tit
   };
 }
 
+/** A link to an event, with the reference it is written with. */
+type EventLink = WrittenLink & { ref: string };
+
+const eventLinksOn = (line: string, offset: number): EventLink[] =>
+  linksOn(line, offset).flatMap((link) => {
+    const ref = linkedEvent(link.target);
+    return ref ? [{ ...link, ref }] : [];
+  });
+
+/** How far before a link's end its words are typed: before the closing brackets. */
+const BEFORE_END = 2;
+
+/**
+ * Links to events, `[[event:ref]]`, each drawn as one chip: its own words where it has them, and
+ * otherwise its title as it is now, for the member whose event it is, read with `host`. Anyone else
+ * sees "Event" and nothing of it. A click on the chip, with ⌘ or without, or vim's gd on it, opens
+ * what `details` shows of the event, for the member whose it is; on any other a click goes into
+ * the link. With no `host`, as on a link's page, nothing is asked. Answers the extension for the
+ * editor of a note.
+ */
+export function eventLinks({ host, shown, details }: Pick<Kind<"event">, "host" | "shown" | "details">): (noteId: string) => Extension {
+  const kind = { kind: "event" as const, title: "Event", shown };
+  /** The event each chip drawn now shows, where it shows one. */
+  const records = new WeakMap<HTMLElement, Extract<SourceRecord, { kind: "event" }>>();
+  const opened = (el: HTMLElement, noteId: string) => {
+    const record = records.get(el);
+    if (record) openPopover(el, "Event", (close) => details(record, { noteId, close }));
+    return !!record;
+  };
+  return (noteId) => {
+    const chip: Chip<EventLink> = {
+      id: "event",
+      find: eventLinksOn,
+      written: "within",
+      draw(el, link, source) {
+        el.classList.add("ref-chip");
+        const show = (read: Read | undefined) => {
+          const { state, text, said, record } = readAs(read, kind, "Event");
+          el.dataset.state = state;
+          el.textContent = link.display ?? text;
+          el.title = said;
+          if (!record) return;
+          records.set(el, record);
+          el.setAttribute("role", "button");
+          el.setAttribute("aria-haspopup", "dialog");
+          el.tabIndex = 0;
+        };
+        el.addEventListener("mousedown", (event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          if (!opened(el, noteId) && !source.readOnly) source.edit(link.to - link.from - BEFORE_END);
+        });
+        el.addEventListener("keydown", (event) => {
+          if ((event.key === "Enter" || event.key === " ") && opened(el, noteId)) event.preventDefault();
+        });
+        if (!host) return show({ is: "private" });
+        const reading = readOf(host, link.ref);
+        show(reading.read);
+        if (!reading.read) void reading.asked.then((read) => el.isConnected && show(read));
+      },
+    };
+    const followed = following.of((view) => {
+      const { head } = view.state.selection.main;
+      const line = view.state.doc.lineAt(head);
+      const link = eventLinksOn(line.text, line.from).find((found) => found.from <= head && head < found.to);
+      const el = link && [...view.contentDOM.querySelectorAll<HTMLElement>(".md-chip-event")].find((drawn) => view.posAtDOM(drawn) === link.from);
+      return !!el && opened(el, noteId);
+    });
+    return [chips(chip), asWritten, look, linkLook, followed];
+  };
+}
+
+/** A link to an event shown as written, with the cursor in it, still reads as a link: all of it in the theme colour. */
+const asWritten = drawnInView((view) => {
+  const { state } = view;
+  const drawn: Range<Decoration>[] = [];
+  for (const range of state.selection.ranges) {
+    const line = state.doc.lineAt(range.head);
+    for (const link of eventLinksOn(line.text, line.from)) if (within(state, link.from, link.to)) drawn.push(Decoration.mark({ class: `${WRITTEN_LINK} md-event-written` }).range(link.from, link.to));
+  }
+  return drawn;
+});
+
+const look = EditorView.baseTheme({ ".md-event-written": { color: "var(--accent)" } });
+
 const NOTHING = { shown: () => ({ text: "", title: "" }), details: () => null };
 
 /**
- * References as whoever holds a link sees them: the label the note holds, in gray, and nothing of
- * the record. A link's page has no member whose record it could be, so nothing is asked.
+ * References as whoever holds a link sees them: a link to an event as "Event", or its own words, and
+ * a contact or an email as the label the note holds, in gray, and nothing of the record. A link's
+ * page has no member whose record it could be, so nothing is asked.
  */
 export const labelledReferences: Plugin = {
   id: "references",
   name: "References",
   activate(host) {
-    host.embeds.register(referenceEmbed({ kind: "event", title: "Event", hint: "", ...NOTHING }));
+    const events = eventLinks(NOTHING);
+    host.editorExtensions.register({ id: "references.events", extension: (editor) => events(editor.noteId) });
     host.embeds.register(referenceEmbed({ kind: "contact", title: "Contact", hint: "", ...NOTHING }));
     host.embeds.register(referenceEmbed({ kind: "email", title: "Email", hint: "", ...NOTHING }));
   },
