@@ -1,11 +1,9 @@
+import { EDITOR, FOCUSABLE, LIST, ROW, arrive, beside, focusOn, goes, listsIn, ownKeys, regions, restOf, rowsOf, shown, typing } from "../lib/rows.ts";
 import { land, toward, type Move, type Side } from "./moving.ts";
 
 /**
- * What vim's keys move through outside a note's text, found by what the page says of itself and not
- * by which plugin drew it. A list is a tree, a listbox, a menu, a list with a name, or anything
- * marked `data-list`. Its rows are its tree items, options and menu items, or what is marked
- * `data-row`, or else its children. A row's delete key presses what it marks `data-row-delete`. A
- * region is the sidebar, the inspector, a side of a split, or anything marked `data-region`.
+ * What vim's keys move through outside a note's text: the lists, rows and regions of `rows.ts`. A
+ * row's delete key presses what it marks `data-row-delete`.
  *
  * A list that takes focus itself keeps its own cursor and has its own keys for it, as History's
  * does. Vim's keys go as far as that list and no further: its rows are the list's to move through.
@@ -13,59 +11,22 @@ import { land, toward, type Move, type Side } from "./moving.ts";
  * first row and the last, and Page Down and Page Up for vim's half pages, which such a list moves by
  * a page of its own.
  */
-const LIST = '[data-list], [role="tree"], [role="listbox"], [role="list"], [role="menu"], ul[aria-label], ol[aria-label], ul[aria-labelledby], ol[aria-labelledby]';
-const ROW = '[data-row], [role="treeitem"], [role="option"], [role^="menuitem"]';
-const REGION = "[data-region], aside, main";
 const OVER = '[role="dialog"], [role="menu"]';
-const FOCUSABLE = "a[href], button, input, select, textarea, [tabindex]";
 const SEARCH = 'input[type="search"], [role="searchbox"]';
-const EDITOR = '[contenteditable="true"][role="textbox"]';
-const TEXTLESS = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"]);
 
 /** What an embed draws in a note. Focus that has gone into it is the embed's, and so are the keys: its cards are no list of the window's. */
 export const DRAWN = ".cm-content .embed";
 
-const shown = (el: Element) => el.getClientRects().length > 0;
 const active = () => (document.activeElement instanceof HTMLElement ? document.activeElement : document.body);
 
-/** Whether a letter pressed here is typed, or chooses: a field, a select, or text that can be edited. */
-export const typing = (el: Element | null) =>
-  el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLInputElement && !TEXTLESS.has(el.type)) || (el instanceof HTMLElement && el.isContentEditable);
-
-/** Whether the list takes focus itself, and so moves through its rows with keys of its own. */
-const ownKeys = (list: Element | null): list is HTMLElement => list instanceof HTMLElement && list.matches("[tabindex]") && list.tabIndex >= 0;
 /** The key a list with its own keys has for a move, where a keyboard has one. j and k are such a list's own already. */
 const OWN_KEY: Partial<Record<Move, string>> = { first: "Home", last: "End", halfDown: "PageDown", halfUp: "PageUp" };
-
-const rowsOf = (list: Element) => {
-  const marked = [...list.querySelectorAll<HTMLElement>(ROW)].filter((row) => row.closest(LIST) === list);
-  return (marked.length ? marked : [...list.children].filter((el) => el instanceof HTMLElement)).filter(shown);
-};
-
-/**
- * What has focus while a row is the one selected: the row, or the first thing in it that can be
- * pressed. A row that begins with a field is selected itself, so no key is typed into the field
- * before the member opens it.
- */
-function restOf(row: HTMLElement) {
-  if (row.matches(FOCUSABLE)) return row;
-  const first = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => shown(el) && !el.matches(":disabled"));
-  if (first && !typing(first)) return first;
-  row.tabIndex = -1;
-  row.dataset.rests = "";
-  return row;
-}
 
 /** What opening a row presses: what it marks `data-row-open`, or its link, or the field it begins with, or what it rests on. */
 function openOf(row: HTMLElement) {
   const rest = restOf(row);
   const field = "rests" in row.dataset ? [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => shown(el) && !el.matches(":disabled")) : undefined;
   return row.querySelector<HTMLElement>("[data-row-open]") ?? (rest === row && !field ? row : (row.querySelector<HTMLElement>("a[href]") ?? field ?? rest));
-}
-
-function regions() {
-  const all = [...document.querySelectorAll<HTMLElement>(REGION)].filter((r) => shown(r) && !r.ariaHidden);
-  return all.filter((r) => !all.some((o) => o !== r && r.contains(o)));
 }
 
 /** The region the keys are in: the one with focus, or the side of a split that was last used, or the first in the middle of the window. */
@@ -112,7 +73,7 @@ export interface Surfaces {
   leaveField(): void;
   go(side: Side): void;
   tab(by: 1 | -1): void;
-  /** Puts focus in the region the keys are in: where it last was there, or its note's text, or its list. */
+  /** Puts focus where a key put something in front: in the region the keys are in, where it last was there, or its note's text, or its list; or, from the sidebar, on what was opened beside it. */
   settle(): void;
   dispose(): void;
 }
@@ -149,7 +110,6 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
   document.addEventListener("focusin", focused);
   document.addEventListener("focusout", left);
 
-  const listsIn = (within: Element) => [within, ...within.querySelectorAll(LIST)].filter((l) => l.matches(LIST) && shown(l) && rowsOf(l).length);
   /** The list the keys are in, or the nearest one to where focus is, or the first of the region. */
   const listNear = () => {
     const within = scope();
@@ -235,8 +195,10 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       const row = list && rowAt(list);
       if (!row) return;
       const target = openOf(row);
-      if (typing(target)) target.focus();
-      else target.click();
+      if (typing(target)) return target.focus();
+      target.click();
+      // What a row beside the editor area opens is shown in it, and the keys go there, whether or not it was open already.
+      if (beside(row) && goes(row)) arrive(keyed(focusOn));
     }),
     out: keyed(() => {
       const list = active().closest(LIST);
@@ -280,7 +242,11 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       const at = tabs.findIndex((t) => t.ariaSelected === "true");
       if (tabs.length > 1) tabs[(at + by + tabs.length) % tabs.length]!.click();
     },
-    settle: keyed(() => enter(here())),
+    settle: keyed(() => {
+      const region = here();
+      if (region && beside(region)) arrive(keyed(focusOn));
+      else enter(region);
+    }),
     dispose() {
       document.removeEventListener("focusin", focused);
       document.removeEventListener("focusout", left);

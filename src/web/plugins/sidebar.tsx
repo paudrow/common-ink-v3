@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Icon, draggableAs, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
+import { arrive, goes } from "./lib/rows.ts";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
@@ -58,7 +59,8 @@ function Sidebar({ app }: ViewProps) {
       </nav>
     );
   return (
-    <aside className="sidebar" aria-label="Sidebar">
+    // Enter on a link or a folder opens it and goes there with the keyboard.
+    <aside className="sidebar" aria-label="Sidebar" data-beside onKeyDown={(e) => e.key === "Enter" && !(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) && e.target instanceof Element && goes(e.target) && arrive()}>
       <WorkspaceMenu app={app} />
       <NewNote app={app} />
       <nav aria-label="Modes" className="modes">

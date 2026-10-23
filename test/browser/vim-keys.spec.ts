@@ -40,7 +40,7 @@ const page = (locator: Locator) => locator.page();
 
 const rows = (list: Locator, row = ":scope > *") => list.locator(row);
 
-test("the folder tree moves with j, k, gg and G, opens with l and Enter, and h collapses a folder and then goes to its parent", async ({ page }) => {
+test("the folder tree moves with j, k, gg and G, za opens a folder out, and h collapses a folder and then goes to its parent", async ({ page }) => {
   await signIn(page);
   const work = await perform(page, { type: "folder.create", name: "Work" });
   const plans = await perform(page, { type: "folder.create", name: "Plans", parentId: work.id });
@@ -67,15 +67,11 @@ test("the folder tree moves with j, k, gg and G, opens with l and Enter, and h c
     await expectSelected(item(to), to);
   };
   await down("Work");
-  await page.keyboard.press("l");
-  await expect(page).toHaveURL(new RegExp(`/folder/.*${work.id}`));
+  await keys(page, "z", "a");
   await expect(item("Work")).toHaveAttribute("aria-expanded", "true");
-  await expectSelected(item("Work"), "Work, after opening it");
+  await expectSelected(item("Work"), "Work, after opening it out");
   await page.keyboard.press("j");
   await expectSelected(item("Plans"), "Plans");
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/folder/.*${plans.id}`));
-  await expectSelected(item("Plans"), "Plans, after opening it");
 
   // h on a row with nothing to collapse goes to its parent, and h there collapses it.
   await page.keyboard.press("h");

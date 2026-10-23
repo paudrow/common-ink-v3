@@ -27,7 +27,7 @@ describe("where each built-in plugin's source starts", () => {
     const vim = (await sourceOf(builtIn("vim"), null)).map((file) => file.path);
     expect(vim[0]).toBe("vim/index.ts");
     // `import("./editing.ts")` is followed as `from "./keys.ts"` is, and what those import in turn.
-    expect([...vim].sort()).toEqual(["vim/editing.ts", "vim/index.ts", "vim/keys.ts", "vim/moving.ts", "vim/surfaces.ts"]);
+    expect([...vim].sort()).toEqual(["lib/rows.ts", "vim/editing.ts", "vim/index.ts", "vim/keys.ts", "vim/moving.ts", "vim/surfaces.ts"]);
     const todos = await sourceOf(builtIn("todos"), null);
     expect(todos.map((file) => file.path)).toContain("lib/openTodo.ts");
     expect(todos.every((file) => !file.path.startsWith(".") && file.text.length > 0)).toBe(true);
