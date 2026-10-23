@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { perform, showPanel, signInAsNewPerson, test } from "./helpers.ts";
+import { fetched, frameOrigin, perform, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 import { frameFor, install, runCommand, toast, turnOn } from "./third-party-helpers.ts";
 import { standIns } from "./media-helpers.ts";
 import { pdf } from "./pdfs.ts";
@@ -138,7 +138,10 @@ test("a video's picture and player, posts and an HTML embed are drawn and run un
   const res = await page.goto(`/note/${note.id}`);
   const policy = res!.headers()["content-security-policy"]!;
   expect(policy.split(",")).toHaveLength(1);
-  expect(policy).toMatch(/frame-src \S+\/embed-frame \S+\/embed-frame\/g\/ https:\/\/www\.youtube-nocookie\.com https:\/\/platform\.twitter\.com https:\/\/embed\.bsky\.app;/);
+  // The embed's document from the app's own address, and from the host kept for embeds where there is one.
+  const hosts = [...new Set([new URL(page.url()).origin, await frameOrigin(page)])];
+  const frames = hosts.flatMap((host) => [`${host}/embed-frame`, `${host}/embed-frame/g/`]);
+  expect(policy).toContain(`frame-src ${[...frames, "https://www.youtube-nocookie.com", "https://platform.twitter.com", "https://embed.bsky.app"].join(" ")};`);
 
   const below = (embed: string) => page.locator(`.embed-below[data-embed="${embed}"]`);
   // The video's picture and its title, from YouTube, then its player once play is pressed.
@@ -155,11 +158,11 @@ test("a video's picture and player, posts and an HTML embed are drawn and run un
   expect(await watch.refused()).toEqual([]);
 });
 
-test("an HTML embed's document runs its own script and styles under the embed frame's policy, sandboxed, and can fetch nothing", async ({ page }) => {
+test("an HTML embed's document runs its own script and styles under the embed frame's policy, sandboxed, and can fetch nothing", async ({ page, baseURL }) => {
   const watch = await watchRefusals(page);
   // Main has no embed document yet, so the Worker's answer for its address is given an embed's body, keeping every header the Worker sent.
   await page.route("**/embed-frame", async (route) => {
-    const sent = await route.fetch();
+    const sent = await fetched(route);
     const body = `<!doctype html><meta charset="utf-8"><style>body { color: rgb(1, 2, 3) }</style><body><p id="said">waiting</p><img alt="dot" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="><script>
       document.getElementById("said").textContent = "ran in " + origin;
       const frame = document.createElement("iframe");
@@ -174,7 +177,8 @@ test("an HTML embed's document runs its own script and styles under the embed fr
   const res = await page.goto("/embed-frame");
   const policy = res!.headers()["content-security-policy"]!;
   expect(policy).toContain("sandbox allow-scripts");
-  expect(policy).toContain("frame-ancestors 'self'");
+  // Framed by the app alone on its own address. A host kept for embeds answers nothing else, and is framed by whoever frames it.
+  expect(policy).toContain((await frameOrigin(page)) === new URL(baseURL!).origin ? "frame-ancestors 'self'" : "frame-ancestors *");
   expect(res!.headers()["referrer-policy"]).toBe("no-referrer");
   await expect(page.locator("#said")).toHaveText("ran in null, inner ran");
   await expect(page.locator("body")).toHaveCSS("color", "rgb(1, 2, 3)");
@@ -241,7 +245,8 @@ test("a drawing is edited in Excalidraw and saved under the page's policy, Excal
   await expect(page.locator('.embed-below[data-embed="drawing"] img')).toHaveAttribute("src", /^data:image\/png;base64,/);
   expect(loaded.some((url) => /\/fonts\/Excalifont\//.test(url)), "the words' font was loaded").toBe(true);
   expect(loaded.some((url) => /\/fonts\/Xiaolai\//.test(url)), "and the font of the words in Chinese").toBe(true);
-  expect(loaded.filter((url) => !url.startsWith(baseURL!) && !url.startsWith("data:")), "from the app's own address").toEqual([]);
+  const frames = await frameOrigin(page);
+  expect(loaded.filter((url) => !url.startsWith(baseURL!) && !url.startsWith(`${frames}/embed-frame`) && !url.startsWith("data:")), "from the app's own address, or the frames' own").toEqual([]);
   expect(await watch.refused()).toEqual([]);
 });
 

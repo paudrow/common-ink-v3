@@ -1,7 +1,7 @@
 import { deflateSync, crc32 } from "node:zlib";
 import { expect, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
-import { asViewerOfNote, perform, signInAsNewPerson, test } from "./helpers.ts";
+import { asViewerOfNote, frameOrigin, perform, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -165,7 +165,8 @@ test("someone who can only read the note gets no settings button on any embed", 
   const photo = await send(admin, "harbour.png", png(400, 300));
   await perform(admin, { type: "note.write", id: note.id, baseRevision: note.revision, text: `${note.text}\n::image{${photo.id} 400x300}\n\nend\n` });
   await page.goto(`/note/${note.id}`);
-  await expect(page.getByRole("button", { name: "Run HTML" })).toBeVisible();
+  // The HTML is drawn: running, or asking to, as this server has a site of HTML embeds' own or not.
+  await expect(page.locator('.embed-below[data-embed="html"]').locator("iframe, .media-load").first()).toBeVisible();
   await expect(editor(page).getByText("5:00")).toBeVisible();
   await expect(page.locator('.embed-below[data-embed="image"] img')).toBeVisible();
   await expect(page.getByRole("button", { name: /^Settings for / })).toHaveCount(0);
@@ -384,4 +385,24 @@ test("a length out of its place is put back by setting it again, and a wrong wor
   await panel.getByRole("group", { name: "Running since: An instant" }).getByRole("button", { name: "Remove" }).click();
   await expect.poll(() => noteText(page, note.id)).toContain("Lap ::timer{5m} here.");
   await expect(panel.locator(".embed-option-stray")).toHaveCount(0);
+});
+
+test("on the dev server an HTML block runs by itself, with no click, from a site of HTML embeds' own", async ({ page, baseURL }) => {
+  const app = new URL(baseURL!).origin;
+  // Only the dev server, whose pages allow Vite's inline script, gives HTML embeds a site of their own. A built Worker, as CI's and a Preview's, has none.
+  const policy = (await page.request.get("/")).headers()["content-security-policy"]!;
+  test.skip(!/script-src [^;]*'unsafe-inline'/.test(policy), "Not the dev server: HTML embeds have no site of their own here.");
+  const served = await frameOrigin(page);
+  expect(served).toBe(`http://embed.localhost:${new URL(app).port}`);
+
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await open(page, '# Page\n\n:::html{}\n<p id="hi">Hi from HTML</p>\n:::\n\nlast\n');
+  const room = page.locator('.embed-below[data-embed="html"]');
+  await expect(room.frameLocator("iframe").frameLocator("iframe").locator("#hi")).toHaveText("Hi from HTML");
+  await expect(room.getByRole("button", { name: /^Run HTML/ })).toHaveCount(0);
+  // Its document came from the embeds' own site, which the page's policy lets it frame, and not from the app's.
+  expect(page.frames().map((f) => f.url())).toContain(`${served}/embed-frame`);
+  expect(page.frames().map((f) => f.url())).not.toContain(`${app}/embed-frame`);
+  const framing = (await page.request.get(`/note/${note.id}`)).headers()["content-security-policy"]!;
+  expect(framing).toContain(`${served}/embed-frame ${served}/embed-frame/g/`);
 });
