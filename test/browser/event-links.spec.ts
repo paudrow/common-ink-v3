@@ -64,7 +64,7 @@ test("[[ finds a repeating event's occurrences after the notes, nearest first, e
   await expect(offered(page)).toHaveText(`Standup${longDay(day)} · ${timeIn(later.when.from as number, zone)} · Work`);
   await page.keyboard.press("Enter");
   const { text: reference } = await perform(page, { type: "record.refer", sourceId: later.sourceId, id: later.id });
-  expect(reference).toMatch(/^::event\{[a-z0-9]{12} Standup\}$/);
+  expect(reference).toMatch(/^\[\[event:[a-z0-9]{12}\]\]$/);
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(`# Standup notes\n\nBefore ${reference}`);
   // The cursor is after it, so typing goes on, and off its edge it is drawn as the event.
   await page.keyboard.type(" after");
@@ -82,7 +82,7 @@ test("[[ finds a repeating event's occurrences after the notes, nearest first, e
   await page.keyboard.press("Enter");
   await page.keyboard.press("Home");
   await page.keyboard.type("So ");
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toMatch(/\nSo Then ::event\{[a-z0-9]{12} Planning\}$/);
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toMatch(/\nSo Then \[\[event:[a-z0-9]{12}\]\]$/);
   await page.unroute("**/ops");
 
   // The occurrence lists the note; another occurrence of the same event doesn't.
@@ -277,4 +277,49 @@ test("Cancel in the new note form gives the keyboard back to New note about this
   await page.keyboard.press("Escape");
   await expect(popover(page)).toHaveCount(0);
   await expect(linkIn(page)).toBeFocused();
+});
+
+test("a link to an event shows its title, or its own words after a |, opens the event on a click, a ⌘-click or vim's gd, and is Event to anyone else", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
+  await perform(page, { type: "source.connect", id: "sample-calendar", back: "/calendar" });
+  const [lunch] = await nearestFirst(page, "Lunch with Sam");
+  const { ref } = await perform(page, { type: "record.refer", sourceId: lunch!.sourceId, id: lunch!.id });
+  const note = await perform(page, { type: "note.create", text: `# Plans\n\nAt [[event:${ref}]] and again at [[event:${ref}|the lunch]]` });
+  await page.goto(`/note/${note.id}`);
+  const chips = editor(page).locator(".md-chip-event");
+  await expect(chips).toHaveText(["Lunch with Sam", "the lunch"]);
+  await expect(chips.nth(1)).toHaveAttribute("title", /Personal/);
+
+  const popover = page.getByRole("dialog", { name: "Event" });
+  await chips.first().click();
+  await expect(popover).toContainText("Lunch with Sam");
+  await page.keyboard.press("Escape");
+  await expect(popover).toHaveCount(0);
+  await chips.nth(1).click({ modifiers: ["ControlOrMeta"] });
+  await expect(popover).toContainText("Lunch with Sam");
+  await page.keyboard.press("Escape");
+
+  // gd from the word before it, where the cursor lands on the drawn link.
+  await editor(page).click();
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
+  await page.keyboard.press("2");
+  await page.keyboard.press("j");
+  await page.keyboard.press("w");
+  await page.keyboard.press("g");
+  await page.keyboard.press("d");
+  await expect(popover).toContainText("Lunch with Sam");
+  await page.keyboard.press("Escape");
+
+  // Another member reads the note and is told nothing of the event: it is Event, or the words the note gives it.
+  const grace = await anotherPerson(page, "Grace Hopper");
+  await join(grace, page, "editor");
+  await grace.goto(`/note/${note.id}`);
+  const theirs = editor(grace).locator(".md-chip-event");
+  await expect(theirs).toHaveText(["Event", "the lunch"]);
+  await expect(theirs.first()).toHaveAttribute("data-state", "private");
+  await theirs.first().click();
+  await expect(grace.getByRole("dialog", { name: "Event" })).toHaveCount(0);
+  await expect(editor(grace)).toContainText(`[[event:${ref}]]`);
 });

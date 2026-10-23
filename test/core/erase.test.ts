@@ -93,7 +93,7 @@ async function sharing() {
   const daily = await perform(env.DB, grace, { type: "daily.open", on: "2026-10-12" });
   const kept = await perform(env.DB, grace, { type: "daily.open", on: "2026-10-13" });
   await perform(env.DB, grace, { type: "note.setPrivate", id: kept.id, private: false });
-  const mention = await perform(env.DB, ada, { type: "note.create", text: `# Ada's\n\nAsk @[[${grace.personId}|Grace Hopper]] about it.` });
+  const mention = await perform(env.DB, ada, { type: "note.create", text: `# Ada's\n\nAsk [[person:${grace.personId}|Grace Hopper]] about it.` });
 
   const file = await upload(grace, "shared.png");
   const hidden = await upload(grace, "hidden.png", PNG, { private: true });
@@ -169,7 +169,7 @@ describe("deleting an account", () => {
     expect((await perform(env.DB, w.ada, { type: "note.history", id: w.byAgent.id })).map((c) => [c.author.name, (c.author as { onBehalfOf: string }).onBehalfOf])).toEqual([[FORMER_AGENT, former]]);
     expect((await perform(env.DB, w.ada, { type: "note.read", id: w.shared.id })).text).toContain("More.");
     expect(await perform(env.DB, w.ada, { type: "note.read", id: w.kept.id })).toMatchObject({ id: w.kept.id });
-    expect((await perform(env.DB, w.ada, { type: "note.read", id: w.mention.id })).text).toContain(`@[[${w.grace.personId}|Grace Hopper]]`);
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: w.mention.id })).text).toContain(`[[person:${w.grace.personId}|Grace Hopper]]`);
     expect((await perform(env.DB, w.ada, { type: "member.list" })).map((m) => m.name)).toEqual(["Ada Lovelace"]);
     expect((await perform(env.DB, w.ada, { type: "plugin.list" })).plugins.find((p) => p.id === w.plugin)).toMatchObject({ installedBy: FORMER_NAME });
     expect(await perform(env.DB, w.ada, { type: "upload.read", id: w.parts.id })).toMatchObject({ name: "parts.bin", state: "live" });
@@ -261,7 +261,7 @@ async function full() {
   const folder = await perform(env.DB, ada, { type: "folder.create", name: "Projects" });
   const inner = await perform(env.DB, ada, { type: "folder.create", name: "Inner", parentId: folder.id });
   const notes: string[] = [];
-  for (let i = 0; i < 45; i++) notes.push((await perform(env.DB, i % 2 ? ada : grace, { type: "note.create", text: `# Note ${i}\n\n- [ ] todo #tag @[[Someone]]`, folderId: i % 3 ? folder.id : inner.id })).id);
+  for (let i = 0; i < 45; i++) notes.push((await perform(env.DB, i % 2 ? ada : grace, { type: "note.create", text: `# Note ${i}\n\n- [ ] todo #tag [[person:Someone]]`, folderId: i % 3 ? folder.id : inner.id })).id);
   await perform(env.DB, ada, { type: "note.write", id: notes[1]!, baseRevision: 1, text: `# Linked\n\n[[${notes[0]}]]` });
   notes.push((await perform(env.DB, ada, { type: "daily.open", on: "2026-10-12" })).id);
   const secret = await perform(env.DB, grace, { type: "note.create", text: "# Hidden" });

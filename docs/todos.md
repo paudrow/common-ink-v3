@@ -13,10 +13,10 @@ A todo is a checkbox line in a note. There is no other record of it: the note's 
 | Due date | `due:2026-10-14` | A real calendar date as `YYYY-MM-DD`. No time and no time zone. The first one on the line counts; a second is words. |
 | Repeat | `every:2w` | One of the rules below. The first one that can be read counts. |
 | Last done | `done:2026-10-10x12` | The day a repeating todo was last checked off, and how many times it has been. With no `x12` it was once. Checking the todo off writes it. |
-| Assignee | `@[[k3j5h8d9f0a1\|Ada Lovelace]]`, `@[[Sam Okafor]]` | A mention of a person on the line: a member by their id and name, anyone else by name. A todo can have several. `docs/adr/0007-mentions-are-ids-for-members-and-names-for-everyone-else.md` has how a mention is written. |
+| Assignee | `[[person:k3j5h8d9f0a1]]`, `[[person:Sam Okafor]]` | A mention of a person on the line: a member by their id, anyone else by name. A todo can have several. `docs/adr/0019-everything-a-note-opens-is-a-link.md` has how a mention is written. |
 | Tag | `#money` | Letters, digits, `_`, `-` and `/`, with something besides digits, so `#12` is not a tag. It tags the todo and the whole note. Matched ignoring case. |
 
-A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `a#b` is not a tag. Text in inline code, in a link to a note (`[[…]]`), in a mention (`@[[…]]`), and in a link's address (`](…)`) is never a token. Nor is a tag in an embed's braces, as `::poll{question #garden}` has. A mention stands alone the same way at its start: its `@` doesn't follow a letter, a digit, `_` or `@`.
+A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `a#b` is not a tag. Text in inline code, in a link (`[[…]]`, a mention too), and in a link's address (`](…)`) is never a token. Nor is a tag in an embed's braces, as `::poll{question #garden}` has.
 
 Where issue 1 was silent, the choices were made for text that is plain to read and to type, that parses one way, and that an agent can write without asking:
 

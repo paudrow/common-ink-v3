@@ -2,6 +2,7 @@ import type { EditorState, Extension, Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { linkedFolder, type WrittenLink } from "../../plugin-api.ts";
 import { chips, editWithin, unitAtCursor, type Chip } from "../lib/chips.ts";
+import { linkLook, WRITTEN_LINK } from "../lib/linkLook.ts";
 import { drawnInView, within } from "../lib/live.ts";
 import { MOD } from "../lib/opening.ts";
 import { noteLinks, noteLinksOn } from "./at.ts";
@@ -73,7 +74,7 @@ const asWritten = (noteOf: NoteOf) =>
       for (const link of noteLinksOn(line.text, line.from)) {
         if (!within(state, link.from, link.to) || !isLink(state, link)) continue;
         const { hint, gone } = linkWords(noteOf(link.target), link.display, HOW.written, kindOf(link.target));
-        drawn.push(Decoration.mark({ class: gone ? "md-notelink md-notelink-gone" : "md-notelink", attributes: { title: hint, ...(gone ? {} : { "data-note": link.target }) } }).range(link.from, link.to));
+        drawn.push(Decoration.mark({ class: `${WRITTEN_LINK} ${gone ? "md-notelink md-notelink-gone" : "md-notelink"}`, attributes: { title: hint, ...(gone ? {} : { "data-note": link.target }) } }).range(link.from, link.to));
       }
     }
     return drawn;
@@ -81,7 +82,7 @@ const asWritten = (noteOf: NoteOf) =>
 
 const look = EditorView.baseTheme({
   // Words in the line and nothing more, so a line is as tall with a link drawn as with it written.
-  ".md-chip-link, .md-notelink": { color: "var(--accent)", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: "2px" },
+  ".md-chip-link, .md-notelink": { color: "var(--accent)" },
   ".md-chip-link": { cursor: "pointer" },
   ".md-notelink-gone": { color: "var(--faint)", textDecorationLine: "line-through", textDecorationStyle: "solid" },
   ".md-notelink-trashed": { color: "var(--muted)" },
@@ -102,5 +103,5 @@ export function linkDrawing(noteOf: NoteOf, open: Open): { extension: Extension;
     },
   });
   const chip = linkChip(noteOf, open);
-  return { extension: [noteLinks, chips(chip), asWritten(noteOf), following, look], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
+  return { extension: [noteLinks, chips(chip), asWritten(noteOf), following, look, linkLook], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
 }

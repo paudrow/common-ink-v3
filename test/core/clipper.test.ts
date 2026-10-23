@@ -167,7 +167,7 @@ describe("what a clipper token reaches", () => {
     const clip = (text: string) => tool(token, "create_note", { workspaceId: ada.workspaceId, text, linkTitles: "resolve-strict", mentionNames: "resolve" });
 
     // A title the member has and one nobody has are answered alike: both made, with the text as it was sent.
-    for (const sent of ["[[Secret Plan]] [[Not There]] @[[Grace Hopper]]", "[[Also Not There]] [[Not There]] @[[Nobody Here]]"]) {
+    for (const sent of ["[[Secret Plan]] [[Not There]] [[person:Grace Hopper]]", "[[Also Not There]] [[Not There]] [[person:Nobody Here]]"]) {
       const made = await clip(sent);
       expect([made.isError, made.text.includes(secret.id), made.text.includes(grace.personId)]).toEqual([false, false, false]);
       expect(await env.DB.prepare("SELECT text FROM notes WHERE id = ?").bind(made.json().id).first("text")).toBe(sent);

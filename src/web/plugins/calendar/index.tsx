@@ -1,7 +1,7 @@
 import type { CalendarEvent, CompletionItem, Plugin } from "../../plugin-api.ts";
 import { AT_ALONE, namable } from "../lib/pointing.ts";
 import { reask } from "../lib/reasking.ts";
-import { referenceEmbed } from "../lib/references.tsx";
+import { eventLinks } from "../lib/references.tsx";
 import { CalendarPage } from "./Calendar.tsx";
 import { whenLabel } from "./dates.ts";
 import { EventLink } from "./EventLink.tsx";
@@ -17,8 +17,8 @@ const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /**
  * The Calendar: the member's events from the calendars they connected, which nobody else in the
- * workspace sees. A note references one as `::event{ref label}`, which shows the event as it is now
- * to the member whose it is and the label to everyone else.
+ * workspace sees. A note links to one as `[[event:ref]]`, which shows the event as it is now to the
+ * member whose it is, and "Event" to everyone else.
  */
 export const calendar: Plugin = {
   id: "calendar",
@@ -87,16 +87,12 @@ export const calendar: Plugin = {
     host.completions.register({ id: "events.at", trigger: "@", spaces: true, items: (typed) => (namable(typed) ? events(typed, "@") : []) });
     host.commands.register({ id: "calendar.copyReference", title: "Copy event reference", group: "Calendar", run: () => void copyEventReference(host) });
     host.views.register("page", { id: "calendar", path: "/calendar", label: "Calendar", description: "The events of the calendars you connect, which only you see.", icon: "calendar", nav: "primary", order: 40, component: (props) => <CalendarPage host={host} {...props} /> });
-    host.embeds.register(
-      referenceEmbed({
-        host,
-        kind: "event",
-        title: "Event",
-        hint: "copy a reference from an event on the Calendar page, and paste it over this",
-        // The title alone: adding the time as the details arrive would widen the chip, and a line that just fit would gain a row.
-        shown: ({ event }) => ({ text: event.title || "Untitled", title: `${whenLabel(event.when, zone())} · ${event.calendar}${event.location ? ` · ${event.location}` : ""}` }),
-        details: ({ event }, { noteId, close }) => <EventLink host={host} event={event} noteId={noteId} close={close} />,
-      }),
-    );
+    const linked = eventLinks({
+      host,
+      // The title alone: adding the time as the details arrive would widen the chip, and a line that just fit would gain a row.
+      shown: ({ event }) => ({ text: event.title || "Untitled", title: `${whenLabel(event.when, zone())} · ${event.calendar}${event.location ? ` · ${event.location}` : ""}` }),
+      details: ({ event }, { noteId, close }) => <EventLink host={host} event={event} noteId={noteId} close={close} />,
+    });
+    host.editorExtensions.register({ id: "calendar.events", extension: (editor) => linked(editor.noteId) });
   },
 };

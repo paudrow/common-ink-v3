@@ -158,7 +158,7 @@ test("@ alone and Enter writes my mention before anything has been read, and wha
   await page.keyboard.type("Ask @");
   await expect(options(page).first()).toHaveText("Ada LovelaceYou");
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk @[[${adaId}|Ada Lovelace]]`);
+  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk [[person:${adaId}]]`);
 
   await page.keyboard.type(" about @");
   await expect.poll(() => groups(page)).toEqual([
@@ -178,7 +178,7 @@ test("@ alone and Enter writes my mention before anything has been read, and wha
   ]);
   await expect(page.getByRole("option", { selected: true })).toHaveText("HiringUnsorted");
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk @[[${adaId}|Ada Lovelace]] about [[${hiring.id}]]`);
+  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk [[person:${adaId}]] about [[${hiring.id}]]`);
 });
 
 test("picking from @ writes what each kind's own way in writes: a mention, a link, an upload placed in the note, and an event's reference", async ({ page }) => {
@@ -196,19 +196,19 @@ test("picking from @ writes what each kind's own way in writes: a mention, a lin
   await page.keyboard.type(" and @minutes");
   await expect(options(page)).toHaveText([/^minutes\.txtFile · /, "Create note “minutes”New note in Unsorted", "Create folder “minutes”New folder at the top", "Create tag #minutesNew tag"]);
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk @[[${adaId}|Ada Lovelace]] about [[${onboarding.id}]] and ::file{${minutes.id}}`);
+  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk [[person:${adaId}]] about [[${onboarding.id}]] and ::file{${minutes.id}}`);
 
   await page.keyboard.type(" at @lunch");
   await expect(options(page)).toHaveCount(11);
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`and ::file\\{${minutes.id}\\} at ::event\\{[a-z0-9]{12} Lunch with Sam\\}$`));
+  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`and ::file\\{${minutes.id}\\} at \\[\\[event:[a-z0-9]{12}\\]\\]$`));
 
   // A picture goes on a line of its own, as a pasted one does, and the cursor on the line after it.
   await page.keyboard.press("Enter");
   await page.keyboard.type("@portrait");
   await expect(options(page)).toHaveText([/^sam-portrait\.png/, "Create note “portrait”New note in Unsorted", "Create folder “portrait”New folder at the top", "Create tag #portraitNew tag"]);
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`Lunch with Sam\\}\\n::image\\{${portrait.id} 40x30\\}\\n$`));
+  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`\\[\\[event:[a-z0-9]{12}\\]\\]\\n::image\\{${portrait.id} 40x30\\}\\n$`));
   await page.keyboard.type("After.");
   await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`::image\\{${portrait.id} 40x30\\}\\nAfter\\.$`));
 });

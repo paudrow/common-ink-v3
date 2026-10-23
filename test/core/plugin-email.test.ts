@@ -53,7 +53,7 @@ describe("the Email plugin", () => {
 
   it("draws a reference on a link's page as its label, asking nothing", () => {
     const { host, asked } = started([labelledReferences]);
-    expect(host.contributions().embeds.map((e) => e.name)).toEqual(["event", "contact", "email"]);
+    expect(host.contributions().embeds.map((e) => e.name)).toEqual(["contact", "email"]);
     expect(asked).toEqual([]);
     host.dispose();
   });

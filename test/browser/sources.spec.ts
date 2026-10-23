@@ -319,7 +319,7 @@ test("a change made from a stale reading is refused, says so, and overwrites not
   expect([saved.title, saved.location]).toEqual(["Planning, moved", "Room 9"]);
 });
 
-test("a reference to an event shows its owner the event as it is now, and every other member the label alone", async ({ page, context }) => {
+test("a link to an event shows its owner the event as it is now, and every other member Event alone", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAsNewPerson(page, "Ada Lovelace");
   const grace = await anotherPerson(page, "Grace Hopper");
@@ -334,7 +334,7 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await runCommand(page, "Copy event reference");
   await expect(page.locator(".toast-card").last()).toContainText(/^Copied the reference to Lunch with Sam, \w{3} \d{1,2}\. Paste it into a note\.$/);
   const written = await page.evaluate(() => navigator.clipboard.readText());
-  expect(written).toMatch(/^::event\{[a-z0-9]{12} Lunch with Sam\}$/);
+  expect(written).toMatch(/^\[\[event:[a-z0-9]{12}\]\]$/);
 
   await openNote(page, note.id, "We meet at");
   await writeAtEnd(page, written);
@@ -355,25 +355,26 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await expect(page.getByRole("dialog", { name: "Event" })).toContainText("Cafe Lula");
   await page.keyboard.press("Escape");
   const kept = (await perform(page, { type: "note.read", id: note.id })).text;
-  expect(kept, "the note holds the reference and its label, and nothing else of the event").toBe(`# Plan\n\nWe meet at ${written}\nafter`);
+  expect(kept, "the note holds the reference, and nothing of the event").toBe(`# Plan\n\nWe meet at ${written}\nafter`);
   expect(kept).not.toContain("Samira");
 
   await openNote(grace, note.id, "We meet at");
-  await expect(chips(grace)).toHaveText(["Lunch with Sam"]);
+  await expect(chips(grace)).toHaveText(["Event"]);
   await expect(chips(grace)).toHaveAttribute("data-state", "private");
   await expect(chips(grace)).toHaveAttribute("title", "Only the member who referenced this event sees its details");
   await expect.poll(() => isMuted(chips(grace))).toBe(true);
   await expect.poll(() => isMuted(chips(page))).toBe(false);
   await expect(grace.locator("body")).not.toContainText("Samira");
   await expect(grace.locator("body")).not.toContainText("Cafe Lula");
-  const ref = /\{([a-z0-9]{12}) /.exec(written)![1]!;
+  await expect(grace.locator("body")).not.toContainText("Lunch with Sam");
+  const ref = /event:([a-z0-9]{12})/.exec(written)![1]!;
   const refused = await answer(grace, { type: "record.read", ref }, workspaceId);
   expect([refused.status, refused.body.error]).toEqual([404, "not_found"]);
 
-  // Disconnected, the owner is left with the label too, and told what brings the rest back.
+  // Disconnected, the owner is left with Event too, and told what brings the rest back.
   await perform(page, { type: "source.disconnect", id: "sample-calendar" });
   await openNote(page, note.id, "We meet at");
-  await expect(chips(page)).toHaveText(["Lunch with Sam"]);
+  await expect(chips(page)).toHaveText(["Event"]);
   await expect(chips(page)).toHaveAttribute("title", "Reconnect Sample calendar first to see this event as it is now");
 });
 
@@ -419,7 +420,7 @@ interface Place {
 }
 
 /** Where each of these words is: the left edge of its first letter, and the top and height of the line it is on. */
-test("whoever opens a link to a note sees a reference as its label, in gray, and their page asks nothing about it", async ({ page }) => {
+test("whoever opens a link to a note sees a link to an event as an event and a reference as its label, in gray, and their page asks nothing about it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await connectSample(page);
   const lunch = await perform(page, { type: "record.refer", ...(({ sourceId, id }) => ({ sourceId, id }))(await eventNamed(page, "Lunch with Sam")) });
@@ -434,8 +435,8 @@ test("whoever opens a link to a note sees a reference as its label, in gray, and
     if (new URL(request.url()).pathname.startsWith("/api/")) asked.push(new URL(request.url()).pathname);
   });
   await anyone.goto(`/s/${link.to.token}`);
-  await expect(chips(anyone)).toHaveText(["Lunch with Sam", "Sam Okafor"]);
-  await expect(editor(anyone)).not.toContainText("::event");
+  await expect(chips(anyone)).toHaveText(["Event", "Sam Okafor"]);
+  await expect(editor(anyone)).not.toContainText("[[event");
   await expect(editor(anyone)).not.toContainText(lunch.ref);
   for (const chip of await chips(anyone).all()) {
     await expect(chip).toHaveAttribute("data-state", "private");
@@ -478,9 +479,9 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   await page.setViewportSize({ width: 1700, height: 900 });
   await signInAsNewPerson(page, "Ada Lovelace");
   await connectSample(page);
-  const lunch = await perform(page, { type: "record.refer", ...(({ sourceId, id }) => ({ sourceId, id }))(await eventNamed(page, "Lunch with Sam")) });
+  const lin = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "lin" });
   const sam = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
-  const note = await perform(page, { type: "note.create", text: `# Refs\n\nplain line above\n\nBefore ${lunch.text} trailing\n\nSecond ${sam.text} and ${lunch.text}\n\nnext line\n\nlast line` });
+  const note = await perform(page, { type: "note.create", text: `# Refs\n\nplain line above\n\nBefore ${lin.text} trailing\n\nSecond ${sam.text} and ${lin.text}\n\nnext line\n\nlast line` });
 
   // The server's answers about the references are held back, so the note is first seen with their labels alone.
   let release!: () => void;
@@ -495,13 +496,13 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
 
   await openNote(page, note.id, "plain line above");
   await page.evaluate(() => document.fonts.ready);
-  await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
+  await expect(chips(page)).toHaveText(["Lin Wei", "Sam Okafor", "Lin Wei"]);
   await expect(chips(page).first()).toHaveAttribute("data-state", "reading");
   const fixed = ["plain line above", "Before", "Second", "next line", "last line"];
   const reading = await places(page, fixed);
 
   release();
-  await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
+  await expect(chips(page)).toHaveText(["Lin Wei", "Sam Okafor", "Lin Wei"]);
   expectUnmoved(await places(page, fixed), reading, "once the details arrived");
   expect(reads, "a reference written twice is read once").toBe(2);
   const drawn = await places(page, [...fixed, "trailing"]);
@@ -516,8 +517,8 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   await page.keyboard.press("Home");
   for (let i = 0; i < "Before ::".length; i++) await page.keyboard.press("ArrowRight");
   const source = editor(page).locator(".embed-source");
-  await expect(source).toHaveText(lunch.text);
-  await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
+  await expect(source).toHaveText(lin.text);
+  await expect(chips(page)).toHaveText(["Lin Wei", "Sam Okafor", "Lin Wei"]);
   const written = await places(page, [...fixed, "trailing"]);
   expectUnmoved({ "plain line above": written["plain line above"]! }, { "plain line above": drawn["plain line above"]! }, "with the first reference shown as written in its line");
   for (const word of fixed) expect(Math.abs(written[word]!.x - drawn[word]!.x), `x of "${word}" with the first reference shown as written in its line`).toBeLessThanOrEqual(0.5);
@@ -526,7 +527,7 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   expect(written.trailing!.x, "and before the rest of its line").toBeGreaterThanOrEqual(text.x + text.width);
 
   await page.keyboard.press("ControlOrMeta+End");
-  await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
+  await expect(chips(page)).toHaveText(["Lin Wei", "Sam Okafor", "Lin Wei"]);
   expectUnmoved(await places(page, [...fixed, "trailing"]), drawn, "with the cursor gone again");
   expect(reads, "drawing a reference again asks nothing").toBe(2);
 

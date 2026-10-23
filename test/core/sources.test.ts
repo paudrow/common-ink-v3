@@ -388,7 +388,7 @@ describe("a reference to a record", () => {
     w.events.set(ada.personId, [event("a1", "Lunch with Sam")]);
     w.contacts.set(ada.personId, [contact("people/c1", "Sam Okafor")]);
     const made = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
-    expect(made).toEqual({ ref: expect.stringMatching(/^[a-z0-9]{12}$/), kind: "event", text: `::event{${made.ref} Lunch with Sam}` });
+    expect(made).toEqual({ ref: expect.stringMatching(/^[a-z0-9]{12}$/), kind: "event", text: `[[event:${made.ref}]]`, label: "Lunch with Sam" });
     expect(await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" })).toEqual(made);
     const person = await w.ask(ada, { type: "record.refer", sourceId: "people", id: "people/c1" });
     expect(person.text).toBe(`::contact{${person.ref} Sam Okafor}`);
@@ -410,14 +410,18 @@ describe("a reference to a record", () => {
     expect(await refusal(w.ask(ada, { type: "record.read", ref }))).toBe("not_found: No such record");
   });
 
-  it("is written so a label can't end the embed or start another", () => {
-    expect(writtenReference("event", "aaaaaaaaaaaa", "Plan {Q4}\n::html{x}")).toBe("::event{aaaaaaaaaaaa Plan Q4 ::html x}");
-    expect(writtenReference("contact", "aaaaaaaaaaaa", "  ")).toBe("::contact{aaaaaaaaaaaa}");
-    // Nor can the title of an event someone else sent write a link or code into the note of whoever references it.
-    expect(writtenReference("event", "aaaaaaaaaaaa", "Lunch [[Board minutes]] `x` [[y|z]]")).toBe("::event{aaaaaaaaaaaa Lunch Board minutes x y|z}");
+  it("is a link to an event, which writes nothing of the event into the note", () => {
+    // The title of an event someone else sent writes no link or code into the note of whoever references it.
+    expect(writtenReference("event", "aaaaaaaaaaaa", "Lunch [[Board minutes]] `x` [[y|z]]\n::html{x}")).toBe("[[event:aaaaaaaaaaaa]]");
   });
 
-  it("stays the person's own in a note other members read: the note holds the label, and they can follow nothing", async () => {
+  it("is written so a label can't end the embed or start another", () => {
+    expect(writtenReference("contact", "aaaaaaaaaaaa", "Plan {Q4}\n::html{x}")).toBe("::contact{aaaaaaaaaaaa Plan Q4 ::html x}");
+    expect(writtenReference("contact", "aaaaaaaaaaaa", "  ")).toBe("::contact{aaaaaaaaaaaa}");
+    expect(writtenReference("email", "aaaaaaaaaaaa", "Lunch [[Board minutes]] `x` [[y|z]]")).toBe("::email{aaaaaaaaaaaa Lunch Board minutes x y|z}");
+  });
+
+  it("stays the person's own in a note other members read: the note holds the reference alone, and they can follow nothing", async () => {
     const w = world();
     const ada = await newMember("Ada");
     const eve = await addMember(ada, "editor", "Eve");
@@ -425,8 +429,8 @@ describe("a reference to a record", () => {
     const { ref, text } = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
     const note = await w.ask(ada, { type: "note.create", text: `# Plans\n\n${text}\n` });
     const read = await w.ask(eve, { type: "note.read", id: note.id });
-    expect(read.text).toContain(`::event{${ref} Lunch with Sam}`);
-    expect(JSON.stringify(read)).not.toMatch(/Cafe Lula|Bring the contract|"a1"/);
+    expect(read.text).toContain(`[[event:${ref}]]`);
+    expect(JSON.stringify(read)).not.toMatch(/Lunch with Sam|Cafe Lula|Bring the contract|"a1"/);
     expect(await refusal(w.ask(eve, { type: "record.read", ref }))).toBe("not_found: No such record");
   });
 });
@@ -600,7 +604,7 @@ describe("a reference in a note, asked about by everyone it doesn't belong to", 
   const PRIVATE = /Cafe-Lula-private|contract-private|sam-private@example\.com|555-0100|Okafor-Works-private|"a1"|people\/c1/;
   const NEVER_MADE = "aaaaaaaaaaaa";
 
-  it("is a reference that was never made to an admin, an editor, a viewer, a guest, each one's agents and whoever holds a link, and the note tells them its label alone", async () => {
+  it("is a reference that was never made to an admin, an editor, a viewer, a guest, each one's agents and whoever holds a link, and the note tells them a contact's label alone", async () => {
     const w = world();
     const olga = await newMember("Olga Owner");
     const ada = await addMember(olga, "editor", "Ada");
@@ -624,7 +628,7 @@ describe("a reference in a note, asked about by everyone it doesn't belong to", 
     for (const [name, actor] of Object.entries(others)) {
       const said: unknown[] = [];
       const read = await w.ask(actor, { type: "note.read", id: note.id });
-      expect(read.text, name).toContain(`::event{${lunch.ref} Lunch with Sam} with ::contact{${sam.ref} Sam Okafor}`);
+      expect(read.text, name).toContain(`[[event:${lunch.ref}]] with ::contact{${sam.ref} Sam Okafor}`);
       said.push(read, await w.ask(actor, { type: "source.list" }), await w.ask(actor, { type: "event.list", ...WEEK }), await w.ask(actor, { type: "contact.list" }), await w.ask(actor, { type: "contact.list", query: "sam" }));
       expect((said[2] as { events: unknown[] }).events, name).toEqual([]);
       expect((said[2] as { calendars: unknown[] }).calendars, name).toEqual([]);
@@ -639,7 +643,7 @@ describe("a reference in a note, asked about by everyone it doesn't belong to", 
       expect(JSON.stringify(said), name).not.toMatch(PRIVATE);
     }
     // Whoever may write a note copies the reference into one of their own, and it is still Ada's.
-    const copied = await w.ask(others.editor!, { type: "note.create", text: `# Mine\n\n::event{${lunch.ref} Lunch with Sam}\n` });
+    const copied = await w.ask(others.editor!, { type: "note.create", text: `# Mine\n\n[[event:${lunch.ref}]]\n` });
     expect(copied.text).toContain(lunch.ref);
     expect(await refusal(w.ask(others.editor!, { type: "record.read", ref: lunch.ref }))).toBe("not_found: No such record");
     // Nor does it lead to a record of their own that goes by the same id where it is kept, as an event two people are both at does.
@@ -651,7 +655,7 @@ describe("a reference in a note, asked about by everyone it doesn't belong to", 
     for (const personId of [null, others.editor!.personId, ada.personId]) {
       const visitor = { kind: "visitor", token, personId } as const;
       const shared = await perform(env.DB, visitor, { type: "shared.read", id: note.id }, T0, w.sources);
-      expect(shared.text).toContain(`::event{${lunch.ref} Lunch with Sam}`);
+      expect(shared.text).toContain(`[[event:${lunch.ref}]]`);
       expect(JSON.stringify(shared)).not.toMatch(PRIVATE);
       for (const op of [{ type: "record.read", ref: lunch.ref }, { type: "contact.list" }, { type: "source.list" }] as const) expect(await refusal(perform(env.DB, visitor, op, T0, w.sources))).toBe(`forbidden: A link can't ${op.type}`);
     }
@@ -681,11 +685,11 @@ describe("a reference in a note, asked about by everyone it doesn't belong to", 
 });
 
 describe("a record named where a reference would be", () => {
-  it("is found outside code, with where it is written, and one that holds a reference already is left", () => {
-    const text = ["# Try", "", "::event{Lunch with Sam} with ::contact{ Sam Okafor }.", "Typed as `::event{Not this}`, and ::event{abcdefghij12 Lunch} is a reference already, as ::contact{abcdefghij12} is.", "```", "::event{Nor this}", "```", "::event{} and ::timer{5m} name nothing."].join("\n");
+  it("is found outside code, with where it is written and a link's own words, and one that holds a reference already is left", () => {
+    const text = ["# Try", "", "[[event:Lunch with Sam|lunch]] with ::contact{ Sam Okafor }.", "Typed as `[[event:Not this]]`, and [[event:abcdefghij12]] is a reference already, as ::contact{abcdefghij12} is.", "```", "[[event:Nor this]]", "```", "[[event:]], ::contact{} and ::timer{5m} name nothing."].join("\n");
     const named = namedReferences(text);
-    expect(named.map(({ kind, name }) => [kind, name])).toEqual([["event", "Lunch with Sam"], ["contact", "Sam Okafor"]]);
-    expect(named.map(({ from, to }) => text.slice(from, to))).toEqual(["::event{Lunch with Sam}", "::contact{ Sam Okafor }"]);
+    expect(named.map(({ kind, name, display }) => [kind, name, display])).toEqual([["event", "Lunch with Sam", "lunch"], ["contact", "Sam Okafor", null]]);
+    expect(named.map(({ from, to }) => text.slice(from, to))).toEqual(["[[event:Lunch with Sam|lunch]]", "::contact{ Sam Okafor }"]);
   });
 });
 

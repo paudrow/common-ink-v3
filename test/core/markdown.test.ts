@@ -115,8 +115,14 @@ describe("a note's title without a # heading", () => {
 
 describe("a note's title, as words", () => {
   it("carries no marks: not bold, code, a link's address, a link's id, a mention's id or an embed", () => {
-    expect(summarize("# **Bold** `plan` for [the trip](https://example.com) with [[abc123def456|Groceries]] and @[[p1|Ada]] ::timer{5m}").title).toBe("Bold plan for the trip with Groceries and @Ada");
+    expect(summarize("# **Bold** `plan` for [the trip](https://example.com) with [[abc123def456|Groceries]] and [[person:abc123def456|Ada]] ::timer{5m}").title).toBe("Bold plan for the trip with Groceries and @Ada");
     expect(summarize("# Notes on [[abc123def456]]").title).toBe("Notes on");
+  });
+
+  it("reads a mention by name as @ and the name, and leaves out a link of any kind that is only an id", () => {
+    expect(summarize("# Call [[person:Sam Okafor]] about [[person:abc123def456]]").title).toBe("Call @Sam Okafor about");
+    expect(summarize("# See [[folder:abc123def456]] and [[event:abc123def456]] on [[2026-10-23]]").title).toBe("See and on 2026-10-23");
+    expect(summarize("# See [[folder:abc123def456|Plans]] at [[event:abc123def456|lunch]]").title).toBe("See Plans at lunch");
   });
 
   it("keeps a * or a backtick that is one of the words, and takes the marks around words", () => {

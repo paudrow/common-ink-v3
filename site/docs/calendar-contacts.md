@@ -40,21 +40,23 @@ The settings **First day of the week** (`calendar.weekStarts`) and **Highlight w
 
 A person page shows what your contacts hold about that person, which only you see. Press **Edit** to change the contact. The change is written back to Google Contacts. The same page lists the open todos assigned to the person and the lines that mention them, in notes you can see. **New note about** the person makes a note that mentions them.
 
-Type `@` in a note to mention a contact. The note keeps only the name, in gray, so anyone who reads the note sees the name and nothing else of your contact. A mention shares nothing. See [Writing notes](/docs/notes).
+Type `@` in a note to mention a contact. The note keeps only the name, as `[[person:Sam Okafor]]`, in gray, so anyone who reads the note sees the name and nothing else of your contact. A mention shares nothing. See [Writing notes](/docs/notes).
 
 ## Point at an event or a contact from a note
 
 A note can reference one of your events without copying it:
 
 ```markdown
-Agenda for ::event{r8m2k4q9x1cd Planning with Sam}
+Agenda for [[event:r8m2k4q9x1cd]]
 ```
 
 To write one, type `[[` in a note. After your notes, the list offers your events, nearest first. Picking one writes the reference. You can also open an event on the Calendar page, run **Copy event reference** from the command palette, and paste it into a note.
 
+You see the event's title as it is now in Google. Anyone else, and anyone opening the note from a share link, sees "Event". To show words of your own instead, type `|` and the words, as `[[event:r8m2k4q9x1cd|Planning with Sam]]`. Everyone sees those words, so write only what others may read. Click the event to open its details.
+
 A reference to a contact is `::contact{…}`. The app has no way yet to copy one, so your agent writes it with `refer_record`.
 
-The words after the reference are plain text in the note. Every reader of the note sees them, in gray. You see the event or contact as it is now in Google. Anyone else, and anyone opening the note from a share link, sees only those words. Edit them if they say more than others should read.
+The words after a contact's reference are plain text in the note. Every reader of the note sees them, in gray. You see the contact as it is now in Google. Anyone else, and anyone opening the note from a share link, sees only those words. Edit them if they say more than others should read.
 
 An event's details list **Notes about this event**, which are the notes you can see that reference it. **New note about this event** makes one.
 

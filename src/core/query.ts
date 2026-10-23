@@ -1003,7 +1003,7 @@ export const syntaxText = (scope: Scope) =>
     .join("\n");
 
 /** What a todo's line can hold, every rule of `every:` among it, for a model that is to write one unaided. */
-const TODO_TOKENS = `A todo is a checkbox line in a note: ${STATES_WRITTEN}. A query that names no state lists only open ones. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:
+const TODO_TOKENS = `A todo is a checkbox line in a note: ${STATES_WRITTEN}. A query that names no state lists only open ones. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and [[person:Name]] or [[person:id]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:
 ${RULE_GRAMMAR}
 done:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note. A todo counts as tagged with the tags on its own line and those that cover it: a heading's cover the lines under it up to the next heading at the same or a higher level; a line of nothing but tags covers the rest of its section, or before the first heading the lines up to it; a tag in a list item covers the items nested under it. Each listed todo's tags are the ones it has, and tagsElsewhere says the line each one it has from elsewhere is written on.`;
 

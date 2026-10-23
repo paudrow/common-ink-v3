@@ -21,10 +21,10 @@ export { BOX_PATTERN, STATES_WRITTEN, TODO_STATES, markOf, stateOfMark, type Tod
  * - `done:2026-10-10x12` is the day a recurring todo was last checked off, and how many times it has been.
  * - `#tag` tags the todo, and its note as a tag on any line does. A todo also has the tags of the lines
  *   that cover it, as `tagScope.ts` reads them.
- * - `@[[id|Name]]` or `@[[Name]]` assigns it to a person. `mentions.ts` has how a mention is written.
+ * - `[[person:id]]` or `[[person:Name]]` assigns it to a person. `mentions.ts` has how a mention is written.
  *
  * A token stands alone: after a space, and before a space, the end of the line, or `.,;:!?)`. Text
- * in inline code, in a link to a note, and in a link's address is never a token, and an embed's
+ * in inline code, in a link, and in a link's address is never a token, and an embed's
  * braces hold no tag. Tags match ignoring case. docs/todos.md says the same to a person.
  */
 export interface Todo {

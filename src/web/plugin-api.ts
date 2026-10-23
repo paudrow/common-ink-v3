@@ -68,7 +68,7 @@ export { allPages } from "../core/allPages.ts";
 export { reline } from "../core/blame.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
-export { isNoteId, linkedFolder, linksIn, linksOn, writtenFolderLink, writtenLink, type WrittenLink } from "../core/links.ts";
+export { isNoteId, linkedEvent, linkedFolder, linksIn, linksOn, writtenFolderLink, writtenLink, type WrittenLink } from "../core/links.ts";
 export { dayLinksOn, linkedDay, writtenDayLink, type DayLink, type LinkedDay } from "../core/dateLinks.ts";
 
 /** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
@@ -698,7 +698,7 @@ export interface Embed {
   pick?: EmbedPick | readonly EmbedPick[];
   /**
    * False for an embed no menu lists by itself: one another embed's `pick` writes, as "Upload an
-   * image" writes a picture, or one written another way, as `@` writes a reference to an event.
+   * image" writes a picture, or one written another way, as `@` writes a reference to a contact.
    * `host.embeds.list()` leaves it out.
    */
   menu?: boolean;

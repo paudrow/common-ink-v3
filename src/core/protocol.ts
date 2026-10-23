@@ -143,12 +143,12 @@ export type LinkTitles = z.output<typeof LinkTitles>;
 const IfExists = z.enum(["return", "error"]).default("error");
 
 /**
- * What a write does with a mention it introduces, `@[[Name]]` or `@[[id]]`, outside code. `resolve`
+ * What a write does with a mention it introduces by name, `[[person:Name]]`, outside code. `resolve`
  * stores a mention of the one member with that name, ignoring case, by their id, as
- * `@[[id|Name]]`, and refuses the write when several members have the name. A name no member has is
- * left as written: a mention of someone by name, who is told nothing and given nothing. `keep`
- * leaves every mention as written. A writer who isn't a member is never told who is one, so theirs
- * are kept.
+ * `[[person:id]]` with any words after the `|` kept, and refuses the write when several members have
+ * the name. A name no member has is left as written: a mention of someone by name, who is told
+ * nothing and given nothing. `keep` leaves every mention as written. A writer who isn't a member is
+ * never told who is one, so theirs are kept.
  */
 const MentionNames = z.enum(["resolve", "keep"]).default("resolve");
 /**
@@ -442,6 +442,15 @@ export const Op = z.discriminatedUnion("type", [
    * on, or made since, is left as it is.
    */
   z.object({ type: z.literal("note.linkDates"), id: Id }),
+  /**
+   * Writes as links the mentions and references to events that notes wrote before they were links,
+   * once: `@[[id|name]]` and `@[[name]]` as `[[person:…]]`, and `::event{ref label}` as `[[event:ref]]`,
+   * outside code (src/core/oldLinks.ts). It converts a batch of the notes waiting to be, each as a
+   * change of the asker's labeled "Links converted", so it can be put back, and leaves a note the asker
+   * may not change for someone who may. `after` carries on from where the batch before stopped. The
+   * app sends it as a member comes in.
+   */
+  z.object({ type: z.literal("note.convertLinks"), after: Id.optional() }),
   /** Puts the note back to how it was at `revision`, as a new change. */
   z.object({ type: z.literal("note.revert"), id: Id, revision: Revision, resolve: Resolve.optional() }),
   /**
@@ -1762,6 +1771,8 @@ export interface Results {
   "note.label": { id: string; revision: number; label: string | null };
   /** `changed` when its dates were written as links, at `revision`. */
   "note.linkDates": { id: string; revision: number; changed: boolean };
+  /** The notes converted, each at its new revision, and where to carry on from, or null when no note the asker can see is waiting. */
+  "note.convertLinks": { converted: { id: string; revision: number }[]; next: string | null };
   "note.revert": Written;
   "note.revertChanges": Written;
   "note.previewRevert": RevertPreview;
@@ -2138,8 +2149,10 @@ export interface NoteAbout {
 export interface Reference {
   ref: string;
   kind: SourceRecord["kind"];
-  /** The embed a note writes, such as `::event{k3j5h8d9f0a1 Lunch with Sam}`. */
+  /** What a note writes: a link to an event, `[[event:k3j5h8d9f0a1]]`, or an embed, such as `::contact{k3j5h8d9f0a1 Sam Okafor}`. */
   text: string;
+  /** What the record was called when it was referenced, as one line of plain words. */
+  label: string;
 }
 
 export const MAX_AGENT_NAME = 60;

@@ -37,7 +37,7 @@ export type EmbedKey = (DeclaredOption | WordKey) & {
 
 export interface EmbedSchema {
   keys: readonly EmbedKey[];
-  /** The bare words past the bare keys are one text of the embed's own, as an event's label. */
+  /** The bare words past the bare keys are one text of the embed's own, as a contact's label. */
   rest?: { id: string; label: string };
   /** Only key=value words with a key it names are checked; anything else is left alone. For a third-party embed's declared options, whose config the plugin also reads itself. */
   open?: true;
@@ -55,7 +55,7 @@ const size = { ...word("size", "Size", /^(?!0+x)\d{1,5}x(?!0+$)\d{1,5}$/, "The r
 const width = { ...word("width", "Width", /^(?:small|medium|large|full|(?!0{1,3}%)(?:0?\d{1,2}|100)%)$/, "small, medium, large or full, or a whole percent such as 42%."), bare: true } as const;
 const crop = word("crop", "Crop", /^\d{1,5},\d{1,5},\d{1,5},\d{1,5}$/, "X,Y,WIDTH,HEIGHT in the pixels of its size, like 120,40,800,600.");
 
-/** An event's or a contact's: the id `@` or refer_record wrote, then its label. */
+/** A contact's or an email's: the id `@` or refer_record wrote, then its label. */
 const reference: EmbedSchema = { keys: [{ ...word("ref", "Reference", /^[a-z0-9]{12}$/, "A reference's id: 12 lowercase letters and digits."), bare: true, required: true }], rest: { id: "label", label: "Label" } };
 
 const HTML_OPTIONS: readonly DeclaredOption[] = [{ type: "number", id: "height", label: "Height", min: 40, max: 2000, step: 1, default: 320 }];
@@ -66,7 +66,6 @@ export const EMBED_SCHEMAS: Readonly<Record<string, EmbedSchema>> = {
   html: { keys: HTML_OPTIONS },
   kanban: { keys: [] },
   form: { keys: [] },
-  event: reference,
   contact: reference,
   email: reference,
   image: { keys: [{ ...upload, required: true }, size, width, crop] },

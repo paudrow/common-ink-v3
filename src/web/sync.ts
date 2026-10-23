@@ -232,6 +232,12 @@ export async function performInSync<T extends OpInput>(workspaceId: string, op: 
     if (result.changed) await open.get(op.id)?.pull(result.revision);
     return result as Results[T["type"]];
   }
+  // So are mentions and references to events converted as the member comes in.
+  if (op.type === "note.convertLinks") {
+    const result = (await by(workspaceId, op)) as Results["note.convertLinks"];
+    for (const { id, revision } of result.converted) await open.get(id)?.pull(revision).catch(() => {});
+    return result as Results[T["type"]];
+  }
   if (op.type === "history.previewRevert") {
     // What is typed and not yet saved would change the note under the preview.
     await commitTyping(op.changes.map((c) => c.noteId)).catch(() => {});

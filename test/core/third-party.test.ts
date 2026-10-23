@@ -613,7 +613,7 @@ describe("a plugin acting for a member", () => {
   it("is answered no more than its permission names: no uploads or members with a note, and never an email", async () => {
     const { ada, grace, id } = await permitted();
     const file = await upload(ada, "cat.png");
-    const text = `# Plan\n\n@[[${grace.personId}|Gracie]] and @[[Sam]]\n\n::image{${file.id}}\n- [ ] Call @[[${grace.personId}|Gracie]]`;
+    const text = `# Plan\n\n[[person:${grace.personId}|Gracie]] and [[person:Sam]]\n\n::image{${file.id}}\n- [ ] Call [[person:${grace.personId}|Gracie]]`;
     const note = await perform(env.DB, ada, { type: "note.create", text });
 
     const asMember = await perform(env.DB, ada, { type: "note.read", id: note.id });
@@ -627,15 +627,15 @@ describe("a plugin acting for a member", () => {
     expect((await perform(env.DB, ada, { type: "folder.list" })).folders.map((f) => f.uploadCount)).toContain(1);
     expect((await perform(env.DB, pluginOf(ada, id), { type: "folder.list" })).folders.map((f) => f.uploadCount)).not.toContain(1);
     // Each mention as the text writes it: who is a member, and what they are called now, is not the note's to say.
-    expect(asPlugin.mentions).toEqual([{ id: grace.personId, name: "Gracie", member: false }, { id: null, name: "Sam", member: false }]);
+    expect(asPlugin.mentions).toEqual([{ id: grace.personId, name: "Someone", member: false }, { id: null, name: "Sam", member: false }]);
     expect(JSON.stringify(asPlugin)).not.toMatch(/cat\.png|Grace Hopper/);
     const todos = await perform(env.DB, pluginOf(ada, id), { type: "todo.list" });
-    expect(todos.todos.map((t) => t.assignees)).toEqual([[{ id: grace.personId, name: "Gracie", member: false }]]);
+    expect(todos.todos.map((t) => t.assignees)).toEqual([[{ id: grace.personId, name: "Someone", member: false }]]);
 
     // A name it writes is kept as a name: a write is not a way to ask who is a member.
-    const wrote = await perform(env.DB, pluginOf(ada, id), { type: "note.create", text: "# Hi\n\n@[[Grace Hopper]]" });
-    expect(wrote.text).toBe("# Hi\n\n@[[Grace Hopper]]");
-    expect((await perform(env.DB, ada, { type: "note.create", text: "# Hi\n\n@[[Grace Hopper]]" })).text).toBe(`# Hi\n\n@[[${grace.personId}|Grace Hopper]]`);
+    const wrote = await perform(env.DB, pluginOf(ada, id), { type: "note.create", text: "# Hi\n\n[[person:Grace Hopper]]" });
+    expect(wrote.text).toBe("# Hi\n\n[[person:Grace Hopper]]");
+    expect((await perform(env.DB, ada, { type: "note.create", text: "# Hi\n\n[[person:Grace Hopper]]" })).text).toBe(`# Hi\n\n[[person:${grace.personId}]]`);
 
     // member.list for a plugin, an admin's too: names and roles, and no email.
     const members = await perform(env.DB, pluginOf(ada, id), { type: "member.list" });

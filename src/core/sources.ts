@@ -1,6 +1,7 @@
 import { inOrder, widened, within, type Span } from "./events.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
+import { writtenEventLink } from "./links.ts";
 import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
@@ -389,8 +390,8 @@ export async function contactCards(asker: Asker, is: (contact: Contact) => boole
  */
 const labelled = (label: string) => label.replace(/[{}[\]`\s]+/g, " ").replace(/ +/g, " ").trim().slice(0, 200);
 
-/** A reference as a note writes it: an embed whose config is the reference, then the label. */
-export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) => `::${kind}{${[ref, labelled(label)].filter(Boolean).join(" ")}}`;
+/** A reference as a note writes it: a link to an event, which shows the event as it is, or an embed whose config is the reference, then the label. */
+export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) => (kind === "event" ? writtenEventLink(ref) : `::${kind}{${[ref, labelled(label)].filter(Boolean).join(" ")}}`);
 
 async function recordOf(source: DataSource, ref: string, id: string): Promise<SourceRecord | null> {
   if (source.kind === "email") {
@@ -426,7 +427,7 @@ export async function refer(asker: Asker, sourceId: string, id: string): Promise
     .bind(newId(), asker.personId, sourceId, id, asker.now)
     .first<{ id: string }>();
   const label = record.kind === "event" ? record.event.title : record.kind === "contact" ? record.contact.name : (record.thread.messages.find((m) => m.id === record.messageId)?.subject ?? record.thread.subject);
-  return { ref: row!.id, kind: RECORD[source.kind], text: writtenReference(RECORD[source.kind], row!.id, label) };
+  return { ref: row!.id, kind: RECORD[source.kind], text: writtenReference(RECORD[source.kind], row!.id, label), label: labelled(label) };
 }
 
 /** The most references to one record that the notes about it are looked for by: the asker's own, and one for each other member. */

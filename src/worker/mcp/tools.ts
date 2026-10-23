@@ -108,6 +108,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "note.discard": "It removes, outside Trash and with its history, a note nobody ever wrote in, and it is the member's own app that does it as they leave the note. A note you make or read while it is blank is held for you for ten minutes after, so it isn't discarded while you are about to write in it; one you leave blank for longer may be. There is nothing for you to clean up: a blank note nobody holds is removed on its own within a day.",
   "note.hold": "It says the member's own app has a note open in an editor, which only the app knows. You hold a blank note by making, reading or writing it.",
   "note.linkDates": "It writes as links the dates a note wrote bare before dates were links, once, as the member's own app opens the note. Write a day as [[YYYY-MM-DD]] yourself.",
+  "note.convertLinks": "It writes as links the mentions and references to events notes wrote before they were links, once, as the member's own app comes in. Write a person as [[person:…]] and an event as [[event:ref]] yourself.",
   "source.connect": "Connecting a data source is the member agreeing, in their own browser, to let Common Ink into their calendar or contacts. An agent can't agree for them. It reads and changes what the member connected.",
   "source.disconnect": "Disconnecting ends the member's own agreement and cuts off every reference in their notes until they agree again. The member does that themself, in the app.",
   "email.senders": "The addresses a member's mail is recognized by are only of use for managing them, which an agent can't do. What came from them is list_email's.",
@@ -176,7 +177,7 @@ const linkTitles = {
   description:
     'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id, and leaves one no note or more than one has that title as written: the answer lists those in unresolved, with the ids of the notes that have the title when several do. "resolve-strict" refuses the whole write for one instead. "keep" leaves every link as written.',
 };
-const mentionNames = { type: "string", enum: ["resolve", "keep"], description: 'What to do with mentions you add, @[[Name]] or @[[id]]. "resolve", the default, stores a mention of the one member with that name by their id, as @[[id|Name]], and refuses the write when several members have the name. A name no member has stays a name. "keep" leaves every mention as you wrote it.' };
+const mentionNames = { type: "string", enum: ["resolve", "keep"], description: 'What to do with mentions you add by name, [[person:Name]]. "resolve", the default, stores a mention of the one member with that name by their id, as [[person:id]], and refuses the write when several members have the name. A name no member has stays a name. "keep" leaves every mention as you wrote it.' };
 const MEMBER_ZONE =
   "your member's time zone: the one their daily.timeZone setting names, or else the one of the browser they last used Common Ink in, or else UTC";
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
@@ -184,11 +185,11 @@ const queryDays = {
   today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
   zone: { type: "string", description: `Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is ${MEMBER_ZONE}` },
 };
-const TODOS = `A todo is a checkbox line in a note: ${STATES_WRITTEN}, with tokens on the line such as !! for its priority, due:2026-10-14, @[[Name]] to assign it, and every:2w or every:mon,thu to make it repeat. query_syntax {"scope":"todos"} lists every token and every rule of every:.`;
+const TODOS = `A todo is a checkbox line in a note: ${STATES_WRITTEN}, with tokens on the line such as !! for its priority, due:2026-10-14, [[person:Name]] to assign it, and every:2w or every:mon,thu to make it repeat. query_syntax {"scope":"todos"} lists every token and every rule of every:.`;
 const LINKS =
-  "A link to another note is [[id]] or [[id|display text]], by id so a rename keeps it. Writing [[Title]] or [[Title|display text]] stores it by id; one no note has that title stays as written, listed in the answer's unresolved. A day is [[YYYY-MM-DD]] or [[YYYY-MM-DD HH:MM]]. Text in code is left alone.";
+  "A link to another note is [[id]] or [[id|display text]], by id so a rename keeps it. Writing [[Title]] or [[Title|display text]] stores it by id; one no note has that title stays as written, listed in the answer's unresolved. A day is [[YYYY-MM-DD]] or [[YYYY-MM-DD HH:MM]]; note_syntax has the other kinds. Text in code is left alone.";
 const MENTIONS =
-  "A mention of a person is @[[id|Name]] for a member of the workspace, with their id from list_members, or @[[Name]] for anyone else, such as one of your member's contacts. You can write @[[Name]] for a member too and it is stored by their id, unless your token is limited to folders: it is then not told who is a member, and every mention is kept and read as written. A mention on a todo's line assigns the todo. A mention gives nobody access and tells nobody. Every reader of the note sees the name, so write only the name of a contact: never their email or anything else list_contacts told you.";
+  "A mention of a person is [[person:id]] for a member of the workspace, with their id from list_members, or [[person:Name]] for anyone else, such as one of your member's contacts. You can write [[person:Name]] for a member too and it is stored by their id, unless your token is limited to folders: it is then not told who is a member, and every mention is kept as written. A mention on a todo's line assigns the todo. A mention gives nobody access and tells nobody. Every reader of the note sees the name, so write only the name of a contact: never their email or anything else list_contacts told you.";
 const TAGS = "Tag only with tags list_tags lists, chosen by their descriptions: a tag no note you can see has is refused unless your member asked for it and newTags names it.";
 const newTags = { type: "array", items: { type: "string" }, description: "New tags your member asked for. Any other tag no note you can see has is refused" };
 const folderId = (description: string) => ({ type: "string", description });
@@ -331,7 +332,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are @[[id|Name]] or @[[Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. Uploads in the text are ::image{id ...}, ::video{id ...}, ::audio{id} or ::file{id}: uploads names each one's id with its name, type, kind and size, or a null upload for one that doesn't exist or that you can't see. A note in Trash is read as any other, and its state says trashed. Pass lines to read only some lines, and numbered to see each line's number: the numbers are edit_note's, counted in the revision read. Leave them out of edit_note's text.",
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are [[person:id]] or [[person:Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. Uploads in the text are ::image{id ...}, ::video{id ...}, ::audio{id} or ::file{id}: uploads names each one's id with its name, type, kind and size, or a null upload for one that doesn't exist or that you can't see. A note in Trash is read as any other, and its state says trashed. Pass lines to read only some lines, and numbered to see each line's number: the numbers are edit_note's, counted in the revision read. Leave them out of edit_note's text.",
     inputSchema: object(
       {
         noteId,
@@ -497,7 +498,7 @@ export const TOOLS: Tool[] = [
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
         every: { type: ["string", "null"], description: 'How it repeats, as written after every:, such as 2w, mon,thu, last-fri or 1m-times-5, or null to stop it repeating. query_syntax {"scope":"todos"} lists every rule' },
         skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Refused for a todo that isn't open or is on its last time" },
-        assign: { type: "string", description: "Someone to assign it to, by writing a mention of them on the line: a member's id or name, or anyone else's name. Assigning gives nobody access and tells nobody." },
+        assign: { type: "string", description: "Someone to assign it to, by writing [[person:…]] on the line: a member's id or name, or anyone else's name. Assigning gives nobody access and tells nobody." },
         unassign: { type: "string", description: "Someone to take it from: a member's id or name, or anyone else's name as the line writes it. Refused when the todo isn't assigned to them." },
         on: day(`The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in ${MEMBER_ZONE}`),
         words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, priority, due date, rule and done: mark, tags included, on one line. Its due date and how it repeats are written after them" },
@@ -1071,14 +1072,14 @@ export const TOOLS: Tool[] = [
   {
     name: "refer_record",
     description:
-      `What a note writes to reference one of your member's events, contacts or emails without copying it: ref, and text, an embed such as ::event{ref Lunch with Sam} or ::contact{ref Sam Okafor} to put in the note. The app draws it for your member with the record's details as they are now. The words after the ref are plain text in the note, which every reader of the note sees, so change or drop them if the title shouldn't be shared; the rest of the record is never in the note. ${SOURCES}`,
+      `What a note writes to reference one of your member's events, contacts or emails without copying it: ref, and text to put in the note, [[event:ref]] or an embed such as ::contact{ref Sam Okafor}. Only your member is shown the record as it is now. The words after a contact's or an email's ref are plain text every reader sees, so change or drop them if they shouldn't be shared. ${SOURCES}`,
     inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
     op: "record.refer",
     example: { sourceId: "google", id: "evt123" },
   },
   {
     name: "read_record",
-    description: `The event, contact or email a reference in a note stands for, as it is now. ref is the first word inside ::event{...}, ::contact{...} or ::email{...}. A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
+    description: `The event, contact or email a reference in a note stands for, as it is now. ref is in [[event:ref]], or first inside ::contact{...} or ::email{...}. A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
     inputSchema: object({ ref: { type: "string", description: "The reference, from the note" } }, ["ref"]),
     op: "record.read",
     example: { ref: "r8m2k4q9x1cd" },

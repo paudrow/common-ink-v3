@@ -16,7 +16,7 @@ describe("a tag deleted from a note's text", () => {
     expect(deletedTags("- [ ] Call the bank #money  #errands  ", "money/x")).toBe("- [ ] Call the bank #money  #errands  ");
     expect(deletedTags("- [ ] Call the bank  #money\t#Money/fees  \n- [ ] Pay rent #money", "money")).toBe("- [ ] Call the bank\n- [ ] Pay rent");
     expect(deletedTags("- [ ] Dig the beds #garden due:2026-10-14", "garden")).toBe("- [ ] Dig the beds due:2026-10-14");
-    expect(deletedTags("- [ ] ! Water #garden every:1w @[[Ada]] #home done:2026-10-10x2", "garden")).toBe("- [ ] ! Water every:1w @[[Ada]] #home done:2026-10-10x2");
+    expect(deletedTags("- [ ] ! Water #garden every:1w [[person:Ada]] #home done:2026-10-10x2", "garden")).toBe("- [ ] ! Water every:1w [[person:Ada]] #home done:2026-10-10x2");
     expect(deletedTags("Not a todo #garden due:2026-10-14", "garden")).toBe("Not a todo garden due:2026-10-14");
   });
 

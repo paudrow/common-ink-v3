@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EMBED_SCHEMAS, keysText, problemText, readConfig } from "../../src/core/embedSchema.ts";
+import { linkedEvent, linksIn } from "../../src/core/links.ts";
 import { NOTE_SYNTAX, syntaxText } from "../../src/core/noteSyntax.ts";
 import { blocksIn, inlineIn } from "../../src/core/embedSyntax.ts";
 import { parseForm } from "../../src/web/plugins/forms/form.ts";
@@ -79,7 +80,7 @@ describe("what a note can hold", () => {
     expect(readClock(inlineIn(NOTE_SYNTAX.find((row) => row.name === "timer" && row.kind === "embed")!.example)[0]!.config, "timer")?.length).toBe("5m");
     expect(readClock(inlineIn(NOTE_SYNTAX.find((row) => row.name === "stopwatch")!.example)[0]!.config, "stopwatch")).toEqual({ length: null, run: { is: "idle" } });
     expect(blocksIn(NOTE_SYNTAX.find((row) => row.name === "html")!.example)[0]!.body).toContain("<p>Hello</p>");
-    expect(writtenReference(inlineIn(NOTE_SYNTAX.find((row) => row.name === "event")!.example)[0]!.config)).toEqual({ ref: "aaaaaaaaaaaa", label: "Lunch" });
+    expect(linksIn(NOTE_SYNTAX.find((row) => row.name === "event")!.example).map((link) => linkedEvent(link.target))).toEqual(["aaaaaaaaaaaa"]);
     expect(writtenReference(inlineIn(NOTE_SYNTAX.find((row) => row.name === "contact")!.example)[0]!.config)).toEqual({ ref: "aaaaaaaaaaaa", label: "Ada Lovelace" });
     const math = NOTE_SYNTAX.find((row) => row.name === "math")!.example;
     expect(formulasIn(math.split("\n")[0]!)).toHaveLength(1);

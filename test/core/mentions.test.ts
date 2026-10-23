@@ -28,12 +28,12 @@ async function indexed(noteId: string) {
 }
 
 describe("a mention a write introduces", () => {
-  it("is stored by the member's id with their name, whether it was written by name or by id, and an agent's is too", async () => {
+  it("is stored by the member's id alone, whether it was written by name or by id, and an agent's is too", async () => {
     const ada = await newMember("Ada Lovelace");
     const grace = await addMember(ada, "editor", "Grace Hopper");
-    const note = await create(await agentOf(ada), `# Plan\n\nAsk @[[grace hopper]] and @[[${ada.personId}]] and @[[Sam Okafor]].`);
+    const note = await create(await agentOf(ada), `# Plan\n\nAsk [[person:grace hopper]] and [[person:${ada.personId}]] and [[person:Sam Okafor]].`);
 
-    expect(note.text).toBe(`# Plan\n\nAsk @[[${grace.personId}|Grace Hopper]] and @[[${ada.personId}|Ada Lovelace]] and @[[Sam Okafor]].`);
+    expect(note.text).toBe(`# Plan\n\nAsk [[person:${grace.personId}]] and [[person:${ada.personId}]] and [[person:Sam Okafor]].`);
     expect((await read(ada, note.id)).mentions).toEqual([
       { id: grace.personId, name: "Grace Hopper", member: true },
       { id: ada.personId, name: "Ada Lovelace", member: true },
@@ -47,19 +47,19 @@ describe("a mention a write introduces", () => {
     const two = await addMember(ada, "viewer", "sam okafor");
     const ids = [one.personId, two.personId].sort().join(", ");
 
-    expect(await codeOf(create(ada, "# Plan\n\n@[[Sam Okafor]]"))).toBe(`invalid: 2 members are named "Sam Okafor": ${ids}. Mention the one you mean as @[[id]], with ids from member.list.`);
-    expect((await create(ada, "# Plan\n\n@[[Sam Okafor]]", { mentionNames: "keep" })).text).toBe("# Plan\n\n@[[Sam Okafor]]");
-    expect((await create(ada, `# Plan\n\n@[[${two.personId}]]`)).text).toBe(`# Plan\n\n@[[${two.personId}|sam okafor]]`);
+    expect(await codeOf(create(ada, "# Plan\n\n[[person:Sam Okafor]]"))).toBe(`invalid: 2 members are named "Sam Okafor": ${ids}. Mention the one you mean as [[person:id]], with ids from member.list.`);
+    expect((await create(ada, "# Plan\n\n[[person:Sam Okafor]]", { mentionNames: "keep" })).text).toBe("# Plan\n\n[[person:Sam Okafor]]");
+    expect((await create(ada, `# Plan\n\n[[person:${two.personId}]]`)).text).toBe(`# Plan\n\n[[person:${two.personId}]]`);
   });
 
-  it("leaves every mention the note already had exactly as written, and a name the writer chose", async () => {
+  it("leaves every mention the note already had exactly as written, and keeps the words the writer chose to show", async () => {
     const ada = await newMember("Ada Lovelace");
-    const kept = `# Plan\n\n@[[Grace Hopper]] and @[[${ada.personId}|The Countess]]`;
+    const kept = `# Plan\n\n[[person:Grace Hopper]] and [[person:${ada.personId}|The Countess]]`;
     const note = await create(ada, kept, { mentionNames: "keep" });
     const grace = await addMember(ada, "editor", "Grace Hopper");
 
-    const next = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: note.revision, text: `${kept}\n\nand again @[[Grace Hopper]] with @[[Ada Lovelace|A.L.]]` });
-    expect(next.text).toBe(`${kept}\n\nand again @[[Grace Hopper]] with @[[${ada.personId}|A.L.]]`);
+    const next = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: note.revision, text: `${kept}\n\nand again [[person:Grace Hopper]] with [[person:Ada Lovelace|A.L.]] and [[person:${ada.personId}]]` });
+    expect(next.text).toBe(`${kept}\n\nand again [[person:Grace Hopper]] with [[person:${ada.personId}|A.L.]] and [[person:${ada.personId}]]`);
     expect((await read(ada, note.id)).mentions).toEqual([
       { id: null, name: "Grace Hopper", member: false },
       { id: ada.personId, name: "Ada Lovelace", member: true },
@@ -67,53 +67,60 @@ describe("a mention a write introduces", () => {
     expect(grace.personId).not.toBe(ada.personId);
   });
 
-  it("tells a guest who writes one nothing of who is a member: the name stays a name", async () => {
+  it("tells a guest who writes one nothing of who is a member: the name stays a name, and an id is someone", async () => {
     const ada = await newMember("Ada Lovelace");
     const grace = await addMember(ada, "editor", "Grace Hopper");
     const note = await create(ada, "# Shared");
     const gus = await guestOn(ada, note.id, "edit");
 
-    const written = await perform(env.DB, gus, { type: "note.write", id: note.id, baseRevision: note.revision, text: `# Shared\n\n@[[Grace Hopper]] @[[${grace.personId}]]` });
-    expect(written.text).toBe(`# Shared\n\n@[[Grace Hopper]] @[[${grace.personId}]]`);
+    const written = await perform(env.DB, gus, { type: "note.write", id: note.id, baseRevision: note.revision, text: `# Shared\n\n[[person:Grace Hopper]] [[person:${grace.personId}]]` });
+    expect(written.text).toBe(`# Shared\n\n[[person:Grace Hopper]] [[person:${grace.personId}]]`);
     expect((await read(gus, note.id)).mentions).toEqual([
       { id: null, name: "Grace Hopper", member: false },
-      { id: grace.personId, name: grace.personId, member: false },
+      { id: grace.personId, name: "Someone", member: false },
     ]);
   });
 });
 
 describe("who a mention is shown as", () => {
-  it("follows a member through a rename, and is the name as written once they are no longer a member", async () => {
+  it("follows a member through a rename, and is a former member once they are no longer one", async () => {
     const ada = await newMember("Ada Lovelace");
     const grace = await addMember(ada, "editor", "Grace Hopper");
-    const note = await create(ada, "# Plan\n\n@[[Grace Hopper]]");
+    const note = await create(ada, "# Plan\n\n[[person:Grace Hopper]]");
     await env.DB.prepare("UPDATE people SET name = 'Grace B. Hopper' WHERE id = ?").bind(grace.personId).run();
 
-    expect((await read(ada, note.id)).text).toBe(`# Plan\n\n@[[${grace.personId}|Grace Hopper]]`);
+    expect((await read(ada, note.id)).text).toBe(`# Plan\n\n[[person:${grace.personId}]]`);
     expect((await read(ada, note.id)).mentions).toEqual([{ id: grace.personId, name: "Grace B. Hopper", member: true }]);
 
     await perform(env.DB, ada, { type: "member.remove", memberId: grace.personId });
-    expect((await read(ada, note.id)).mentions).toEqual([{ id: grace.personId, name: "Grace Hopper", member: false }]);
+    expect((await read(ada, note.id)).mentions).toEqual([{ id: grace.personId, name: "A former member", member: false }]);
   });
 
-  it("is only the name as written to a guest, who is not told a member's name now", async () => {
+  it("is someone to a guest, who is not told a member's name, and the words a mention shows are what the note says", async () => {
     const ada = await newMember("Ada Lovelace");
     const grace = await addMember(ada, "editor", "Grace Hopper");
-    const note = await create(ada, "# Plan\n\n- [ ] ship @[[Grace Hopper]]");
+    const note = await create(ada, "# Plan\n\n- [ ] ship [[person:Grace Hopper]] with [[person:Ada Lovelace|the Countess]]");
     await env.DB.prepare("UPDATE people SET name = 'Rear Admiral Hopper' WHERE id = ?").bind(grace.personId).run();
     const gus = await guestOn(ada, note.id);
 
     const said = JSON.stringify([await read(gus, note.id), await todos(gus), await perform(env.DB, gus, { type: "todo.filters" })]);
-    expect(said).toContain("Grace Hopper");
-    expect(said).not.toContain("Rear Admiral");
-    expect((await todos(gus))[0]!.assignees).toEqual([{ id: grace.personId, name: "Grace Hopper", member: false }]);
-    expect((await todos(ada))[0]!.assignees).toEqual([{ id: grace.personId, name: "Rear Admiral Hopper", member: true }]);
+    expect(said).not.toContain("Hopper");
+    expect(said).not.toContain("Lovelace");
+    expect(said).toContain("the Countess");
+    expect((await todos(gus))[0]!.assignees).toEqual([
+      { id: grace.personId, name: "Someone", member: false },
+      { id: ada.personId, name: "Someone", member: false },
+    ]);
+    expect((await todos(ada))[0]!.assignees).toEqual([
+      { id: grace.personId, name: "Rear Admiral Hopper", member: true },
+      { id: ada.personId, name: "Ada Lovelace", member: true },
+    ]);
   });
 
   it("gives nobody access: a mentioned member still can't see a private note, and a mentioned name is nobody", async () => {
     const ada = await newMember("Ada Lovelace");
     const grace = await addMember(ada, "editor", "Grace Hopper");
-    const note = await create(ada, "# Mine\n\n- [ ] ask @[[Grace Hopper]] and @[[Sam Okafor]]");
+    const note = await create(ada, "# Mine\n\n- [ ] ask [[person:Grace Hopper]] and [[person:Sam Okafor]]");
     await perform(env.DB, ada, { type: "note.setPrivate", id: note.id, private: true });
     const sam = await signIn(env.DB, { email: `${crypto.randomUUID()}@example.com`, name: "Sam Okafor" });
 
@@ -128,15 +135,15 @@ describe("who a mention is shown as", () => {
 describe("the index of mentions", () => {
   it("holds who each line mentions, through every write, and is made for a note written before there was one", async () => {
     const ada = await newMember("Ada Lovelace");
-    const note = await create(ada, `# Plan\n\n@[[Sam Okafor]]\n- [ ] call @[[Ada Lovelace]] @[[sam okafor]]\n\`@[[Code]]\``);
+    const note = await create(ada, `# Plan\n\n[[person:Sam Okafor]]\n- [ ] call [[person:Ada Lovelace]] [[person:sam okafor]]\n\`[[person:Code]]\``);
     expect(await indexed(note.id)).toEqual([
       [2, "sam okafor", "Sam Okafor"],
-      [3, ada.personId, "Ada Lovelace"],
+      [3, ada.personId, ""],
       [3, "sam okafor", "sam okafor"],
     ]);
 
-    const next = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: note.revision, text: "# Plan\n\n- [ ] call @[[Ada Lovelace]]" });
-    expect(await indexed(note.id)).toEqual([[2, ada.personId, "Ada Lovelace"]]);
+    const next = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: note.revision, text: "# Plan\n\n- [ ] call [[person:Ada Lovelace]]" });
+    expect(await indexed(note.id)).toEqual([[2, ada.personId, ""]]);
     await perform(env.DB, ada, { type: "note.undo", id: note.id });
     expect((await indexed(note.id)).length).toBe(3);
 
@@ -152,7 +159,7 @@ describe("a todo's assignees", () => {
   async function team() {
     const ada = await newMember("Ada Lovelace");
     const grace = await addMember(ada, "editor", "Grace Hopper");
-    const note = await create(ada, "# Plan\n\n- [ ] one @[[Grace Hopper]]\n- [ ] two @[[Ada Lovelace]] @[[Sam Okafor]]\n- [ ] three @[[sam okafor]]\n- [ ] four\n\nNot a todo: @[[Zed Zimmer]]");
+    const note = await create(ada, "# Plan\n\n- [ ] one [[person:Grace Hopper]]\n- [ ] two [[person:Ada Lovelace]] [[person:Sam Okafor]]\n- [ ] three [[person:sam okafor]]\n- [ ] four\n\nNot a todo: [[person:Zed Zimmer]]");
     return { ada, grace, note };
   }
 
@@ -187,29 +194,29 @@ describe("a todo's assignees", () => {
       return (await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: now.revision, line: todo.line, text: todo.text, ...change })).text.split("\n")[todo.line];
     };
 
-    expect(await set({ assign: "grace hopper" })).toBe(`- [ ] four @[[${grace.personId}|Grace Hopper]]`);
-    expect(await set({ assign: grace.personId })).toBe(`- [ ] four @[[${grace.personId}|Grace Hopper]]`);
-    expect(await set({ assign: "Sam Okafor" })).toBe(`- [ ] four @[[${grace.personId}|Grace Hopper]] @[[Sam Okafor]]`);
-    expect(await set({ unassign: grace.personId })).toBe("- [ ] four @[[Sam Okafor]]");
-    expect(await set({ unassign: "sam okafor", assign: ada.personId })).toBe(`- [ ] four @[[${ada.personId}|Ada Lovelace]]`);
+    expect(await set({ assign: "grace hopper" })).toBe(`- [ ] four [[person:${grace.personId}]]`);
+    expect(await set({ assign: grace.personId })).toBe(`- [ ] four [[person:${grace.personId}]]`);
+    expect(await set({ assign: "Sam Okafor" })).toBe(`- [ ] four [[person:${grace.personId}]] [[person:Sam Okafor]]`);
+    expect(await set({ unassign: grace.personId })).toBe("- [ ] four [[person:Sam Okafor]]");
+    expect(await set({ unassign: "sam okafor", assign: ada.personId })).toBe(`- [ ] four [[person:${ada.personId}]]`);
     expect(await codeOf(perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 5, text: "- [ ] four", assign: "a]]b" }))).toMatch(/^invalid: /);
   });
 
-  it("are set by their id by a guest with the name the note already calls them, which is all the guest was told", async () => {
+  it("are set by their id by a guest, who is told no name", async () => {
     const { ada, grace, note } = await team();
     const gus = await guestOn(ada, note.id, "edit");
     const stored = await read(ada, note.id);
     const four = (await todos(gus, { noteId: note.id })).find((t) => t.words === "four")!;
     const set = await perform(env.DB, gus, { type: "todo.set", id: note.id, revision: stored.revision, line: four.line, text: four.text, assign: grace.personId });
-    expect(set.text.split("\n")[four.line]).toBe(`- [ ] four @[[${grace.personId}|Grace Hopper]]`);
-    expect((await todos(gus, { noteId: note.id })).find((t) => t.words === "four")!.assignees).toEqual([{ id: grace.personId, name: "Grace Hopper", member: false }]);
+    expect(set.text.split("\n")[four.line]).toBe(`- [ ] four [[person:${grace.personId}]]`);
+    expect((await todos(gus, { noteId: note.id })).find((t) => t.words === "four")!.assignees).toEqual([{ id: grace.personId, name: "Someone", member: false }]);
     const after = await read(ada, note.id);
     const again = await perform(env.DB, gus, { type: "todo.set", id: note.id, revision: after.revision, line: four.line, text: set.text.split("\n")[four.line]!, assign: ada.personId });
-    expect(again.text.split("\n")[four.line]).toBe(`- [ ] four @[[${grace.personId}|Grace Hopper]] @[[${ada.personId}|Ada Lovelace]]`);
-    // An id the note calls nothing is written as it was given: there is no name to be had without being told who is a member.
+    expect(again.text.split("\n")[four.line]).toBe(`- [ ] four [[person:${grace.personId}]] [[person:${ada.personId}]]`);
+    // An id the note holds nowhere is written as it was given too.
     const lone = await create(ada, "# Lone\n\n- [ ] five");
     const gusToo = await guestOn(ada, lone.id, "edit");
-    expect((await perform(env.DB, gusToo, { type: "todo.set", id: lone.id, revision: lone.revision, line: 2, text: "- [ ] five", assign: grace.personId })).text).toBe(`# Lone\n\n- [ ] five @[[${grace.personId}]]`);
+    expect((await perform(env.DB, gusToo, { type: "todo.set", id: lone.id, revision: lone.revision, line: 2, text: "- [ ] five", assign: grace.personId })).text).toBe(`# Lone\n\n- [ ] five [[person:${grace.personId}]]`);
   });
 
   it("are taken away by name as they are by id, a member's too, and an unassign that names nobody on the line is refused", async () => {
@@ -223,11 +230,11 @@ describe("a todo's assignees", () => {
     await set("one", { unassign: "grace hopper" });
     expect((await line("one")).text).toBe("- [ ] one");
     await set("two", { unassign: ada.personId });
-    expect((await line("two")).text).toBe("- [ ] two @[[Sam Okafor]]");
+    expect((await line("two")).text).toBe("- [ ] two [[person:Sam Okafor]]");
     // A member written by name alone and the same member by id are both who the name means.
     await set("four", { assign: grace.personId });
     const both = await read(ada, note.id);
-    await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: both.revision, text: both.text.replace("- [ ] four", "- [ ] four @[[Grace Hopper]]"), mentionNames: "keep" });
+    await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: both.revision, text: both.text.replace("- [ ] four", "- [ ] four [[person:Grace Hopper]]"), mentionNames: "keep" });
     await set("four", { unassign: "Grace Hopper" });
     expect((await line("four")).text).toBe("- [ ] four");
 
@@ -247,19 +254,19 @@ describe("a todo's assignees", () => {
       expect(await codeOf(todos(ada, { assignee: name })), JSON.stringify(name)).toMatch(/^invalid: /);
     }
     const assigned = await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 5, text: "- [ ] four", assign: "\u202eSam\u200b Okafor" });
-    expect(assigned.text.split("\n")[5]).toBe("- [ ] four @[[Sam Okafor]]");
+    expect(assigned.text.split("\n")[5]).toBe("- [ ] four [[person:Sam Okafor]]");
   });
 
   it("ride onto the line a recurring todo files, and are withheld with its words where the daily note is seen by more people", async () => {
     const ada = await newMember("Ada Lovelace");
-    const open = await create(ada, "# Open\n\n- [ ] water @[[Sam Okafor]] every:1d");
-    const secret = await create(ada, "# Secret\n\n- [ ] confide @[[Sam Okafor]] every:1d");
+    const open = await create(ada, "# Open\n\n- [ ] water [[person:Sam Okafor]] every:1d");
+    const secret = await create(ada, "# Secret\n\n- [ ] confide [[person:Sam Okafor]] every:1d");
     await perform(env.DB, ada, { type: "note.setPrivate", id: secret.id, private: true });
     await perform(env.DB, ada, { type: "settings.write", text: JSON.stringify({ "daily.private": false }), baseRevision: 0 });
 
     for (const note of [open, secret]) await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 2, text: note.text.split("\n")[2]!, done: true, on: "2026-10-11" });
     const daily = await perform(env.DB, ada, { type: "daily.open", on: "2026-10-11" });
-    expect(daily.text).toContain(`- [x] water @[[Sam Okafor]] [[${open.id}]]`);
+    expect(daily.text).toContain(`- [x] water [[person:Sam Okafor]] [[${open.id}]]`);
     expect(daily.text).toContain(`- [x] [[${secret.id}]]`);
     expect(daily.text).not.toContain("confide");
     expect(daily.text.match(/Sam Okafor/g)).toHaveLength(1);
@@ -271,7 +278,7 @@ describe("sharing with a member by naming them", () => {
     const ada = await newMember("Ada Lovelace");
     const eve = await addMember(ada, "editor", "Eve Editor");
     const grace = await addMember(ada, "viewer", "Grace Hopper");
-    const note = await create(eve, "# Mine\n\n@[[Grace Hopper]]");
+    const note = await create(eve, "# Mine\n\n[[person:Grace Hopper]]");
     await perform(env.DB, eve, { type: "note.setPrivate", id: note.id, private: true });
 
     const grant = await perform(env.DB, eve, { type: "grant.set", noteId: note.id, memberId: grace.personId, access: "view" });
@@ -301,24 +308,24 @@ describe("sharing with a member by naming them", () => {
 });
 
 describe("what a mention leaves elsewhere", () => {
-  it("is found by search and read in a snippet as the name it was written with", async () => {
+  it("is found by search and read in a snippet as the name it is by, and a member's as nothing, whose name the note doesn't hold", async () => {
     const ada = await newMember("Ada Lovelace");
     const grace = await addMember(ada, "editor", "Grace Hopper");
-    const note = await create(ada, "# Plan\n\nLunch with @[[Grace Hopper]] and @[[Sam Okafor]]");
+    const note = await create(ada, "# Plan\n\nLunch with [[person:Grace Hopper]] and [[person:Sam Okafor]]");
 
-    expect(note.snippet).toBe("Lunch with @Grace Hopper and @Sam Okafor");
+    expect(note.snippet).toBe("Lunch with and @Sam Okafor");
     expect((await perform(env.DB, ada, { type: "search", query: "okafor" })).results.map((r) => r.note.id)).toEqual([note.id]);
     expect(await perform(env.DB, ada, { type: "note.backlinks", id: note.id })).toEqual([]);
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM links WHERE source_id = ?").bind(note.id).first<{ n: number }>())!.n).toBe(0);
     expect(grace.personId).toHaveLength(12);
   });
 
-  it("leaves a link after an @ that starts no mention a link, with its backlink", async () => {
+  it("leaves a link after an @ a link, with its backlink: an @ starts no mention", async () => {
     const ada = await newMember("Ada Lovelace");
     const target = await create(ada, "# Target");
-    const note = await create(ada, `# Mail\n\nmail@[[${target.id}]] and x@[[Target]]`);
+    const note = await create(ada, `# Mail\n\nmail@[[${target.id}]] and @[[Target]]`);
 
-    expect(note.text).toBe(`# Mail\n\nmail@[[${target.id}]] and x@[[${target.id}]]`);
+    expect(note.text).toBe(`# Mail\n\nmail@[[${target.id}]] and @[[${target.id}]]`);
     expect((await read(ada, note.id)).links).toEqual([{ id: target.id, title: "Target", state: "live" }]);
     expect((await read(ada, note.id)).mentions).toEqual([]);
     expect((await perform(env.DB, ada, { type: "note.backlinks", id: target.id })).map((n) => n.id)).toEqual([note.id]);

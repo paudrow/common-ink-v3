@@ -92,7 +92,7 @@ test("@ lists the members in the theme colour and my contacts in gray, narrows a
   await expect(mentions(page).nth(1)).toHaveCSS("color", muted);
   await expect(mentions(page).nth(1)).toHaveAttribute("title", "Sam Okafor, mentioned by name");
 
-  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk @[[${graceId}|Grace Hopper]] and @[[Sam Okafor]]`);
+  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk [[person:${graceId}]] and [[person:Sam Okafor]]`);
   // The contacts are read once for the list, however much is typed after the @.
   expect(contactLists).toHaveLength(1);
 });
@@ -211,7 +211,7 @@ test("another reader sees a mentioned contact's name in gray, and nothing else o
   const note = await perform(page, { type: "note.create", text: "# Plan\n\n" });
   await open(page, note.id, "Plan");
   await pick(page, "Lunch with @zoe", /^Zoë Álvarez/);
-  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nLunch with @[[Zoë Álvarez]]");
+  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nLunch with [[person:Zoë Álvarez]]");
 
   const said: string[] = [];
   grace.on("response", (response) => void response.text().then((body) => said.push(body), () => {}));
@@ -289,9 +289,9 @@ test("the offer to share can be turned off in settings, isn't made for a note th
   // An agent's mention reaches the open editor as a change from elsewhere, and asks nothing.
   await open(page, diary.id, "Diary");
   const claude = await connectAgent(page, "Claude");
-  await claude.tool("write_note", { id: diary.id, baseRevision: diary.revision, text: "# Diary\n\nAsk @[[Grace Hopper]]" });
+  await claude.tool("write_note", { id: diary.id, baseRevision: diary.revision, text: "# Diary\n\nAsk [[person:Grace Hopper]]" });
   await expect(mentions(page)).toHaveText(["@Grace Hopper"]);
-  await expect.poll(() => text(page, diary.id)).toBe(`# Diary\n\nAsk @[[${graceId}|Grace Hopper]]`);
+  await expect.poll(() => text(page, diary.id)).toBe(`# Diary\n\nAsk [[person:${graceId}]]`);
   await expect(notice(page)).toHaveCount(0);
   await expect.poll(async () => (await perform(page, { type: "grant.list", noteId: diary.id })).grants).toEqual([]);
 
@@ -311,7 +311,7 @@ test("the offer to share can be turned off in settings, isn't made for a note th
 
 test("a person mentioned on a todo is its assignee, drawn as a chip, and the Todos page lists them, finds them with assignee:, and changes who a todo is assigned to from the chip", async ({ page }) => {
   const { graceId, grace, workspaceId } = await team(page);
-  const note = await perform(page, { type: "note.create", text: `# Plan\n\n- [ ] Book the venue\n- [ ] Call the bank @[[Sam Okafor]]\n- [ ] Send invites @[[Ada Lovelace]]\n\nThanks to @[[Grace Hopper]].` });
+  const note = await perform(page, { type: "note.create", text: `# Plan\n\n- [ ] Book the venue\n- [ ] Call the bank [[person:Sam Okafor]]\n- [ ] Send invites [[person:Ada Lovelace]]\n\nThanks to [[person:Grace Hopper]].` });
   await open(page, note.id, "Plan");
   await editor(page).getByText("Book the venue").click();
   await page.keyboard.press("End");
@@ -325,7 +325,7 @@ test("a person mentioned on a todo is its assignee, drawn as a chip, and the Tod
   // In prose the same mention is words in the line, and no chip.
   await expect(mentions(page).last()).toHaveText("@Grace Hopper");
   await expect(mentions(page).last()).not.toHaveClass(/md-mention-assignee/);
-  await expect.poll(() => text(page, note.id)).toContain(`- [ ] Book the venue @[[${graceId}|Grace Hopper]]`);
+  await expect.poll(() => text(page, note.id)).toContain(`- [ ] Book the venue [[person:${graceId}]]`);
 
   await page.goto("/todos");
   const rows = page.getByRole("list", { name: "Todos" }).getByRole("listitem");
@@ -368,7 +368,7 @@ test("a person mentioned on a todo is its assignee, drawn as a chip, and the Tod
   await rows.first().getByRole("button", { name: "Assigned to Sam Okafor" }).click();
   await page.getByRole("dialog", { name: "Assignees of Call the bank" }).getByRole("button", { name: "Assign to Ada Lovelace" }).click();
   await expect(rows.first().locator(".todo-assignee")).toHaveText(["@Sam Okafor", "@Ada Lovelace"]);
-  await expect.poll(() => text(page, note.id)).toMatch(/- \[ \] Call the bank @\[\[Sam Okafor\]\] @\[\[[a-z0-9]{12}\|Ada Lovelace\]\]/);
+  await expect.poll(() => text(page, note.id)).toMatch(/- \[ \] Call the bank \[\[person:Sam Okafor\]\] \[\[person:[a-z0-9]{12}\]\]/);
 
   // A todo with nobody has a quiet Assign chip in its place on the second line, after the date and before Add tag, Repeat and Priority.
   await filter(page, "venue");
@@ -376,7 +376,7 @@ test("a person mentioned on a todo is its assignee, drawn as a chip, and the Tod
   await expect(rows.first().getByRole("button", { name: "Assign: nobody" })).toHaveAttribute("data-unset", "true");
   await rows.first().getByRole("button", { name: "Assign: nobody" }).click();
   await page.getByRole("dialog", { name: "Assignees of Book the venue" }).getByRole("button", { name: "Assign to Grace Hopper" }).click();
-  await expect.poll(() => text(page, note.id)).toContain(`- [ ] Book the venue @[[${graceId}|Grace Hopper]]`);
+  await expect.poll(() => text(page, note.id)).toContain(`- [ ] Book the venue [[person:${graceId}]]`);
 });
 
 interface Place {
@@ -418,7 +418,7 @@ test("nothing moves when the cursor comes to a line with mentions, a deletion ta
   const { graceId } = await team(page);
   const note = await perform(page, {
     type: "note.create",
-    text: `# Plan\n\nUp @[[${graceId}|Grace Hopper]] mid end\n\nBy name @[[Sam Okafor]] here\n\n- [ ] Todo first @[[${graceId}|Grace Hopper]] then @[[Sam Okafor]] last\n\nBelow the rest`,
+    text: `# Plan\n\nUp [[person:${graceId}]] mid end\n\nBy name [[person:Sam Okafor]] here\n\n- [ ] Todo first [[person:${graceId}]] then [[person:Sam Okafor]] last\n\nBelow the rest`,
   });
   await open(page, note.id, "Below the rest");
   const words = ["Up", "mid", "end", "By name", "here", "Todo first", "then", "last", "Below the rest"];
@@ -444,7 +444,7 @@ test("nothing moves when the cursor comes to a line with mentions, a deletion ta
   await page.keyboard.press("End");
   for (let i = 0; i < " mid end".length; i++) await page.keyboard.press("ArrowLeft");
   await page.keyboard.type("!");
-  await expect.poll(() => text(page, note.id)).toContain(`Up @[[${graceId}|Grace Hopper]]! mid`);
+  await expect.poll(() => text(page, note.id)).toContain(`Up [[person:${graceId}]]! mid`);
   await page.keyboard.press("Backspace");
   await page.keyboard.press("Backspace");
   await expect.poll(() => text(page, note.id)).toContain("\nUp  mid end\n");
@@ -460,7 +460,7 @@ test("nothing moves when the cursor comes to a line with mentions, a deletion ta
   await expect(mentions(page)).toHaveCount(4);
   await page.keyboard.press("ArrowRight");
   await expect(mentions(page)).toHaveCount(3);
-  await expect(editor(page)).toContainText(`@[[${graceId}|Grace Hopper]]`);
+  await expect(editor(page)).toContainText(`[[person:${graceId}]]`);
   await page.keyboard.press("ArrowLeft");
   await expect(mentions(page)).toHaveCount(4);
   await page.keyboard.press("End");
@@ -473,16 +473,16 @@ test("nothing moves when the cursor comes to a line with mentions, a deletion ta
   await page.keyboard.press("Home");
   for (let i = 0; i < "Up ".length + 1; i++) await page.keyboard.press("ArrowRight");
   await expect(mentions(page)).toHaveCount(3);
-  await expect(editor(page)).toContainText(`@[[${graceId}|Grace Hopper]]`);
+  await expect(editor(page)).toContainText(`[[person:${graceId}]]`);
   const inside = await placesOf(page, words);
   const rest = ["Up", "By name", "here", "Todo first", "then", "last", "Below the rest"];
   expectUnmoved(Object.fromEntries(rest.map((word) => [word, inside[word]!])), Object.fromEntries(rest.map((word) => [word, away[word]!])), "with the cursor inside a mention");
   for (const word of ["mid", "end"]) expect([inside[word]!.top, inside[word]!.height], word).toEqual([away[word]!.top, away[word]!.height]);
 });
 
-test("a link's page shows a mentioned member by the name the note writes, in gray, and never asks who is in the workspace", async ({ page }) => {
+test("a link's page shows a mentioned member as someone, or the words the note gives them, in gray, and never asks who is in the workspace", async ({ page }) => {
   const { graceId } = await team(page);
-  const note = await perform(page, { type: "note.create", text: `# Minutes\n\nPresent: @[[${graceId}|Grace Hopper]] and @[[Sam Okafor]]\n\n- [ ] Follow up @[[${graceId}|Grace Hopper]]` });
+  const note = await perform(page, { type: "note.create", text: `# Minutes\n\nPresent: [[person:${graceId}]] and [[person:Sam Okafor]]\n\n- [ ] Follow up [[person:${graceId}|Grace]]` });
   const link = await perform(page, { type: "grant.link", noteId: note.id, link: "public" });
   const token = link!.to.kind === "link" ? (link!.to.token ?? "") : "";
 
@@ -490,11 +490,12 @@ test("a link's page shows a mentioned member by the name the note writes, in gra
   const requests: string[] = [];
   reader.on("request", (request) => requests.push(`${request.method()} ${new URL(request.url()).pathname} ${request.postData() ?? ""}`));
   await reader.goto(`/s/${token}`);
-  await expect(mentions(reader)).toHaveText(["@Grace Hopper", "@Sam Okafor", "@Grace Hopper"]);
+  await expect(mentions(reader)).toHaveText(["@Someone", "@Sam Okafor", "@Grace"]);
   const muted = await colorOf(reader, "--muted");
   for (const i of [0, 1, 2]) await expect(mentions(reader).nth(i)).toHaveCSS("color", muted);
   await expect(mentions(reader).first()).toHaveCSS("unicode-bidi", "isolate");
-  await expect(mentions(reader).first()).toHaveAttribute("title", "Grace Hopper, mentioned by name");
+  await expect(mentions(reader).nth(1)).toHaveAttribute("title", "Sam Okafor, mentioned by name");
+  await expect(reader.locator("body")).not.toContainText("Hopper");
   // A click there goes nowhere: a link's page has no person to open.
   await mentions(reader).first().click();
   await expect(reader).toHaveURL(new RegExp(`/s/${token}$`));
@@ -505,9 +506,9 @@ const personPage = (page: Page, name: string) => page.getByRole("region", { name
 
 test("a click on a mention opens that person's page: my contact's details for me alone, their open todos, the lines that mention them, a search among those notes, and one action that starts a note about them", async ({ page }) => {
   const { grace, graceId, workspaceId } = await team(page);
-  const boiler = await perform(page, { type: "note.create", text: `# Boiler\n\n- [ ] Fix the boiler @[[Sam Okafor]]\n\nSam said the valve is old.` });
-  await perform(page, { type: "note.create", text: `# Plumbing log\n\nCalled @[[Sam Okafor]] about the leak under the sink.` });
-  const secret = await perform(page, { type: "note.create", text: `# Secret\n\nsecret-line about @[[Sam Okafor]]` });
+  const boiler = await perform(page, { type: "note.create", text: `# Boiler\n\n- [ ] Fix the boiler [[person:Sam Okafor]]\n\nSam said the valve is old.` });
+  await perform(page, { type: "note.create", text: `# Plumbing log\n\nCalled [[person:Sam Okafor]] about the leak under the sink.` });
+  const secret = await perform(page, { type: "note.create", text: `# Secret\n\nsecret-line about [[person:Sam Okafor]]` });
   await perform(page, { type: "note.setPrivate", id: secret.id, private: true });
 
   await perform(page, { type: "note.create", text: `# Valves\n\nA catalogue of valves.` });
@@ -555,7 +556,7 @@ test("a click on a mention opens that person's page: my contact's details for me
   await expect(hers).not.toContainText(/555|Okafor Plumbing|Water Lane|secret-line|Only you see this/);
 
   // A member's page is their card, and opened from a mention of them.
-  await perform(page, { type: "note.write", id: boiler.id, baseRevision: 1, text: `# Boiler\n\n- [ ] Fix the boiler @[[Sam Okafor]]\n\nSam said the valve is old. Ask @[[${graceId}|Grace Hopper]].` });
+  await perform(page, { type: "note.write", id: boiler.id, baseRevision: 1, text: `# Boiler\n\n- [ ] Fix the boiler [[person:Sam Okafor]]\n\nSam said the valve is old. Ask [[person:${graceId}]].` });
   await page.goto(`/note/${boiler.id}`);
   await expect(mentions(page)).toHaveCount(2);
   await mentions(page).nth(1).click();
@@ -567,13 +568,13 @@ test("a click on a mention opens that person's page: my contact's details for me
   await expect(page).toHaveURL(/\/note\//);
   await expect(editor(page)).toContainText("Grace Hopper");
   const made = (await perform(page, { type: "note.list" }, workspaceId)).notes.find((note) => note.title === "Grace Hopper")!;
-  expect((await perform(page, { type: "note.read", id: made.id }, workspaceId)).text).toBe(`# Grace Hopper\n\n@[[${graceId}|Grace Hopper]] `);
+  expect((await perform(page, { type: "note.read", id: made.id }, workspaceId)).text).toBe(`# Grace Hopper\n\n[[person:${graceId}]] `);
 });
 
 test("search finds the notes that mention someone with mentions:, and the todos assigned to them with assignee:", async ({ page }) => {
   const { graceId } = await team(page);
-  await perform(page, { type: "note.create", text: `# Launch\n\nAsk @[[${graceId}|Grace Hopper]] first.` });
-  await perform(page, { type: "note.create", text: `# Venue\n\n- [ ] Book it @[[Sam Okafor]]` });
+  await perform(page, { type: "note.create", text: `# Launch\n\nAsk [[person:${graceId}]] first.` });
+  await perform(page, { type: "note.create", text: `# Venue\n\n- [ ] Book it [[person:Sam Okafor]]` });
   await page.goto("/search");
   const search = page.getByRole("region", { name: "Search" });
   const bar = search.getByRole("searchbox", { name: "Search notes" });

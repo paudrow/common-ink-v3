@@ -127,7 +127,7 @@ const PLUGIN_NAMES = Object.keys(PLUGINS) as PluginName[];
 const address = () => `${crypto.randomUUID()}@example.com`;
 
 /** Each note has a todo with words of its own, a tag of its own, and someone of its own it is assigned to, which give the note away as its title does. */
-const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name} @[[who-${name}]]`;
+const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name} [[person:who-${name}]]`;
 const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
 
 /** `more` is written in every note's text, after its own words. */
@@ -317,6 +317,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   search: { on: "everything", covers: "live", archived: true, only: true, args: () => ({ query: "body", limit: 50 }) },
   "note.label": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revision: 1, name: "Start" }) },
   "note.linkDates": { on: "note", needs: "E", trashed: "refused", members: true, args: (id) => ({ id }) },
+  "note.convertLinks": { on: "workspace", who: MEMBERS, args: () => ({}) },
   "note.revert": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
   "note.revertChanges": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revisions: [99] }) },
   "note.previewRevert": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, revisions: [1] }) },
@@ -1116,7 +1117,7 @@ export function accessMatrix(part: ActorName | null) {
           it(`${name}, as ${as}`, async () => {
             // Every note holds Ada's reference to the event; the reference is made before the notes, by its id.
             const ref = newId();
-            const w = await world(`::event{${ref} Team sync}`);
+            const w = await world(`[[event:${ref}]]`);
             const ada = w.actors["Ada, an admin"];
             await env.DB.prepare("INSERT INTO source_refs (id, person_id, data_source, record_id, created_at) VALUES (?, ?, 'cal', ?, 0)").bind(ref, ada.personId, SYNC.id).run();
             const person = w.actors[name];

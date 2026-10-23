@@ -13,10 +13,10 @@ const N = 40_000;
 const HOSTILE: Record<string, string> = {
   backticks: "`".repeat(N),
   "backticks apart": "` ".repeat(N / 2),
-  "code then everything": `${"`".repeat(N)} [[a]] @[[b]] ::image{aaaaaaaaaaaa} ](x)`,
+  "code then everything": `${"`".repeat(N)} [[a]] [[person:b]] ::image{aaaaaaaaaaaa} ](x)`,
   addresses: "](".repeat(N / 2),
   links: "[[".repeat(N / 2),
-  mentions: "@[[".repeat(N / 3),
+  mentions: "[[person:".repeat(N / 9),
   brackets: "[".repeat(N),
   pictures: "![".repeat(N / 2),
   "links with addresses": "[a](".repeat(N / 4),
@@ -74,7 +74,7 @@ describe("inline code and addresses on a line", () => {
   it("reads what the line says the same as before", () => {
     expect(parseTodo("- [ ] call `due:2026-01-01` [x](due:2026-01-02) due:2026-01-03")?.due?.date).toBe("2026-01-03");
     expect(linksOn("`[[code]]` [[note]]").map((l) => l.target)).toEqual(["note"]);
-    expect(mentionsOn("[x](@[[nobody]]) `@[[nor]]` @[[Ada]]").map((m) => m.target)).toEqual(["Ada"]);
+    expect(mentionsOn("[x]([[person:nobody]]) `[[person:nor]]` [[person:Ada]]").map((m) => m.target)).toEqual(["Ada"]);
     expect(uploadIds("`::image{aaaaaaaaaaaa}` ::file{bbbbbbbbbbbb}")).toEqual(["bbbbbbbbbbbb"]);
     expect(summarize("# A `code` [link](https://x.y) and [[abcdefghijkl]] and [[Note|shown]] ![pic](p.png)").title).toBe("A code link and and shown");
     expect(summarize("# See [Foo [1]](https://en.wikipedia.org/wiki/Foo_(bar)) here ![p](a_(b).png) ##").title).toBe("See Foo [1] here");
