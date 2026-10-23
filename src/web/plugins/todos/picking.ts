@@ -1,3 +1,4 @@
+import type { Text } from "@codemirror/state";
 import { DAY_NAMES, nameKey, ordinal, parseRule, skippedTo, tagsOn, writeRule, type IconName, type Importance, type TodoChange, type TodoState } from "../../plugin-api.ts";
 import { addDays, dueLabel } from "./dates.ts";
 import { shortDay } from "./recurrence.ts";
@@ -28,6 +29,43 @@ export const PUTTING: Record<PutAway, { label: string; icon: IconName; command: 
 
 /** What a key, a button or a menu item for a state makes a todo: that state, or open again when it is in it already. */
 export const pressed = (state: TodoState, to: PutAway): TodoState => (state === to ? "open" : to);
+
+/** The command and keys that put the todos on the lines of a note the cursor or the selection is on in each state, or open them again. */
+export const IN_A_NOTE: Record<PutAway, { command: string; title: string; keys: readonly string[] }> = {
+  done: { command: "todos.note.complete", title: "Complete the todo the cursor is on, or open it again", keys: ["mod+enter"] },
+  abandoned: { command: "todos.note.abandon", title: "Abandon the todo the cursor is on, or open it again", keys: ["mod+shift+enter"] },
+  backlog: { command: "todos.note.backlog", title: "Move the todo the cursor is on to the backlog, or open it again", keys: ["mod+alt+enter"] },
+};
+
+/** Where each line starts that any of `ranges` takes in, in order. A selection that ends at the start of a line ends past what it takes, and so doesn't take that line. */
+export function linesTouched(doc: Text, ranges: readonly { from: number; to: number }[]): number[] {
+  const starts = new Set<number>();
+  for (const { from, to } of ranges) {
+    const last = doc.lineAt(to > from && doc.lineAt(to).from === to ? to - 1 : to).number;
+    for (let n = doc.lineAt(from).number; n <= last; n++) starts.add(doc.line(n).from);
+  }
+  return [...starts].sort((a, b) => a - b);
+}
+
+/** A line a key for a state acts on, by where it starts: a todo in its state, or a list item that is no todo yet, with where its box is written. */
+export type KeyedLine = { from: number; state: TodoState } | { from: number; box: number };
+
+/** What a key for a state does to the lines it acts on: puts todos in a state, by where their lines start, or makes todos of list items, by where each box is written. */
+export type Keyed = { put: { from: number; state: TodoState }[] } | { boxed: number[] };
+
+/**
+ * What a key for `to` does to the lines it acts on, as `pressed` does to one todo: every todo there goes to `to`, or open
+ * again when they all are in it already. Done's key first makes open todos of the list items there that are none, and
+ * leaves the todos as they are. Nothing when there is nothing for it to do.
+ */
+export function keyed(lines: readonly KeyedLine[], to: PutAway): Keyed | null {
+  const boxed = to === "done" ? lines.flatMap((line) => ("box" in line ? [line.box] : [])) : [];
+  if (boxed.length) return { boxed };
+  const todos = lines.flatMap((line) => ("state" in line ? [line] : []));
+  const state: TodoState = todos.every((todo) => todo.state === to) ? "open" : to;
+  const put = todos.filter((todo) => todo.state !== state).map(({ from }) => ({ from, state }));
+  return put.length ? { put } : null;
+}
 
 /** The chips of a todo that open a popover of choices, in a note and on the Todos page. */
 export type ChipKind = "due" | "importance" | "every";

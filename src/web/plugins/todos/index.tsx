@@ -2,11 +2,11 @@ import { EditorView, ViewPlugin } from "@codemirror/view";
 import type { Plugin } from "../../plugin-api.ts";
 import { editorKey, redraw } from "../lib/live.ts";
 import { todoOpener } from "../lib/openTodo.ts";
-import { openOptionHere, todoAdds, todoAtCursor } from "./lineControls.ts";
+import { keyedHere, openOptionHere, putHere, todoAdds, todoAtCursor } from "./lineControls.ts";
 import { tickedIn, todoChips, untick } from "./chips.ts";
 import { CHANGED, putAway, refused, takeBack } from "./completed.ts";
 import { dueOffers, today } from "./dates.ts";
-import { PUTTING, type PutAway, type RowChip } from "./picking.ts";
+import { IN_A_NOTE, PUTTING, type PutAway, type RowChip } from "./picking.ts";
 import { everyOffers } from "./recurrence.ts";
 import { SORTS, TodosPage, putterHere } from "./Todos.tsx";
 
@@ -57,9 +57,15 @@ export const todos: Plugin = {
 
     host.views.register("page", { id: "todos", path: "/todos", label: "Todos", description: "Every todo in the workspace, with its due date, priority and note.", icon: "todos", nav: "primary", order: 30, component: ({ app }) => <TodosPage host={host} app={app} onOpen={open} /> });
 
-    // Keys for the row of a list of todos the keyboard is on, whether or not vim's are on: vim's dd presses the row's Abandon.
+    // Keys for the row of a list of todos the keyboard is on, whether or not vim's are on: vim's dd presses the row's Abandon. A note's
+    // keys for each state work on a row too: the two commands share them, and each runs only where it is.
     for (const [to, { command, title, keys }] of Object.entries(PUTTING) as [PutAway, (typeof PUTTING)[PutAway]][]) {
-      host.commands.register({ id: command, title, keys, group: "Todos", when: () => putterHere() !== null, run: () => putterHere()?.(to) });
+      host.commands.register({ id: command, title, keys: [...keys, ...IN_A_NOTE[to].keys], group: "Todos", when: () => putterHere() !== null, run: () => putterHere()?.(to) });
+    }
+
+    // Keys for the todos on the lines of a note the cursor or the selection is on. Off them, ⌘Enter is the editor's own.
+    for (const [to, { command, title, keys }] of Object.entries(IN_A_NOTE) as [PutAway, (typeof IN_A_NOTE)[PutAway]][]) {
+      host.commands.register({ id: command, title, keys, group: "Todos", when: () => keyedHere(to) !== null, run: () => putHere(to) });
     }
 
     // The keyboard's way to the controls beside a todo in a note, from the line the cursor is on.

@@ -3,7 +3,7 @@ import { land, toward, type Move, type Side } from "./moving.ts";
 
 /**
  * What vim's keys move through outside a note's text: the lists, rows and regions of `rows.ts`. A
- * row's delete key presses what it marks `data-row-delete`.
+ * row's delete key presses what it marks `data-row-delete`. A row marked `data-row-puts` is put in a state by keys of its own.
  *
  * A list that takes focus itself keeps its own cursor and has its own keys for it, as History's
  * does. Vim's keys go as far as that list and no further: its rows are the list's to move through.
@@ -55,6 +55,8 @@ export interface Surfaces {
     beside(): boolean;
     /** As `row`, on a row with something to delete it by. */
     deletable(): boolean;
+    /** As `row`, on a row that is put in a state by keys of its own, as a todo's is. */
+    puttable(): boolean;
     /** Not typing, with a search box in reach. */
     search(): boolean;
     /** Typing in a field that isn't a note's, with a list in reach. */
@@ -199,6 +201,7 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
         return !!row && beside(row) && goes(row);
       },
       deletable: () => !!deleterOf(selected()),
+      puttable: () => !!selected()?.matches("[data-row-puts]"),
       search: () => !drawn() && !typing(active()) && !!searchBox(),
       field: () => inField() && !!listNear(),
       // Over the window only a search box or a field inside a list, as Settings has: a palette's own field keeps Escape for closing.

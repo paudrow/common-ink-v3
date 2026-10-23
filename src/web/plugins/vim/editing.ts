@@ -2,6 +2,7 @@ import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { EditorView, RectangleMarker, ViewPlugin, drawSelection, keymap, layer } from "@codemirror/view";
 import { Vim, getCM, vim, type MotionFn } from "@replit/codemirror-vim";
 import { dismissing, following, historyStepped, noteJump } from "../../plugin-api.ts";
+import { TODO_KEYS } from "./keys.ts";
 
 let run: (commandId: string) => boolean = () => false;
 
@@ -53,6 +54,16 @@ Vim.defineAction("nextTab", () => void run("vim.tab.next"));
 Vim.defineAction("previousTab", () => void run("vim.tab.previous"));
 Vim.mapCommand("gt", "action", "nextTab", {}, { context: "normal" });
 Vim.mapCommand("gT", "action", "previousTab", {}, { context: "normal" });
+
+// gx, g- and g> put the todos on the cursor's line, or on the lines visual mode selects, in a state as ⌘Enter and its like do, and
+// leave visual mode as Escape does. In a note g begins many of vim's own keys, so they are vim's to map and not the window's.
+for (const { id, vim: keys, runs } of TODO_KEYS) {
+  Vim.defineAction(id, (cm, _, state) => {
+    run(runs);
+    if (state.visualMode) Vim.exitVisualMode(cm);
+  });
+  for (const context of ["normal", "visual"]) Vim.mapCommand(keys, "action", id, {}, { context });
+}
 
 // zz, zt and zb put the cursor's line in the middle, at the top or at the foot of what is seen, and z., z<CR> and z- do the
 // same with the cursor on the line's first letter. The library's own scroll the editor, which here never scrolls: its pane does.

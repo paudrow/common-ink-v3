@@ -150,7 +150,9 @@ test("turning tabs off shows the open note alone, and turning them on brings its
   await writes(page, beta.id, "written with tabs off");
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.keyboard.type("close");
-  await expect(palette(page).getByText("No commands match.")).toBeVisible();
+  // Other commands have the letters of "close" in order, as "Complete the todo the cursor is on" does: no command closes anything.
+  await expect(palette(page).getByRole("combobox")).toHaveValue("close");
+  await expect(palette(page).getByRole("option", { name: /close/i })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
   await openNote(page, "Alpha");

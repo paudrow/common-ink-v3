@@ -1,5 +1,6 @@
+import { EditorSelection, Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { choicesFor, clicked, picking, pressed, repeatOf, repeats, sameRule, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
+import { choicesFor, clicked, keyed, linesTouched, picking, pressed, repeatOf, repeats, sameRule, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
 
 const run = (events: PickingEvent[], from: Picking = null) => events.reduce(picking, from);
 const open = (row: string, chip: Opened): PickingEvent => ({ type: "open", row, chip });
@@ -124,5 +125,69 @@ describe("a todo's box", () => {
     expect(from.map((state) => pressed(state, "done"))).toEqual(["done", "open", "done", "done"]);
     expect(from.map((state) => pressed(state, "abandoned"))).toEqual(["abandoned", "abandoned", "open", "abandoned"]);
     expect(from.map((state) => pressed(state, "backlog"))).toEqual(["backlog", "backlog", "backlog", "open"]);
+  });
+});
+
+describe("the lines a key for a todo's state acts on", () => {
+  // Lines start at 0, 8, 16 and 24.
+  const doc = Text.of(["- [ ] a", "- [x] b", "- [ ] c", "- [ ] d"]);
+  const touched = (...ranges: [number, number][]) => linesTouched(doc, EditorSelection.create(ranges.map(([anchor, head]) => EditorSelection.range(anchor, head))).ranges);
+
+  it("are the cursor's line, or every line a selection takes in", () => {
+    expect(touched([10, 10])).toEqual([8]);
+    expect(touched([3, 19])).toEqual([0, 8, 16]);
+  });
+
+  it("leave out the line a selection ends at the start of, as selecting whole lines does, but not an empty one there", () => {
+    expect(touched([0, 16])).toEqual([0, 8]);
+    expect(touched([16, 16])).toEqual([16]);
+  });
+
+  it("are each line once, in order, for a selection on each of several lines as a block is", () => {
+    expect(touched([26, 27], [1, 2], [4, 5], [10, 11])).toEqual([0, 8, 24]);
+  });
+});
+
+describe("what a key for a todo's state does to the lines it acts on", () => {
+  it("is what `pressed` makes one todo", () => {
+    expect(keyed([{ from: 8, state: "open" }], "done")).toEqual({ put: [{ from: 8, state: "done" }] });
+    expect(keyed([{ from: 8, state: "done" }], "done")).toEqual({ put: [{ from: 8, state: "open" }] });
+    expect(keyed([{ from: 8, state: "backlog" }], "abandoned")).toEqual({ put: [{ from: 8, state: "abandoned" }] });
+    expect(keyed([{ from: 8, state: "backlog" }], "backlog")).toEqual({ put: [{ from: 8, state: "open" }] });
+  });
+
+  it("puts every todo there in the state, and leaves those in it already, until they all are: then opens them all", () => {
+    const mixed = [
+      { from: 0, state: "open" },
+      { from: 8, state: "done" },
+      { from: 16, state: "abandoned" },
+    ] as const;
+    expect(keyed(mixed, "done")).toEqual({
+      put: [
+        { from: 0, state: "done" },
+        { from: 16, state: "done" },
+      ],
+    });
+    expect(keyed([{ from: 0, state: "done" }, { from: 8, state: "done" }], "done")).toEqual({
+      put: [
+        { from: 0, state: "open" },
+        { from: 8, state: "open" },
+      ],
+    });
+  });
+
+  it("for done, makes open todos of the list items that are none, and leaves the todos as they are; the other states pass the items by", () => {
+    const lines = [
+      { from: 0, state: "open" },
+      { from: 8, box: 10 },
+      { from: 14, box: 16 },
+    ] as const;
+    expect(keyed(lines, "done")).toEqual({ boxed: [10, 16] });
+    expect(keyed(lines, "abandoned")).toEqual({ put: [{ from: 0, state: "abandoned" }] });
+    expect(keyed([{ from: 8, box: 10 }], "backlog")).toBeNull();
+  });
+
+  it("is nothing on lines with no todo", () => {
+    expect(keyed([], "done")).toBeNull();
   });
 });
