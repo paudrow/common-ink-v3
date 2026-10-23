@@ -201,13 +201,16 @@ const LAYOUT = [
 ].join("\n");
 const MEASURED = ["Above words", "First todo", "#home", "trailing words", "Nested todo", "#trip", "nested tail", "Deeper todo", "A long todo", "#long-tag-name", "and then some more", "wrap again", "Numbered todo", "numbered tail", "Below words"];
 
-/** Every token of LAYOUT's todos that is drawn as a chip, in the order they are written: a box, importance, and the first due date. */
+/** Every token of LAYOUT's todos that is drawn as a chip, in the order they are written: a box, importance, the first due date, and a tag that ends a todo's words. */
 const TOKENS = todosIn(LAYOUT)
   .flatMap((todo) => [
     { kind: "task", ...todo.box },
     ...(todo.importanceAt ? [{ kind: "importance", ...todo.importanceAt }] : []),
     ...(todo.due ? [{ kind: "due", from: todo.due.from, to: todo.due.to }] : []),
   ])
+  // A tag at the end of a todo's words is a chip too.
+  .concat([{ kind: "tag", from: LAYOUT.indexOf("#second"), to: LAYOUT.indexOf("#second") + "#second".length }])
+  .sort((a, b) => a.from - b.from)
   .map((token) => ({ ...token, text: LAYOUT.slice(token.from, token.to) }));
 
 /** Each chip drawn in the note, in order: its kind, the token it stands for, and where it is. And each token shown as written and kept in one piece. */
@@ -255,7 +258,8 @@ for (const width of [1600, 1100]) {
       let now!: Awaited<ReturnType<typeof drawnIn>>;
       await expect.poll(async () => (now = await drawnIn(page)).chips.map((c) => [c.kind, c.text]), `the chips drawn ${when}`).toEqual(rest.map((t) => [t.kind, t.text]));
       const token = on.find((t) => t.kind !== "task");
-      expect(now.written.map((w) => w.text), `what is kept in one piece ${when}`).toEqual(token ? [token.text] : []);
+      // A tag is one word, and has nothing to keep together.
+      expect(now.written.map((w) => w.text), `what is kept in one piece ${when}`).toEqual(token && token.kind !== "tag" ? [token.text] : []);
 
       // A box is drawn over its token's own width, so the boxes never move. The other chips are as wide as their words, and the words
       // after one move over while its token is shown as written, which starts where the chip did unless it is wider than the room left on

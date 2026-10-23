@@ -148,3 +148,62 @@ test("a note's date, repeat and priority chips are the Todos page's: as wide as 
   const onPage = await Promise.all([".todo-due", ".todo-every", ".todo-importance"].map((chip) => row.locator(chip).first().evaluate(style)));
   expect(inNote).toEqual(onPage);
 });
+
+test("a todo's tags at the end of its words are chips, as on the Todos page: Add tag writes one at the end of the line, the cross takes one off, and ⌘-click opens a tag's page", async ({ page }) => {
+  const note = await open(page, "# Errands\n\n- [ ] Renew the passport due:2031-10-21 #errands #home\n- [ ] A #tag inside the words stays words\n\nLast words.");
+  const passport = line(page, "Renew the passport");
+  await expect(passport.locator(".md-chip-tag .todo-tag")).toHaveText(["#errands", "#home"]);
+  // A tag inside a todo's words is a word, as it is on the Todos page.
+  await expect(line(page, "inside the words").locator(".md-chip-tag")).toHaveCount(0);
+
+  await passport.getByText("Renew the passport").hover();
+  await adds(page).getByRole("button", { name: "Add tag" }).click();
+  await page.getByRole("textbox", { name: "Tag" }).fill("travel");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => read(page, note.id)).toContain("- [ ] Renew the passport due:2031-10-21 #errands #home #travel\n");
+  await expect(passport.locator(".md-chip-tag .todo-tag")).toHaveText(["#errands", "#home", "#travel"]);
+
+  await passport.locator(".md-chip-tag").first().hover();
+  await passport.getByRole("button", { name: "Remove #errands" }).click();
+  await expect.poll(() => read(page, note.id)).toContain("- [ ] Renew the passport due:2031-10-21 #home #travel\n");
+
+  // From the keyboard, by the palette's command, with the cursor on the todo.
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await runCommand(page, "Add a tag to this todo");
+  await page.getByRole("textbox", { name: "Tag" }).fill("urgent");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => read(page, note.id)).toContain("#home #travel #urgent\n");
+
+  await passport.locator(".md-chip-tag .todo-tag", { hasText: "#home" }).click({ modifiers: ["ControlOrMeta"] });
+  await expect(page).toHaveURL(/\/tags\/home$/);
+});
+
+test("the cross on a tag's chip takes that tag off, where the line writes the same name again in other letters or inside its words", async ({ page }) => {
+  const note = await open(page, "# Errands\n\n- [ ] Call #home about the loan #Home #home\n\nLast words.");
+  const call = line(page, "about the loan");
+  // Only the tags that end the words are chips; the one inside them is a word.
+  await expect(call.locator(".md-chip-tag .todo-tag")).toHaveText(["#Home", "#home"]);
+  await call.locator(".md-chip-tag").first().hover();
+  await call.getByRole("button", { name: "Remove #Home", exact: true }).click();
+  await expect.poll(() => read(page, note.id)).toContain("- [ ] Call #home about the loan #home\n");
+});
+
+test("Add tag offers the workspace's tags but those the todo has already, typed in its words or shown as chips, in any letters", async ({ page }) => {
+  await open(page, "# Garden\n\n- [ ] Buy #seeds for the #Beds #spring\n- Ideas for #summer and #autumn\n\nLast words.");
+  await expect.poll(async () => (await perform(page, { type: "tag.list" })).tags.map((tag) => tag.name).sort()).toEqual(["Beds", "autumn", "seeds", "spring", "summer"]);
+  await line(page, "Buy").getByText("Buy").hover();
+  await adds(page).getByRole("button", { name: "Add tag" }).click();
+  await expect(page.locator(".chip-menu .chip-choice")).toHaveText(["#autumn", "#summer"]);
+  await page.getByRole("textbox", { name: "Tag" }).fill("beds");
+  await expect(page.locator(".chip-menu .chip-choice")).toHaveCount(0);
+});
+
+test("a member who can only read a note sees a todo's tags as chips, with nothing to take one off", async ({ page }) => {
+  const { note } = await asViewerOfNote(page, "# Errands\n\n- [ ] Renew the passport #errands\n\nLast words.");
+  await page.goto(`/note/${note.id}`);
+  await expect(line(page, "Renew the passport").locator(".md-chip-tag .todo-tag")).toHaveText(["#errands"]);
+  await expect(line(page, "Renew the passport").locator(".todo-tag-remove")).toHaveCount(0);
+});

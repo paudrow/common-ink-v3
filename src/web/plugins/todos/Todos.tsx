@@ -14,7 +14,7 @@ import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
 import { linksOut, type LinkOut } from "./linksOut.ts";
 import { openPage } from "../lib/opening.ts";
-import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, clicked, pickerLabel, picking, pressed, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
+import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, clicked, pickerLabel, picking, pressed, splitTags, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { STATE_CHOICES, stateOf, withState, type StateChoice } from "./states.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
@@ -83,21 +83,6 @@ function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
 const comesAround = (todo: ListedTodo, on: string) => todo.state !== "done" && changeTodo(todo.text, { state: "done" }, on).filed !== null;
-
-/**
- * A todo's words, and the tags written at their end, which are drawn as chips after them. A tag inside the
- * sentence stays where it is written. Words that are nothing but tags keep them.
- */
-function splitTags(words: string): { lead: string; trailing: string[] } {
-  const tags = tagsOn(words);
-  let from = words.trimEnd().length;
-  const trailing: string[] = [];
-  for (let i = tags.length - 1; i >= 0 && !words.slice(tags[i]!.to, from).trim(); i--) {
-    trailing.unshift(tags[i]!.name);
-    from = tags[i]!.from;
-  }
-  return words.slice(0, from).trim() ? { lead: words.slice(0, from).trimEnd(), trailing } : { lead: words, trailing: [] };
-}
 
 /** A linked note's title; null when there is no such note the member can see; undefined while the notes are still being listed. */
 type TitleOf = (noteId: string) => string | null | undefined;

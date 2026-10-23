@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { createElement, type ReactNode } from "react";
-import { changeTodo, markOf, parseTodo, rewriteTodo, type Importance, type LastDone, type PluginHost, type Ticking, type TodoState } from "../../plugin-api.ts";
+import { changeTodo, markOf, parseTodo, rewriteTodo, tagsOn, type Importance, type LastDone, type PluginHost, type Ticking, type TodoState } from "../../plugin-api.ts";
 import { BOX_EM } from "../gfm/lists.ts";
 import { chips, type Chip, type Source, type Token } from "../lib/chips.ts";
 import { clock } from "../lib/historyView.ts";
@@ -9,12 +9,13 @@ import { drawnInView, touched, writable } from "../lib/live.ts";
 import { openPopover } from "../lib/Popover.tsx";
 import { replacing } from "../lib/rewrite.ts";
 import { onTodo, todoLines } from "../lib/todoLines.ts";
-import { ChipMenu } from "./ChipMenu.tsx";
+import { tagPath } from "../tags/path.ts";
+import { ChipMenu, LoadedTagMenu } from "./ChipMenu.tsx";
 import { Completions } from "./Completions.tsx";
 import { CHIP_ICONS } from "./chipIcons.ts";
 import { continuedTodos } from "./continuing.ts";
 import { dueLabel, dueState, tickedLabel, today } from "./dates.ts";
-import { CHIP_NAMES, PRIORITY, STATE_NAMES, clicked, pickerLabel, type ChipKind } from "./picking.ts";
+import { CHIP_NAMES, PRIORITY, STATE_NAMES, clicked, pickerLabel, splitTags, tagged, type ChipKind } from "./picking.ts";
 import { doneLabel, doneName, everyLabel, everyName } from "./recurrence.ts";
 
 interface Checkbox extends Token {
@@ -30,6 +31,9 @@ interface Every extends Token {
   written: string;
 }
 interface Done extends Token, LastDone {}
+interface Tag extends Token {
+  name: string;
+}
 
 /** What the chips of one note's editor are drawn from besides the note. */
 export interface TodoChipsContext {
@@ -251,6 +255,25 @@ export function chipMenu(chip: ChipKind, line: string | undefined, close: () => 
   });
 }
 
+/**
+ * The Todos page's tag picker for the todo `line` writes, offering the workspace's tags but those the line has already, as chips
+ * or in its words. A pick closes it and writes `#tag` at the end of the line, as it would be typed.
+ */
+export function tagMenu(host: PluginHost, line: string | undefined, close: () => void, rewriteLine: (next: (line: string) => string) => void): ReactNode {
+  const read = line === undefined ? null : parseTodo(line);
+  return createElement(LoadedTagMenu, {
+    load: () => host.perform({ type: "tag.list", limit: 200 }).then((answer) => answer.tags.map((tag) => tag.name)),
+    has: read && line !== undefined ? tagsOn(line).map((tag) => tag.name) : [],
+    onPick(name) {
+      close();
+      rewriteLine((text) => {
+        const todo = parseTodo(text);
+        return todo && tagged(todo.words, name) !== todo.words ? `${text.trimEnd()} #${name}` : text;
+      });
+    },
+  });
+}
+
 /** A chip that opens the popover the Todos page opens from the same chip, and writes what is picked there on its line as the member's edit. */
 function opener(el: HTMLElement, says: string, chip: ChipKind, source: Source, named = says) {
   panel(el, chip, says, `${CHIP_NAMES[chip]}: ${named}`, pickerLabel(chip), source.readOnly, (close) => chipMenu(chip, source.line()?.text, close, source.rewriteLine, () => source.edit()));
@@ -354,6 +377,47 @@ function lastDone(context: TodoChipsContext): Chip<Done> {
   };
 }
 
+/**
+ * A tag at the end of a todo's words, drawn as the Todos page draws it there: a chip, with a cross that takes it off. A click puts the
+ * cursor in it, and ⌘-click or Ctrl-click opens the tag's page, as on a tag elsewhere in a note. Where the note can only be read, a
+ * click opens it.
+ */
+const tag = ({ host }: TodoChipsContext): Chip<Tag> => ({
+  ...onTodoLine,
+  id: "tag",
+  find(line, offset) {
+    const todo = parseTodo(line, offset);
+    const count = todo ? splitTags(todo.words).trailing.length : 0;
+    return count ? tagsOn(line, offset).slice(-count) : [];
+  },
+  draw(el, token, source) {
+    el.classList.add("todo-tag-chip");
+    const chip = el.appendChild(document.createElement("span"));
+    chip.className = "todo-chip todo-tag";
+    chip.dataset.tag = token.name;
+    chip.setAttribute("role", "button");
+    chip.setAttribute("aria-label", `#${token.name}`);
+    chip.appendChild(document.createElement("span")).className = "todo-tag-name";
+    chip.firstElementChild!.textContent = `#${token.name}`;
+    chip.addEventListener("mousedown", (event) => event.button === 0 && event.preventDefault());
+    chip.addEventListener("click", (event) => (event.metaKey || event.ctrlKey || source.readOnly ? host.app().go(tagPath(token.name)) : source.edit()));
+    if (source.readOnly) return;
+    const remove = el.appendChild(document.createElement("button"));
+    remove.type = "button";
+    remove.className = "todo-tag-remove";
+    remove.tabIndex = -1;
+    remove.title = remove.ariaLabel = `Remove #${token.name}`;
+    remove.innerHTML = CHIP_ICONS.close;
+    remove.addEventListener("mousedown", (event) => event.preventDefault());
+    remove.addEventListener("click", () => {
+      const at = source.line()?.at;
+      if (at === undefined) return;
+      // This tag, where the line has it, and the space before it.
+      source.rewriteLine((text) => text.slice(0, at - (/[ \t]/.test(text[at - 1] ?? "") ? 1 : 0)) + text.slice(at + token.to - token.from));
+    });
+  },
+});
+
 /** How a todo's words are drawn after its box, for a state that changes them: abandoned struck through, and in the backlog dimmed. */
 const STATE_WORDS: Partial<Record<TodoState, Decoration>> = {
   abandoned: Decoration.mark({ class: "md-todo-abandoned" }),
@@ -431,7 +495,10 @@ const look = EditorView.baseTheme({
   ".md-todo-chip:hover": { boxShadow: "inset 0 0 0 1px var(--line-strong)" },
   ".md-todo-chip[aria-expanded]": { boxShadow: "inset 0 0 0 1px var(--accent)" },
   ".md-todo-chip[aria-disabled]": { cursor: "default", boxShadow: "none" },
+  ".md-chip-tag": { verticalAlign: "middle" },
+  ".md-chip-tag .todo-tag": { cursor: "pointer" },
+  ".md-chip-tag .todo-tag:hover": { boxShadow: "inset 0 0 0 1px var(--line-strong)" },
 });
 
 /** Draws a todo's checkbox and its options as chips. */
-export const todoChips = (context: TodoChipsContext): Extension => [todoLines, ticked, chips(checkbox(context)), chips(importance), chips(due), chips(every), chips(lastDone(context)), stateWords, continuedTodos, asWritten, look];
+export const todoChips = (context: TodoChipsContext): Extension => [todoLines, ticked, chips(checkbox(context)), chips(importance), chips(due), chips(every), chips(lastDone(context)), chips(tag(context)), stateWords, continuedTodos, asWritten, look];

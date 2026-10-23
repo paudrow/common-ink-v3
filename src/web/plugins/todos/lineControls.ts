@@ -1,23 +1,28 @@
-import { StateEffect, StateField, type ChangeDesc, type EditorState, type Extension } from "@codemirror/state";
+import { Facet, StateEffect, StateField, type ChangeDesc, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, showTooltip, type Tooltip, type TooltipView } from "@codemirror/view";
-import { parseTodo, type Todo } from "../../plugin-api.ts";
+import { parseTodo, type PluginHost, type Todo } from "../../plugin-api.ts";
 import { writable } from "../lib/live.ts";
 import { openFrom, openPopover } from "../lib/Popover.tsx";
 import { replacing } from "../lib/rewrite.ts";
 import { todoLines } from "../lib/todoLines.ts";
 import { CHIP_ICONS } from "./chipIcons.ts";
-import { chipMenu } from "./chips.ts";
-import { CHIP_NAMES, pickerLabel, type ChipKind } from "./picking.ts";
+import { chipMenu, tagMenu } from "./chips.ts";
+import { CHIP_NAMES, pickerLabel, type RowChip } from "./picking.ts";
 
 /**
  * What a todo can be given from beside it in a note, in the order the Todos page has them: its chip's
  * icon and title there, and whether the todo has it.
  */
-const OPTIONS: readonly { chip: ChipKind; icon: string; title: string; has: (todo: Todo) => boolean }[] = [
+const OPTIONS: readonly { chip: RowChip; icon: string; title: string; has: (todo: Todo) => boolean }[] = [
   { chip: "due", icon: CHIP_ICONS.due, title: "Add date", has: (todo) => todo.due !== null },
   { chip: "every", icon: CHIP_ICONS.every, title: "Repeat", has: (todo) => todo.every !== null },
   { chip: "importance", icon: CHIP_ICONS.importance, title: "Priority", has: (todo) => todo.importance > 0 },
+  // A todo can always have one more tag.
+  { chip: "tag", icon: '<span class="chip-hash" aria-hidden="true"></span>', title: "Add tag", has: () => false },
 ];
+
+/** The host the tag picker reads the workspace's tags through. */
+const hostIs = Facet.define<PluginHost, PluginHost | null>({ combine: (hosts) => hosts[0] ?? null });
 
 /** How far after a todo's words its controls start, in the text's own size. */
 const AFTER_EM = 0.5;
@@ -57,7 +62,7 @@ interface Adds extends Tooltip {
  * there opens. They float level with the end of its words, in no room of the line's, so showing them
  * moves nothing, and they are kept in the window as any of the editor's tooltips is.
  */
-function made(from: number, chips: readonly ChipKind[]) {
+function made(from: number, chips: readonly RowChip[]) {
   return (view: EditorView): TooltipView => {
     /** Where the line ends now, as the tooltip was last placed. */
     let end = view.state.doc.lineAt(from).to;
@@ -66,11 +71,11 @@ function made(from: number, chips: readonly ChipKind[]) {
     for (const { chip, icon, title } of OPTIONS.filter((option) => chips.includes(option.chip))) {
       const button = dom.appendChild(document.createElement("button"));
       button.type = "button";
-      button.className = `todo-chip todo-${chip}`;
+      button.className = `todo-chip ${chip === "tag" ? "todo-add-tag" : `todo-${chip}`}`;
       button.dataset.chip = chip;
       button.dataset.unset = "";
       button.title = title;
-      button.setAttribute("aria-label", `${CHIP_NAMES[chip]}: none`);
+      button.setAttribute("aria-label", chip === "tag" ? title : `${CHIP_NAMES[chip]}: none`);
       button.setAttribute("aria-haspopup", "dialog");
       // Tab would take the keyboard from the note, which hides them: the palette's commands are the keyboard's way to them.
       button.tabIndex = -1;
@@ -157,7 +162,7 @@ const pointing = ViewPlugin.define((view) => {
  * does, and keeps that line's controls while it is open. A pick rewrites the line as the member's
  * edit, with the tokens they would type.
  */
-function openOption(view: EditorView, chip: ChipKind, anchor: HTMLElement, from: number) {
+function openOption(view: EditorView, chip: RowChip, anchor: HTMLElement, from: number) {
   if (view.state.field(shown).opened !== from) view.dispatch({ effects: shownIs.of({ opened: from }) });
   /** The todo's line, unless it is gone or is a todo no more. */
   const lineOf = () => {
@@ -168,12 +173,15 @@ function openOption(view: EditorView, chip: ChipKind, anchor: HTMLElement, from:
   openPopover(
     anchor,
     pickerLabel(chip),
-    (close) =>
-      chipMenu(chip, lineOf()?.text, close, (next) => {
+    (close) => {
+      const rewriteLine = (next: (line: string) => string) => {
         const line = writable(view.state) ? lineOf() : undefined;
         const changes = line && replacing(line.text, next(line.text), line.from);
         if (changes) view.dispatch({ changes, userEvent: `input.${chip}` });
-      }),
+      };
+      const host = view.state.facet(hostIs);
+      return chip === "tag" ? host && tagMenu(host, lineOf()?.text, close, rewriteLine) : chipMenu(chip, lineOf()?.text, close, rewriteLine);
+    },
     (hadFocus) => {
       anchor.removeAttribute("aria-expanded");
       if (hadFocus) view.focus();
@@ -212,14 +220,15 @@ export function todoAtCursor(): EditorView | null {
  * Opens the popover of `chip` for the todo the cursor is on: from its chip when the line draws one, and
  * otherwise from its control beside the line, once that is shown and placed.
  */
-export function openOptionHere(chip: ChipKind) {
+export function openOptionHere(chip: RowChip) {
   const view = todoAtCursor();
   if (!view) return;
   const { from } = view.state.doc.lineAt(view.state.selection.main.head);
   const { node } = view.domAtPos(from);
   const line = (node instanceof Element ? node : node.parentElement)?.closest(".cm-line");
   const drawnChip = line?.querySelector<HTMLElement>(`.md-chip-${chip} .md-todo-chip, .md-chip-${chip}.md-todo-chip`);
-  if (drawnChip) return drawnChip.click();
+  // A tag's chip is the tag itself, and adding one is always from the control beside the line.
+  if (drawnChip && chip !== "tag") return drawnChip.click();
   view.dispatch({ effects: [shownIs.of({ opened: from }), EditorView.scrollIntoView(view.state.selection.main.head)] });
   // The control is made at once and placed in the editor's next measure, which a frame after this one has done.
   requestAnimationFrame(() =>
@@ -237,5 +246,5 @@ const look = EditorView.baseTheme({
   ".md-todo-adds .todo-chip[data-unset]": { opacity: "1", borderColor: "var(--faint)", color: "var(--chip-ink)", cursor: "pointer" },
 });
 
-/** Beside a todo's line in a note it can change, while the line is pointed at or has the cursor, controls to give it a due date, a repeat or a priority. */
-export const todoAdds: Extension = [todoLines, shown, tooltips, pointing, remembered, EditorView.focusChangeEffect.of((_, focusing) => shownIs.of({ focused: focusing })), look];
+/** Beside a todo's line in a note it can change, while the line is pointed at or has the cursor, controls to give it a due date, a repeat, a priority or a tag. */
+export const todoAdds = (host: PluginHost): Extension => [hostIs.of(host), todoLines, shown, tooltips, pointing, remembered, EditorView.focusChangeEffect.of((_, focusing) => shownIs.of({ focused: focusing })), look];

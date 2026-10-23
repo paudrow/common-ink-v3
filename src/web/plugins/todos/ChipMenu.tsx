@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { Icon, describeRule, nameKey, parseRule, type IconName, type TodoChange } from "../../plugin-api.ts";
 import { DayField } from "../lib/DayField.tsx";
 import { choicesFor, repeatOf, repeats, sameRule, typedTag, type ChipKind, type Choice, type Picked, type Repeat } from "./picking.ts";
@@ -171,6 +171,21 @@ interface TagProps {
   /** The tags the todo has, which are not offered again. */
   has: readonly string[];
   onPick: (name: string) => void;
+}
+
+/** The Todos page's tag picker where the tags in use aren't at hand, as in a note: it offers them once `load` has read them. */
+export function LoadedTagMenu({ load, has, onPick }: Omit<TagProps, "tags"> & { load: () => Promise<readonly string[]> }) {
+  const [tags, setTags] = useState<readonly string[]>([]);
+  useEffect(() => {
+    let open = true;
+    load().then(
+      (read) => open && setTags(read),
+      // A tag can still be typed.
+      () => {},
+    );
+    return () => void (open = false);
+  }, [load]);
+  return <TagMenu tags={tags} has={has} onPick={onPick} />;
 }
 
 /**

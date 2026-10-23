@@ -146,3 +146,18 @@ export function typedTag(typed: string): string | null {
 
 /** A todo's words with a tag written after them, or as they are when they have it. */
 export const tagged = (words: string, name: string): string => (tagsOn(words).some((tag) => nameKey(tag.name) === nameKey(name)) ? words : `${words} #${name}`.trim());
+
+/**
+ * A todo's words, and the tags written at their end, which are drawn as chips after them. A tag inside the
+ * sentence stays where it is written. Words that are nothing but tags keep them.
+ */
+export function splitTags(words: string): { lead: string; trailing: string[] } {
+  const tags = tagsOn(words);
+  let from = words.trimEnd().length;
+  const trailing: string[] = [];
+  for (let i = tags.length - 1; i >= 0 && !words.slice(tags[i]!.to, from).trim(); i--) {
+    trailing.unshift(tags[i]!.name);
+    from = tags[i]!.from;
+  }
+  return words.slice(0, from).trim() ? { lead: words.slice(0, from).trimEnd(), trailing } : { lead: words, trailing: [] };
+}

@@ -6,7 +6,7 @@ import { openOptionHere, todoAdds, todoAtCursor } from "./lineControls.ts";
 import { tickedIn, todoChips, untick } from "./chips.ts";
 import { CHANGED, putAway, refused, takeBack } from "./completed.ts";
 import { dueOffers, today } from "./dates.ts";
-import { PUTTING, type ChipKind, type PutAway } from "./picking.ts";
+import { PUTTING, type PutAway, type RowChip } from "./picking.ts";
 import { everyOffers } from "./recurrence.ts";
 import { SORTS, TodosPage, putterHere } from "./Todos.tsx";
 
@@ -67,7 +67,8 @@ export const todos: Plugin = {
       ["due", "Set this todo's due date"],
       ["every", "Set how this todo repeats"],
       ["importance", "Set this todo's priority"],
-    ] as const satisfies readonly (readonly [ChipKind, string])[]) {
+      ["tag", "Add a tag to this todo"],
+    ] as const satisfies readonly (readonly [RowChip, string])[]) {
       host.commands.register({ id: `todos.set.${chip}`, title, group: "Todos", when: () => todoAtCursor() !== null, run: () => openOptionHere(chip) });
     }
 
@@ -94,7 +95,7 @@ export const todos: Plugin = {
       id: "todos",
       extension: (editor) => [
         todoChips({ host, noteId: editor.noteId, onCompleted: (view) => putAway(host, "done", () => reopen(editor.noteId, view)), onRecurred: (revision) => putAway(host, "done", () => takeBack(host, editor.noteId, revision)) }),
-        todoAdds,
+        todoAdds(host),
         ViewPlugin.define((view) => {
           const key = editorKey(editor);
           editors.set(key, view);
