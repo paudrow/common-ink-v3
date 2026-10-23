@@ -37,7 +37,7 @@ test("the app's pages draw and run under the policy the Worker sends, and it ref
   await expect(editor.getByRole("region", { name: "Done", exact: true })).toBeVisible();
   await expect(editor.getByRole("button", { name: "Timer, 5:00 left" })).toBeVisible();
   // CodeMirror's styles are in, and the icons drawn as data: masks show.
-  await expect(page.locator(".cm-editor")).toHaveCSS("display", "flex");
+  await expect(page.locator(".cm-editor").first()).toHaveCSS("display", "flex");
   await editor.focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("i");

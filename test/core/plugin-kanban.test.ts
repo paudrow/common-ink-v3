@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCard, cardEnd, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard } from "../../src/web/plugins/kanban/board.ts";
+import { addCard, addColumn, cardEnd, cardsOf, colourColumn, deleteColumn, moveCard, moveColumn, parseBoard, renameColumn, serializeBoard } from "../../src/web/plugins/kanban/board.ts";
 
 const titles = (body: string) => parseBoard(body).columns.map((c) => [c.title, cardsOf(c).map((card) => card.text)]);
 const moved = (body: string, from: [number, number], to: [number, number]) => serializeBoard(moveCard(parseBoard(body), { column: from[0], card: from[1] }, { column: to[0], card: to[1] }));
@@ -184,5 +184,49 @@ describe("where a card is written", () => {
   it("is nowhere for a place with no card", () => {
     expect(cardEnd(board, { column: 1, card: 1 })).toBeNull();
     expect(cardEnd(board, { column: 2, card: 0 })).toBeNull();
+  });
+});
+
+describe("a board's columns", () => {
+  const edited = (body: string, change: (board: ReturnType<typeof parseBoard>) => ReturnType<typeof parseBoard>) => serializeBoard(change(parseBoard(body)));
+  const COLOURED = "## To do {.red}\n- write\n- review\n\n## Doing\n- build\n\n## Done\n";
+
+  it("are added at the end, written as the board's headings are, a blank line after the column before", () => {
+    expect(edited(BOARD, (b) => addColumn(b, "Later"))).toBe("## To do\n- write\n- review\n\n## Doing\n- build\n\n## Done\n\n## Later");
+    expect(edited("### A\n- x", (b) => addColumn(b, "  B  ")).split("\n")).toEqual(["### A", "- x", "", "### B"]);
+    expect(edited("", (b) => addColumn(b, "First"))).toBe("## First");
+    expect(edited(BOARD, (b) => addColumn(b, " \n "))).toBe(BOARD);
+    expect(titles(edited(BOARD, (b) => addColumn(b, "Two\nlines {.red}")))).toContainEqual(["Two lines", []]);
+  });
+
+  it("are renamed by rewriting the heading's words, keeping its marks and its colour", () => {
+    expect(edited(COLOURED, (b) => renameColumn(b, 0, "Next"))).toBe(COLOURED.replace("## To do {.red}", "## Next {.red}"));
+    expect(edited("# One #\n- a", (b) => renameColumn(b, 0, "Two"))).toBe("# Two #\n- a");
+    expect(edited(BOARD, (b) => renameColumn(b, 0, ""))).toBe(BOARD);
+    expect(edited(BOARD, (b) => renameColumn(b, 7, "X"))).toBe(BOARD);
+  });
+
+  it("are moved with everything under them, a blank line between each and the next", () => {
+    expect(titles(edited(BOARD, (b) => moveColumn(b, 2, 0)))).toEqual([
+      ["Done", []],
+      ["To do", ["write", "review"]],
+      ["Doing", ["build"]],
+    ]);
+    expect(edited("## A\n- a\n## B\n- b", (b) => moveColumn(b, 0, 1))).toBe("## B\n- b\n\n## A\n- a");
+    expect(edited(COLOURED, (b) => moveColumn(b, 0, 1))).toContain("## Doing\n- build\n\n## To do {.red}\n- write\n- review\n");
+    expect(edited(BOARD, (b) => moveColumn(b, 0, 5))).toBe(BOARD);
+  });
+
+  it("are deleted with their cards, or with their cards moved to the end of another column first", () => {
+    expect(titles(edited(BOARD, (b) => deleteColumn(b, 1)))).toEqual([
+      ["To do", ["write", "review"]],
+      ["Done", []],
+    ]);
+    expect(titles(edited(BOARD, (b) => deleteColumn(b, 1, 0)))).toEqual([
+      ["To do", ["write", "review", "build"]],
+      ["Done", []],
+    ]);
+    expect(edited(BOARD, (b) => deleteColumn(b, 1, 1))).toBe(BOARD);
+    expect(edited(BOARD, (b) => deleteColumn(b, 3))).toBe(BOARD);
   });
 });

@@ -100,7 +100,7 @@ const KINDS: readonly Kind[] = [
 /** Where the words above and below a block are, where the block is, and the lines of the note between the words. */
 const measure = (page: Page, kind: Kind) =>
   page.evaluate(({ top, bottom }) => {
-    const lines = [...document.querySelectorAll<HTMLElement>(".cm-content > .cm-line")];
+    const lines = [...document.querySelectorAll<HTMLElement>('[aria-label="Note text"] > .cm-line')];
     const [a, b] = ["Para A.", "Para B."].map((text) => lines.find((l) => l.textContent === text)!.getBoundingClientRect());
     const first = document.querySelector(top)?.getBoundingClientRect();
     const last = [...document.querySelectorAll(bottom)].at(-1)?.getBoundingClientRect();

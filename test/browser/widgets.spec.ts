@@ -18,7 +18,8 @@ const read = async (page: Page, id: string) => (await perform(page, { type: "not
 const authors = async (page: Page, id: string) => (await perform(page, { type: "note.history", id })).map((c) => `${c.author.kind} ${c.author.name}`);
 const column = (page: Page, name: string) => editor(page).getByRole("region", { name, exact: true });
 const cards = (within: Locator) => within.getByRole("listitem");
-const board = async (page: Page) => Object.fromEntries(await Promise.all((await editor(page).getByRole("region").all()).map(async (c) => [await c.getAttribute("aria-label"), await cards(c).locator(".kanban-card-text").allTextContents()])));
+/** Each column's cards, by the first line each is drawn with. */
+const board = async (page: Page) => Object.fromEntries(await Promise.all((await editor(page).getByRole("region").all()).map(async (c) => [await c.getAttribute("aria-label"), await cards(c).locator(".kanban-card-text .cm-line:first-child").allTextContents()])));
 
 /** Signs in and opens a note with this text, with the cursor at its end. */
 async function open(page: Page, text: string, settings?: Record<string, unknown>) {
