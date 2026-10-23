@@ -101,6 +101,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "grant.set": SHARING,
   "grant.link": SHARING,
   "grant.revoke": SHARING,
+  "tag.delete": "Deleting a tag rewrites every note that has it at once, across the whole workspace, taking the tag out of each. An agent that was talked into it could undo how every note is filed. The member deletes a tag in the app, where they see the notes it changes first and can undo it.",
   "tag.rename": "Renaming a tag rewrites every note that has it at once, across the whole workspace. An agent that was talked into it could scramble how every note is filed, and a merge can't be told apart afterwards. The member renames a tag in the app, in Settings, where they see how many notes it changes and can undo it.",
   "note.setPrivate": "A private note is hidden from every other member, admins too, and that is not a change in history. The member who made the note decides it, in the app.",
   "note.purge": "Removing a note from Trash for good takes its history with it, and nothing brings it back: not a revert, not Trash. An agent reads notes other people wrote, so one that was talked into it could destroy them past recovery. An agent moves a note to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",

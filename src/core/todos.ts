@@ -23,8 +23,8 @@ export { BOX_PATTERN, STATES_WRITTEN, TODO_STATES, markOf, stateOfMark, type Tod
  * - `@[[id|Name]]` or `@[[Name]]` assigns it to a person. `mentions.ts` has how a mention is written.
  *
  * A token stands alone: after a space, and before a space, the end of the line, or `.,;:!?)`. Text
- * in inline code, in a link to a note, and in a link's address is never a token. Tags match
- * ignoring case. docs/todos.md says the same to a person.
+ * in inline code, in a link to a note, and in a link's address is never a token, and an embed's
+ * braces hold no tag. Tags match ignoring case. docs/todos.md says the same to a person.
  */
 export interface Todo {
   /** Where the `[ ]` is. */
@@ -63,6 +63,8 @@ export type Importance = 0 | 1 | 2 | 3;
 
 const BOX = new RegExp(`^(\\s*(?:[-*+]|\\d+[.)])\\s+)(${BOX_PATTERN})(?=\\s|$)`);
 const NOTE_LINK = /\[\[[^[\]\n]*\]\]/g;
+/** An embed's name and braces, `::name{...}` or a block's `:::name{...}`: what is in them is the embed's, not words of the note. */
+const EMBED = /(?<!:):{2,3}[a-z][a-z0-9-]*\{[^{}\n]*\}/g;
 const AFTER = "(?=$|[\\s.,;:!?)])";
 const IMPORTANCE = /^\s+(!{1,3})(?=\s|$)/;
 const DUE = new RegExp(`(?<=\\s)due:(\\d{4}-\\d{2}-\\d{2})${AFTER}`, "g");
@@ -70,9 +72,10 @@ const EVERY = new RegExp(`(?<=\\s)every:(${RULE_PATTERN})${AFTER}`, "g");
 const LAST_DONE = new RegExp(`(?<=\\s)done:(\\d{4}-\\d{2}-\\d{2})(?:x([1-9]\\d{0,5}))?${AFTER}`, "g");
 const TAG = new RegExp(`(?<=^|\\s)#([\\p{L}\\p{N}_][\\p{L}\\p{N}_/-]*)${AFTER}`, "gu");
 
+const out = (text: string) => "\0".repeat(text.length);
+
 /** The line with what is never a token put out of the way, each character still where it was. */
 const readable = (line: string) => {
-  const out = (text: string) => "\0".repeat(text.length);
   const read = blanked(line, codeSpans(line), "\0").replace(NOTE_LINK, out);
   return blanked(read, addressSpans(read), "\0");
 };
@@ -92,7 +95,7 @@ export const nameKey = (name: string) => name.toLowerCase();
 /** The tags on one line of a note, which starts at `offset`. A tag has something in it besides digits, so `#12` is not one. */
 export function tagsOn(line: string, offset = 0): (Span & { name: string })[] {
   if (!line.includes("#")) return [];
-  return [...readable(line).matchAll(TAG)].filter((m) => /\D/.test(m[1]!)).map((m) => ({ from: offset + m.index, to: offset + m.index + m[0].length, name: m[1]! }));
+  return [...readable(line).replace(EMBED, out).matchAll(TAG)].filter((m) => /\D/.test(m[1]!)).map((m) => ({ from: offset + m.index, to: offset + m.index + m[0].length, name: m[1]! }));
 }
 
 /** Whether `name` is a tag's whole name, as `#name` would write it. */
@@ -386,6 +389,62 @@ export function renamedTags(text: string, from: string, to: string): string {
     }
   }
   return renamed + text.slice(at);
+}
+
+/** What a line of nothing but tags may start with besides them: its indent, a quote's `>`s, and a bullet, a number or a heading's `#`s. */
+const LEAD = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)]|#{1,6})\s+)?/;
+
+/**
+ * The text with tag `name`, ignoring case, and every tag under it, taken out, where a tag is read as
+ * `renamedTags` reads one. A tag in the run of tags a line ends with labels the line, and goes with
+ * the space before it: `Call the bank #money #errands` loses `#money` to `Call the bank #errands`.
+ * A todo's due date, repeat, last-done mark and assignees are of the run too, and stay. A
+ * line of nothing but tags that loses all of them goes, and a blank line beside it that would leave
+ * two goes with it. Anywhere else a tag is a word of the sentence, which stays as the last part of
+ * the tag's name: `Water the #projects/garden today` is `Water the garden today`.
+ */
+export function deletedTags(text: string, name: string): string {
+  if (!text.includes("#")) return text;
+  const gone = (tag: { name: string }) => renamedTag(tag.name, name, name) !== null;
+  const lines: (string | null)[] = text.split("\n");
+  for (const { line, index } of linesOutsideCode(text)) {
+    const tags = tagsOn(line);
+    if (!tags.some(gone)) continue;
+    const todo = parseTodo(line);
+    const marks = todo ? [todo.due, todo.every, todo.lastDone, ...todo.assignees].filter((mark) => mark !== null) : [];
+    const bare = blanked(line, marks.map((mark) => [mark.from, mark.to] as const).sort((a, b) => a[0] - b[0]), " ");
+    // The run of tags the line ends with starts at the first tag with nothing but spaces, tags and a todo's own tokens after it.
+    let run = tags.length;
+    while (run > 0 && /^\s*$/.test(bare.slice(tags[run - 1]!.to, tags[run]?.from ?? line.length))) run--;
+    const labels = tags.slice(run);
+    const first = labels[0]?.from ?? line.length;
+    const kept = [...labels.filter((tag) => !gone(tag)), ...marks.filter((mark) => mark.from > first)].sort((a, b) => a.from - b.from).map((span) => line.slice(span.from, span.to));
+    const alone = LEAD.exec(line.slice(0, first))![0].length === first;
+    if (run === 0 && alone && !kept.length) {
+      lines[index] = null;
+      continue;
+    }
+    let written = "";
+    let at = 0;
+    for (const tag of tags.slice(0, run).filter(gone)) {
+      written += `${line.slice(at, tag.from)}${tag.name.split("/").filter(Boolean).at(-1)}`;
+      at = tag.to;
+    }
+    if (!labels.some(gone)) lines[index] = written + line.slice(at);
+    else if (alone) lines[index] = written + line.slice(at, first) + kept.join(" ");
+    else lines[index] = [(written + line.slice(at, first)).trimEnd(), ...kept].join(" ");
+  }
+  const left: string[] = [];
+  let dropped = false;
+  for (const line of lines) {
+    if (line === null) dropped = true;
+    else if (dropped && !line.trim() && !left.at(-1)?.trim()) dropped = false;
+    else {
+      dropped = false;
+      left.push(line);
+    }
+  }
+  return left.join("\n");
 }
 
 /** The tags a note has on its lines but one, each once ignoring case, outside code. */

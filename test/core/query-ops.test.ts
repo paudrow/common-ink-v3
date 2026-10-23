@@ -383,7 +383,7 @@ describe("todo.list, by each filter", () => {
     // As the migration leaves a line it can't read the rule of: marked by the look of it, until the note is read in again.
     await env.DB.batch([env.DB.prepare("UPDATE todos SET recurs = text LIKE '% every:%' WHERE note_id = ?").bind(note.id), env.DB.prepare("UPDATE notes SET indexed = 3 WHERE id = ?").bind(note.id)]);
     expect(await todos(ada, "has:repeat")).toEqual(["Water plants"]);
-    expect((await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first<{ indexed: number }>())!.indexed).toBe(9);
+    expect((await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first<{ indexed: number }>())!.indexed).toBe(10);
     await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 4, text: "- [ ] Sweep", every: "1w" });
     expect((await todos(ada, "has:repeat")).sort()).toEqual(["Sweep", "Water plants"]);
 

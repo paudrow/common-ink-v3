@@ -2,6 +2,7 @@ import { useId, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { ALL_NOTES, draggableAs, isTagName, nameKey, type App, type ListedTag, type Opened, type PluginHost } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { NoteFinder, type keeping } from "../noteList.tsx";
+import { DeleteTagDialog } from "./Deleting.tsx";
 import { listReducer, taggedQuery } from "../noteListView.ts";
 import { addressOf } from "../search/request.ts";
 import { MANAGE_PATH, TAGS_PAGE, TAGS_PATH, tagOfPath, tagPath } from "./path.ts";
@@ -52,8 +53,8 @@ export const going = (app: App, path: string) => ({
 
 const tagTab = (name: string) => ({ kind: "page", id: TAGS_PAGE, path: tagPath(name) }) satisfies Opened;
 
-/** What a tag's menu offers, as a folder's does: to open its page, in a split too where there are splits, to go to its row in Settings, and for whoever may, to rename it there. */
-function tagMenu(app: App, store: TagStore, name: string): MenuItem[] {
+/** What a tag's menu offers, as a folder's does: to open its page, in a split too where there are splits, to go to its row in Settings, and for whoever may, to rename it there or delete it. */
+function tagMenu(app: App, store: TagStore, name: string, remove: () => void): MenuItem[] {
   const tab = tagTab(name);
   const { openBeside } = app;
   const toRow = (request: TagRequest) => () => {
@@ -69,7 +70,12 @@ function tagMenu(app: App, store: TagStore, name: string): MenuItem[] {
         ]
       : []),
     { label: "Manage tags", icon: "settings", action: toRow({ name, kind: null }) },
-    ...(describes(app) ? [{ label: "Rename tag", icon: "edit" as const, action: toRow({ name, kind: "rename" }) }] : []),
+    ...(describes(app)
+      ? [
+          { label: "Rename tag", icon: "edit" as const, action: toRow({ name, kind: "rename" }) },
+          { label: "Delete tag", icon: "trash" as const, action: remove },
+        ]
+      : []),
   ];
 }
 
@@ -77,64 +83,68 @@ function tagMenu(app: App, store: TagStore, name: string): MenuItem[] {
  * Each tag, which opens its page. `described` shows each one's description under it, where there is room for it.
  * A right-click, Shift+F10 or the menu key opens its menu, and it drags to the editor area, as a folder's row does.
  */
-function TagLinks({ app, store, tags, labelledBy, described = false }: { app: App; store: TagStore; tags: readonly ListedTag[]; labelledBy: string; described?: boolean }) {
+function TagLinks({ host, app, store, tags, labelledBy, described = false }: { host: PluginHost; app: App; store: TagStore; tags: readonly ListedTag[]; labelledBy: string; described?: boolean }) {
   const [menu, setMenu] = useState<{ name: string; x: number; y: number; from: HTMLElement } | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   return (
-    <ul className="tag-rows" aria-labelledby={labelledBy}>
-      {tags.map((tag) => (
-        <li key={tag.name}>
-          <a
-            className="tag-row"
-            data-tag={tag.name}
-            data-tag-card="beside"
-            aria-current={app.path === tagPath(tag.name) ? "page" : undefined}
-            {...going(app, tagPath(tag.name))}
-            {...draggableAs(tagTab(tag.name))}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setMenu({ name: tag.name, x: e.clientX, y: e.clientY, from: e.currentTarget });
+    <>
+      <ul className="tag-rows" aria-labelledby={labelledBy}>
+        {tags.map((tag) => (
+          <li key={tag.name}>
+            <a
+              className="tag-row"
+              data-tag={tag.name}
+              data-tag-card="beside"
+              aria-current={app.path === tagPath(tag.name) ? "page" : undefined}
+              {...going(app, tagPath(tag.name))}
+              {...draggableAs(tagTab(tag.name))}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ name: tag.name, x: e.clientX, y: e.clientY, from: e.currentTarget });
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+                // From the keyboard the menu opens under the row.
+                e.preventDefault();
+                const box = e.currentTarget.getBoundingClientRect();
+                setMenu({ name: tag.name, x: box.left, y: box.bottom, from: e.currentTarget });
+              }}
+            >
+              <span className="tag-name">#{tag.name}</span>
+              <span className="count" aria-label={`${tag.inside ?? tag.notes} ${(tag.inside ?? tag.notes) === 1 ? "note" : "notes"}`}>
+                {tag.inside ?? tag.notes}
+              </span>
+            </a>
+            {described && tag.description && <p className="tag-row-description">{tag.description}</p>}
+          </li>
+        ))}
+        {menu && (
+          <ContextMenu
+            label={`#${menu.name} actions`}
+            x={menu.x}
+            y={menu.y}
+            items={tagMenu(app, store, menu.name, () => setDeleting(menu.name))}
+            onClose={() => {
+              // An item that goes somewhere takes the keyboard there after this.
+              if (menu.from.isConnected) menu.from.focus();
+              setMenu(null);
             }}
-            onKeyDown={(e) => {
-              if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
-              // From the keyboard the menu opens under the row.
-              e.preventDefault();
-              const box = e.currentTarget.getBoundingClientRect();
-              setMenu({ name: tag.name, x: box.left, y: box.bottom, from: e.currentTarget });
-            }}
-          >
-            <span className="tag-name">#{tag.name}</span>
-            <span className="count" aria-label={`${tag.inside ?? tag.notes} ${(tag.inside ?? tag.notes) === 1 ? "note" : "notes"}`}>
-              {tag.inside ?? tag.notes}
-            </span>
-          </a>
-          {described && tag.description && <p className="tag-row-description">{tag.description}</p>}
-        </li>
-      ))}
-      {menu && (
-        <ContextMenu
-          label={`#${menu.name} actions`}
-          x={menu.x}
-          y={menu.y}
-          items={tagMenu(app, store, menu.name)}
-          onClose={() => {
-            // An item that goes somewhere takes the keyboard there after this.
-            if (menu.from.isConnected) menu.from.focus();
-            setMenu(null);
-          }}
-        />
-      )}
-    </ul>
+          />
+        )}
+      </ul>
+      {deleting && <DeleteTagDialog host={host} app={app} store={store} name={deleting} onClose={() => setDeleting(null)} />}
+    </>
   );
 }
 
-/** Who may say what a tag is for, and rename it: a member who may change things, and not a guest, whom the server refuses. */
+/** Who may say what a tag is for, rename it and delete it: a member who may change things, and not a guest, whom the server refuses. */
 export const describes = (app: App) => app.workspace.role === "admin" || app.workspace.role === "editor";
 
 /**
  * The sidebar's section: each tag with how many notes have it, which opens the tag's page. A tag made
  * ahead that no note has yet is left to the page of every tag and Settings: there is nothing to open.
  */
-export function TagSection({ app, store }: { app: App; store: TagStore }) {
+export function TagSection({ host, app, store }: { host: PluginHost; app: App; store: TagStore }) {
   const ids = useId();
   const every = useSyncExternalStore(store.subscribe, store.tags);
   const more = useSyncExternalStore(store.subscribe, store.more);
@@ -145,7 +155,7 @@ export function TagSection({ app, store }: { app: App; store: TagStore }) {
       <div className="section-head">
         <span id={`${ids}-label`}>Tags</span>
       </div>
-      {tags && (tags.length ? <TagLinks app={app} store={store} tags={tags.slice(0, MOST_IN_SECTION)} labelledBy={`${ids}-label`} /> : <p className="tags-hint">Write #tag in a note to tag it.</p>)}
+      {tags && (tags.length ? <TagLinks host={host} app={app} store={store} tags={tags.slice(0, MOST_IN_SECTION)} labelledBy={`${ids}-label`} /> : <p className="tags-hint">Write #tag in a note to tag it.</p>)}
       {tags && (tags.length > MOST_IN_SECTION || more) && (
         <a className="tag-row tags-all" {...going(app, TAGS_PATH)} {...draggableAs({ kind: "page", id: TAGS_PAGE, path: TAGS_PATH })}>
           {more ? "All tags" : `All ${every.length} tags`}
@@ -193,7 +203,7 @@ function TagNotes({ host, app, store, lists, tag }: { host: PluginHost; app: App
 }
 
 /** Every tag, at `/tags`. */
-function AllTags({ app, store }: { app: App; store: TagStore }) {
+function AllTags({ host, app, store }: { host: PluginHost; app: App; store: TagStore }) {
   const ids = useId();
   const tags = useSyncExternalStore(store.subscribe, store.tags);
   const more = useSyncExternalStore(store.subscribe, store.more);
@@ -207,7 +217,7 @@ function AllTags({ app, store }: { app: App; store: TagStore }) {
       </div>
       <StillIndexing store={store} />
       {tags && !tags.length && <p className="search-status">No tags yet. Write #tag anywhere in a note to tag it.</p>}
-      {tags && tags.length > 0 && <TagLinks app={app} store={store} tags={tags} labelledBy={`${ids}-heading`} described />}
+      {tags && tags.length > 0 && <TagLinks host={host} app={app} store={store} tags={tags} labelledBy={`${ids}-heading`} described />}
       {more && (
         <div className="search-more">
           <button type="button" className="found-more" onClick={more}>
@@ -222,5 +232,5 @@ function AllTags({ app, store }: { app: App; store: TagStore }) {
 export function TagsPage({ host, app, store, lists }: { host: PluginHost; app: App; store: TagStore; lists: TagLists }) {
   const tag = tagOfPath(app.path);
   // A page of its own for each tag, so one tag's notes are never shown under another's name.
-  return tag === null ? <AllTags app={app} store={store} /> : <TagNotes key={tag} host={host} app={app} store={store} lists={lists} tag={tag} />;
+  return tag === null ? <AllTags host={host} app={app} store={store} /> : <TagNotes key={tag} host={host} app={app} store={store} lists={lists} tag={tag} />;
 }

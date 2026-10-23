@@ -22,7 +22,7 @@ const MOST = 1000;
 export const tags: Plugin = {
   id: "tags",
   name: "Tags",
-  description: "A #tag in a note tags it: the sidebar lists every tag, each has a page of its notes, and Settings has every tag to describe and rename.",
+  description: "A #tag in a note tags it: the sidebar lists every tag, each has a page of its notes, and Settings has every tag to describe, rename and delete.",
   icon: "tag",
   activate(host) {
     let listed: readonly ListedTag[] | null = null;
@@ -105,7 +105,7 @@ export const tags: Plugin = {
 
     const lists = keeping();
     const cards = tagCards(host, store);
-    host.views.register("section", { id: "tags", label: "Tags", icon: "tag", component: ({ app }) => <TagSection app={app} store={store} /> });
+    host.views.register("section", { id: "tags", label: "Tags", icon: "tag", component: ({ app }) => <TagSection host={host} app={app} store={store} /> });
     host.views.register("page", {
       id: TAGS_PAGE,
       path: TAGS_PATH,
@@ -118,7 +118,7 @@ export const tags: Plugin = {
       component: ({ app }) => <TagsPage host={host} app={app} store={store} lists={lists} />,
     });
     host.views.register("settings", { id: SETTINGS_ID, label: "Tags", component: ({ app }) => <ManageTags host={host} app={app} store={store} /> });
-    host.commands.register({ id: "tags.manage", title: "Manage tags", aliases: ["describe tags", "rename tag"], run: () => host.app().go(MANAGE_PATH) });
+    host.commands.register({ id: "tags.manage", title: "Manage tags", aliases: ["describe tags", "rename tag", "delete tag"], run: () => host.app().go(MANAGE_PATH) });
     host.editorExtensions.register({ id: "tags", extension: tagDrawing((name) => host.app().go(tagPath(name)), cards) });
 
     return () => {

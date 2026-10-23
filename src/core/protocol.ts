@@ -392,6 +392,17 @@ export const Op = z.discriminatedUnion("type", [
    */
   z.object({ type: z.literal("tag.rename"), name: TagName, to: TagName, preview: z.boolean().default(false) }),
   /**
+   * Deletes a tag, and each tag under it, from every note the asker may change, as their own change
+   * in each note's history, labeled "Deleted #name": a tag at the end of a line, among the tags
+   * there, is taken out, and a line of nothing but tags that loses them all goes; in a sentence it
+   * stays as a word, the last part of its name. Outside code, as tag.rename reads tags. Notes the
+   * asker may see and not change keep it, and are counted in `skipped`. The descriptions of the tag
+   * and those under it go once no note has the tag, and a tag no note has is deleted by its
+   * description alone. With `preview`, nothing is written: the answer is what deleting would change.
+   * Refused as `unavailable` while notes are still being indexed, which a delete then could miss.
+   */
+  z.object({ type: z.literal("tag.delete"), name: TagName, preview: z.boolean().default(false) }),
+  /**
    * The notes the asker can see that `query` finds, written in the query language of docs/search.md:
    * words, each matching the start of a word in the note, ignoring case and accents; "a phrase"; filters
    * such as `folder:`, `tag:` or `#name`, `updated:`, `editor:`, `is:`, `has:`; `-` and `NOT`, `OR`, and
@@ -1124,6 +1135,20 @@ export interface RenamedTag {
   descriptions: { name: string; to: string; description: string; toDescribed: boolean; describedTo: boolean }[];
 }
 
+export interface DeletedTag {
+  name: string;
+  /** The notes written, each at the revision the delete made, which Undo reverts: or with `preview` at the revision they are at. */
+  deleted: { noteId: string; noteTitle: string; revision: number }[];
+  /** How many notes the asker sees have the tag and may not change: they keep it. */
+  skipped: number;
+  /** How many the asker may change and couldn't be: they keep it too. */
+  failed: number;
+  /** The tags under `name`, as `name/sub`, that go with it, by name. */
+  under: string[];
+  /** What was said of the tag and of each under it that went, or a tag made ahead with nothing said, which Undo says again. */
+  descriptions: { name: string; description: string }[];
+}
+
 export interface Note extends NoteSummary {
   text: string;
 }
@@ -1715,6 +1740,7 @@ export interface Results {
   "tag.list": { tags: ListedTag[]; next: string | null; indexing: boolean };
   "tag.describe": { name: string; description: string | null };
   "tag.rename": RenamedTag;
+  "tag.delete": DeletedTag;
   /** `indexing` is as for tag.list. */
   search: { results: SearchResult[]; next: string | null; indexing: boolean };
   "note.label": { id: string; revision: number; label: string | null };
