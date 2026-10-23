@@ -13,8 +13,8 @@ import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
 import { linksOut, type LinkOut } from "./linksOut.ts";
-import { openPage } from "../lib/opening.ts";
-import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, clicked, pickerLabel, picking, pressed, splitTags, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
+import { ALT, SHIFT, openPage } from "../lib/opening.ts";
+import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, boxHint, clicked, pickerLabel, picking, pressed, pressedWith, splitTags, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { STATE_CHOICES, stateOf, withState, type StateChoice } from "./states.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
@@ -532,8 +532,10 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
         // Not disabled while its completion is on its way: that would take the keyboard off it.
         aria-disabled={completing || undefined}
         aria-label={STATE_NAMES[todo.state]}
-        // An open todo is checked off, and any other opened again.
-        onChange={() => !completing && onChange(todo, { state: clicked(todo.state) })}
+        title={readOnly ? undefined : boxHint(todo.state, SHIFT, ALT)}
+        // An open todo is checked off, and any other opened again. With ⇧ held it is abandoned and with ⌥ moved to the backlog, as the row's
+        // buttons do, or opened again from there. It is told of the click that changed it, which holds no keys when it came from the keyboard.
+        onChange={(e) => !completing && onChange(latest.current, { state: pressedWith(latest.current.state, e.nativeEvent as MouseEvent) })}
       />
       <i className="todo-box-mark" aria-hidden="true" />
       <span className="todo-text" style={editing === null ? undefined : { minHeight: editing }}>

@@ -6,6 +6,7 @@ import { BOX_EM } from "../gfm/lists.ts";
 import { chips, type Chip, type Source, type Token } from "../lib/chips.ts";
 import { clock } from "../lib/historyView.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
+import { ALT, SHIFT } from "../lib/opening.ts";
 import { openPopover } from "../lib/Popover.tsx";
 import { replacing } from "../lib/rewrite.ts";
 import { onTodo, todoLines } from "../lib/todoLines.ts";
@@ -15,7 +16,7 @@ import { Completions } from "./Completions.tsx";
 import { CHIP_ICONS } from "./chipIcons.ts";
 import { continuedTodos } from "./continuing.ts";
 import { dueLabel, dueState, tickedLabel, today } from "./dates.ts";
-import { CHIP_NAMES, PRIORITY, STATE_NAMES, clicked, pickerLabel, splitTags, tagged, type ChipKind } from "./picking.ts";
+import { CHIP_NAMES, PRIORITY, STATE_NAMES, boxHint, pickerLabel, pressedWith, splitTags, tagged, type ChipKind } from "./picking.ts";
 import { doneLabel, doneName, everyLabel, everyName } from "./recurrence.ts";
 
 interface Checkbox extends Token {
@@ -61,6 +62,8 @@ interface Ticked {
 
 const tick = StateEffect.define<Ticked>();
 
+const NO_KEYS = { shiftKey: false, altKey: false };
+
 /** The todo last checked off in this editor, followed through every change since: what Undo opens again. */
 const ticked = StateField.define<Ticked | null>({
   create: () => null,
@@ -89,7 +92,9 @@ export function untick(view: EditorView): boolean {
 
 /**
  * A checkbox that writes `[x]` or `[ ]` when it is clicked, as typing in the brackets does: an open
- * todo is checked off, and any other opened again, an abandoned or backlogged one too. The server
+ * todo is checked off, and any other opened again, an abandoned or backlogged one too. Shift-click
+ * writes `[-]`, abandoning it, and Option-click `[>]`, moving it to the backlog, or opens again one
+ * that is there, as the Todos page's buttons and box do. The server
  * completes a recurring todo whose box a write checked, and the editor takes the line it answers with.
  * Only the server can file the line on the daily note, so nothing is rolled forward here.
  */
@@ -110,8 +115,17 @@ const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
     box.dataset.state = token.state;
     box.disabled = source.readOnly;
     box.setAttribute("aria-label", STATE_NAMES[token.state]);
+    // A ticked box's card says it, with when it was ticked.
+    if (token.state !== "done" && !source.readOnly) box.title = boxHint(token.state, SHIFT, ALT);
+    /** The keys held with the press that clicked the box: none for a click from the keyboard. */
+    let held = NO_KEYS;
+    box.addEventListener("click", (event) => {
+      // A click the box is given for a press beside it carries the keys of that press, set there.
+      if (event.isTrusted) held = { shiftKey: event.shiftKey, altKey: event.altKey };
+    });
     box.addEventListener("change", () => {
-      const to = clicked(token.state);
+      const to = pressedWith(token.state, held);
+      held = NO_KEYS;
       box.checked = to === "done";
       const editor = el.closest<HTMLElement>(".cm-editor");
       const view = editor && EditorView.findFromDOM(editor);
@@ -142,11 +156,14 @@ const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
     el.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
-      if (event.target !== box) box.click();
+      if (event.target === box) return;
+      held = { shiftKey: event.shiftKey, altKey: event.altKey };
+      box.click();
+      held = NO_KEYS;
     });
     // The tick is an element of its own, so it is painted in the theme's ink.
     el.append(box, document.createElement("i"));
-    if (token.state === "done") tickedCard(el, box, () => historyOf(context, source).then((history) => history.completed));
+    if (token.state === "done") tickedCard(el, box, !source.readOnly, () => historyOf(context, source).then((history) => history.completed));
   },
 });
 
@@ -157,7 +174,7 @@ let cards = 0;
  * ticked and who ticked it. It is read from the server the first time it is shown, and shows nothing
  * when the server can't say.
  */
-function tickedCard(el: HTMLElement, box: HTMLInputElement, ask: () => Promise<Ticking | null>) {
+function tickedCard(el: HTMLElement, box: HTMLInputElement, changes: boolean, ask: () => Promise<Ticking | null>) {
   const card = document.createElement("div");
   card.className = "md-ticked-card";
   card.id = `md-ticked-card-${++cards}`;
@@ -172,7 +189,10 @@ function tickedCard(el: HTMLElement, box: HTMLInputElement, ask: () => Promise<T
       const by = document.createElement("span");
       by.className = "md-ticked-by";
       by.append(`by ${ticked.by.name}${ticked.by.kind === "agent" ? " (agent)" : ""}`);
-      card.replaceChildren(`${tickedLabel(ticked.at, today())}, ${clock(ticked.at)}`, by);
+      const hint = document.createElement("span");
+      hint.className = "md-ticked-hint";
+      hint.append(boxHint("done", SHIFT, ALT));
+      card.replaceChildren(`${tickedLabel(ticked.at, today())}, ${clock(ticked.at)}`, by, ...(changes ? [hint] : []));
       const at = el.getBoundingClientRect();
       card.style.left = `${at.left}px`;
       card.style.top = `${at.bottom + 6}px`;

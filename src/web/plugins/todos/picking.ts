@@ -32,6 +32,15 @@ export const pressed = (state: TodoState, to: PutAway): TodoState => (state === 
 /** The chips of a todo that open a popover of choices, in a note and on the Todos page. */
 export type ChipKind = "due" | "importance" | "every";
 
+/** What a press on a todo's box puts it in, by the keys held with it: ⇧ abandons and ⌥ moves to the backlog, or opens again what is there. */
+export const pressedWith = (state: TodoState, keys: { shiftKey: boolean; altKey: boolean }): TodoState => (keys.shiftKey ? pressed(state, "abandoned") : keys.altKey ? pressed(state, "backlog") : clicked(state));
+
+/** What a press on a todo's box does, by the keys held with it, said where the box is pointed at. */
+export function boxHint(state: TodoState, shift: string, alt: string): string {
+  const again = "open it again";
+  return `Click to ${state === "open" ? "check it off" : again}, ${shift}-click to ${state === "abandoned" ? again : "abandon it"}, ${alt}-click to ${state === "backlog" ? again : "move it to the backlog"}`;
+}
+
 /** The chips of a row on the Todos page that open a popover: those, and Add tag. A tag's own chip narrows the list instead. */
 export type RowChip = ChipKind | "tag";
 

@@ -2557,7 +2557,8 @@ test("in a note, a ticked box shows a card while it is pointed at or has the key
   await expect(card).toHaveCount(0);
 
   await line(page, "Book flights").getByRole("checkbox").hover();
-  await expect(card).toHaveText(new RegExp(`^Done ${monthDay(today)}, \\d{1,2}:\\d{2}\\s[AP]Mby Claude \\(agent\\)$`));
+  // Under who ticked it, what a press on it does with each key held.
+  await expect(card).toHaveText(new RegExp(`^Done ${monthDay(today)}, \\d{1,2}:\\d{2}\\s[AP]Mby Claude \\(agent\\)Click to open it again, (⇧|Shift)-click to abandon it, (⌥|Alt)-click to move it to the backlog$`));
   await expect(line(page, "Book flights").getByRole("checkbox")).toHaveAttribute("aria-describedby", (await card.getAttribute("id"))!);
   await page.mouse.move(0, 0);
   await expect(card).toHaveCount(0);
@@ -2567,7 +2568,7 @@ test("in a note, a ticked box shows a card while it is pointed at or has the key
   await expect(card).toHaveCount(0);
 
   await line(page, "Book flights").getByRole("checkbox").focus();
-  await expect(card).toHaveText(/^Done .+by Claude \(agent\)$/);
+  await expect(card).toHaveText(/^Done .+by Claude \(agent\)Click to open it again/);
   await editor(page).focus();
   await expect(card).toHaveCount(0);
 });

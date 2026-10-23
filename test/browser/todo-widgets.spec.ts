@@ -207,3 +207,41 @@ test("a member who can only read a note sees a todo's tags as chips, with nothin
   await expect(line(page, "Renew the passport").locator(".md-chip-tag .todo-tag")).toHaveText(["#errands"]);
   await expect(line(page, "Renew the passport").locator(".todo-tag-remove")).toHaveCount(0);
 });
+
+test("Shift-click on a todo's box abandons it and Option-click puts it in the backlog, from any state and again to open it, in a note and on the Todos page, as the box's tooltip and the keyboard help say", async ({ page }) => {
+  const note = await open(page, "# Garden\n\n- [ ] Mow the lawn\n- [ ] Rake the leaves\n\nLast words.");
+  const lawn = line(page, "Mow the lawn");
+  const box = lawn.locator(".md-chip-task");
+  const written = async () => (await read(page, note.id)).split("\n")[2];
+  await expect(lawn.getByRole("checkbox")).toHaveAttribute("title", /^Click to check it off, (⇧|Shift)-click to abandon it, (⌥|Alt)-click to move it to the backlog$/);
+
+  await box.click({ modifiers: ["Shift"] });
+  await expect.poll(written).toBe("- [-] Mow the lawn");
+  await box.click({ modifiers: ["Alt"] });
+  await expect.poll(written).toBe("- [>] Mow the lawn");
+  await expect(lawn.getByRole("checkbox")).toHaveAttribute("title", /(⌥|Alt)-click to open it again$/);
+  await box.click({ modifiers: ["Alt"] });
+  await expect.poll(written).toBe("- [ ] Mow the lawn");
+  await box.click();
+  await expect.poll(written).toBe("- [x] Mow the lawn");
+  await box.click({ modifiers: ["Shift"] });
+  await expect.poll(written).toBe("- [-] Mow the lawn");
+
+  await page.goto("/todos");
+  const row = page.getByRole("region", { name: "Todos" }).getByRole("listitem").filter({ hasText: "Rake the leaves" });
+  await expect(row.getByRole("checkbox")).toHaveAttribute("title", /(⇧|Shift)-click to abandon it/);
+  await row.getByRole("checkbox").click({ modifiers: ["Alt"] });
+  await expect.poll(async () => (await read(page, note.id)).split("\n")[3]).toBe("- [>] Rake the leaves");
+  // From the keyboard the box is only ever checked off or opened again, whatever was held before.
+  await row.getByRole("checkbox").focus();
+  await page.keyboard.press("Space");
+  await expect.poll(async () => (await read(page, note.id)).split("\n")[3]).toBe("- [ ] Rake the leaves");
+  await row.getByRole("checkbox").click({ modifiers: ["Shift"] });
+  await expect.poll(async () => (await read(page, note.id)).split("\n")[3]).toBe("- [-] Rake the leaves");
+  await row.getByRole("checkbox").click({ modifiers: ["Shift"] });
+  await expect.poll(async () => (await read(page, note.id)).split("\n")[3]).toBe("- [ ] Rake the leaves");
+
+  await runCommand(page, "Keyboard shortcuts");
+  const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(sheet.getByRole("table", { name: "Todos, with the pointer" }).getByRole("row")).toHaveText([/^Abandon a todo, or open it again(⇧|Shift) click its box$/, /^Move a todo to the backlog, or open it again(⌥|Alt) click its box$/]);
+});
