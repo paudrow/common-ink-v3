@@ -776,6 +776,10 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   const openFolder = (folderId: string, options: { preview?: boolean } = {}) => openTab({ kind: "folder", id: folderId }, { preview: options.preview ?? true, here: true });
 
   const openBeside = (tab: Opened, side: "right" | "down") => host.contributions().views.editor.at(-1)?.split?.(tab, side);
+  const openToSide = (tab: Opened, { preview = true, focus = false }: { preview?: boolean; focus?: boolean } = {}) => {
+    setToFocus(focus && tab.kind === "note" ? tab.id : null);
+    host.contributions().views.editor.at(-1)?.aside?.(tab, { preview, stay: !focus });
+  };
 
   /** Where the member has been, kept in this browser, which Go back and Go forward walk. Settings is a place to change things from and no place in it. */
   const travelsKey = `ink.travels.${workspaceId}.${me.person.id}`;
@@ -1046,6 +1050,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     openNote,
     openFolder,
     openBeside,
+    openToSide,
     folderPath,
     show,
     createNote,
@@ -1131,6 +1136,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     overlay: overlay?.id ?? null,
     ...actions,
     openBeside: contributed.views.editor.at(-1)?.split ? actions.openBeside : null,
+    openToSide: contributed.views.editor.at(-1)?.aside ? actions.openToSide : null,
   };
   appNow.current = app;
   const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
@@ -1148,7 +1154,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     contributed.views.section.flatMap((section) => {
       if (only !== undefined && section.id !== only) return [];
       const telling = <A extends unknown[]>(open: (...args: A) => void) => (...args: A) => (open(...args), opened?.());
-      const as = (its: App): App => ({ ...its, openNote: telling(its.openNote), openFolder: telling(its.openFolder), openBeside: its.openBeside && telling(its.openBeside), go: telling(its.go) });
+      const as = (its: App): App => ({ ...its, openNote: telling(its.openNote), openFolder: telling(its.openFolder), openBeside: its.openBeside && telling(its.openBeside), openToSide: its.openToSide && telling(its.openToSide), go: telling(its.go) });
       return <Drawn key={section.id} host={host} view={section} as={opened && as} />;
     });
   app.sections = contributed.views.section.length === 0 ? null : sections();

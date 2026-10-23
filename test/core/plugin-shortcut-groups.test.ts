@@ -19,7 +19,7 @@ describe("the keyboard shortcuts sheet", () => {
     ]);
     expect(groups.map((g) => [g.name, g.commands.map((c) => c.id)])).toEqual([
       ["Navigation", ["go.note"]],
-      ["Sidebar", ["sidebar.0", "sidebar.1", "sidebar.2", "sidebar.3", "sidebar.4", "sidebar.own"]],
+      ["Sidebar", ["sidebar.0", "sidebar.1", "sidebar.2", "sidebar.3", "sidebar.4", "sidebar.5", "sidebar.6", "sidebar.own"]],
       ["Notes", ["note.save"]],
       ["Editor", ["bullets.indent", "undo"]],
       ["Vim", ["vim.down"]],
@@ -36,6 +36,8 @@ describe("the keyboard shortcuts sheet", () => {
       ["Open a folder or More out, or shut it", ["→", "←"]],
       ["Open the row and go to it", ["Enter"]],
       ["Open the row and stay in the sidebar", ["Space"]],
+      ["Open the row to the side and go to it", ["Shift+Enter"]],
+      ["Open the row to the side and stay in the sidebar", ["Shift+Space"]],
     ]);
     const vim = [
       command("vim.list.down", ["J"], "Vim"),
@@ -55,6 +57,8 @@ describe("the keyboard shortcuts sheet", () => {
       ["Open a folder or More out, or shut it", ["→", "←", "Z A", "H"]],
       ["Open the row and go to it", ["Enter", "L"]],
       ["Open the row and stay in the sidebar", ["Space"]],
+      ["Open the row to the side and go to it", ["Shift+Enter"]],
+      ["Open the row to the side and stay in the sidebar", ["Shift+Space"]],
       ["Go to the sidebar, on the row of what is open", ["⌃W H"]],
       ["Go back to the region you were in", ["⌃W P"]],
     ]);

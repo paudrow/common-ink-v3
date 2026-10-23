@@ -73,6 +73,8 @@ export const tabs: Plugin = {
     const dispatch = (asked: EditorAction) => {
       const action = "tab" in asked ? { ...asked, tab: keyed(asked.tab, ownTab) } : asked;
       const next = editorReducer(layout, action);
+      // Gone to the side, it shows in a pane beside the one in front, which focus would hide.
+      if (action.type === "aside" && next !== layout) host.app().setFocus(false);
       if ((action.type === "split" || action.type === "send") && next !== layout) {
         // A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
         host.app().setFocus(false);
@@ -190,6 +192,7 @@ export const tabs: Plugin = {
       open: (tab, { preview, background, here }) => dispatch({ type: "open", tab, preview, background, here }),
       returnsTo: () => focused(layout),
       split: (tab, side) => dispatch({ type: "split", groupId: layout.focusedGroupId, side, tab, keep: true }),
+      aside: (tab, { preview, stay }) => dispatch({ type: "aside", tab, preview, stay }),
       tabs: () => layout.groups.flatMap((g, i) => g.tabs.map(({ preview: _, ...opened }) => ({ opened, pane: i + 1 }))),
     });
   },

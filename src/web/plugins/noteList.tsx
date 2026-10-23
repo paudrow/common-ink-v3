@@ -536,6 +536,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
       e.preventDefault();
       setAtId(next.id);
       card(next.id)?.focus();
+    } else if ((e.key === "Enter" || e.key === " ") && e.shiftKey && !withModifier(e) && !e.altKey && app.openToSide) {
+      // Shift with Enter opens the note to the side and goes there; with Space it opens there and the keyboard stays on the card.
+      e.preventDefault();
+      app.openToSide({ kind: "note", id: note.id }, { focus: e.key === "Enter" });
     } else if (e.key === "Enter") {
       e.preventDefault();
       open(note, withModifier(e) ? "behind" : "preview");

@@ -14,6 +14,8 @@ const SIDEBAR: readonly { title: string; keys: readonly string[]; commands: read
   { title: "Open a folder or More out, or shut it", keys: ["→", "←"], commands: ["vim.list.toggle", "vim.list.out"] },
   { title: "Open the row and go to it", keys: ["Enter"], commands: ["vim.list.open"] },
   { title: "Open the row and stay in the sidebar", keys: ["Space"], commands: ["vim.list.preview"] },
+  { title: "Open the row to the side and go to it", keys: ["Shift+Enter"], commands: [] },
+  { title: "Open the row to the side and stay in the sidebar", keys: ["Shift+Space"], commands: [] },
   { title: "Go to the sidebar, on the row of what is open", keys: [], commands: ["vim.window.left"] },
   { title: "Go back to the region you were in", keys: [], commands: ["vim.window.previous"] },
 ];

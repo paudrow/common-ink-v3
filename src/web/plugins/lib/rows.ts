@@ -130,16 +130,23 @@ function eachFrame(ms: number, look: (last: boolean) => boolean) {
 const HOLDING_MS = 500;
 
 /**
- * Opens what a row's `rest` goes to and keeps focus on it, even from a page that takes focus as it
- * is drawn, as Search does, until the member presses a key or the pointer.
+ * Keeps focus on `rest` while what was just opened is drawn, even a page that takes focus as it is,
+ * as Search does, until the member presses a key or the pointer, or puts focus on another row.
  */
-export function preview(rest: HTMLElement, onto: (el: HTMLElement) => void = focusOn) {
-  rest.click();
+export function hold(rest: HTMLElement, onto: (el: HTMLElement) => void = focusOn) {
+  const list = listOf(rest);
   eachFrame(HOLDING_MS, () => {
-    if (!rest.isConnected) return true;
-    if (document.activeElement !== rest) onto(rest);
+    const at = document.activeElement;
+    if (!rest.isConnected || (at !== rest && list?.contains(at))) return true;
+    if (at !== rest) onto(rest);
     return false;
   });
+}
+
+/** Opens what a row's `rest` goes to and keeps focus on it. */
+export function preview(rest: HTMLElement, onto: (el: HTMLElement) => void = focusOn) {
+  rest.click();
+  hold(rest, onto);
 }
 
 const ARRIVING_MS = 2000;

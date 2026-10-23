@@ -413,6 +413,8 @@ test("the keyboard shortcuts list the sidebar's keys under a heading of their ow
     ["Open a folder or More out, or shut it", "→", "←"],
     ["Open the row and go to it", "Enter"],
     ["Open the row and stay in the sidebar", "Space"],
+    ["Open the row to the side and go to it", "Shift+Enter"],
+    ["Open the row to the side and stay in the sidebar", "Shift+Space"],
   ]);
   await page.keyboard.press("Escape");
 
@@ -427,6 +429,8 @@ test("the keyboard shortcuts list the sidebar's keys under a heading of their ow
     ["Open a folder or More out, or shut it", "→", "←", "Z A", "H"],
     ["Open the row and go to it", "Enter", "L"],
     ["Open the row and stay in the sidebar", "Space"],
+    ["Open the row to the side and go to it", "Shift+Enter"],
+    ["Open the row to the side and stay in the sidebar", "Shift+Space"],
     ["Go to the sidebar, on the row of what is open", ctrlW("H")],
     ["Go back to the region you were in", ctrlW("P")],
   ]);
@@ -481,5 +485,57 @@ test.describe("opening goes to the pane you're in", () => {
     await page.keyboard.press("Enter");
     await expect(pane(page, 1).locator(".cards > li")).toHaveCount(3);
     await expectMarked(pane(page, 1).locator(".cards > li").nth(0), "Work's first note, in the first pane");
+  });
+});
+
+test.describe("Shift+Space and Shift+Enter open to the side", () => {
+  const pane = (page: Page, n: number) => page.getByRole("region", { name: `Editor group ${n}` });
+  const tabsIn = (page: Page, n: number) => pane(page, n).getByRole("tablist", { name: "Open notes" }).getByRole("tab");
+
+  for (const vim of [false, true])
+    test(`${vim ? "in vim mode" : "without vim mode"}, Shift+Space on a sidebar row opens it in a pane to the side and stays on the row, again in that pane, and Shift+Enter goes there`, async ({ page }) => {
+      await setUp(page, vim);
+      await expect(tag(page, "idea")).toBeVisible();
+      await expect(page.getByRole("region", { name: /^Editor group/ })).toHaveCount(1);
+      await folder(page, "Work").focus();
+      await page.keyboard.press("Shift+Space");
+      await expect(pane(page, 2).locator(".cards > li")).toHaveCount(3);
+      await expect(tabsIn(page, 1)).toHaveText(["All notes"]);
+      await expectAt(folder(page, "Work"), "Work, opened to the side");
+
+      // Again, from the same row's list, the next one takes its place in that pane: no pane more.
+      await tag(page, "idea").focus();
+      await page.keyboard.press("Shift+Space");
+      await expect(pane(page, 2).locator(".cards > li")).toHaveCount(2);
+      await expect(page.getByRole("region", { name: /^Editor group/ })).toHaveCount(2);
+      await expect(tabsIn(page, 2)).toHaveText(["#idea"]);
+      await expectAt(tag(page, "idea"), "the tag, opened to the side");
+
+      await folder(page, "Work").focus();
+      await page.keyboard.press("Shift+Enter");
+      await expect(tabsIn(page, 2)).toHaveText(["Work"]);
+      await expectAt(pane(page, 2).locator(".cards > li").nth(0), "Work's first note, in the pane to the side");
+      await expect(tabsIn(page, 1)).toHaveText(["All notes"]);
+    });
+
+  test("on a note's card, Shift+Space opens the note to the side and the keyboard stays on the card, and Shift+Enter opens it there with the cursor in it", async ({ page }) => {
+    await setUp(page, false);
+    const cardsHere = pane(page, 1).locator(".cards > li");
+    await expect(cardsHere).toHaveCount(3);
+    const first = cardsHere.nth(0).locator(".card");
+    const title = await cardsHere.nth(0).locator(".card-title").innerText();
+    await first.focus();
+    await page.keyboard.press("Shift+Space");
+    await expect(tabsIn(page, 2)).toHaveText([title]);
+    await expect(first).toBeFocused();
+
+    const second = cardsHere.nth(1).locator(".card");
+    const next = await cardsHere.nth(1).locator(".card-title").innerText();
+    await page.keyboard.press("ArrowDown");
+    await expect(second).toBeFocused();
+    await page.keyboard.press("Shift+Enter");
+    await expect(tabsIn(page, 2)).toHaveText([next]);
+    await expect(pane(page, 2).getByRole("textbox", { name: "Note text" })).toBeFocused();
+    await expect(tabsIn(page, 1)).toHaveText(["All notes"]);
   });
 });

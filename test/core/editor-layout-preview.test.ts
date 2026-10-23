@@ -29,6 +29,7 @@ function anyAction(layout: EditorLayout, pick: (below: number) => number): Edito
     () => ({ type: "open", tab, preview: true, here: true }),
     () => ({ type: "open", tab, preview: false }),
     () => ({ type: "open", tab, preview: pick(2) === 0, background: true }),
+    () => ({ type: "aside", tab, preview: pick(2) === 0, stay: pick(2) === 0 }),
     () => ({ type: "split", groupId: group.id, side: SIDES[pick(4)]!, tab: pick(2) ? held : tab, keep: pick(2) === 0, ...from() }),
     () => ({ type: "add", groupId: group.id, tab: pick(2) ? held : tab, ...from() }),
     () => ({ type: "drop", groupId: group.id, index: pick(group.tabs.length + 1), tab: pick(2) ? held : tab, ...from() }),
@@ -42,7 +43,12 @@ function anyAction(layout: EditorLayout, pick: (below: number) => number): Edito
 
 /** What a member does to say a tab is to stay: keep it, open it kept or behind, or drag it somewhere. Nothing else may turn a preview into a kept tab. */
 const keeps = (action: EditorAction) =>
-  action.type === "pin" || action.type === "drop" || action.type === "add" || (action.type === "split" && action.keep === true) || (action.type === "open" && (!action.preview || action.background === true));
+  action.type === "pin" ||
+  action.type === "drop" ||
+  action.type === "add" ||
+  (action.type === "split" && action.keep === true) ||
+  (action.type === "open" && (!action.preview || action.background === true)) ||
+  (action.type === "aside" && !action.preview);
 const keyOf = (tab: Opened) => `${tab.kind} ${tab.id}`;
 
 const previewsIn = (layout: EditorLayout) => layout.groups.flatMap((g) => g.tabs.filter((t) => t.preview).map((tab) => ({ groupId: g.id, tab })));
@@ -62,7 +68,7 @@ describe("the window's preview tab", () => {
         const action = anyAction(layout, pick);
         const was = previewsIn(layout)[0];
         // A preview that is all its pane has is kept there when the next preview opens in another pane, so no pane closes.
-        const alone = !!was && action.type === "open" && layout.groups.find((g) => g.id === was.groupId)!.tabs.length === 1;
+        const alone = !!was && (action.type === "open" || action.type === "aside") && layout.groups.find((g) => g.id === was.groupId)!.tabs.length === 1;
         const groupsBefore = layout.groups.map((g) => g.id);
         layout = editorReducer(layout, action);
         if (action.type === "open" && layout.groups.map((g) => g.id).join() !== groupsBefore.join()) throw new Error(`seed ${seed}, step ${step}: a group came or went by ${JSON.stringify(action)}`);

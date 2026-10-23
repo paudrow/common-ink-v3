@@ -523,6 +523,8 @@ export interface Slots {
      * offer "Open in a split".
      */
     split?: (tab: Opened, side: "right" | "down") => void;
+    /** Asked to open a note, a folder's list or a page to the side, for `app.openToSide`. With `stay` the pane in front stays so. */
+    aside?: (tab: Opened, options: { preview: boolean; stay: boolean }) => void;
     /** Every tab open, pane by pane in reading order and each pane's left to right, for `app.openTabs`. */
     tabs?: () => readonly OpenTab[];
   };
@@ -1164,6 +1166,13 @@ export interface App {
    * of or under what is in front, where it is kept. Null where the editor area has no splits.
    */
   openBeside: ((tab: Opened, side: "right" | "down") => void) | null;
+  /**
+   * Opens a note, a folder's list or a page to the side: in the pane after the one in front, or in a
+   * new pane right of it when there is one pane, as a preview unless `preview` is false. With `focus`
+   * the pane it opens in comes in front, and a note's editor takes the cursor; without, the pane in
+   * front stays so. Null where the editor area has no splits.
+   */
+  openToSide: ((tab: Opened, options?: { preview?: boolean; focus?: boolean }) => void) | null;
   /** Where a folder's list lives, such as `/folder/all`. */
   folderPath(folderId: string): string;
   /**

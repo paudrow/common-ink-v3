@@ -135,6 +135,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
       aria-labelledby={`${ids}-${id}`}
       aria-describedby={`${ids}-${id}-count`}
       tabIndex={selectedId === id || (id === ALL_NOTES && !(selectedId && (tree.byId.has(selectedId) || (selectedId === SHARED_WITH_ME && loose > 0)))) ? 0 : -1}
+      data-opens={host.app().folderPath(id)}
       {...draggableAs({ kind: "folder", id })}
       onClick={() => onOpen(id, false)}
       onDoubleClick={() => onOpen(id, true)}
@@ -143,7 +144,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
         setMenu({ id, name, x: e.clientX, y: e.clientY });
       }}
       onKeyDown={(e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
+        if ((e.key !== "Enter" && e.key !== " ") || e.shiftKey) return;
         e.preventDefault();
         onOpen(id, false);
       }}
@@ -185,6 +186,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             aria-labelledby={`${ids}-${folder.id}`}
             aria-describedby={`${ids}-${folder.id}-count`}
             tabIndex={folder.id === selectedId ? 0 : -1}
+            data-opens={host.app().folderPath(folder.id)}
             {...draggableAs({ kind: "folder", id: folder.id }, () => (dragging.current = folder.id))}
             onDragEnd={() => {
               dragging.current = null;
@@ -194,7 +196,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             onClick={choose}
             onDoubleClick={() => onOpen(folder.id, true)}
             onKeyDown={(e) => {
-              if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+              // Shift with them is the sidebar's, which opens the folder to the side.
+              if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ") || e.shiftKey) return;
               e.preventDefault();
               choose();
             }}

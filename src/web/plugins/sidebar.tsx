@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import { Icon, draggableAs, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
+import { Icon, draggableAs, openedAt, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
-import { arrive, goes, listOf, preview, step } from "./lib/rows.ts";
+import { arrive, goes, hold, listOf, preview, step } from "./lib/rows.ts";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
@@ -33,9 +33,34 @@ function Sidebar({ app }: ViewProps) {
       {more && links("more")}
     </>
   );
+  /**
+   * Shift with Enter or Space opens a row to the side, as they open it in the pane in front: Enter goes there with the keyboard,
+   * and Space stays. A row says what it opens by its address: a link's, or the one it is marked `data-opens` with.
+   */
+  const aside = (row: HTMLElement, go: boolean) => {
+    const address = row.getAttribute("href") ?? row.dataset.opens;
+    const page = app.pages.find((p) => p.path === address);
+    const tab = typeof page?.transient === "function" ? page.transient() : Promise.resolve(address ? openedAt(address, app.pages) : null);
+    tab.then(
+      (opened) => {
+        if (!opened || !app.openToSide) return;
+        app.openToSide(opened, { focus: go });
+        if (go) arrive();
+        else hold(row);
+      },
+      (err: Error) => app.notify({ message: err.message }),
+    );
+  };
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
-    const row = e.target instanceof HTMLElement && listOf(e.target) === e.currentTarget && !(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) ? e.target : null;
+    const row = e.target instanceof HTMLElement && listOf(e.target) === e.currentTarget && !(e.altKey || e.ctrlKey || e.metaKey) ? e.target : null;
     if (!row) return;
+    if (e.shiftKey) {
+      if ((e.key === "Enter" || e.key === " ") && goes(row) && app.openToSide) {
+        e.preventDefault();
+        aside(row, e.key === "Enter");
+      }
+      return;
+    }
     // A folder's row has opened itself by now.
     if (e.key === "Enter") return void (goes(row) && arrive());
     if (e.defaultPrevented) return;
