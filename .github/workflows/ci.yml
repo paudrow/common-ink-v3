@@ -75,7 +75,7 @@ jobs:
 
   # Every PR gets a Preview at https://pr-<number>-common-ink-v3-previews.draftox.workers.dev with its own D1
   # database, open without a login, linked from one comment that each push updates. Previews run on their own
-  # Worker, common-ink-v3-previews, which the first Preview creates; production has no workers.dev address.
+  # Worker, common-ink-v3-previews, which the first Preview creates; production's workers.dev address serves HTML embeds alone.
   # Uploads go to the bucket Previews share, common-ink-v3-uploads-preview, so the token needs Workers R2 Storage: Edit.
   preview:
     if: github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository

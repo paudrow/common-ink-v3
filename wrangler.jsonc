@@ -3,7 +3,9 @@
   "name": "common-ink-v3",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-10-01",
-  "workers_dev": false,
+  // On for HTML embeds alone: a deploy sets EMBED_ORIGIN to this Worker's workers.dev address
+  // (package.json's deploy), which then answers with the embed's frame and nothing else of the app.
+  "workers_dev": true,
   "preview_urls": false,
   // CPU time one request may spend: an export part holding one multi-GB upload computes CRC-32 over every
   // byte, which can pass the 30 s default (src/core/zip.ts). Wall time waiting on R2 and D1 isn't counted.

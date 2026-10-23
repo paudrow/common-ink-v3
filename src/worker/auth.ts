@@ -5,16 +5,13 @@ import { authorizeUrl, covers, exchange, isGoogleSource, REACHING_SCOPES, revoke
 import { connectionOf, keepTokens } from "./sources/connections.ts";
 import { PROVIDER as GOOGLE } from "./sources/google.ts";
 import { vault } from "./vault.ts";
-import { THIS_MACHINE } from "./hosts.ts";
+import { PREVIEW_HOSTS, THIS_MACHINE } from "./hosts.ts";
 import { b64url, cookie, setCookie, sign, verify } from "./session.ts";
 
 const SESSION_COOKIE = "__Host-ink_session";
 const STATE_COOKIE = "__Host-ink_google";
 const SESSION_SECONDS = 30 * 86_400;
 const STATE_SECONDS = 600;
-
-/** A Preview's addresses on the Previews' own Worker: `pr-<n>-…` and each deployment's own `<hex>-…`. Production has no workers.dev address. */
-const PREVIEW_HOSTS = /^[a-z0-9-]+-common-ink-v3-previews\.draftox\.workers\.dev$/;
 
 /**
  * Dev sign-in is set only by the dev server and scripts/preview.ts. On this machine it is the dev

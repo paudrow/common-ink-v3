@@ -73,8 +73,9 @@ describe("dev sign-in", () => {
   it("signs nobody in where a Google client or a list is set, on the production Worker's own addresses, or on the app's domain", async () => {
     expect((await me("pr-12-common-ink-v3-previews.draftox.workers.dev", { GOOGLE_CLIENT_ID: "client-id" })).status).toBe(401);
     expect((await me("pr-12-common-ink-v3-previews.draftox.workers.dev", { ALLOWED_EMAILS: "ada@example.com" })).status).toBe(401);
-    expect((await me("1a2b3c4d-common-ink-v3.draftox.workers.dev", {})).status).toBe(401);
-    expect((await me("pr-12-common-ink-v3.draftox.workers.dev", {})).status).toBe(401);
+    // The production Worker's workers.dev addresses answer nothing of the app's at all.
+    expect((await me("1a2b3c4d-common-ink-v3.draftox.workers.dev", {})).status).toBe(404);
+    expect((await me("pr-12-common-ink-v3.draftox.workers.dev", {})).status).toBe(404);
     expect((await me("commonink.app", {})).status).toBe(401);
   });
 });
