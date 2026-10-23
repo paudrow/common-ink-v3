@@ -900,6 +900,25 @@ test("a hover card stays while the pointer rests anywhere on it, its description
   await expect(card(page)).toHaveCount(0);
 });
 
+test("a click on a tag's row takes its card away until the pointer leaves the row; back on it, a rest shows it", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const seeds = await create(page, "# Seeds\n\nPay #money\n");
+  await perform(page, { type: "tag.describe", name: "money", description: "Bills and budgets" });
+  await page.goto(`/note/${seeds.id}`);
+  await expect(editor(page)).toContainText("Pay");
+  const money = listed(page).filter({ hasText: "#money" });
+  await money.hover();
+  await expect(card(page)).toContainText("Bills and budgets");
+  await money.click();
+  await expect(page).toHaveURL(/\/tags\/money$/);
+  await expect(card(page)).toHaveCount(0);
+  await page.waitForTimeout(1000);
+  await expect(card(page)).toHaveCount(0);
+  await page.mouse.move(700, 300);
+  await money.hover();
+  await expect(card(page)).toContainText("Bills and budgets");
+});
+
 test("a hover card stays while the pointer crosses to it, over other tags on the way, and goes once the pointer has left both", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const seeds = await create(page, "# Seeds\n\n#alpha #beta #gamma #garden #money\n");

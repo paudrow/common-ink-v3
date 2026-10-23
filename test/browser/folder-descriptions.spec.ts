@@ -319,7 +319,16 @@ test("Escape goes to the menu the keyboard is in while a folder's card shows und
   const { work } = await withFolders(page);
   await perform(page, { type: "note.create", folderId: work.id, text: "# Plans\n\nThe plans\n" });
   await page.goto("/");
+  // A click takes the card away, and a rest on the row after it shows none.
+  await folderRow(page, "Work").hover();
+  await expect(card(page)).toContainText("No description yet.");
   await folderRow(page, "Work").click();
+  await expect(card(page)).toHaveCount(0);
+  await page.waitForTimeout(1000);
+  await expect(card(page)).toHaveCount(0);
+  // Off the row and back, a rest shows it.
+  await page.mouse.move(2, 2);
+  await folderRow(page, "Work").hover();
   await expect(card(page)).toContainText("No description yet.");
   await page.getByRole("navigation", { name: "Notes" }).getByRole("article", { name: "Plans", exact: true }).focus();
   await page.keyboard.press("Tab");

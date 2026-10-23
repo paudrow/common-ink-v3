@@ -217,6 +217,20 @@ test("a card draws its note to be read, which nothing in it changes, and Edit op
   await expect(card.getByRole("checkbox")).toHaveCount(2);
 });
 
+test("a click on a folder's row and a rest there show no folder card over the list it opened, so its first note's Edit can be clicked", async ({ page }) => {
+  const { plan } = await withFolders(page);
+  await openFolder(page, "Projects");
+  await editOf(page, "Plan").click();
+  await expect(tabs(page)).toHaveText(["Plan"]);
+
+  await folderRow(page, "Projects").click();
+  await expect(tabs(page)).toHaveText(["Projects"]);
+  await page.waitForTimeout(1000);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await editOf(page, "Plan").click();
+  await expect(page).toHaveURL(new RegExp(`/note/plan-${plan.id}$`));
+});
+
 test("a card beside its note's editor is only a reading of it: what follows the editor still does", async ({ page }) => {
   await withFolders(page);
   const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
