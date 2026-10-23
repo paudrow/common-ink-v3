@@ -4,6 +4,9 @@ export const toDoc = (text: string) => Text.of(text.split("\n"));
 
 export const applyChanges = (changes: ChangeSet, text: string) => changes.apply(toDoc(text)).toString();
 
+/** Whether a note's text says nothing: spaces and line breaks, and at most the mark of a title. */
+export const blank = (text: string) => /^#?$/.test(text.trim());
+
 /*
  * Changes are moved over one another in terminated text: the note with a newline after its last
  * line, so that every line owns the newline that ends it, and a line added or removed is one whole

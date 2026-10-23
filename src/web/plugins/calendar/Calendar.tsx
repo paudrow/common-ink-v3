@@ -346,6 +346,9 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
             </>
           )}
           <h2 aria-live="polite">{title}</h2>
+          <span role="status" className="cal-loading">
+            {busy && !listing.failed && (connected || !sources) ? "Loading events…" : ""}
+          </span>
           {(connected || !sources) && (
             <div className="cal-views" role="group" aria-label="View">
               {(Object.keys(VIEWS) as View[]).map((each) => (
@@ -372,8 +375,11 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
         </section>
       )}
       {listing.failed && (
-        <p role="alert" className="said failed">
-          {listing.failed}
+        <p role="alert" className="said failed cal-failed">
+          Your events couldn't be read: {listing.failed}
+          <button type="button" className="button small" onClick={listing.retry}>
+            Try again
+          </button>
         </p>
       )}
       {isGrid(view) && (connected || !sources) && (

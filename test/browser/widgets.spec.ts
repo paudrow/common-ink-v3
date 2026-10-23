@@ -59,7 +59,7 @@ async function drag(page: Page, from: Locator, to: Locator, at: { x: number; y: 
 
 /** Everything / lists with every plugin on: the blocks of markdown, then the embeds. */
 const BLOCKS = [/^Heading 1/, /^Heading 2/, /^Heading 3/, /^Bulleted list/, /^Numbered list/, /^Task list/, /^Table/, /^Code block/, /^Quote/, /^Divider/];
-const EMBEDS = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Drawing/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Insert an upload/];
+const EMBEDS = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Drawing/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Record your voice/, /^Insert an upload/];
 
 const BOARD = "# Plan\n\n:::kanban{}\n## To do\n- write\n- review\n\n## Doing\n- build\n\n## Done\n:::\n\nAfter the board.\n";
 
@@ -126,8 +126,9 @@ test("an ordinary word after a / and Enter or Tab stays as it was typed", async 
   await page.keyboard.press("Enter");
   await page.keyboard.type("x /wat");
   await settled(page);
+  // With no menu open, Tab is the note's own: it adds room after the word and takes nothing from it.
   await page.keyboard.press("Tab");
-  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /hr\nN /A\n/an\n> /tmr\n> in /or\n> x /wat");
+  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /hr\nN /A\n/an\n> /tmr\n> in /or\n> x /wat  ");
 });
 
 const highlighted = (page: Page) => options(page).and(page.locator("[aria-selected=true]"));

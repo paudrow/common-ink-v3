@@ -6,6 +6,7 @@ import { sealLinksWith, sealOldLinks } from "../core/linkSeal.ts";
 import { sweep } from "../core/oauth.ts";
 import { eraseWorkspaces, pruneDeletions, redoRequested } from "../core/erase.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
+import { sweepUnwritten } from "../core/discard.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
 import { MAX_OP_BYTES, TooLarge, cappedJson } from "./body.ts";
@@ -19,6 +20,7 @@ import { embedOrigin, embedResponse } from "./frames.ts";
 import { crossOrigin, secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
 import { addressOf, limitByAddress, overLimit, tokenKey } from "./limits.ts";
+import { listenerOf } from "./listen.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 import { handleClientFault, opName, report, reportOf, told, traceOf, type Report, type Trace } from "./report.ts";
 import { handleEmail, logged, mailAddress } from "./mail.ts";
@@ -129,9 +131,13 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
       return json({ error: "invalid", message: "The body isn't JSON" }, 400);
     }
     trace.op = opName((op as { type?: unknown } | null)?.type);
+    if ((op as { type?: unknown } | null)?.type === "upload.transcribe") {
+      const busier = await overLimit(env, url, "TRANSCRIBE_LIMIT", personId);
+      if (busier) return busier;
+    }
     if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, a part of one at the address upload.start gives, and an export's at the addresses export.plan gives" }, 400);
     try {
-      return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
+      return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES, listen: listenerOf(env) }));
     } catch (err) {
       if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
       throw err;
@@ -249,7 +255,7 @@ export default {
       report(env, (sent) => ctx.waitUntil(sent), { source: "job", route: "email", requestId: null, op: "mail.receive", status: null, ...told(err) });
     }
   },
-  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
+  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, notes nobody wrote in that were left a day ago, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env, ctx) {
     const broke = (what: string, err: unknown) => report(env, (sent) => ctx.waitUntil(sent), { source: "job", route: "cron", requestId: null, op: what, status: null, ...told(err) });
     keyLinks(env);
@@ -268,6 +274,12 @@ export default {
       return broke("clearUploads", err);
     }
     if (uploads.removed || uploads.failed.length) console.log(`Removed ${uploads.removed} uploads${uploads.failed.length ? `, and couldn't remove ${uploads.failed.length}` : ""}${uploads.more ? ", with more waiting" : ""}`);
+    try {
+      const swept = await sweepUnwritten(env.DB, controller.scheduledTime);
+      if (swept.removed || swept.failed.length) console.log(`Removed ${swept.removed} notes nobody wrote in${swept.failed.length ? `, and couldn't remove ${swept.failed.length}` : ""}${swept.more ? ", with more waiting" : ""}`);
+    } catch (err) {
+      broke("sweepUnwritten", err);
+    }
     try {
       const sealed = await sealOldLinks(env.DB);
       if (sealed) console.log(`Sealed ${sealed} links kept from before links were sealed`);

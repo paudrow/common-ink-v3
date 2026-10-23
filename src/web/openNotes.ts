@@ -64,6 +64,9 @@ export function openInAnotherTab(noteId: string): Promise<boolean> {
  */
 export const noteJump = StateEffect.define<{ from: number; to: number }>();
 
+/** On the change an editor takes from the member's own undo or redo through the note's history, which comes back a moment after the key. */
+export const historyStepped = Annotation.define<boolean>();
+
 /** Where the cursor last was in each note's editor, kept once the editor has gone. */
 const cursors = new Map<string, number>();
 /** Where the next editor of a note is to put the cursor, for a note being opened, and until when: one that never opened puts nothing later. */

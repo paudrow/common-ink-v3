@@ -36,8 +36,10 @@ const KNOWN: readonly Known[] = [
   { type: "video/mp4", kind: "video", endings: ["mp4", "m4v"], inline: true, is: (h) => brand(h, "isom", "iso2", "iso5", "iso6", "mp41", "mp42", "avc1", "M4V ", "dash", "mmp4") },
   { type: "video/quicktime", kind: "video", endings: ["mov"], inline: true, is: (h) => brand(h, "qt  ") },
   { type: "video/webm", kind: "video", endings: ["webm"], inline: true, is: (h) => starts(h, 0x1a, 0x45, 0xdf, 0xa3) },
+  // A WebM of sound alone, as a browser records one: `.weba`, since the same bytes named `.webm` are a video.
+  { type: "audio/webm", kind: "audio", endings: ["weba"], inline: true, is: (h) => starts(h, 0x1a, 0x45, 0xdf, 0xa3) },
   { type: "audio/mpeg", kind: "audio", endings: ["mp3"], inline: true, is: (h) => ascii(h, 0, "ID3") || (h[0] === 0xff && ((h[1] ?? 0) & 0xe0) === 0xe0) },
-  { type: "audio/mp4", kind: "audio", endings: ["m4a"], inline: true, is: (h) => brand(h, "M4A ", "isom", "mp42") },
+  { type: "audio/mp4", kind: "audio", endings: ["m4a"], inline: true, is: (h) => brand(h, "M4A ", "isom", "iso5", "iso6", "mp41", "mp42") },
   { type: "audio/wav", kind: "audio", endings: ["wav"], inline: true, is: (h) => ascii(h, 0, "RIFF") && ascii(h, 8, "WAVE") },
   { type: "audio/ogg", kind: "audio", endings: ["ogg", "oga"], inline: true, is: (h) => ascii(h, 0, "OggS") },
   // Opened in a tab, it is shown by the browser's own viewer, and its script runs inside the viewer and reaches nothing of the app's. See ADR 0008 for what the tab's page is.

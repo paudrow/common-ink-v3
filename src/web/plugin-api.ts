@@ -18,7 +18,7 @@ import type { UploadKind } from "../core/filetypes.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_FOLDER_DESCRIPTION, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
+export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_FOLDER_DESCRIPTION, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_TAG_DESCRIPTION, MAX_UPLOAD_BYTES, MAX_VOCABULARY, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
 /**
  * The query language notes and todos are found by, as the server reads it: what is typed to a query
  * and back, every filter there is with what it takes and means, and what is being typed at the
@@ -112,6 +112,8 @@ export { useOpenNote, type OpenNote } from "./openNotes.ts";
  * app's history, so Go back comes back to `from` before it leaves the note.
  */
 export { noteJump } from "./openNotes.ts";
+/** A CodeMirror annotation on the change an editor takes from the member's own undo or redo through the note's history, which comes back a moment after the key. */
+export { historyStepped } from "./openNotes.ts";
 
 /**
  * Dragging to the editor area. `draggableAs(what)` is the props that make an element drag a note, a

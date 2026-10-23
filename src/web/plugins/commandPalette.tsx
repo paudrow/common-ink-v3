@@ -20,7 +20,8 @@ function ShortcutSheet({ host, close }: { host: PluginHost; close: () => void })
             Press <kbd>{own[0]}</kbd> anywhere but where text is typed to open this.{" "}
           </>
         )}
-        {own.length > 0 ? "In a note, open it from the command palette." : "Open this from the command palette."}{" "}
+        {own.length > 0 ? "In a note, open it from the command palette." : "Open this from the command palette."} In a note, <kbd>Tab</kbd> indents and{" "}
+        <kbd>Shift+Tab</kbd> outdents. To leave the note from the keyboard, press <kbd>Esc</kbd> and then <kbd>Tab</kbd>.{" "}
         <a
           href="/settings/keyboard"
           onClick={(e) => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Calendar, CalendarEvent, PluginHost, Source } from "../../plugin-api.ts";
 import { daysBetween, shiftDay, spanOf, type Day } from "./dates.ts";
 
@@ -32,6 +32,8 @@ export interface Listing {
   /** The oldest reading among the runs wanted that have answered: a change made at a later reading is not in what is shown yet. */
   reading: number;
   failed: string | null;
+  /** Asks again for the runs that failed. */
+  retry(): void;
 }
 
 /**
@@ -43,6 +45,11 @@ export interface Listing {
 export function useListing(host: PluginHost, timeZone: string, from: number, to: number, reading: number): Listing {
   const chunks = useRef(new Map<number, Chunk>());
   const [answered, setAnswered] = useState(0);
+  const [tries, setTries] = useState(0);
+  const retry = useCallback(() => {
+    for (const [n, chunk] of chunks.current) if (chunk.status === "failed") chunks.current.delete(n);
+    setTries((t) => t + 1);
+  }, []);
   const first = Math.floor(from / CHUNK);
   const last = Math.floor((to - 1) / CHUNK);
 
@@ -79,7 +86,7 @@ export function useListing(host: PluginHost, timeZone: string, from: number, to:
         },
       );
     }
-  }, [host, timeZone, first, last, reading]);
+  }, [host, timeZone, first, last, reading, tries]);
 
   return useMemo(() => {
     const seen = new Set<string>();
@@ -102,8 +109,8 @@ export function useListing(host: PluginHost, timeZone: string, from: number, to:
       }
     }
     const listed = (index: number) => chunks.current.get(Math.floor(index / CHUNK))?.status === "listed";
-    return { events, sources: latest?.sources ?? null, calendars: latest?.calendars ?? [], listed, reading: oldest === Infinity ? -1 : oldest, failed };
+    return { events, sources: latest?.sources ?? null, calendars: latest?.calendars ?? [], listed, reading: oldest === Infinity ? -1 : oldest, failed, retry };
     // `answered` is what changes when a run comes back; the map itself is the same object throughout.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [first, last, answered, reading]);
+  }, [first, last, answered, reading, tries, retry]);
 }

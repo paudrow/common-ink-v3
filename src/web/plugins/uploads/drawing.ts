@@ -105,9 +105,10 @@ const detailsOf = ({ name, kind, width, height, size }: NonNullable<ReferredTo>)
  * `::audio{id}` and `::file{id}`. A picture, a video and a recording are all below their line, and
  * nothing of them is in it. What each knows of its upload is what the host was told by the read
  * of the note, and its bytes come from the address the host gives, so on a link's page they come by the link.
- * `pick` is how a menu sends a file into a note, where one can be sent.
+ * `pick` is how a menu sends a file into a note, where one can be sent, and `transcribe` writes
+ * what is said in a recording under it, for a member who can change the note.
  */
-export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: OnTheWay): { embeds: Embed[]; stop: Dispose } {
+export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: OnTheWay, transcribe?: (uploadId: string, drawn: HTMLElement) => Promise<unknown>): { embeds: Embed[]; stop: Dispose } {
   const drawn = new Set<() => void>();
   const asked = new Set<string>();
   const everyAgain = () => {
@@ -302,6 +303,24 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
     return button;
   };
 
+  /** A recording's player with a button beside it that transcribes it into the note, under its line, for a member who can change the note. */
+  const transcribable = (player: Node, id: string, drawn: HTMLElement, transcribe: (uploadId: string, drawn: HTMLElement) => Promise<unknown>) => {
+    const row = el("div", "upload-audio-row");
+    const button = el("button", "button small upload-transcribe", "Transcribe");
+    button.type = "button";
+    button.title = "Write what is said in the recording under it";
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      button.textContent = "Transcribing…";
+      void transcribe(id, drawn).finally(() => {
+        button.disabled = false;
+        button.textContent = "Transcribe";
+      });
+    });
+    row.append(player, button);
+    return row;
+  };
+
   const editButton = () => {
     const button = el("button", "upload-edit");
     button.type = "button";
@@ -362,6 +381,7 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
         const nodes = media(embed, id, info);
         const scene = embed === "drawing" && info && info.state !== "trashed" ? (info.size <= SCENE_BYTES ? sceneOf(host, id) : Promise.reject(new Error(UNREADABLE))) : null;
         if (scene) unpicture = drawScene(scene, nodes[0] as HTMLElement);
+        if (embed === "audio" && transcribe && !now.readOnly && info?.kind === "audio" && info.state !== "trashed") nodes.splice(0, 1, transcribable(nodes[0]!, id, into, transcribe));
         if (embed !== "audio" && !now.readOnly && info && info.state !== "trashed" && (info.kind === embed || scene)) {
           const sized = sizeHandle(into, info.name, () => now, embed);
           retell = sized.said;

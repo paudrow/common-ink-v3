@@ -672,3 +672,64 @@ test("makes no request of its own and asks for no location", async ({ page }) =>
   expect(asked.filter((url) => new URL(url).origin !== new URL(page.url()).origin)).toEqual([]);
   expect(await page.evaluate(() => (window as unknown as { located?: boolean }).located ?? false)).toBe(false);
 });
+
+test("a checkbox is seen against black, in a note, on the Todos page and in Settings, at 3:1 or more in every strength, and is where it was", async ({ page }) => {
+  await start(page, { "night-shift.enabled": false }, "# Boxes\n\n- [ ] Open\n- [x] Done\n- [-] Dropped\n- [>] Later\n");
+  const boxes = () => page.evaluate(() => [...document.querySelectorAll(".cm-content input[type=checkbox]")].map((el) => JSON.stringify(el.getBoundingClientRect())));
+  const before = await boxes();
+  expect(before).toHaveLength(4);
+  /** How far each unchecked box's border stands out from the black page, as WCAG counts contrast, or its border color where that isn't a color of red and green. */
+  const contrasts = (selector: string) =>
+    page.evaluate((selector) => {
+      const light = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+      return [...document.querySelectorAll<HTMLElement>(selector)]
+        .filter((el) => !(el as HTMLInputElement).checked && el.dataset.state !== "done" && el.getClientRects().length)
+        .map((el) => {
+          const color = getComputedStyle(el).borderTopColor;
+          const [r, g, b] = (/^rgb\((\d+), (\d+), (\d+)\)$/.exec(color) ?? []).slice(1).map(Number);
+          if (r === undefined) return color;
+          return Math.round(((0.2126 * light(r) + 0.7152 * light(g!) + 0.0722 * light(b!) + 0.05) / 0.05) * 10) / 10;
+        });
+    }, selector);
+
+  for (const strength of ["deep red", "amber"]) {
+    await perform(page, { type: "settings.write", text: JSON.stringify({ "night-shift.enabled": true, "night-shift.strength": strength }), baseRevision: (await perform(page, { type: "settings.read" })).revision });
+    await page.reload();
+    await expect(editor(page)).toContainText("Open");
+    await expect.poll(() => root(page).getAttribute("data-night-shift")).toBe(strength);
+    const inNote = await contrasts(".cm-content input[type=checkbox]");
+    expect(inNote, strength).toHaveLength(3);
+    for (const contrast of inNote) expect(contrast, `${strength} in a note`).toBeGreaterThanOrEqual(3);
+  }
+  expect(await boxes()).toEqual(before);
+
+  await page.goto("/todos");
+  await expect(page.locator(".todo-box").first()).toBeVisible();
+  for (const contrast of await contrasts(".todo-box:not([data-state=abandoned], [data-state=backlog])")) expect(contrast, "on the Todos page").toBeGreaterThanOrEqual(3);
+  // A box keeps the accent the app gives it: pointed at, and done in a todo's glance.
+  const accent = await root(page).evaluate((el) => {
+    const probe = el.appendChild(document.createElement("i"));
+    probe.style.color = "var(--accent)";
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  const open = page.locator("input.todo-box:not(:checked)").first();
+  await open.hover();
+  await expect.poll(() => open.evaluate((el) => getComputedStyle(el).borderTopColor)).toBe(accent);
+  const glanced = await page.evaluate(() => {
+    const glance = document.body.appendChild(document.createElement("ul"));
+    glance.innerHTML = '<li class="todo-glance"><span class="todo-box" data-state="done"></span></li>';
+    const color = getComputedStyle(glance.querySelector(".todo-box")!).borderTopColor;
+    glance.remove();
+    return color;
+  });
+  expect(glanced).toBe(accent);
+
+  await runCommand(page, "Go to settings (UI)");
+  const editorSettings = await category(page, "Editor");
+  await expect(editorSettings.locator("input[type=checkbox]").first()).toBeVisible();
+  const inSettings = await contrasts("dialog input[type=checkbox]:not(.switch)");
+  expect(inSettings.length).toBeGreaterThan(0);
+  for (const contrast of inSettings) expect(contrast, "in Settings").toBeGreaterThanOrEqual(3);
+});

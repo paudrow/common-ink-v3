@@ -1,8 +1,9 @@
 // The app on this machine: the site's pages written from site/, local D1 migrated, then Vite with the Worker inside it and dev sign-in on.
 //
-//   npm run dev -- [--port 5173] [--host] [--state .wrangler/state]
+//   npm run dev -- [--port 5173] [--host] [--state .wrangler/state] [--ai]
 //
 // --state keeps the local D1 and R2 in a directory of their own, as the browser tests do theirs.
+// --ai gives the Worker Workers AI, which runs on Cloudflare (it needs `wrangler login`), so recordings can be transcribed.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, readFileSync, watch, writeFileSync } from "node:fs";
@@ -22,6 +23,8 @@ const args = process.argv.slice(2);
 const at = args.indexOf("--state");
 const state = at === -1 ? ".wrangler/state" : args.splice(at, 2)[1];
 if (!state || state.startsWith("--")) throw new Error("--state takes a directory: --state .wrangler/test-state");
+const ai = args.indexOf("--ai");
+if (ai !== -1) args.splice(ai, 1);
 const SITE = ["run", "--silent", "site"];
 execFileSync("npm", SITE, { stdio: "inherit" });
 // A page of the site that is being written is seen as it is saved. One that doesn't make a page says why and leaves the last one.
@@ -29,4 +32,4 @@ execFileSync("npm", SITE, { stdio: "inherit" });
 for (const [path, recursive] of [["site", true], ["docs/legal", false], ["scripts/ink-cli.ts", false], ["src/worker/mcp/tools.ts", false], ["src/core/query.ts", false]] as const) watch(path, { recursive }, () => spawnSync("npm", SITE, { stdio: "inherit" }));
 execFileSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state], { stdio: "inherit", env: { ...process.env, CI: "1" } });
 // Miniflare's Local Explorer answers raw SQL on the bucket and database to anyone who reaches the server, with no sign-in.
-spawn("npx", ["vite", "dev", ...args], { stdio: "inherit", env: { ...process.env, X_LOCAL_EXPLORER: "false", INK_STATE: state } }).on("exit", (code) => process.exit(code ?? 0));
+spawn("npx", ["vite", "dev", ...args], { stdio: "inherit", env: { ...process.env, X_LOCAL_EXPLORER: "false", INK_STATE: state, ...(ai !== -1 && { INK_AI: "1" }) } }).on("exit", (code) => process.exit(code ?? 0));

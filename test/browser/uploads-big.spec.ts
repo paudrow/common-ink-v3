@@ -134,7 +134,7 @@ test("Upload a recording in the / menu takes out what was typed as the file pick
     await route.continue();
   });
 
-  await page.keyboard.type("/rec", { delay: 20 });
+  await page.keyboard.type("/recording", { delay: 20 });
   await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Upload a recording/]);
   await page.evaluate(() => new Promise((done) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 50)));
   const chooser = page.waitForEvent("filechooser");

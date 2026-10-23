@@ -7,13 +7,16 @@ import { createPortal } from "react-dom";
 import type { GrantAccess, Note } from "../core/protocol.ts";
 import { ApiError, perform, session } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
+import { listKeys } from "./listEnter.ts";
 import { completing } from "./completing.ts";
 import { dismissing } from "./dismiss.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import { readOnly } from "./readOnly.ts";
+import { noteTabs } from "./tabbing.ts";
 import { fontLoaded } from "./noteFont.ts";
 import { inEditorOf, openNote } from "./openNotes.ts";
+import { holdingOpen } from "./holding.ts";
 import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, worthRetrying, type SaveState } from "./sync.ts";
 
@@ -190,8 +193,10 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               history(),
               underTitle(under),
               keymap.of(defaultKeymap),
+              noteTabs,
               // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
-              markdown({ base: markdownLanguage }),
+              markdown({ base: markdownLanguage, addKeymap: false }),
+              listKeys,
               noteHighlighting,
               embedding(noteId),
               embedded.of(embedsAre(embedsNow.current)),
@@ -203,6 +208,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               placeholder("# Title"),
               sync.extension,
               openNote(noteId),
+              holdingOpen(workspaceId, noteId),
               EditorView.updateListener.of((u) => {
                 if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();
               }),

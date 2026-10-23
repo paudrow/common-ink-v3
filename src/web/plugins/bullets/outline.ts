@@ -90,7 +90,8 @@ function parentOf(lines: Lines, item: Item): Item | null {
   return null;
 }
 
-const slice = (lines: Lines, from: number, to: number) => Array.from({ length: to - from }, (_, i) => lines.at(from + i));
+const range = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => from + i);
+const slice = (lines: Lines, from: number, to: number) => range(from, to).map(lines.at);
 
 /** The item on line `first`, and those after it in its list that start by line `last`, as one item: the lines an outline key moves together. */
 function itemsFrom(lines: Lines, first: number, last: number): Item | null {
@@ -128,10 +129,24 @@ function numberedList(lines: Lines, n: number): Item[] {
   return list;
 }
 
-/** The number a list that starts on line `n` after an edit counts from: the first number of the list that started on that line before, or 1 for a list the edit began. */
-function startAt(was: Lines, n: number) {
-  const list = numberedList(was, n);
-  return list[0]?.line === n ? Number(numbered(was, list[0])![2]) : 1;
+/** How a list after an edit is read against the note before it: which of its items the edit put there, and the line each was on before. */
+interface Before {
+  was: Lines;
+  isPlaced: (item: Item) => boolean;
+  origin: (line: number) => number;
+}
+
+/**
+ * The number a list counts from after an edit: the first number of the list the first of its items
+ * that stayed came from, so a list keeps its start when an item comes into it or leaves it. A list
+ * of nothing but placed items counts from the first number of the list its first item began, or
+ * from 1 when that item was further down a list.
+ */
+function startOf({ was, isPlaced, origin }: Before, list: Item[]) {
+  const stayed = list.find((item) => !isPlaced(item));
+  const line = origin((stayed ?? list[0]!).line);
+  const old = numberedList(was, line);
+  return stayed || old[0]?.line === line ? Number(numbered(was, old[0]!)![2]) : 1;
 }
 
 /** The number two or more items all have, if they do. */
@@ -141,27 +156,25 @@ const shared = (numbers: string[]) => (numbers.length > 1 && numbers.every((numb
  * The number a list written as `1.`, `1.`, `1.` keeps on every item after an edit: the number the items that were in it share,
  * when two or more were. With fewer, the list the moved items came from counts too, when it was written that way.
  */
-function sameNumber(was: Lines, lines: Lines, list: Item[], placed: Item | null) {
-  const isPlaced = (item: Item) => !!placed && item.line >= placed.line && item.line < placed.end;
+function sameNumber({ was, isPlaced, origin }: Before, lines: Lines, list: Item[]) {
   const stayed = list.filter((item) => !isPlaced(item)).map((item) => numbered(lines, item)![2]!);
   if (stayed.length > 1) return shared(stayed);
   const came = list.find(isPlaced);
-  const from = came ? numberedList(was, came.line).map((item) => numbered(was, item)![2]!) : [];
+  const from = came ? numberedList(was, origin(came.line)).map((item) => numbered(was, item)![2]!) : [];
   return from.length > 1 ? shared([...stayed, ...from]) : undefined;
 }
 
 /**
  * Numbers the list the item on line `n` is in 1., 2., 3. in order, from the number it starts at, or with the one number
- * every item has when it is written that way (`sameNumber`). `placed` is the block the edit put in a new place, when it
- * stays on its lines.
+ * every item has when it is written that way (`sameNumber`), read against the note before the edit (`Before`).
  * A number that grows or shrinks a column takes what is written under its item along with its text.
  */
-function renumber(was: Lines, rewrites: Rewrites, n: number, placed: Item | null) {
-  const lines = over(was, rewrites);
+function renumber(before: Before, rewrites: Rewrites, n: number) {
+  const lines = over(before.was, rewrites);
   const list = numberedList(lines, n);
   if (!list.length) return;
-  const start = startAt(was, list[0]!.line);
-  const same = sameNumber(was, lines, list, placed);
+  const start = startOf(before, list);
+  const same = sameNumber(before, lines, list);
   list.forEach((item, i) => {
     const [, space, number, closer] = numbered(lines, item)!;
     const to = same ?? String(start + i);
@@ -174,7 +187,10 @@ function renumber(was: Lines, rewrites: Rewrites, n: number, placed: Item | null
 
 /** The edit that writes these lines, with each numbered list on `lists` numbered in order after them. It spans only the lines that come out different. */
 function made(was: Lines, rewrites: Rewrites, lists: readonly (number | undefined)[], placed: Item | null, landed: (line: number) => number = (line) => line): Edit {
-  for (const n of lists) if (n !== undefined) renumber(was, rewrites, n, placed);
+  // The lines an edit moves are among those it writes, so where each written line was is where landed puts it, turned around.
+  const origins = new Map([...rewrites.keys()].map((line) => [landed(line), line]));
+  const before: Before = { was, isPlaced: (item) => !!placed && item.line >= placed.line && item.line < placed.end, origin: (line) => origins.get(line) ?? line };
+  for (const n of lists) if (n !== undefined) renumber(before, rewrites, n);
   const changed = [...rewrites.keys()].filter((n) => rewrites.get(n) !== was.at(n));
   if (!changed.length) changed.push(...rewrites.keys());
   const [from, to] = [Math.min(...changed), Math.max(...changed) + 1];
@@ -211,14 +227,46 @@ export function outdent(lines: Lines, n: number, last = n): Edit | null {
 }
 
 /**
+ * Puts the item, with what is under it, before line `at`, a line that isn't one of its own, written
+ * `indent` columns in. The list it left and the list it joins are numbered again.
+ */
+export function place(lines: Lines, item: Item, at: number, indent: number): Edit {
+  const own = range(item.line, item.end);
+  // The lines from where it goes to where it was, or from where it was to where it goes, in their new order.
+  const [from, order] = at < item.line ? [at, [...own, ...range(at, item.line)]] : [item.line, [...range(item.end, at), ...own]];
+  const rewrites: Rewrites = new Map(order.map((m, i) => [from + i, m >= item.line && m < item.end ? moved(lines.at(m), indent - item.indent) : lines.at(m)]));
+  const to = new Map(order.map((m, i) => [m, from + i]));
+  const landed = (line: number) => to.get(line) ?? line;
+  const placed = landed(item.line);
+  const left = [before(lines, item)?.line, after(lines, item)?.line].map((line) => (line === undefined ? undefined : landed(line)));
+  return made(lines, rewrites, [placed, ...left], { ...item, line: placed, end: placed + own.length }, landed);
+}
+
+/**
+ * Moves an item that is the first of its list (`by` -1) or the last (1) into the list beside it at
+ * its depth, as an outliner does: to the end of what is under the item before its parent, or the
+ * start of what is under the item after it. What is under it goes with it, and it is written as
+ * far in as what is under that item already is. Null when its parent has no item there.
+ */
+function across(lines: Lines, item: Item, by: -1 | 1): Edit | null {
+  const parent = parentOf(lines, item);
+  const into = parent && (by < 0 ? before(lines, parent) : after(lines, parent));
+  if (!into) return null;
+  const under = slice(lines, into.line + 1, into.end).find((line) => !blank(line));
+  return place(lines, item, by < 0 ? into.end : into.line + 1, under === undefined ? into.inside : indentOf(under));
+}
+
+/**
  * Moves the item on line `n` past the item before it (`by` -1) or after it (1) in its list, with
- * everything under it, and with the items after it in its list that start by line `last`. Null when
- * there is none.
+ * everything under it, and with the items after it in its list that start by line `last`. The first
+ * or last of a list goes into the list beside it at its depth (`across`). Null when there is nowhere
+ * to go.
  */
 export function move(lines: Lines, n: number, by: -1 | 1, last = n): Edit | null {
   const item = itemsFrom(lines, n, last);
-  const other = item && (by < 0 ? before(lines, item) : after(lines, item));
-  if (!item || !other) return null;
+  if (!item) return null;
+  const other = by < 0 ? before(lines, item) : after(lines, item);
+  if (!other) return across(lines, item, by);
   const [first, second] = by < 0 ? [other, item] : [item, other];
   const [a, gap, b] = [slice(lines, first.line, first.end), slice(lines, first.end, second.line), slice(lines, second.line, second.end)];
   const rewrites: Rewrites = new Map([...b, ...gap, ...a].map((line, i) => [first.line + i, line]));

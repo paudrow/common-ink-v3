@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { listedNote, noteIdIn, openAllNotes, perform, signInAsNewPerson, test } from "./helpers.ts";
+import { listedNote, newEmail, noteIdIn, openAllNotes, perform, signInAs, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -196,6 +196,28 @@ test("an empty note open in another tab of the browser is not discarded when one
   await editor(other).focus();
   await other.keyboard.type("Typed in the other tab");
   await expect.poll(async () => (await read(page, id)).text).toBe("Typed in the other tab");
+});
+
+test("an empty note open in another browser of the member's is kept when one closes it, and discarded when the last one does", async ({ page, browser }) => {
+  const email = newEmail();
+  await signInAs(page, email, "Ada Lovelace");
+  const kept = await perform(page, { type: "note.create", text: "# Kept" });
+  await page.goto(`/note/${kept.id}`);
+  await page.getByRole("button", { name: "New note" }).first().click();
+  await expect(page).toHaveURL(/\/note\/untitled-/);
+  const id = noteIdIn(page);
+  const phone = await (await browser.newContext({ baseURL: test.info().project.use.baseURL })).newPage();
+  const held = phone.waitForResponse((r) => r.request().postData()?.includes('"note.hold"') === true && r.ok());
+  await signInAs(phone, email, "Ada Lovelace", `/note/${id}`);
+  await expect(editor(phone)).toBeVisible();
+  await held;
+
+  await page.getByTitle("Close Untitled", { exact: true }).click();
+  await page.waitForTimeout(1500);
+  expect((await read(page, id)).state).toBe("live");
+
+  await phone.getByTitle("Close Untitled", { exact: true }).click();
+  await gone(page, id);
 });
 
 test("an empty note that loads while a folder's name is typed leaves the cursor in the name", async ({ page }) => {

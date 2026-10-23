@@ -217,6 +217,41 @@ test("u and ctrl+r are the app's undo and redo: local for typing not yet saved, 
   await expect(lines(page)).toHaveText(["# Undo", "basekept"]);
 });
 
+test("u and ctrl+r of a saved change put the cursor on it, scrolled to, from far down the note", async ({ page }) => {
+  const body = Array.from({ length: 80 }, (_, i) => `line ${i + 1}`).join("\n");
+  const [note] = await withVim(page, `# Far\n${body}`);
+  await edit(page, note!.id);
+  const first = lines(page).filter({ hasText: /^@?line 1( changed)?$/ });
+
+  await keys(page, "j", "Shift+A");
+  await page.keyboard.type(" changed");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => hows(page, note!.id)).toEqual(["edit", "edit"]);
+  await keys(page, "Shift+G");
+  await expect(first).not.toBeInViewport();
+  await page.keyboard.press("u");
+  await expect.poll(() => hows(page, note!.id)).toEqual(["edit", "edit", "undo"]);
+  await expect(first).toBeInViewport();
+  await keys(page, "0", "i");
+  await page.keyboard.type("@");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => text(page, note!.id)).toContain("\n@line 1\nline 2\n");
+
+  await keys(page, "Shift+G");
+  await expect(first).not.toBeInViewport();
+  await page.keyboard.press("u");
+  await expect.poll(() => text(page, note!.id)).toContain("\nline 1\nline 2\n");
+  await keys(page, "Shift+G");
+  await expect(first).not.toBeInViewport();
+  await page.keyboard.press("Control+r");
+  await expect.poll(() => text(page, note!.id)).toContain("\n@line 1\nline 2\n");
+  await expect(first).toBeInViewport();
+  await keys(page, "0", "i");
+  await page.keyboard.type("#");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => text(page, note!.id)).toContain("\n#@line 1\nline 2\n");
+});
+
 test(":w saves what is typed now, ⌘S does too, and :q closes the tab", async ({ page }) => {
   const [note] = await withVim(page, "# Save\nbody");
   await edit(page, note!.id);

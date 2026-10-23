@@ -345,12 +345,12 @@ test("the size handle is seen on hover or focus, steps with the keys, drags to a
   await expect.poll(() => noteText(page, note.id)).toBe(text());
   expect(await pictures(page).evaluate((img) => (img as HTMLImageElement & { marked?: boolean }).marked), "the same picture, never drawn again").toBe(true);
 
-  /** Drags the handle to `share` of the column from the picture's left edge, and lets go unless told not to. */
+  /** Drags the picture's right edge, by its handle, to `share` of the column from its left edge, and lets go unless told not to. */
   const drag = async (share: number, { release = true } = {}) => {
     const bar = (await handle.boundingBox())!;
     await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
     await page.mouse.down();
-    await page.mouse.move(column.left + column.width * share, bar.y + bar.height / 2, { steps: 4 });
+    await page.mouse.move(column.left + column.width * share - bar.width / 2, bar.y + bar.height / 2, { steps: 4 });
     if (release) await page.mouse.up();
   };
   const ghost = page.locator(".upload-size-ghost");
@@ -360,7 +360,7 @@ test("the size handle is seen on hover or focus, steps with the keys, drags to a
   await expect.poll(async () => Math.round((await ghost.boundingBox())!.width)).toBe(Math.round(column.width * 0.8));
   expect(Math.abs((await ghost.boundingBox())!.height - (column.width * 0.8 * 800) / 1200)).toBeLessThan(1);
   expect(await noteText(page, note.id)).toBe(text());
-  await page.mouse.move(column.left + column.width * 0.62, (await handle.boundingBox())!.y + 10, { steps: 2 });
+  await page.mouse.move(column.left + column.width * 0.62 - (await handle.boundingBox())!.width / 2, (await handle.boundingBox())!.y + 10, { steps: 2 });
   await page.mouse.up();
   await expect(ghost).toHaveCount(0);
   await expect.poll(() => noteText(page, note.id)).toBe(text(" 62%"));
@@ -417,7 +417,8 @@ test("a picture dragged to any width keeps its share of the column and its shape
   const bar = (await sizeOf(page, "harbour.png").boundingBox())!;
   await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
   await page.mouse.down();
-  await page.mouse.move(column.left + column.width * 0.42, bar.y + bar.height / 2, { steps: 4 });
+  // The handle is held at its middle, inside the picture's right edge, and the edge moves as far as the pointer.
+  await page.mouse.move(column.left + column.width * 0.42 - bar.width / 2, bar.y + bar.height / 2, { steps: 4 });
   await page.mouse.up();
   await expect.poll(() => noteText(page, note.id)).toBe(text(" 42%"));
   await expect(page.getByRole("status")).toHaveText("Saved");
@@ -658,4 +659,25 @@ test("a video plays in the note from its first frame, and typing elsewhere, the 
   await page.keyboard.press("ArrowRight");
   await expect.poll(() => noteText(page, note.id)).toContain(embed(" 15%"));
   await goesOn("at another size");
+});
+
+test("a full-width picture's size handle stays inside the column: the note can't be scrolled sideways, and a wide table still scrolls in its own frame", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const shot = await send(page, "screenshot.png", png(1860, 460));
+  const wide = Array.from({ length: 14 }, (_, i) => `column number ${i + 1}`);
+  const text = ["# Wide", "", `::image{${shot.id} 1860x460}`, "", `| ${wide.join(" | ")} |`, `|${wide.map(() => "---").join("|")}|`, `| ${wide.map(() => "a cell").join(" | ")} |`, "", "after it"].join("\n");
+  await open(page, text, "after it");
+  await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1860);
+  await settled(page);
+  const sideways = () => page.locator(".cm-scroller").evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(await sideways()).toBe(0);
+  await pictures(page).hover();
+  expect(await sideways()).toBe(0);
+  // The handle is still on the picture's right edge, to be dragged.
+  const [picture, handle] = await Promise.all([below(page, "image").boundingBox(), sizeOf(page, "screenshot.png").boundingBox()]);
+  expect(handle!.x + handle!.width).toBeLessThanOrEqual(picture!.x + picture!.width + 0.5);
+  expect(handle!.x + handle!.width).toBeGreaterThan(picture!.x + picture!.width - 4);
+  const table = page.locator(".md-table-frame > div");
+  expect(await table.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
 });

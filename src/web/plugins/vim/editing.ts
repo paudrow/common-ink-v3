@@ -1,7 +1,7 @@
 import { EditorState, Prec, type Extension } from "@codemirror/state";
-import { EditorView, RectangleMarker, ViewPlugin, drawSelection, layer } from "@codemirror/view";
+import { EditorView, RectangleMarker, ViewPlugin, drawSelection, keymap, layer } from "@codemirror/view";
 import { Vim, getCM, vim, type MotionFn } from "@replit/codemirror-vim";
-import { dismissing, noteJump } from "../../plugin-api.ts";
+import { dismissing, historyStepped, noteJump } from "../../plugin-api.ts";
 
 let run: (commandId: string) => boolean = () => false;
 
@@ -113,10 +113,35 @@ const rowsOrLines: MotionFn = function (this: Record<string, MotionFn>, cm, head
 Vim.defineMotion("rowsOrLines", rowsOrLines);
 
 /**
+ * An undo or redo of what was saved comes back from the note's history a moment after the key, u,
+ * ctrl+r or ⌘Z, and the cursor goes to it then, as vim's own puts it at the change: in the editor
+ * the member is in, with the change brought to the middle of the pane.
+ */
+const toTheStep = EditorView.updateListener.of((update) => {
+  if (!update.view.hasFocus || !update.transactions.some((tr) => tr.annotation(historyStepped))) return;
+  let at = -1;
+  update.changes.iterChangedRanges((_fromA, _toA, fromB) => {
+    if (at < 0) at = fromB;
+  });
+  if (at < 0) return;
+  const { view } = update;
+  queueMicrotask(() => {
+    const anchor = Math.min(at, view.state.doc.length);
+    view.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: "center" }) });
+  });
+});
+
+/**
  * In visual line mode every line selected is painted from its left edge to its right, a code block's across the whole block.
  * The editor's own painting runs the first line from where its text starts and the last to where its text ends, which in a
  * code block is short of the block's edges on both sides.
  */
+/** Out of insert mode Tab and Shift+Tab change nothing, as in vim, and don't leave the note: Escape and then Tab does. */
+const notTyped = (view: EditorView) => {
+  const state = getCM(view)?.state.vim;
+  return !!state && !state.insertMode;
+};
+
 const wholeLines = layer({
   above: false,
   class: "cm-selectionLayer",
@@ -167,6 +192,8 @@ export function vimEditing(runCommand: (commandId: string) => boolean): { extens
       // Without this nothing selected in visual mode is painted anywhere.
       drawSelection(),
       wholeLines,
+      keymap.of([{ key: "Tab", run: notTyped, shift: notTyped }]),
+      toTheStep,
       // Visual block mode is a selection on each of its lines, which an editor keeps only when told it may. A click still makes one.
       EditorState.allowMultipleSelections.of(true),
       EditorView.clickAddsSelectionRange.of(() => false),

@@ -1,12 +1,14 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Icon, MAX_SEARCH_LENGTH, TODO_SORT_WORDS, changeTodo, isNoteId, isPersonId, linksOn, mentionKey, mentionName, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useInspected, useNow, type App, type ListedTodo, type Mentioned, type PluginHost, type Results, type SortKey, type TodoChange, type TodoCompletion, type TodoSort, type WrittenLink } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
 import { QueryBar } from "../lib/QueryBar.tsx";
+import { Segmented } from "../lib/Segmented.tsx";
 import { EMPTY, keyOf, left, listing, pending, type Hold, type Listing, type ListingEvent } from "./arranged.ts";
 import { Assignees, sameWho, whoOf } from "./Assignees.tsx";
 import { ChipMenu, MoreTags, TagMenu, type PlacedTag } from "./ChipMenu.tsx";
 import { putAway, refused, takeBack } from "./completed.ts";
+import { QuickAdd } from "./QuickAdd.tsx";
 import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
@@ -14,6 +16,7 @@ import { linksOut, type LinkOut } from "./linksOut.ts";
 import { openPage } from "../lib/opening.ts";
 import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, clicked, pickerLabel, picking, pressed, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
+import { STATE_CHOICES, stateOf, withState, type StateChoice } from "./states.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
 import { tagPath } from "../tags/path.ts";
 
@@ -1192,6 +1195,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const narrowedTags = useMemo(() => narrowedTo(query), [query]);
   const read = useMemo(() => parseQuery(query, "todos"), [query]);
   const field = useRef<HTMLInputElement>(null);
+  const ids = useId();
 
   const run = (text: string) => {
     setQuery(text);
@@ -1254,6 +1258,11 @@ export function TodosPage({ host, app, onOpen }: Props) {
     setTyped(next);
     askFor(next);
   };
+  const chooseState = (choice: StateChoice) => {
+    const next = withState(typed, choice);
+    setTyped(next);
+    askFor(next);
+  };
 
   return (
     <section className="todos-page" aria-label="Todos">
@@ -1295,6 +1304,8 @@ export function TodosPage({ host, app, onOpen }: Props) {
           </select>
         </label>
       </div>
+      <Segmented className="todo-state-choices" name={`${ids}-state`} label="Todos by state" choices={STATE_CHOICES} chosen={stateOf(typed)} onChoose={chooseState} />
+      <QuickAdd host={host} />
       <TodoList
         host={host}
         app={app}

@@ -39,6 +39,8 @@ import type { SettingsStore } from "./settingsStore.ts";
 import { forgetAll } from "./stash.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { isOpen, openInAnotherTab } from "./openNotes.ts";
+import { tabLeaves } from "./tabbing.ts";
+import { PAGE } from "./holding.ts";
 import { catchUp, commitTyping, onFiled, onLost, performInSync, recover, saveAll, saveNow, undoOrRedo } from "./sync.ts";
 import { retryAfter } from "./retry.ts";
 import { ago, useNow } from "./time.ts";
@@ -845,14 +847,14 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     return note.id;
   };
 
-  /** A note no tab holds now. One the member made and never wrote in is removed, once what was typed in it is sent and its editor has gone: the server decides, and refuses any other. */
+  /** A note no tab holds now. One nobody ever wrote in is removed, once what was typed in it is sent and its editor has gone: the server decides, and refuses any other, and any that is open somewhere else. */
   const left = (noteId: string) => {
     const note = byIdNow.current.get(noteId);
     if (!note || note.title !== "" || note.access !== "edit" || note.state === "trashed") return;
     setTimeout(() => {
       if (isOpen(noteId)) return;
       void commitTyping([noteId])
-        .then(async () => (isOpen(noteId) || (await openInAnotherTab(noteId)) ? null : perform(workspaceId, { type: "note.discard", id: noteId })))
+        .then(async () => (isOpen(noteId) || (await openInAnotherTab(noteId)) ? null : perform(workspaceId, { type: "note.discard", id: noteId, holder: PAGE })))
         .then(
           (done) => {
             if (!done) return;
@@ -995,6 +997,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       if (e.target instanceof HTMLIFrameElement) return;
       // A press in the keyboard shortcuts table's recorder is a key to write down, and one in a drawing's editor is Excalidraw's, not one to run.
       if (e.target instanceof Element && e.target.closest("[data-records-keys], [data-keeps-keys]")) return;
+      // Escape and then Tab in a note leaves it for what comes next on the page, whatever Tab is bound to there.
+      if (e.key === "Tab" && tabLeaves(e.target)) return;
       const { keybindings, commands } = host.contributions();
       const chord = chordOf(e, MAC);
       const begun = pending;

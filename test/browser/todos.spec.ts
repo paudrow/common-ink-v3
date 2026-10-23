@@ -1553,6 +1553,8 @@ test("a todo's words being edited are left alone when the list is read again wit
 
 test("a row has nothing at its right but its note's name, and its two states, shown when pointed at, come after what is set: pointing at it moves nothing, Tab goes words, what is set, states, what isn't, name, each chip opens its popover under itself, and the menu opens the note, in front or beside the list", async ({ page }) => {
   const { home, work } = await twoNotes(page);
+  // Tall enough that each popover of the last row fits under it, below the bar, the state choices and the Add field.
+  await page.setViewportSize({ width: page.viewportSize()!.width, height: 900 });
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
   const notes = row(page, "Write notes");
   // Repeat and Priority not set keep no room, and come last: they are drawn only while the row is pointed at.

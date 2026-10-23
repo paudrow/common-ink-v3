@@ -48,7 +48,8 @@ export function Palette({ label, placeholder, items, most, empty, toggle, found,
     const focused = document.activeElement;
     input.current!.focus();
     return () => {
-      if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
+      // Back where it was, with whatever it is in scrolled as it was: a note's editor would otherwise be scrolled to its top.
+      if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
     };
   }, []);
   useEffect(() => {

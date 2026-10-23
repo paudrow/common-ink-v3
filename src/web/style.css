@@ -6932,6 +6932,7 @@ button.diff-fold:hover {
   /* Less room at the sides in a narrow column, which is the todos' room. */
   padding: 2rem clamp(12px, 5%, 2rem) 3rem;
   overflow-y: auto;
+  container: todos-page / inline-size;
 }
 
 .todos-page h1 {
@@ -6939,17 +6940,81 @@ button.diff-fold:hover {
   font-size: calc(22px * var(--text-scale));
 }
 
-/* The query bar and, at the end of its line, the order, which is the query's sort: said as a menu. */
+/*
+ * The query bar and, at the end of its line, the order, which is the query's sort: said as a menu.
+ * The bar's own parts are laid out here, so what is under its line, the builder above all, is as wide
+ * as the list and not cut short by the menu. In a narrow column the menu goes under the line.
+ */
 .todo-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px 14px;
+  container-type: inline-size;
 }
 
 .todo-tools > .query-bar {
-  flex: 1 1 18rem;
-  min-width: 0;
+  display: contents;
+}
+
+.todo-tools .query-line {
+  grid-area: 1 / 1;
+}
+
+.todo-tools .todo-sort {
+  grid-area: 1 / 2;
+}
+
+.todo-tools .query-bar > :not(.query-line) {
+  grid-column: 1 / -1;
+}
+
+@container (width < 26rem) {
+  .todo-tools .todo-sort {
+    grid-area: auto / 1 / auto / -1;
+  }
+}
+
+/* Which todos by their state, on its own line under the bar: one line in a phone's width, and two only where even that is too narrow. */
+.todos-page > .todo-state-choices {
+  align-self: flex-start;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+@container todos-page (width < 26rem) {
+  .todo-state-choices span {
+    padding-inline: 7px;
+  }
+}
+
+/* The field a todo is added to today's note from, and under it where the last one went. */
+.todo-add {
+  display: flex;
+  flex-direction: column;
+}
+
+.todo-add-said {
+  margin: 0;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.todo-add-said:not(:empty) {
+  margin-top: 4px;
+}
+
+.todo-add-said button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.todo-add-said button:hover {
+  text-decoration: underline;
 }
 
 .todo-sort {
@@ -9246,6 +9311,27 @@ button.todo-tag[aria-pressed="true"] {
   font-size: calc(13px * var(--text-scale));
 }
 
+/* Only a read that takes a moment says so, so a quick one flashes nothing. */
+.cal-loading:not(:empty) {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  animation: cal-loading 0.2s 0.3s both;
+}
+
+@keyframes cal-loading {
+  from {
+    opacity: 0;
+  }
+}
+
+.cal-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0;
+}
+
 .cal-nav,
 .cal-views {
   display: flex;
@@ -9639,6 +9725,13 @@ button.todo-tag[aria-pressed="true"] {
 
 .cal-col[data-today] {
   background-color: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+/* A day whose events aren't read yet is not drawn as a day with none: tinted once the read has taken a moment, as the loading words are, and clear at once when it is read. */
+.cal-col:not([data-listed]),
+.calendar-page[data-weekends] .cal-col[data-weekend]:not([data-listed]) {
+  background-color: color-mix(in srgb, var(--muted) 7%, transparent);
+  transition: background-color 0.2s 0.3s;
 }
 
 .calendar-page[data-weekends] .cal-col[data-weekend]:not([data-today]),
@@ -10401,7 +10494,7 @@ button.todo-tag[aria-pressed="true"] {
  * around it. It fills the room the note keeps for it, and the room never follows it. Its size handle
  * and the width a drag will snap to are drawn past its edges.
  */
-.embed-below:has(> .embed-below-drawn > :is(.upload-picture, .upload-video, .upload-audio)) {
+.embed-below:has(> .embed-below-drawn > :is(.upload-picture, .upload-video, .upload-audio, .upload-audio-row)) {
   overflow: visible;
   border: 0;
   border-radius: 0;
@@ -10443,13 +10536,30 @@ button.todo-tag[aria-pressed="true"] {
   height: 100%;
 }
 
-/* The size handle: a bar on the right edge, seen on hover or focus, which drags the width to any share of the column. */
+.upload-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+}
+
+.upload-audio-row .upload-audio {
+  flex: 1;
+  min-width: 0;
+}
+
+.upload-transcribe {
+  flex: none;
+  font-family: var(--prose);
+}
+
+/* The size handle: a bar on the right edge, seen on hover or focus, which drags the width to any share of the column. It is inside the picture, so a picture as wide as the column doesn't make the note scroll sideways. */
 .upload-size {
   display: grid;
   position: absolute;
   top: 50%;
-  right: -10px;
-  place-items: center;
+  right: 0;
+  place-items: center end;
   width: 20px;
   height: 56px;
   translate: 0 -50%;
@@ -11502,6 +11612,88 @@ a.file-chip:hover .file-chip-name {
 .upload-insert-none {
   margin: 8px 4px 2px;
   color: var(--muted);
+}
+
+.cm-editor .cm-tooltip.upload-recorder {
+  box-sizing: border-box;
+  width: min(22rem, calc(100vw - 16px));
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-family: var(--prose);
+  font-size: calc(13px * var(--text-scale));
+}
+
+.upload-recorder-words {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.upload-recorder-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-recorder-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.upload-recorder-dot.live {
+  background: var(--danger);
+  animation: upload-recorder-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes upload-recorder-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upload-recorder-dot.live {
+    animation: none;
+  }
+}
+
+.upload-recorder-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.vocabulary-control {
+  align-items: flex-start;
+}
+
+.vocabulary-control textarea {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.upload-recording-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
 .file-page {
@@ -12876,7 +13068,7 @@ button.crumb[aria-expanded="true"] {
 :root[data-night-shift] input[type="checkbox"]:not(.switch, .todo-box),
 :root[data-night-shift] input[type="radio"] {
   appearance: none;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--muted);
   border-radius: 3px;
   background: var(--bg-elev) center / 100% no-repeat;
 }
@@ -12898,6 +13090,15 @@ button.crumb[aria-expanded="true"] {
 
 :root[data-night-shift] :is(input[type="checkbox"], input[type="radio"]):disabled {
   opacity: 0.5;
+}
+
+/* On black a box is only seen as bright as quiet text: the faint ink the app gives a box is next to none. Only as strong as the app's own rule, so a checked, hovered or done box keeps its accent. */
+:where(:root[data-night-shift]) .todo-box {
+  border-color: var(--muted);
+}
+
+:where(:root[data-night-shift]) .todo-box:is([data-state="abandoned"], [data-state="backlog"]) {
+  border-color: var(--faint);
 }
 
 :root[data-night-shift] .todo-box:checked {

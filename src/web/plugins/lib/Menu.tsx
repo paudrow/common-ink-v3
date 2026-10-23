@@ -23,6 +23,18 @@ interface Props {
 
 const EDGE = 8;
 
+let opened = 0;
+const watchers = new Set<() => void>();
+
+/** Whether a context menu is open, and a call each time one opens, for what would cover it, as a hover card does. */
+export const contextMenus = {
+  open: () => opened > 0,
+  onOpen(watch: () => void) {
+    watchers.add(watch);
+    return () => void watchers.delete(watch);
+  },
+};
+
 /** Up and Down from item to item, round from the last to the first, and Home and End to the ends. */
 function move(e: KeyboardEvent<HTMLDivElement>, onClose: () => void) {
   if (e.key === "Tab") return onClose();
@@ -38,6 +50,11 @@ function move(e: KeyboardEvent<HTMLDivElement>, onClose: () => void) {
 export function ContextMenu({ label, x, y, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(onClose, ref);
+  useLayoutEffect(() => {
+    opened++;
+    for (const watch of watchers) watch();
+    return () => void opened--;
+  }, []);
   // Placed again each time it is drawn: its items can change after it opens, as when what the member may do is read.
   useLayoutEffect(() => {
     const el = ref.current!;

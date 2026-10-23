@@ -17,6 +17,7 @@ SELECT
   (SELECT count(*) FROM mail_threads) AS mail_threads,
   (SELECT count(*) FROM members) AS members,
   (SELECT count(*) FROM mentions) AS mentions,
+  (SELECT count(*) FROM note_holds) AS note_holds,
   (SELECT count(*) FROM note_search) AS note_search,
   (SELECT count(*) FROM note_search_rows) AS note_search_rows,
   (SELECT count(*) FROM note_tags) AS note_tags,

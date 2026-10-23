@@ -315,7 +315,7 @@ test("a folder's card stays while the pointer rests anywhere on it, its descript
   await expect(card(page)).toHaveCount(0);
 });
 
-test("Escape goes to the menu the keyboard is in while a folder's card shows under the resting pointer, and takes the card away too", async ({ page }) => {
+test("a menu opened from the keyboard while a folder's card shows under the resting pointer takes the card away, and Escape goes to the menu", async ({ page }) => {
   const { work } = await withFolders(page);
   await perform(page, { type: "note.create", folderId: work.id, text: "# Plans\n\nThe plans\n" });
   await page.goto("/");
@@ -326,7 +326,7 @@ test("Escape goes to the menu the keyboard is in while a folder's card shows und
   await page.keyboard.press("Tab");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("menu")).toBeVisible();
-  await expect(card(page)).toHaveCount(1);
+  await expect(card(page)).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(card(page)).toHaveCount(0);
@@ -379,4 +379,26 @@ test("a folder's menu in the sidebar has Manage folders, which opens Settings' F
   await vera.getByRole("menu", { name: "Work actions" }).getByRole("menuitem", { name: "Manage folders" }).click();
   await expect(row(vera, "Work")).toBeFocused();
   await expect(row(vera, "Work").locator(".manage-description")).toHaveText("Clients, invoices and plans");
+});
+
+test("a folder's card goes when its menu opens and stays away while the menu is up", async ({ page }) => {
+  const { seeds } = await withFolders(page);
+  await page.goto(`/note/${seeds.id}`);
+  await expect(editor(page)).toContainText("Order seeds");
+  const home = folderRow(page, "Home");
+
+  await home.hover();
+  await expect(card(page)).toContainText("Home0 notes");
+  await home.click({ button: "right" });
+  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(card(page)).toHaveCount(0);
+  await home.hover({ position: { x: 30, y: 4 } });
+  await home.hover({ position: { x: 40, y: 6 } });
+  await page.waitForTimeout(800);
+  await expect(card(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await page.mouse.move(700, 300);
+  await home.hover();
+  await expect(card(page)).toContainText("Home0 notes");
 });

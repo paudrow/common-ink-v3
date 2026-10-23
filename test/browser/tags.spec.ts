@@ -917,3 +917,39 @@ test("a hover card stays while the pointer crosses to it, over other tags on the
   await page.mouse.move(700, 300, { steps: 5 });
   await expect(card(page)).toHaveCount(0);
 });
+
+test("a tag's card goes when its menu opens and stays away while the menu is up, from a right-click or the keyboard", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const seeds = await create(page, "# Seeds\n\nOrder seeds #garden\n");
+  await page.goto(`/note/${seeds.id}`);
+  await expect(editor(page)).toContainText("Order seeds");
+  const garden = listed(page).filter({ hasText: "#garden" });
+  const menu = page.getByRole("menu", { name: "#garden actions" });
+
+  await garden.hover();
+  await expect(card(page)).toContainText("#garden1 note");
+  await garden.click({ button: "right" });
+  await expect(menu).toBeVisible();
+  await expect(card(page)).toHaveCount(0);
+  // The pointer resting on the tag again, past when its card would show, shows none over the menu.
+  await garden.hover({ position: { x: 10, y: 4 } });
+  await garden.hover({ position: { x: 20, y: 6 } });
+  await page.waitForTimeout(800);
+  await expect(card(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await page.mouse.move(700, 300);
+  await garden.hover();
+  await expect(card(page)).toContainText("#garden1 note");
+
+  // The keyboard on the tag shows its card, and Shift+F10 swaps it for the menu.
+  await page.mouse.move(700, 300);
+  await expect(card(page)).toHaveCount(0);
+  await garden.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(card(page)).toContainText("#garden1 note");
+  await page.keyboard.press("Shift+F10");
+  await expect(menu).toBeVisible();
+  await expect(card(page)).toHaveCount(0);
+});

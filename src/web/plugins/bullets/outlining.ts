@@ -6,7 +6,7 @@ import { drawnInView, touched, writable } from "../lib/live.ts";
 import { mathBlocksIn, type Formula } from "../math/syntax.ts";
 import { indent, itemAt, leading, move, outdent, textStart, type Edit, type Item, type Lines } from "./outline.ts";
 
-const linesIn = (doc: Text): Lines => ({ count: doc.lines, at: (n) => doc.line(n + 1).text });
+export const linesIn = (doc: Text): Lines => ({ count: doc.lines, at: (n) => doc.line(n + 1).text });
 
 const mathOf = new WeakMap<Text, Formula[]>();
 
@@ -15,7 +15,7 @@ const mathOf = new WeakMap<Text, Formula[]>();
  * there. A line that only looks like one, in a code block or a block of math, is not a bullet:
  * nothing draws it as one, and no bullet key moves it.
  */
-function bulletAt(state: EditorState, n: number): Item | null {
+export function bulletAt(state: EditorState, n: number): Item | null {
   const item = itemAt(linesIn(state.doc), n);
   if (!item) return null;
   const line = state.doc.line(n + 1);
@@ -246,8 +246,8 @@ const KEPT: readonly string[] = ["moveUp", "moveDown", "moveRight", "moveLeft"];
 
 /**
  * Each bullet key's command: what it does, and whether the key is its now. Tab and Shift+Tab with
- * nothing to do are left to whatever else would take them, so Tab on the first bullet of a list is
- * the browser's Tab.
+ * nothing to do are left to whatever else would take them: in a note, its own Tab, which keeps the
+ * key there.
  */
 export const bulletCommands = {
   ...(Object.fromEntries(Object.entries(MAKES).map(([name, make]) => [name, { when: () => (KEPT.includes(name) ? onBullet() !== null : ready(make) !== null), run: () => edit(make) }])) as Record<keyof typeof MAKES, { when: () => boolean; run: () => void }>),

@@ -4,6 +4,7 @@ import { reasonOf } from "./lib/FoundNote.tsx";
 import { lifecycle } from "./lib/lifecycle.ts";
 import { ContextMenu, type MenuItem } from "./lib/Menu.tsx";
 import { QueryBar } from "./lib/QueryBar.tsx";
+import { Segmented } from "./lib/Segmented.tsx";
 import { EXCERPT_HEIGHT, ITEM_ICONS, ITEM_LABELS, NEAR_PX, cardItems, editorLabel, editorsOf, estimatedHeight, shownHeight, type CardItem } from "./noteCard.ts";
 import { NoteCrumbs } from "./NoteCrumbs.tsx";
 import { INITIAL_VIEW, LIVES, ORDERS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, showOf, taggedQuery, titleOf, todosOf, withLife, withTodos, withoutTagMarks, TODO_CHOICES, type Life, type TodoChoice, type ListAction, type ListView } from "./noteListView.ts";
@@ -722,34 +723,8 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
         />
         {whichNotes && (
           <div className="note-choices">
-            <div className="segmented note-life" role="radiogroup" aria-label="Which notes">
-              {LIVES.map((life) => (
-                <label key={life.id}>
-                  <input
-                    type="radio"
-                    name={`${ids}-life`}
-                    checked={lifeOf(typed) === life.id}
-                    onClick={() => chooseLife(life.id)}
-                    onChange={() => chooseLife(life.id)}
-                  />
-                  <span>{life.label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="segmented note-todos" role="radiogroup" aria-label="Notes by todos">
-              {TODO_CHOICES.map((choice) => (
-                <label key={choice.id}>
-                  <input
-                    type="radio"
-                    name={`${ids}-todos`}
-                    checked={todosOf(typed) === choice.id}
-                    onClick={() => chooseTodos(choice.id)}
-                    onChange={() => chooseTodos(choice.id)}
-                  />
-                  <span>{choice.label}</span>
-                </label>
-              ))}
-            </div>
+            <Segmented className="note-life" name={`${ids}-life`} label="Which notes" choices={LIVES} chosen={lifeOf(typed)} onChoose={chooseLife} />
+            <Segmented className="note-todos" name={`${ids}-todos`} label="Notes by todos" choices={TODO_CHOICES} chosen={todosOf(typed)} onChoose={chooseTodos} />
           </div>
         )}
         {error && (
