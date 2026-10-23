@@ -149,7 +149,7 @@ describe("what an agent can do, against what the web app can", () => {
       read_upload: { ...uploaded, name: "../../etc/cat.png" },
       start_upload: sending,
       resume_upload: { ...sending, stored: [1, 3], address: "https://ink.test/api/upload-parts/fresh/{part}" },
-      finish_upload: { ...uploaded, line: `::image{${ID} 640x480}` },
+      finish_upload: { ...uploaded, line: `/image(${ID} 640x480)` },
     };
     const io: Io = {
       env: { INK_TOKEN: "cink_x", INK_URL: "https://ink.test" },
@@ -185,7 +185,7 @@ describe("what an agent can do, against what the web app can", () => {
     expect(requests.sort((a, b) => a.url.localeCompare(b.url))).toEqual(
       [1, 2, 3].map((n) => ({ method: "PUT", url: `https://ink.test/api/upload-parts/first/${n}`, headers: { "Content-Type": "application/octet-stream" }, body: [...PNG_BYTES.slice((n - 1) * 2, n * 2)] })),
     );
-    expect(out.at(-1)).toBe(`In a note: ::image{${ID} 640x480}`);
+    expect(out.at(-1)).toBe(`In a note: /image(${ID} 640x480)`);
 
     // A part that doesn't get through is sent again, to a fresh address, and only the parts not stored are.
     requests.length = calls.length = 0;

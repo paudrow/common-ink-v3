@@ -29,7 +29,7 @@ describe("the one-time conversion of dates written bare", () => {
     "# 2026-10-23",
     "Lunch 2026-10-24 and (2026-10-25 15:30), then 2026-10-26.",
     "- [ ] Pay rent due:2026-11-01 before 2026-11-02",
-    "Not `2026-11-03`, [this](2026-11-04) or ::event{abcdefghijkl Lunch 2026-11-05}.",
+    "Not `2026-11-03`, [this](2026-11-04) or /email(abcdefghijkl Lunch 2026-11-05).",
     "See [the report 2026-09-30](https://example.com/2026-09-29) and [[2026-11-06]] already.",
     "```",
     "2026-11-07 in a fence",
@@ -48,7 +48,7 @@ describe("the one-time conversion of dates written bare", () => {
         "# 2026-10-23",
         "Lunch [[2026-10-24]] and ([[2026-10-25 15:30]]), then [[2026-10-26]].",
         "- [ ] Pay rent due:2026-11-01 before [[2026-11-02]]",
-        "Not `2026-11-03`, [this](2026-11-04) or ::event{abcdefghijkl Lunch 2026-11-05}.",
+        "Not `2026-11-03`, [this](2026-11-04) or /email(abcdefghijkl Lunch 2026-11-05).",
         "See [the report 2026-09-30](https://example.com/2026-09-29) and [[2026-11-06]] already.",
         "```",
         "2026-11-07 in a fence",
@@ -60,7 +60,7 @@ describe("the one-time conversion of dates written bare", () => {
   });
 
   it("leaves what is inside a block embed or a formula, which would show the brackets as written", () => {
-    const blocks = ["Before 2026-10-21", ":::html{}", "<p>Launch on 2026-10-21</p>", ":::", ":::kanban{}", "## To do", "Ship 2026-10-22", ":::", "$$", "x = 2026-10-23", "$$", "After 2026-10-24"].join("\n");
+    const blocks = ["Before 2026-10-21", "/html()", "```html", "<p>Launch on 2026-10-21</p>", "```", "/kanban()", "```markdown", "## To do", "Ship 2026-10-22", "```", "$$", "x = 2026-10-23", "$$", "After 2026-10-24"].join("\n");
     expect(datesAsLinks(blocks)).toBe(blocks.replace("Before 2026-10-21", "Before [[2026-10-21]]").replace("After 2026-10-24", "After [[2026-10-24]]"));
   });
 

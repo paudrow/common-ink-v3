@@ -190,9 +190,9 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   thread ID                           an email thread with every message in it, by its id or one of its messages'
   person WHO [--limit N]              a person's page: the member they are, your member's contacts that are
                                       them, their open todos, and the lines that mention them
-  refer SOURCE RECORD                 the [[event:...]] or ::contact{...} a note writes to reference a record
+  refer SOURCE RECORD                 what a note writes to point at a record: [[event:...]], /email(...), or [[person:Name]] for a contact
   record REF                          the event or contact a reference stands for, as it is now
-  notes-about SOURCE RECORD           the notes that reference a record, by your member's reference or a teammate's to the same event, and who sees each
+  notes-about SOURCE RECORD           the notes that reference an event, by your member's reference or a teammate's to the same event, and who sees each
 
 A flag a command doesn't take is refused, and nothing is sent. A --manifest or --code that starts
 with @ is read from the file it names, such as --code @plugin.js.
@@ -233,8 +233,8 @@ SOURCE is a data source's id from sources, such as google-calendar. EVENT and RE
 events and contacts, quoted when they have a space. A reference is your member's alone: nobody else
 who reads the note can follow it.
 
-A note shows an upload with a line of its own: ::image{ID WIDTHxHEIGHT}, ::video{ID WIDTHxHEIGHT},
-::audio{ID} or ::file{ID}. upload prints the line for the file it sent. A file can be at most 25 GB,
+A note shows an upload with a line of its own: /image(ID WIDTHxHEIGHT), /video(ID WIDTHxHEIGHT),
+/audio(ID) or /file(ID). upload prints the line for the file it sent. A file can be at most 25 GB,
 and download never replaces a file that is there unless --force true.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;

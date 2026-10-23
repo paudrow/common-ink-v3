@@ -1,5 +1,6 @@
 import type { ChangeSet } from "@codemirror/state";
 import { BOX_PATTERN, markOf, stateOfMark, type TodoState } from "./boxes.ts";
+import { callsIn } from "./embedSyntax.ts";
 import { following } from "./follow.ts";
 import { linesOutsideCode } from "./lines.ts";
 import { mentionKey, mentionsOn, personKey, writtenMention, type WrittenMention } from "./mentions.ts";
@@ -64,8 +65,6 @@ export type Importance = 0 | 1 | 2 | 3;
 
 const BOX = new RegExp(`^(\\s*(?:[-*+]|\\d+[.)])\\s+)(${BOX_PATTERN})(?=\\s|$)`);
 const NOTE_LINK = /\[\[[^[\]\n]*\]\]/g;
-/** An embed's name and braces, `::name{...}` or a block's `:::name{...}`: what is in them is the embed's, not words of the note. */
-const EMBED = /(?<!:):{2,3}[a-z][a-z0-9-]*\{[^{}\n]*\}/g;
 const AFTER = "(?=$|[\\s.,;:!?)])";
 const IMPORTANCE = /^\s+(!{1,3})(?=\s|$)/;
 const DUE = new RegExp(`(?<=\\s)due:(\\d{4}-\\d{2}-\\d{2})${AFTER}`, "g");
@@ -96,7 +95,9 @@ export const nameKey = (name: string) => name.toLowerCase();
 /** The tags on one line of a note, which starts at `offset`. A tag has something in it besides digits, so `#12` is not one. */
 export function tagsOn(line: string, offset = 0): (Span & { name: string })[] {
   if (!line.includes("#")) return [];
-  return [...readable(line).replace(EMBED, out).matchAll(TAG)].filter((m) => /\D/.test(m[1]!)).map((m) => ({ from: offset + m.index, to: offset + m.index + m[0].length, name: m[1]! }));
+  const read = readable(line);
+  // What is in an embed's parentheses is the embed's, not words of the note.
+  return [...blanked(read, callsIn(read).map((c) => [c.from, c.to] as const), "\0").matchAll(TAG)].filter((m) => /\D/.test(m[1]!)).map((m) => ({ from: offset + m.index, to: offset + m.index + m[0].length, name: m[1]! }));
 }
 
 /** Whether `name` is a tag's whole name, as `#name` would write it. */

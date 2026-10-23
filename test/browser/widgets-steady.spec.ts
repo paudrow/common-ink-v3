@@ -114,11 +114,11 @@ const NOTE = () =>
     "# Steady",
     "",
     // Short lines, so none wraps and the start of each row is a word.
-    `Tea ::timer{25m since=${running()}} ok`,
-    "Lap ::stopwatch{at=1m5s} ok",
-    "Idle ::timer{5m} here.",
+    `Tea /timer(25m since=${running()}) ok`,
+    "Lap /stopwatch(at=1m5s) ok",
+    "Idle /timer(5m) here.",
     "",
-    "A chip ::chip{one} and a tag ::tag{two} in a line.",
+    "A chip /chip(one) and a tag /tag(two) in a line.",
     "",
     ":::kanban{}",
     "## To do",
@@ -296,7 +296,7 @@ test("an embed's own rewrite changes it where it stands: the same element, in th
   await expect(column(page, "Done").getByRole("listitem")).toHaveText(["plan", "ship"]);
   sameElements(await seen(page), first, ["timer", "stopwatch", "kanban", "box", "crate"]);
   await expect.poll(() => read(page, note.id)).toContain("## Done\n- plan\n- ship\n:::");
-  await expect.poll(() => read(page, note.id)).toContain("::chip{one!} and a tag ::tag{two!}");
+  await expect.poll(() => read(page, note.id)).toContain("/chip(one!) and a tag /tag(two!)");
 });
 
 test("someone else starting the timer and adding a card changes the embeds where they stand", async ({ page }) => {
@@ -304,7 +304,7 @@ test("someone else starting the timer and adding a card changes the embeds where
   const first = await seen(page);
 
   const text = await read(page, note.id);
-  await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: text.replace("::timer{5m}", `::timer{5m since=${new Date().toISOString()}}`).replace("- plan\n", "- plan\n- ship\n") });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: text.replace("/timer(5m)", `/timer(5m since=${new Date().toISOString()})`).replace("- plan\n", "- plan\n- ship\n") });
   await expect(column(page, "Done").getByRole("listitem")).toHaveText(["plan", "ship"], { timeout: 20_000 });
   await expect(editor(page).getByRole("button", { name: /^Timer, 4:\d\d left/ })).toHaveAttribute("aria-pressed", "true");
   sameElements(await seen(page), first, ["timer", "stopwatch", "chip", "tag", "kanban"]);
@@ -348,7 +348,7 @@ test("a note opened again in its tab, and in a split, shows its embeds drawn fro
 });
 
 test("a line with a clock, and a board, have the same room above and below them with the cursor on them as off: a clock's text is shown in its line, and a board's above it and all that is added", async ({ page }) => {
-  await open(page, "# Steady\n\nwords before\nTea ::timer{5m} here.\nwords after\n\n:::kanban{}\n## To do\n- write\n\n## Done\n:::\n\nThe last line.\n");
+  await open(page, "# Steady\n\nwords before\nTea /timer(5m) here.\nwords after\n\n/kanban()\n~~~markdown\n## To do\n- write\n\n## Done\n~~~\n\nThe last line.\n");
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const box = async (locator: Locator) => (await locator.first().boundingBox())!;
   const line = (text: string) => lines(page).filter({ hasText: new RegExp(`^${text}`) });
@@ -380,7 +380,7 @@ test("a line with a clock, and a board, have the same room above and below them 
 
   await line("Tea").click({ position: { x: 2, y: 5 } });
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowRight");
-  await expect(editor(page).locator(".embed-source")).toHaveText("::timer{5m}");
+  await expect(editor(page).locator(".embed-source")).toHaveText("/timer(5m)");
   expect(await measure()).toEqual(off);
 
   await line("words after").click();

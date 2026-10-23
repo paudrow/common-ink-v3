@@ -798,7 +798,7 @@ test("za shows the whole of the selected row and then less of it: a long note's 
 test("inside what an embed draws in a note, vim's list, search and tab keys do nothing: focus there is the embed's, and so are the keys", async ({ page }) => {
   await signIn(page);
   await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
-  const note = await perform(page, { type: "note.create", text: "# Plan\n\nabove\n:::kanban{}\n## To do\n- write\n- review\n\n## Doing\n- build\n:::\nbelow\n" });
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\nabove\n/kanban()\n~~~markdown\n## To do\n- write\n- review\n\n## Doing\n- build\n~~~\nbelow\n" });
   await open(page, "/folder/all");
   await page.locator(".cards > li").first().waitFor();
   // A note opened from a previewed list takes the list's place, so the list is kept first.

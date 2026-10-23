@@ -390,7 +390,7 @@ test("a reference to a contact shows its owner the contact, and every other memb
   await expect(contact(page, "Sam Okafor")).toContainText("+1 555 0142");
   await expect(page.getByRole("button", { name: "Copy reference" })).toHaveCount(0);
   const { text: written } = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
-  expect(written).toMatch(/^::contact\{[a-z0-9]{12} Sam Okafor\}$/);
+  expect(written).toMatch(/^\/contact\([a-z0-9]{12} Sam Okafor\)$/);
 
   await openNote(page, note.id, "Call");
   await writeAtEnd(page, written);

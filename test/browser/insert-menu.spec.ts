@@ -104,13 +104,13 @@ test(":: lists the embeds alone, filters them by what follows, and writes what /
   await expect(options(page)).toHaveText([/^Timer/]);
   await settled(page);
   await page.keyboard.press("Tab");
-  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\n:::kanban{}\n## To do\n\n## Doing\n\n## Done\n:::\nafter ::timer{5m}");
+  await expect.poll(() => text(page, note.id)).toBe("# Plan\n\n/kanban()\n~~~markdown\n## To do\n\n## Doing\n\n## Done\n~~~\nafter /timer(5m)");
 });
 
 test("an embed typed by hand past :: is left as typed, and neither a written one nor a block's closing ::: opens the list", async ({ page }) => {
   const note = await open(page, "# Hand\n\n");
 
-  await page.keyboard.type("::image{abcdefabcdef} and ::timer{5m}", { delay: 20 });
+  await page.keyboard.type("/image(abcdefabcdef) and /timer(5m)", { delay: 20 });
   await settled(page);
   await expect(list(page)).toHaveCount(0);
   await page.keyboard.press("Enter");
@@ -121,7 +121,7 @@ test("an embed typed by hand past :: is left as typed, and neither a written one
   await page.keyboard.type("act{", { delay: 20 });
   await settled(page);
   await expect(list(page)).toHaveCount(0);
-  await page.keyboard.type("}\n:::html{}\n<b>hi</b>\n:::", { delay: 20 });
+  await page.keyboard.type("}\n/html()\n~~~html\n<b>hi</b>\n~~~", { delay: 20 });
   await settled(page);
   await expect(list(page)).toHaveCount(0);
   await page.keyboard.press("Enter");

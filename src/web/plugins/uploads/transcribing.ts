@@ -1,6 +1,6 @@
 import type { Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import type { PluginHost } from "../../plugin-api.ts";
+import { callsIn, uploadIn, type PluginHost } from "../../plugin-api.ts";
 import { reasonOf } from "../lib/FoundNote.tsx";
 import { writable } from "../lib/live.ts";
 
@@ -9,11 +9,11 @@ import { writable } from "../lib/live.ts";
  * a line of their own under it, the line nearest `near` when the note plays it more than once. Null when no line does.
  */
 export function underRecording(text: string, uploadId: string, near = 0): number | null {
-  const embed = new RegExp(`::audio\\{${uploadId}(?=[\\s}])[^}\\n]*\\}`, "g");
   let best: { at: number; end: number } | null = null;
-  for (const found of text.matchAll(embed)) {
-    const end = text.indexOf("\n", found.index);
-    if (!best || Math.abs(found.index - near) < Math.abs(best.at - near)) best = { at: found.index, end: end === -1 ? text.length : end };
+  for (const found of callsIn(text)) {
+    if (found.name !== "audio" || uploadIn(found.config) !== uploadId) continue;
+    const end = text.indexOf("\n", found.from);
+    if (!best || Math.abs(found.from - near) < Math.abs(best.at - near)) best = { at: found.from, end: end === -1 ? text.length : end };
   }
   return best?.end ?? null;
 }

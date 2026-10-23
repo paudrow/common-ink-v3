@@ -2149,7 +2149,7 @@ export interface NoteAbout {
 export interface Reference {
   ref: string;
   kind: SourceRecord["kind"];
-  /** What a note writes: a link to an event, `[[event:k3j5h8d9f0a1]]`, or an embed, such as `::contact{k3j5h8d9f0a1 Sam Okafor}`. */
+  /** What a note writes: a link to an event, `[[event:k3j5h8d9f0a1]]`, or an embed, such as `/contact(k3j5h8d9f0a1 Sam Okafor)`. */
   text: string;
   /** What the record was called when it was referenced, as one line of plain words. */
   label: string;

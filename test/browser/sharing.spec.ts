@@ -215,7 +215,7 @@ test("a link's page draws the note as the app does, and runs nothing in it until
   await signInAsNewPerson(page, "Ada Lovelace");
   // The member has HTML run by itself, which is not the default on a server without an embed site (#40).
   await perform(page, { type: "settings.write", text: JSON.stringify({ "html.run": "automatically" }), baseRevision: 0 });
-  const text = "# Demo\n\nSome **bold** words.\n\n:::html{}\n<p>Hello from HTML.</p>\n:::\n\nWatch this.\n\nhttps://youtu.be/dQw4w9WgXcQ\n";
+  const text = "# Demo\n\nSome **bold** words.\n\n/html()\n~~~html\n<p>Hello from HTML.</p>\n~~~\n\nWatch this.\n\nhttps://youtu.be/dQw4w9WgXcQ\n";
   const note = await perform(page, { type: "note.create", text });
   const link = await perform(page, { type: "grant.link", noteId: note.id, link: "public" });
   if (link?.to.kind !== "link") throw new Error("no link was made");

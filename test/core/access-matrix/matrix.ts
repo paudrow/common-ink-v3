@@ -1039,7 +1039,7 @@ export function accessMatrix(part: ActorName | null) {
       for (const as of ["themself", "their agent", "their agent limited to the folder Team", "their agent limited to the folder Open"] as const) {
         it(`${name}, as ${as}`, async () => {
           const w = await world();
-          await perform(env.DB, w.actors["Ada, an admin"], { type: "note.write", id: w.notes.open, baseRevision: 1, text: textOf("open", `\n::image{${w.uploads.team} 1x1}\n`) });
+          await perform(env.DB, w.actors["Ada, an admin"], { type: "note.write", id: w.notes.open, baseRevision: 1, text: textOf("open", `\n/image(${w.uploads.team} 1x1)\n`) });
           const person = w.actors[name];
           const within = as === "themself" ? undefined : LIMITED[as];
           const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope: within && { folderIds: [w.folders[within[0]!]] } };

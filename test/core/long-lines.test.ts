@@ -24,7 +24,9 @@ const HOSTILE: Record<string, string> = {
   spaces: `${" ".repeat(N)}x[[`,
   "a heading's spaces": `a${" ".repeat(N)}b`,
   "nested brackets": "[[a]".repeat(N / 4),
-  embeds: "::image{".repeat(N / 8),
+  embeds: " /image(".repeat(N / 8),
+  "embeds that nest": " /timer(((".repeat(N / 10),
+  "embeds that nest and close at the end": `${" /timer(((".repeat(N / 10)})`,
   mixed: "`[[@[[](![::a{**~~_".repeat(N / 20),
 };
 
@@ -75,7 +77,7 @@ describe("inline code and addresses on a line", () => {
     expect(parseTodo("- [ ] call `due:2026-01-01` [x](due:2026-01-02) due:2026-01-03")?.due?.date).toBe("2026-01-03");
     expect(linksOn("`[[code]]` [[note]]").map((l) => l.target)).toEqual(["note"]);
     expect(mentionsOn("[x]([[person:nobody]]) `[[person:nor]]` [[person:Ada]]").map((m) => m.target)).toEqual(["Ada"]);
-    expect(uploadIds("`::image{aaaaaaaaaaaa}` ::file{bbbbbbbbbbbb}")).toEqual(["bbbbbbbbbbbb"]);
+    expect(uploadIds("`/image(aaaaaaaaaaaa)` /file(bbbbbbbbbbbb)")).toEqual(["bbbbbbbbbbbb"]);
     expect(summarize("# A `code` [link](https://x.y) and [[abcdefghijkl]] and [[Note|shown]] ![pic](p.png)").title).toBe("A code link and and shown");
     expect(summarize("# See [Foo [1]](https://en.wikipedia.org/wiki/Foo_(bar)) here ![p](a_(b).png) ##").title).toBe("See Foo [1] here");
     expect(["# Title ##  ", "# C#", "#   spaced"].map((text) => summarize(text).title)).toEqual(["Title", "C#", "spaced"]);
@@ -83,20 +85,20 @@ describe("inline code and addresses on a line", () => {
 });
 
 describe("a note of many forms", () => {
-  // A form is one line to open it and one to close it, so a note as long as a note can be has some twenty thousand, and as many lines again.
+  // A form is its line and a fence to open and close its content, so a note as long as a note can be has some twenty thousand, and as many lines again.
   const forms = 18_000;
-  const text = ":::form{}\n:::\n".repeat(forms) + "\nword".repeat(48_000);
+  const text = "/form()\n~~~json\n~~~\n".repeat(forms) + "\nword".repeat(48_000);
 
   it("is read in one pass: its lines outside the forms in under 200 ms", () => {
     const start = performance.now();
     const lines = [...linesOutsideCode(text)];
     expect(Math.round(performance.now() - start)).toBeLessThan(200);
-    expect(lines).toHaveLength(48_001);
-    expect(lines.at(-1)).toEqual({ line: "word", from: text.length - 4, index: forms * 2 + 48_000 });
+    expect(lines).toHaveLength(forms + 48_001);
+    expect(lines.at(-1)).toEqual({ line: "word", from: text.length - 4, index: forms * 3 + 48_000 });
   });
 
-  it("still leaves out each form's lines, and the lines between them stay", () => {
-    expect([...linesOutsideCode("a\n:::form{}\n{}\n:::\nb\n:::form{}\n:::\nc")].map((l) => l.line)).toEqual(["a", "b", "c"]);
-    expect([...linesOutsideCode(":::form{}\nnever closed")].map((l) => l.line)).toEqual([":::form{}", "never closed"]);
+  it("still leaves out each form's content and fences, and its line and the lines between them stay", () => {
+    expect([...linesOutsideCode("a\n/form()\n~~~json\n{}\n~~~\nb\n/form()\n~~~json\n~~~\nc")].map((l) => l.line)).toEqual(["a", "/form()", "b", "/form()", "c"]);
+    expect([...linesOutsideCode("/form()\nnever closed")].map((l) => l.line)).toEqual(["/form()", "never closed"]);
   });
 });

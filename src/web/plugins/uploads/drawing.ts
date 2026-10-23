@@ -101,8 +101,8 @@ const TITLE: Record<UploadEmbed, string> = { ...KIND_LABEL, drawing: "Drawing" }
 const detailsOf = ({ name, kind, width, height, size }: NonNullable<ReferredTo>) => `${name}\n${[KIND_LABEL[kind], width && height ? `${width} × ${height}` : null, formatBytes(size)].filter(Boolean).join(" · ")}`;
 
 /**
- * The embeds that show an upload where a note refers to one: `::image{id 640x480 medium}`, `::video{id 640x360 42%}`,
- * `::audio{id}` and `::file{id}`. A picture, a video and a recording are all below their line, and
+ * The embeds that show an upload where a note refers to one: `/image(id 640x480 medium)`, `/video(id 640x360 42%)`,
+ * `/audio(id)` and `/file(id)`. A picture, a video and a recording are all below their line, and
  * nothing of them is in it. What each knows of its upload is what the host was told by the read
  * of the note, and its bytes come from the address the host gives, so on a link's page they come by the link.
  * `pick` is how a menu sends a file into a note, where one can be sent, and `transcribe` writes
@@ -447,7 +447,7 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
   const drawing: Embed = {
     ...shown("drawing"),
     menu: !!pick,
-    pick: pick && { title: TITLE.drawing, description: "Shapes, arrows and words drawn by hand in Excalidraw", preview: { image: DRAWING_PICTURE }, insert: () => Promise.resolve("::drawing{}") },
+    pick: pick && { title: TITLE.drawing, description: "Shapes, arrows and words drawn by hand in Excalidraw", preview: { image: DRAWING_PICTURE }, insert: () => Promise.resolve("/drawing()") },
     below: {
       box: ({ config }) => (uploadIn(config) ? boxFor("drawing", config) : { height: EMPTY_DRAWING }),
       render: (into, handed) => below("drawing", into, handed),

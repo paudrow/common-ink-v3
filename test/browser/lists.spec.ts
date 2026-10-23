@@ -26,7 +26,7 @@ const ITEMS: [mark: string, word: string][] = [
   ["\t- ", "Tabbed"],
 ];
 /** A line with a clock in it, whose words go on after the clock. */
-const CLOCK: [mark: string, word: string] = ["- Timed ::stopwatch{} ", "Clocked"];
+const CLOCK: [mark: string, word: string] = ["- Timed /stopwatch() ", "Clocked"];
 const NOTE = ["# Lists", "", "Body words.", "", ...[...ITEMS, CLOCK].map(([mark, word]) => mark + tail(word)), "", "Last words."].join("\n");
 
 interface Item {

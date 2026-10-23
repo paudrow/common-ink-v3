@@ -398,7 +398,7 @@ describe("the email data source", () => {
     await expect(as(grace, { type: "email.thread", sourceId: "email", id: thread!.id })).rejects.toThrow("No such thread");
 
     const reference = await as(ada, { type: "record.refer", sourceId: "email", id: thread!.id });
-    expect(reference.text).toBe(`::email{${reference.ref} Private plans}`);
+    expect(reference.text).toBe(`/email(${reference.ref} Private plans)`);
     expect(await as(ada, { type: "record.read", ref: reference.ref })).toMatchObject({ kind: "email", messageId: null, thread: { id: thread!.id } });
     await expect(as(grace, { type: "record.read", ref: reference.ref })).rejects.toThrow("No such record");
   });
@@ -410,7 +410,7 @@ describe("the email data source", () => {
     const [thread] = await threads(actor);
     const second = (await as(actor, { type: "email.thread", sourceId: "email", id: thread!.id })).messages[1]!;
     const reference = await as(actor, { type: "record.refer", sourceId: "email", id: second.id });
-    expect(reference.text).toBe(`::email{${reference.ref} Re: Thread, the second}`);
+    expect(reference.text).toBe(`/email(${reference.ref} Re: Thread, the second)`);
     expect(await as(actor, { type: "record.read", ref: reference.ref })).toMatchObject({ kind: "email", messageId: second.id });
   });
 

@@ -1,5 +1,6 @@
+import { callsIn } from "./embedSyntax.ts";
 import { linesOutsideCode } from "./lines.ts";
-import { codeSpans } from "./spans.ts";
+import { blanked, codeSpans } from "./spans.ts";
 import { BOX_PATTERN, parseTodo } from "./todos.ts";
 
 const HEADING = /^ {0,3}#[ \t]+(.*)$/;
@@ -42,14 +43,14 @@ const ADDRESS_IN = String.raw`\((?:[^()]|\([^()]*\))*\)`;
  */
 const plainText = (line: string) =>
   unmarked(
-    line
+    // An embed is drawn, and has no words of its own.
+    blanked(line, callsIn(line).map((c) => [c.from, c.to] as const), " ")
       .replace(/^\s*(?:>\s*)*/, "")
       .replace(/^#{1,6}(?:\s+|$)/, "")
       .replace(LIST_MARK, "")
-      // An embed and an image are drawn, and a block of math's fence is no words.
-      .replace(/:{2,3}[a-z][a-z0-9-]*\{[^{}]*\}/g, "")
+      // An image is drawn, and a block of math's fence is no words.
       .replace(new RegExp(`!${TEXT}${ADDRESS_IN}`, "g"), "")
-      .replace(/^(?::::|\$\$)\s*$/, "")
+      .replace(/^\$\$\s*$/, "")
       // A mention reads as `@` and its own words, or the name it is by.
       .replace(/\[\[person:[^[\]|]*\|([^[\]]*)\]\]/g, "@$1")
       .replace(/\[\[person:(?![a-z0-9]{12}\]\])([^[\]|]+)\]\]/g, "@$1")

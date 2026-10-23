@@ -1,10 +1,11 @@
+import { callsIn, writtenEmbed } from "./embedSyntax.ts";
 import { linesOutsideCode } from "./lines.ts";
 import { blanked, codeSpans } from "./spans.ts";
 
 /**
- * A note refers to an upload by an embed whose config starts with the upload's id: `::image{id 640x480}`,
- * `::image{id 640x480 42% crop=120,40,800,600}`, `::video{id 640x360 medium}`, `::audio{id}`, `::file{id}`, or
- * `::drawing{id 800x600}`, whose upload is an Excalidraw scene. The embed's name is what says the id
+ * A note refers to an upload by an embed whose config starts with the upload's id: `/image(id 640x480)`,
+ * `/image(id 640x480 42% crop=120,40,800,600)`, `/video(id 640x360 medium)`, `/audio(id)`, `/file(id)`, or
+ * `/drawing(id 800x600)`, whose upload is an Excalidraw scene. The embed's name is what says the id
  * is an upload's, since a note's id is written the same way. Anything after the id is how it is
  * shown, and the upload's name is never in the note.
  */
@@ -19,14 +20,12 @@ export const SIZE_WORDS = ["small", "medium", "large", "full"] as const;
 export type SizeWord = (typeof SIZE_WORDS)[number];
 export const SIZE_SHARE: Record<SizeWord, number> = { small: 1 / 3, medium: 1 / 2, large: 3 / 4, full: 1 };
 
-const REF = new RegExp(`(?<!:)::(${UPLOAD_EMBEDS.join("|")})\\{([a-z0-9]{12})(?:[ \\t][^{}\\n]*)?\\}`, "g");
-
 /** The upload an embed's config names, or null when it names none. */
 export const uploadIn = (config: string): string | null => /^([a-z0-9]{12})(?:[ \t]|$)/.exec(config)?.[1] ?? null;
 
 /** How an embed of an upload is written. `size` is the room kept for a picture or a video, which the app measures. */
 export const writtenUpload = (embed: UploadEmbed, id: string, size?: { width: number; height: number } | null) =>
-  `::${embed}{${id}${size ? ` ${Math.round(size.width)}x${Math.round(size.height)}` : ""}}`;
+  writtenEmbed(embed, `${id}${size ? ` ${Math.round(size.width)}x${Math.round(size.height)}` : ""}`);
 
 const SIZED = /^[a-z0-9]{12}[ \t]+(\d{1,5})x(\d{1,5})(?=[ \t]|$)/;
 
@@ -135,11 +134,14 @@ export function withCrop(config: string, crop: Crop | null): string {
 
 /** The ids of the uploads a note's text refers to outside code, each once, in the order they first appear. */
 export function uploadIds(text: string): string[] {
-  if (!text.includes("::")) return [];
+  if (!text.includes("(")) return [];
   const ids = new Set<string>();
   for (const { line } of linesOutsideCode(text)) {
-    if (!line.includes("::")) continue;
-    for (const match of blanked(line, codeSpans(line), " ").matchAll(REF)) ids.add(match[2]!);
+    if (!line.includes("(")) continue;
+    for (const call of callsIn(blanked(line, codeSpans(line), " "))) {
+      const id = UPLOAD_EMBEDS.includes(call.name as UploadEmbed) ? uploadIn(call.config) : null;
+      if (id) ids.add(id);
+    }
   }
   return [...ids];
 }

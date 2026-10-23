@@ -6,8 +6,8 @@ import { lettering, sketch } from "./sketch.ts";
 export const clockSketch = (time: string) => sketch(`<path d="M44 28 L62 42 L44 56 Z"/>` + lettering(74, 54, 34, time, 'font-weight="600"'));
 
 const KINDS = {
-  stopwatch: { title: "Stopwatch", hint: "Start or stop the stopwatch", example: "::stopwatch{}", stop: "Stop" },
-  timer: { title: "Timer", hint: "Start or pause the timer", example: "::timer{5m}", stop: "Pause" },
+  stopwatch: { title: "Stopwatch", hint: "Start or stop the stopwatch", example: "/stopwatch()", stop: "Stop" },
+  timer: { title: "Timer", hint: "Start or pause the timer", example: "/timer(5m)", stop: "Pause" },
 } as const;
 
 const HOW = "Write it like 25m, 1h30m or 90s.";

@@ -71,9 +71,9 @@ test("a recording over 8 MB dropped in a note goes in parts: its line is written
   await expect(below(page, "audio")).toContainText(/Uploading episode-12\.wav · \d+%/);
   await expect(below(page, "audio").getByRole("progressbar", { name: "episode-12.wav uploaded" })).toBeVisible();
   // The line is in the note while the file is still on its way, and the file is in no list yet.
-  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Episode 12\n\nThe recording:\n::audio\{[a-z0-9]{12}\}\n$/);
+  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Episode 12\n\nThe recording:\n\/audio\([a-z0-9]{12}\)\n$/);
   expect((await perform(page, { type: "upload.list" })).uploads).toEqual([]);
-  const id = /::audio\{([a-z0-9]{12})\}/.exec(await noteText(page, note.id))![1]!;
+  const id = /\/audio\(([a-z0-9]{12})\)/.exec(await noteText(page, note.id))![1]!;
   await expect(page.getByRole("status", { name: "Uploading" })).toContainText("Uploading episode-12.wav");
 
   release();
@@ -144,7 +144,7 @@ test("Upload a recording in the / menu takes out what was typed as the file pick
   await asked.setFiles({ name: "episode-13.wav", mimeType: "audio/wav", buffer: recording(12 * MIB) });
 
   await expect(below(page, "audio")).toContainText(/Uploading episode-13\.wav · \d+%/);
-  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Episode 13\n\n::audio\{[a-z0-9]{12}\}\n$/);
+  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Episode 13\n\n\/audio\([a-z0-9]{12}\)\n$/);
   release();
   await expect(below(page, "audio").locator("audio")).toBeVisible();
 });

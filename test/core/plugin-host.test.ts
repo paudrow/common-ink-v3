@@ -53,7 +53,7 @@ const notes: Plugin = {
     host.views.register("column", { id: "list", component: View });
     host.views.register("page", { id: "todos", path: "/todos", label: "Todos", component: View });
     host.embeds.register({ name: "timer", title: "Timer", starts: { config: "5m" }, render: () => {} });
-    host.completions.register({ id: "embeds", trigger: "/", items: () => host.embeds.list().map((e) => ({ label: e.title, insert: `::${e.name}{${e.starts?.config ?? ""}}` })) });
+    host.completions.register({ id: "embeds", trigger: "/", items: () => host.embeds.list().map((e) => ({ label: e.title, insert: `/${e.name}(${e.starts?.config ?? ""})` })) });
   },
 };
 
@@ -87,12 +87,12 @@ describe("plugin host", () => {
 
     expect([menu!.id, menu!.trigger]).toEqual(["embeds", "/"]);
     expect(await menu!.items("", { noteId: "n" })).toEqual([
-      { label: "Timer", insert: "::timer{5m}" },
-      { label: "Kanban board", insert: "::kanban{}" },
+      { label: "Timer", insert: "/timer(5m)" },
+      { label: "Kanban board", insert: "/kanban()" },
     ]);
 
     host.setEnabled("board", false);
-    expect(await menu!.items("", { noteId: "n" })).toEqual([{ label: "Timer", insert: "::timer{5m}" }]);
+    expect(await menu!.items("", { noteId: "n" })).toEqual([{ label: "Timer", insert: "/timer(5m)" }]);
     host.setEnabled("notes", false);
     expect(host.contributions().completions).toEqual([]);
   });

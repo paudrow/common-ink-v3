@@ -15,7 +15,7 @@ test("a click on a choice is stored in the note under the member who clicked", a
   await signInAsNewPerson(page, "Ada Lovelace");
   const person = (await me(page)).person;
   const body = { questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"] }], answers: {} };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -40,7 +40,7 @@ test("one shared answer stays on the next member's controls, and their edit keep
     ],
     answers: { ada: { q: "Yes", r: "Because" } },
   };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -57,7 +57,7 @@ test("one shared answer stays on the next member's controls, and their edit keep
 test("an anonymous tally of zero does not look chosen", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const body = { anonymous: true, questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"] }], tallies: {}, texts: {}, voted: [] };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -76,7 +76,7 @@ test("an anonymous cast stores the tally and who voted", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const person = (await me(page)).person;
   const body = { anonymous: true, questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"] }], tallies: {}, texts: {}, voted: [] };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -94,7 +94,7 @@ test("Other is stored with the choice, and a form can turn it off", async ({ pag
   await signInAsNewPerson(page, "Ada Lovelace");
   const person = (await me(page)).person;
   const body = { questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"] }], answers: {} };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -103,7 +103,7 @@ test("Other is stored with the choice, and a form can turn it off", async ({ pag
   await expect.poll(async () => JSON.parse(readFence(await read(page, note.id))).other?.[person.id]?.q).toBe("the date moved");
 
   const quiet = { explain: false, questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"] }], answers: {} };
-  const hidden = await perform(page, { type: "note.create", text: `# Quiet\n\n:::form{}\n${JSON.stringify(quiet, null, 2)}\n:::\n` });
+  const hidden = await perform(page, { type: "note.create", text: `# Quiet\n\n/form()\n~~~json\n${JSON.stringify(quiet, null, 2)}\n~~~\n` });
   await page.goto(`/note/${hidden.id}`);
   await expect(editor(page).getByText("Ship it?")).toBeVisible();
   await expect(editor(page).getByRole("textbox", { name: "Other" })).toHaveCount(0);
@@ -120,7 +120,7 @@ test("a closed dropdown and date show another member's answer", async ({ page })
     ],
     answers: { ada: { who: "Harbor", day: "2026-10-18", hour: "09:30" } },
   };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -134,7 +134,7 @@ test("a closed dropdown and date show another member's answer", async ({ page })
 test("an anonymous dropdown shows the tally on the option that was picked", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const body = { anonymous: true, questions: [{ id: "q", type: "dropdown", prompt: "Who leads?", options: ["Harbor", "Pier"] }], tallies: {}, texts: {}, voted: [] };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -161,7 +161,7 @@ test("an anonymous grid and image leave a zero tally unmarked", async ({ page })
     texts: {},
     voted: [],
   };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -184,7 +184,7 @@ test("an anonymous grid and image leave a zero tally unmarked", async ({ page })
 test("Edit questions keeps Other on when the question forces it and the form turned it off", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const body = { explain: false, questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"], explain: true }], answers: {} };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -196,7 +196,7 @@ test("Edit questions keeps Other on when the question forces it and the form tur
 test("Done closes the form, and the choices stop taking clicks", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const body = { questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"] }], answers: {} };
-  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const text = `# Form\n\n/form()\n~~~json\n${JSON.stringify(body, null, 2)}\n~~~\n`;
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
 
@@ -209,7 +209,7 @@ test("Done closes the form, and the choices stop taking clicks", async ({ page }
 });
 
 function readFence(text: string): string {
-  const start = text.indexOf(":::form{}\n");
-  const end = text.indexOf("\n:::", start);
-  return text.slice(start + ":::form{}\n".length, end);
+  const open = "/form()\n~~~json\n";
+  const start = text.indexOf(open);
+  return text.slice(start + open.length, text.indexOf("\n~~~", start + open.length));
 }

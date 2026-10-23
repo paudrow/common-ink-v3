@@ -15,7 +15,7 @@ const picture = (page: Page) => drawingBelow(page).locator("img.upload-drawing")
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Edit Drawing" });
 const noteText = async (page: Page, id: string) => (await perform(page, { type: "note.read", id })).text;
 const settled = (page: Page) => page.evaluate(() => new Promise((done) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 50)));
-const DRAWN = /^::drawing\{([a-z0-9]{12}) (\d+)x(\d+)\}$/m;
+const DRAWN = /^\/drawing\(([a-z0-9]{12}) (\d+)x(\d+)\)$/m;
 
 /** The PNG the drawing's picture shows, as its `data:` address, once it has loaded. */
 const shown = (page: Page) => picture(page).evaluate((img: HTMLImageElement) => (img.complete && img.naturalWidth > 0 ? img.src : ""));
@@ -70,7 +70,7 @@ test("/drawing writes an empty drawing, Edit drawing opens Excalidraw, and each 
   await expect(page.getByRole("option", { name: /^Drawing/ })).toHaveText("DrawingShapes, arrows and words drawn by hand in Excalidraw");
   await settled(page);
   await page.keyboard.press("Enter");
-  await expect.poll(() => noteText(page, note.id)).toBe("# Sketch\n\n::drawing{}");
+  await expect.poll(() => noteText(page, note.id)).toBe("# Sketch\n\n/drawing()");
 
   await drawingBelow(page).getByRole("button", { name: "Edit drawing" }).click();
   await expect(dialog(page)).toBeVisible();
@@ -114,19 +114,19 @@ test("/drawing writes an empty drawing, Edit drawing opens Excalidraw, and each 
 
 test("in the editor every key is Excalidraw's, its own dialogs show over it, and what is behind it can't be reached", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  const note = await perform(page, { type: "note.create", text: "# Keys\n\n::drawing{}\n\nwords" });
+  const note = await perform(page, { type: "note.create", text: "# Keys\n\n/drawing()\n\nwords" });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("words");
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" more");
-  await expect.poll(() => noteText(page, note.id)).toBe("# Keys\n\n::drawing{}\n\nwords more");
+  await expect.poll(() => noteText(page, note.id)).toBe("# Keys\n\n/drawing()\n\nwords more");
   await drawingBelow(page).getByRole("button", { name: "Edit drawing" }).click();
   await drawShape(page, "Rectangle", [400, 250], [620, 390]);
   await expect(dialog(page).getByRole("button", { name: "Undo" })).toBeEnabled();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(dialog(page).getByRole("button", { name: "Undo" }), "Excalidraw undid the rectangle").toBeDisabled();
-  expect(await noteText(page, note.id), "and the note's typing is still there").toBe("# Keys\n\n::drawing{}\n\nwords more");
+  expect(await noteText(page, note.id), "and the note's typing is still there").toBe("# Keys\n\n/drawing()\n\nwords more");
   await dialog(page).getByRole("button", { name: "Help" }).click();
   await expect(page.getByRole("dialog", { name: /Help/ }).or(page.locator(".HelpDialog"))).toBeVisible();
   await page.keyboard.press("Escape");
@@ -140,7 +140,7 @@ test("in the editor every key is Excalidraw's, its own dialogs show over it, and
 test("a drawing saved in a private note in a folder is kept in that folder and private, and one whose upload is no scene says it can't be read", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const folder = await perform(page, { type: "folder.create", name: "Plans" });
-  const note = await perform(page, { type: "note.create", text: "# Private\n\n::drawing{}\n", folderId: folder.id });
+  const note = await perform(page, { type: "note.create", text: "# Private\n\n/drawing()\n", folderId: folder.id });
   await perform(page, { type: "note.setPrivate", id: note.id, private: true });
   await page.goto(`/note/${note.id}`);
   await drawingBelow(page).getByRole("button", { name: "Edit drawing" }).click();
@@ -152,7 +152,7 @@ test("a drawing saved in a private note in a folder is kept in that folder and p
   expect([kept.name, kept.folderId, kept.private]).toEqual(["Drawing.excalidraw", folder.id, true]);
 
   const words = await send(page, "notes.excalidraw", "not a scene");
-  const other = await perform(page, { type: "note.create", text: `# Other\n\n::drawing{${words.id} 300x200}\n` });
+  const other = await perform(page, { type: "note.create", text: `# Other\n\n/drawing(${words.id} 300x200)\n` });
   await page.goto(`/note/${other.id}`);
   await expect(drawingBelow(page)).toContainText("This drawing can't be read");
   await expect(drawingBelow(page).getByRole("button", { name: "Edit drawing" })).toHaveCount(0);
@@ -177,7 +177,7 @@ async function drawnAt(page: Page, x: number, y: number) {
 test("a drawing is shown in the app's theme as Excalidraw shows it while it is edited, light, dark and in Night shift, and the drawing kept is the same in each", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const drawn = await send(page, "Drawing.excalidraw", AGENT_SCENE);
-  const written = `# Themed\n\n::drawing{${drawn.id} 232x197}\n`;
+  const written = `# Themed\n\n/drawing(${drawn.id} 232x197)\n`;
   const note = await perform(page, { type: "note.create", text: written });
   /** The paper between the box and the word, and the picture's address, with these settings. */
   const look = async (settings: Record<string, unknown>) => {
@@ -229,7 +229,7 @@ test("a photo in a drawing stays the right way round in the dark, as Excalidraw'
     files: { white: { id: "white", mimeType: "image/png", dataURL: white, created: 1 } },
   });
   const drawn = await send(page, "Photo.excalidraw", scene);
-  const note = await perform(page, { type: "note.create", text: `# Photo\n\n::drawing{${drawn.id} 272x132}\n` });
+  const note = await perform(page, { type: "note.create", text: `# Photo\n\n/drawing(${drawn.id} 272x132)\n` });
   await page.goto(`/note/${note.id}`);
   await expect.poll(() => shown(page)).toMatch(PNG);
   await settled(page);
@@ -249,7 +249,7 @@ test("a photo in a drawing stays the right way round in the dark, as Excalidraw'
 test("Cancel leaves a drawing as it was, and a drawing is sized with its handle as a picture is", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const drawn = await send(page, "Drawing.excalidraw", AGENT_SCENE);
-  const note = await perform(page, { type: "note.create", text: `# Sized\n\n::drawing{${drawn.id} 232x197}\n\nafter\n` });
+  const note = await perform(page, { type: "note.create", text: `# Sized\n\n/drawing(${drawn.id} 232x197)\n\nafter\n` });
   await page.goto(`/note/${note.id}`);
   await expect.poll(() => shown(page)).toMatch(PNG);
 
@@ -258,14 +258,14 @@ test("Cancel leaves a drawing as it was, and a drawing is sized with its handle 
   await drawShape(page, "Rectangle", [400, 250], [600, 400]);
   await dialog(page).getByRole("button", { name: "Cancel" }).click();
   await expect(dialog(page)).toHaveCount(0);
-  expect(await noteText(page, note.id)).toBe(`# Sized\n\n::drawing{${drawn.id} 232x197}\n\nafter\n`);
+  expect(await noteText(page, note.id)).toBe(`# Sized\n\n/drawing(${drawn.id} 232x197)\n\nafter\n`);
 
   const size = page.getByRole("slider", { name: "Size of Drawing.excalidraw" });
   await size.focus();
   await page.keyboard.press("Home");
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Sized\n\n::drawing{${drawn.id} 232x197 10%}\n\nafter\n`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Sized\n\n/drawing(${drawn.id} 232x197 10%)\n\nafter\n`);
   await page.keyboard.press("ArrowRight");
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Sized\n\n::drawing{${drawn.id} 232x197 15%}\n\nafter\n`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Sized\n\n/drawing(${drawn.id} 232x197 15%)\n\nafter\n`);
   await settled(page);
   const box = (await drawingBelow(page).boundingBox())!;
   expect(Math.round((box.width / box.height) * 100) / 100, "at the drawing's shape").toBe(Math.round((232 / 197) * 100) / 100);
@@ -274,7 +274,7 @@ test("Cancel leaves a drawing as it was, and a drawing is sized with its handle 
 test("a member who can't change the note sees a drawing an agent wrote, drawn from its scene, with no Edit drawing and no size handle", async ({ page }) => {
   const { admin } = await asViewerOfNote(page, "# Seen\n");
   const drawn = await send(admin, "Drawing.excalidraw", AGENT_SCENE);
-  const note = await perform(admin, { type: "note.create", text: `# Plan\n\n::drawing{${drawn.id}}\n\n::drawing{}\n\nafter\n` });
+  const note = await perform(admin, { type: "note.create", text: `# Plan\n\n/drawing(${drawn.id})\n\n/drawing()\n\nafter\n` });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("after");
   await expect.poll(() => shown(page)).toMatch(PNG);
@@ -289,7 +289,7 @@ test("a folder's link shows a drawing, with no Edit drawing", async ({ page }) =
   await signInAsNewPerson(page, "Ada Lovelace");
   const folder = await perform(page, { type: "folder.create", name: "Handbook" });
   const drawn = await send(page, "Drawing.excalidraw", AGENT_SCENE, { folderId: folder.id });
-  const note = await perform(page, { type: "note.create", text: `# Welcome\n\n::drawing{${drawn.id} 232x197}\n\nafter\n`, folderId: folder.id });
+  const note = await perform(page, { type: "note.create", text: `# Welcome\n\n/drawing(${drawn.id} 232x197)\n\nafter\n`, folderId: folder.id });
   const link = await perform(page, { type: "grant.link", folderId: folder.id, link: "public" });
   if (link?.to.kind !== "link") throw new Error("no link was made");
   const anyone = await visitor(page);

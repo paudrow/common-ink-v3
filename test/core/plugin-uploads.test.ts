@@ -187,7 +187,7 @@ describe("what a paste or a drop carries", () => {
 });
 
 describe("where an uploaded file is written", () => {
-  const written = `::image{${ID} 4x3}`;
+  const written = `/image(${ID} 4x3)`;
 
   it("takes the place of a blank line", () => {
     expect(onItsOwnLine(written, { from: 10, text: "", last: false })).toEqual({ from: 10, to: 10, insert: written, end: 10 + written.length, after: 11 + written.length });
@@ -206,16 +206,16 @@ describe("where an uploaded file is written", () => {
 
 describe("how a note writes an upload", () => {
   it("writes a picture with the size the server read, or else the one the browser measured, or none", () => {
-    expect(writtenFor({ id: ID, kind: "image", width: 640, height: 480 }, { width: 1, height: 1 })).toBe(`::image{${ID} 640x480}`);
-    expect(writtenFor({ id: ID, kind: "image", width: null, height: null }, { width: 120, height: 80 })).toBe(`::image{${ID} 120x80}`);
-    expect(writtenFor({ id: ID, kind: "image", width: null, height: null })).toBe(`::image{${ID}}`);
+    expect(writtenFor({ id: ID, kind: "image", width: 640, height: 480 }, { width: 1, height: 1 })).toBe(`/image(${ID} 640x480)`);
+    expect(writtenFor({ id: ID, kind: "image", width: null, height: null }, { width: 120, height: 80 })).toBe(`/image(${ID} 120x80)`);
+    expect(writtenFor({ id: ID, kind: "image", width: null, height: null })).toBe(`/image(${ID})`);
   });
 
   it("writes a video with the size the browser measured or a default, and a recording and a file with none", () => {
-    expect(writtenFor({ id: ID, kind: "video", width: null, height: null }, { width: 1920, height: 1080 })).toBe(`::video{${ID} 1920x1080}`);
-    expect(writtenFor({ id: ID, kind: "video", width: null, height: null })).toBe(`::video{${ID} 640x360}`);
-    expect(writtenFor({ id: ID, kind: "audio", width: null, height: null }, { width: 9, height: 9 })).toBe(`::audio{${ID}}`);
-    expect(writtenFor({ id: ID, kind: "file", width: null, height: null })).toBe(`::file{${ID}}`);
+    expect(writtenFor({ id: ID, kind: "video", width: null, height: null }, { width: 1920, height: 1080 })).toBe(`/video(${ID} 1920x1080)`);
+    expect(writtenFor({ id: ID, kind: "video", width: null, height: null })).toBe(`/video(${ID} 640x360)`);
+    expect(writtenFor({ id: ID, kind: "audio", width: null, height: null }, { width: 9, height: 9 })).toBe(`/audio(${ID})`);
+    expect(writtenFor({ id: ID, kind: "file", width: null, height: null })).toBe(`/file(${ID})`);
   });
 });
 

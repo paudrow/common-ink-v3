@@ -54,7 +54,7 @@ To write one, type `[[` in a note. After your notes, the list offers your events
 
 You see the event's title as it is now in Google. Anyone else, and anyone opening the note from a share link, sees "Event". To show words of your own instead, type `|` and the words, as `[[event:r8m2k4q9x1cd|Planning with Sam]]`. Everyone sees those words, so write only what others may read. Click the event to open its details.
 
-A reference to a contact is `::contact{…}`. The app has no way yet to copy one, so your agent writes it with `refer_record`.
+A reference to a contact is `/contact(…)`. The app has no way yet to copy one, so your agent writes it with `refer_record`.
 
 The words after a contact's reference are plain text in the note. Every reader of the note sees them, in gray. You see the contact as it is now in Google. Anyone else, and anyone opening the note from a share link, sees only those words. Edit them if they say more than others should read.
 

@@ -152,7 +152,7 @@ describe("a note that refers to an upload", () => {
     const picture = await upload(ada, "picture.png");
     const paper = await upload(ada, "paper.pdf", bytesOf("%PDF-1.7"));
     const inCode = await upload(ada, "code.png");
-    const note = await perform(env.DB, ada, { type: "note.create", text: `# Trip\n\n::image{${picture.id} 640x480}\nSee ::file{${paper.id}} and [[${picture.id}]]\n\n\`\`\`\n::image{${inCode.id}}\n\`\`\`\n\`::file{${inCode.id}}\``, linkTitles: "keep" });
+    const note = await perform(env.DB, ada, { type: "note.create", text: `# Trip\n\n/image(${picture.id} 640x480)\nSee /file(${paper.id}) and [[${picture.id}]]\n\n\`\`\`\n/image(${inCode.id})\n\`\`\`\n\`/file(${inCode.id})\``, linkTitles: "keep" });
     const read = await perform(env.DB, ada, { type: "note.read", id: note.id });
     expect(read.uploads).toEqual([
       { id: picture.id, upload: { name: "picture.png", type: "image/png", kind: "image", size: PNG.byteLength, width: 1, height: 1, state: "live" } },
@@ -169,7 +169,7 @@ describe("a note that refers to an upload", () => {
   it("makes the record of which notes use an upload for notes written before there was one", async () => {
     const ada = await newMember();
     const picture = await upload(ada, "picture.png");
-    const note = await perform(env.DB, ada, { type: "note.create", text: `::image{${picture.id}}` });
+    const note = await perform(env.DB, ada, { type: "note.create", text: `/image(${picture.id})` });
     await env.DB.batch([env.DB.prepare("DELETE FROM upload_refs WHERE note_id = ?").bind(note.id), env.DB.prepare("UPDATE notes SET indexed = 4 WHERE id = ?").bind(note.id)]);
     expect((await perform(env.DB, ada, { type: "upload.read", id: picture.id })).usedIn.map((n) => n.id)).toEqual([note.id]);
     expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 11 });
@@ -179,7 +179,7 @@ describe("a note that refers to an upload", () => {
     const ada = await newMember();
     const ed = await addMember(ada, "editor", "Ed");
     const hidden = await upload(ed, "salaries-2026.png", PNG, { private: true });
-    const note = await perform(env.DB, ed, { type: "note.create", text: `::image{${hidden.id} 300x200} ::file{zzzzzzzzzzzz}` });
+    const note = await perform(env.DB, ed, { type: "note.create", text: `/image(${hidden.id} 300x200) /file(zzzzzzzzzzzz)` });
     const forAda = await perform(env.DB, ada, { type: "note.read", id: note.id });
     expect(forAda.uploads).toEqual([{ id: hidden.id, upload: null }, { id: "zzzzzzzzzzzz", upload: null }]);
     expect(JSON.stringify(forAda)).not.toContain("salaries");
@@ -187,7 +187,7 @@ describe("a note that refers to an upload", () => {
     await expect(bytesFor(ada, "zzzzzzzzzzzz")).rejects.toMatchObject({ code: "not_found", message: "No such upload" });
     expect((await perform(env.DB, ed, { type: "note.read", id: note.id })).uploads[0]!.upload).toMatchObject({ name: "salaries-2026.png" });
     // And the upload doesn't tell its owner of a note of someone else's that they can't see.
-    const secret = await perform(env.DB, ada, { type: "note.create", text: `# Hidden plan\n::image{${hidden.id}}` });
+    const secret = await perform(env.DB, ada, { type: "note.create", text: `# Hidden plan\n/image(${hidden.id})` });
     await perform(env.DB, ada, { type: "note.setPrivate", id: secret.id, private: true });
     expect((await perform(env.DB, ed, { type: "upload.read", id: hidden.id })).usedIn.map((n) => n.id)).toEqual([note.id]);
   });
@@ -195,8 +195,8 @@ describe("a note that refers to an upload", () => {
   it("leaves the uploads a note refers to when the note is deleted for good", async () => {
     const ada = await newMember();
     const picture = await upload(ada, "picture.png");
-    const note = await perform(env.DB, ada, { type: "note.create", text: `::image{${picture.id} 1x1}` });
-    const other = await perform(env.DB, ada, { type: "note.create", text: `# Other\n::image{${picture.id} 1x1}` });
+    const note = await perform(env.DB, ada, { type: "note.create", text: `/image(${picture.id} 1x1)` });
+    const other = await perform(env.DB, ada, { type: "note.create", text: `# Other\n/image(${picture.id} 1x1)` });
     await perform(env.DB, ada, { type: "note.trash", id: note.id });
     await perform(env.DB, ada, { type: "note.purge", id: note.id });
     expect(await perform(env.DB, ada, { type: "upload.read", id: picture.id })).toMatchObject({ state: "live", usedIn: [{ id: other.id }] });
@@ -207,7 +207,7 @@ describe("a note that refers to an upload", () => {
   it("says an upload it refers to is in Trash, shows it again once restored, and reads as for none once it is removed", async () => {
     const ada = await newMember();
     const picture = await upload(ada, "picture.png");
-    const note = await perform(env.DB, ada, { type: "note.create", text: `::image{${picture.id} 1x1}` });
+    const note = await perform(env.DB, ada, { type: "note.create", text: `/image(${picture.id} 1x1)` });
     const state = async () => (await perform(env.DB, ada, { type: "note.read", id: note.id })).uploads[0]!.upload?.state ?? null;
     expect(await perform(env.DB, ada, { type: "upload.trash", id: picture.id })).toMatchObject({ state: "trashed", usedIn: 1 });
     expect(await state()).toBe("trashed");
@@ -242,7 +242,7 @@ describe("an upload's life", () => {
     const kept = await upload(ada, "kept.png");
     const gone = await upload(ada, "gone.png");
     await perform(env.DB, ada, { type: "grant.set", uploadId: gone.id, email: "someone@example.com", access: "view" });
-    const note = await perform(env.DB, ada, { type: "note.create", text: `::image{${gone.id}}` });
+    const note = await perform(env.DB, ada, { type: "note.create", text: `/image(${gone.id})` });
     expect(await remains(gone.id)).toEqual(["uploads.id", "grants.upload_id"]);
     await perform(env.DB, ada, { type: "upload.trash", id: gone.id }, T0);
     await perform(env.DB, ada, { type: "upload.trash", id: kept.id }, T0 + 5000);
@@ -418,7 +418,7 @@ describe("who an upload is shown to", () => {
     await perform(env.DB, ada, { type: "upload.archive", id: archived.id, archived: true });
     await perform(env.DB, ada, { type: "upload.trash", id: trashed.id });
     await expect(perform(env.DB, ada, { type: "grant.link", uploadId: inside.id, link: "public" })).rejects.toMatchObject({ code: "invalid", message: "An upload has no link of its own. Put a link on the folder it is in." });
-    const note = await perform(env.DB, ada, { type: "note.create", folderId: folder.id, text: `# Page\n::image{${inside.id}} ::image{${outside.id}} ::image{${secret.id}} ::image{${trashed.id}}` });
+    const note = await perform(env.DB, ada, { type: "note.create", folderId: folder.id, text: `# Page\n/image(${inside.id}) /image(${outside.id}) /image(${secret.id}) /image(${trashed.id})` });
     const visitor = async (on: { noteId: string } | { folderId: string }): Promise<Visitor> => {
       const link = await perform(env.DB, ada, { type: "grant.link", ...on, link: "public" });
       return { kind: "visitor", token: link!.to.kind === "link" ? (link!.to.token ?? "") : "", personId: null };
@@ -467,12 +467,12 @@ describe("finding uploads", () => {
       theirs: await upload(eve, "eve.png", PNG, { folderId: projects.id }, T0 + 4 * DAY),
       agents: await upload(asScribe, "by-agent.png", PNG, {}, T0 + 5 * DAY),
     };
-    await perform(env.DB, ada, { type: "note.create", text: `# Shows dot\n\n::image{${files.dot.id} 1x1}` });
-    const hidden = await perform(env.DB, eve, { type: "note.create", text: `# Eve's own\n\n::image{${files.dot.id} 1x1}\n\n::file{${files.paper.id}}` });
+    await perform(env.DB, ada, { type: "note.create", text: `# Shows dot\n\n/image(${files.dot.id} 1x1)` });
+    const hidden = await perform(env.DB, eve, { type: "note.create", text: `# Eve's own\n\n/image(${files.dot.id} 1x1)\n\n/file(${files.paper.id})` });
     await perform(env.DB, eve, { type: "note.setPrivate", id: hidden.id, private: true });
     // A note in another workspace may write any id at all: it shows nothing, and is no use of the upload here.
     const stranger = await newMember("Stranger");
-    await perform(env.DB, stranger, { type: "note.create", text: `# Elsewhere\n\n::image{${files.zip.id} 1x1}\n\n::image{${files.dot.id} 1x1}` });
+    await perform(env.DB, stranger, { type: "note.create", text: `# Elsewhere\n\n/image(${files.zip.id} 1x1)\n\n/image(${files.dot.id} 1x1)` });
     return { ada, eve, projects, scribe, asScribe, files };
   }
 

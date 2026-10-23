@@ -211,7 +211,7 @@ test("over its own port a plugin is answered only for what it was permitted: wha
 
 test("a plugin can't read another plugin's frames, hand one a port or a document of its own, or pass for a frame the app is starting", async ({ page, baseURL }) => {
   const { admin } = await withHostile(page, baseURL!);
-  await perform(admin, { type: "note.create", text: "# Second\n\n::x-victim{}\n\nend\n" });
+  await perform(admin, { type: "note.create", text: "# Second\n\n/x-victim()\n\nend\n" });
   const frame = await background(page);
   const got: string[] = [];
   await page.exposeFunction("gotMessage", (data: string) => void got.push(data));
@@ -252,7 +252,7 @@ test("a plugin can't read another plugin's frames, hand one a port or a document
 
 test("a plugin can't send its frame, the frame around it, or the app anywhere, or open a window", async ({ page, baseURL }) => {
   const tries = ["self", "shell", "top", "named", "link", "popup"];
-  const text = `# Shared\n\n${tries.map((what) => `::x-trap{${what}}\n\n`).join("")}end\n`;
+  const text = `# Shared\n\n${tries.map((what) => `/x-trap(${what})\n\n`).join("")}end\n`;
   await page.setViewportSize({ width: 1280, height: 1600 });
   const asked: string[] = [];
   const app = new URL(baseURL!).origin;
@@ -286,7 +286,7 @@ test("a plugin can't send its frame, the frame around it, or the app anywhere, o
 
 test("a plugin's frame can't take the keyboard from the note, wherever it is drawn, or draw outside the room it was given", async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 1280, height: 1000 });
-  const { admin, note } = await withHostile(page, baseURL!, { text: "# Shared\n\n::x-trap{steal}\n\n::x-trap{cover}\n\nend line\n" });
+  const { admin, note } = await withHostile(page, baseURL!, { text: "# Shared\n\n/x-trap(steal)\n\n/x-trap(cover)\n\nend line\n" });
   const stopped = page.locator(".embed-below").getByRole("alert");
   await page.mouse.move(5, 5);
 
@@ -514,7 +514,7 @@ test("HTML embeds reach no site until an admin lists one, and then the Run butto
   await signInAsNewPerson(page, "Ada Lovelace");
   // Asked first, whether or not this server has a site of HTML embeds' own, so the Run button says what it would reach.
   await perform(page, { type: "settings.write", text: JSON.stringify({ "html.run": "ask first" }), baseRevision: 0 });
-  const note = await perform(page, { type: "note.create", text: `# Reaching\n\n:::html{height=80}\n${html}\n:::\n\nend\n` });
+  const note = await perform(page, { type: "note.create", text: `# Reaching\n\n/html(height=80)\n~~~html\n${html}\n~~~\n\nend\n` });
   const run = page.locator('.embed-below[data-embed="html"]').getByRole("button", { name: "Run HTML" });
   const found = () => running(page)[0]!.evaluate(() => (window as unknown as { found: Record<string, string> }).found);
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");

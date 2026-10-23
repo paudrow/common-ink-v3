@@ -58,7 +58,7 @@ const source = (page: Page) => editor(page).locator(".embed-source");
 const fonts = (page: Page) => page.evaluate(() => document.fonts.ready.then(() => undefined));
 
 test("a running stopwatch is the same element, still counting, with the cursor on it, through it, and typing around it: its text is shown in its line after it, and it doesn't move", async ({ page }) => {
-  const note = await open(page, "# Laps\n\nbefore\nLap ::stopwatch{} here.\nafter\n");
+  const note = await open(page, "# Laps\n\nbefore\nLap /stopwatch() here.\nafter\n");
   await fonts(page);
   await editor(page).getByRole("button", { name: "Start stopwatch" }).click();
   await expect(editor(page).getByRole("button", { name: "Stop stopwatch" })).toBeVisible();
@@ -124,7 +124,7 @@ test("a running stopwatch is the same element, still counting, with the cursor o
 test("two embeds on a line each show their text after themselves, with nothing above the line, and a press on a button of the embed leaves it where it is", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const since = new Date(Date.now() - 65_000).toISOString();
-  await open(page, `# Rows\n\nbefore\nTea ::timer{25m since=${since}} ::stopwatch{at=1m5s}\nafter\n`);
+  await open(page, `# Rows\n\nbefore\nTea /timer(25m since=${since}) /stopwatch(at=1m5s)\nafter\n`);
   await fonts(page);
   const cards = editor(page).locator(".embed-card");
   const off = { before: await boxOf(line(page, "before")), timer: await boxOf(cards.nth(0)) };
@@ -133,7 +133,7 @@ test("two embeds on a line each show their text after themselves, with nothing a
   // Every embed the selection touches is shown, each right after its own card.
   await line(page, "Tea").click({ position: { x: 2, y: 5 } });
   await page.keyboard.press("Shift+End");
-  await expect(source(page)).toHaveText([`::timer{25m since=${since}}`, "::stopwatch{at=1m5s}"]);
+  await expect(source(page)).toHaveText([`/timer(25m since=${since})`, "/stopwatch(at=1m5s)"]);
   const order = () => line(page, "Tea").evaluate((el) => [...el.querySelectorAll(".embed-frame, .embed-source")].map((one) => (one.matches(".embed-source") ? one.textContent!.split("{")[0] : one.querySelector<HTMLElement>(".embed")!.dataset.embed)));
   expect(await order()).toEqual(["timer", "::timer", "stopwatch", "::stopwatch"]);
   expect((await boxOf(source(page))).y).toBeGreaterThanOrEqual(off.before.y + off.before.height);
@@ -145,7 +145,7 @@ test("two embeds on a line each show their text after themselves, with nothing a
   await expect(source(page)).toHaveCount(0);
   await page.keyboard.press("ArrowDown");
   for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight");
-  await expect(source(page)).toHaveText([`::timer{25m since=${since}}`]);
+  await expect(source(page)).toHaveText([`/timer(25m since=${since})`]);
   const shown = await boxOf(cards.nth(0));
   await editor(page).getByRole("button", { name: "Pause timer" }).click();
   await expect(editor(page).getByRole("button", { name: "Start timer" })).toBeFocused();
@@ -155,12 +155,12 @@ test("two embeds on a line each show their text after themselves, with nothing a
 
 test("an inline timer's settings open right below the row it is on, and leave that row and the drawing as they are", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await open(page, "# Tea\n\nbefore\nSteep ::timer{5m} now, then pour.\nafter\n");
+  await open(page, "# Tea\n\nbefore\nSteep /timer(5m) now, then pour.\nafter\n");
   await fonts(page);
   await mark(page);
   await line(page, "Steep").click({ position: { x: 2, y: 5 } });
   for (let i = 0; i < 7; i++) await page.keyboard.press("ArrowRight");
-  await expect(source(page)).toHaveText("::timer{5m}");
+  await expect(source(page)).toHaveText("/timer(5m)");
   const row = await boxOf(line(page, "Steep"));
   await editor(page).getByRole("button", { name: "Settings for Timer" }).click();
   const panel = page.getByRole("dialog", { name: "Settings for Timer" });
@@ -174,7 +174,7 @@ test("an inline timer's settings open right below the row it is on, and leave th
 test("an inline timer's settings open below its whole line where the line wraps, as it does with the cursor on a running timer", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const words = Array.from({ length: 24 }, (_, i) => `leaf${i}`).join(" ");
-  await open(page, `# Tea\n\nbefore\nSteep ::timer{5m} ${words}.\nafter\n`);
+  await open(page, `# Tea\n\nbefore\nSteep /timer(5m) ${words}.\nafter\n`);
   await fonts(page);
   await editor(page).getByRole("button", { name: "Start timer" }).click();
   await line(page, "Steep").click({ position: { x: 2, y: 5 } });
@@ -189,7 +189,7 @@ test("an inline timer's settings open below its whole line where the line wraps,
 });
 
 test("a running stopwatch scrolled far out of sight and back shows the time that went by, and is still counting", async ({ page }) => {
-  await open(page, `# Long\n\nLap ::stopwatch{} here.\n\n${Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n")}\n`);
+  await open(page, `# Long\n\nLap /stopwatch() here.\n\n${Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n")}\n`);
   await editor(page).getByRole("button", { name: "Start stopwatch" }).click();
   await expect.poll(() => seconds(page, /^Stopwatch, /)).toBeGreaterThanOrEqual(1);
   const before = await seconds(page, /^Stopwatch, /);
@@ -207,7 +207,7 @@ test("a running stopwatch scrolled far out of sight and back shows the time that
 });
 
 test("a stopwatch and a timer say what their buttons do, and each button does it", async ({ page }) => {
-  const note = await open(page, "# Clocks\n\nLap ::stopwatch{} and tea ::timer{5m} here.\n");
+  const note = await open(page, "# Clocks\n\nLap /stopwatch() and tea /timer(5m) here.\n");
   const stopwatch = editor(page).locator('.embed[data-embed="stopwatch"]');
   const timer = editor(page).locator('.embed[data-embed="timer"]');
   const says = (clock: typeof timer) => clock.locator("button").evaluateAll((buttons) => buttons.map((b) => (b.textContent || getComputedStyle(b, "::before").content.replaceAll('"', "")) + (b.hasAttribute("disabled") ? " (off)" : "")));
@@ -223,7 +223,7 @@ test("a stopwatch and a timer say what their buttons do, and each button does it
   await expect.poll(() => read(page, note.id)).toMatch(/::timer\{5m at=\d+s\}|::timer\{5m\}/);
   await expect.poll(async () => (await says(timer)).slice(1)).toEqual(["Start", "Reset"]);
   await timer.getByRole("button", { name: "Reset timer" }).click();
-  await expect.poll(() => read(page, note.id)).toContain("::timer{5m}");
+  await expect.poll(() => read(page, note.id)).toContain("/timer(5m)");
   await expect.poll(() => says(timer)).toEqual(["5:00", "Start", "Reset (off)"]);
   await expect.poll(async () => (await timer.boundingBox())!.width).toBe(width);
 
@@ -231,13 +231,13 @@ test("a stopwatch and a timer say what their buttons do, and each button does it
   await expect.poll(async () => (await says(stopwatch)).slice(1)).toEqual(["Stop", "Reset"]);
   await stopwatch.getByRole("button", { name: "Stop stopwatch" }).click();
   await stopwatch.getByRole("button", { name: "Reset stopwatch" }).click();
-  await expect.poll(() => read(page, note.id)).toContain("::stopwatch{} and");
+  await expect.poll(() => read(page, note.id)).toContain("/stopwatch() and");
   // What the buttons say is not text in the line: the time is all a clock adds to it.
   await expect(line(page, "Lap")).toHaveText("Lap 0:00 and tea 5:00 here.");
 });
 
 test("an embed's one settings button, in its card, opens its settings beneath the card, and setting one rewrites the embed as the member's change, where it stands", async ({ page }) => {
-  const note = await open(page, "# Options\n\nTea ::timer{5m} and lap ::stopwatch{} here.\n\nlast\n");
+  const note = await open(page, "# Options\n\nTea /timer(5m) and lap /stopwatch() here.\n\nlast\n");
   await mark(page);
   const at = await place(page, ".embed");
 
@@ -259,7 +259,7 @@ test("an embed's one settings button, in its card, opens its settings beneath th
   await options.getByRole("spinbutton", { name: "Minutes" }).fill("25");
   await page.keyboard.press("Enter");
   await expect(editor(page).getByRole("button", { name: "Timer, 25:00 left" })).toBeVisible();
-  await expect.poll(() => read(page, note.id)).toContain("Tea ::timer{25m} and");
+  await expect.poll(() => read(page, note.id)).toContain("Tea /timer(25m) and");
   await expect(options.getByRole("spinbutton", { name: "Minutes" })).toHaveValue("25");
   await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
   // A longer time is wider. It starts where it did and is as tall.
@@ -272,23 +272,23 @@ test("an embed's one settings button, in its card, opens its settings beneath th
   await expect(editor(page).getByRole("button", { name: "Settings for Timer" })).toBeFocused();
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+z");
-  await expect.poll(() => read(page, note.id)).toContain("Tea ::timer{5m} and");
+  await expect.poll(() => read(page, note.id)).toContain("Tea /timer(5m) and");
 
   await editor(page).getByRole("button", { name: "Settings for Stopwatch" }).click();
   await page.getByRole("dialog", { name: "Settings for Stopwatch" }).getByRole("textbox", { name: "Time so far" }).fill("1m5s");
   await page.keyboard.press("Enter");
   await expect(editor(page).getByRole("button", { name: "Stopwatch, 1:05" })).toBeVisible();
-  await expect.poll(() => read(page, note.id)).toContain("::stopwatch{at=1m5s}");
+  await expect.poll(() => read(page, note.id)).toContain("/stopwatch(at=1m5s)");
 
   // Nothing offers the embed "as markdown": the cursor is put in it instead, here by a press on its card's own edge, and it is shown as written in its line.
   await page.keyboard.press("Escape");
   await expect(page.getByText("Edit as markdown")).toHaveCount(0);
   const stopwatch = editor(page).locator('.embed-card:has([data-embed="stopwatch"])');
   await stopwatch.click({ position: { x: 4, y: 4 } });
-  await expect(source(page)).toHaveText("::stopwatch{at=1m5s}");
+  await expect(source(page)).toHaveText("/stopwatch(at=1m5s)");
   await expect(editor(page).getByRole("button", { name: "Stopwatch, 1:05" })).toBeVisible();
   await page.keyboard.type("0");
-  await expect.poll(() => read(page, note.id)).toContain("::stopwatch{0at=1m5s}");
+  await expect.poll(() => read(page, note.id)).toContain("/stopwatch(0at=1m5s)");
   await page.keyboard.press("Backspace");
 });
 
@@ -301,7 +301,7 @@ test("Tab picks the highlighted item of the / menu, as Enter does", async ({ pag
   await page.keyboard.type("/stop");
   await expect(menu.filter({ hasText: "Stopwatch" })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Tab");
-  await expect.poll(() => read(page, note.id)).toBe("# Menu\n\n::stopwatch{}");
+  await expect.poll(() => read(page, note.id)).toBe("# Menu\n\n/stopwatch()");
   await expect(menu).toHaveCount(0);
   await page.keyboard.type(" /t");
   await expect(menu).toHaveText([/^Task list/, /^Table/, /^Timer/]);
@@ -311,7 +311,7 @@ test("Tab picks the highlighted item of the / menu, as Enter does", async ({ pag
   await page.keyboard.press("ArrowDown");
   await expect(menu.nth(2)).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Tab");
-  await expect.poll(() => read(page, note.id)).toBe("# Menu\n\n::stopwatch{} ::timer{5m}");
+  await expect.poll(() => read(page, note.id)).toBe("# Menu\n\n/stopwatch() /timer(5m)");
   await expect(menu).toHaveCount(0);
   // With no menu open, Tab is not taken from the note.
   await page.keyboard.press("ControlOrMeta+End");
@@ -323,7 +323,7 @@ test("Tab picks the highlighted item of the / menu, as Enter does", async ({ pag
   await expect.poll(() => read(page, note.id)).toMatch(/\n- one\n[ \t]+- two$/);
 });
 
-const BOARD = "# Board\n\nabove\n:::kanban{}\n## To do\n- write\n- review\n\n## Doing\n- build\n\n## Done\n:::\nbelow\n";
+const BOARD = "# Board\n\nabove\n/kanban()\n~~~markdown\n## To do\n- write\n- review\n\n## Doing\n- build\n\n## Done\n~~~\nbelow\n";
 
 test("the arrow keys go from the line above into a board's markdown, which is shown above the board that stays drawn, through it as through any text, and out to the line below, and back up", async ({ page }) => {
   const note = await open(page, BOARD);
@@ -499,7 +499,7 @@ test("a column is given a colour from the board, which its heading keeps as mark
 });
 
 test("a key that jumps past a board doesn't go into it, a press on a card puts the cursor at the end of that card's line, and a board with no columns has no options", async ({ page }) => {
-  const note = await open(page, "above\n:::kanban{}\n## To do\n- write\n- review\n:::\nbetween\n:::kanban{}\n:::\nbelow");
+  const note = await open(page, "above\n/kanban()\n~~~markdown\n## To do\n- write\n- review\n~~~\nbetween\n/kanban()\n~~~markdown\n~~~\nbelow");
   await expect(column(page, "To do")).toBeVisible();
   await line(page, "above").click();
   await page.keyboard.press("ControlOrMeta+End");
@@ -525,7 +525,7 @@ test("a key that jumps past a board doesn't go into it, a press on a card puts t
 test("with vim on and typing, Escape closes an embed's open options and leaves insert mode alone, and the next Escape is vim's", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
-  const note = await perform(page, { type: "note.create", text: "# Options\n\nTea ::timer{5m} here.\n\nlast\n" });
+  const note = await perform(page, { type: "note.create", text: "# Options\n\nTea /timer(5m) here.\n\nlast\n" });
   await page.goto(`/note/${note.id}`);
   const mode = page.locator(".cm-vim-panel");
   await line(page, "last").click();
@@ -548,7 +548,7 @@ test("with vim on and typing, Escape closes an embed's open options and leaves i
 });
 
 test("a note that starts with an embed opens with it drawn, the first press on the note lands where it was made, and a press on a card's title past a board goes to that embed and not into the board", async ({ page }) => {
-  const note = await open(page, "::timer{5m}\n:::kanban{}\n## To do\n- write\n:::\n\nSome words here.\n\nabove\n:::kanban{}\n## Next\n- later\n:::\n::stopwatch{} below the board\n\nlast\n");
+  const note = await open(page, "/timer(5m)\n/kanban()\n~~~markdown\n## To do\n- write\n~~~\n\nSome words here.\n\nabove\n/kanban()\n~~~markdown\n## Next\n- later\n~~~\n/stopwatch() below the board\n\nlast\n");
   await fonts(page);
   await expect(column(page, "Next")).toBeVisible();
   // The cursor is at the start of the note, on the timer, and nobody put it there.
@@ -568,20 +568,20 @@ test("a note that starts with an embed opens with it drawn, the first press on t
   // From the line above the second board, a press on the stopwatch's own card below it.
   await line(page, "above").click();
   await editor(page).locator('.embed-card:has([data-embed="stopwatch"])').click({ position: { x: 4, y: 4 } });
-  await expect(source(page)).toHaveText("::stopwatch{}");
+  await expect(source(page)).toHaveText("/stopwatch()");
   await expect(lines(page).filter({ hasText: ":::kanban" })).toHaveCount(0);
   await page.keyboard.type("at=5s");
-  await expect.poll(() => read(page, note.id)).toContain("::stopwatch{at=5s} below the board");
+  await expect.poll(() => read(page, note.id)).toContain("/stopwatch(at=5s) below the board");
 });
 
 test("an embed's text in a heading is one small size, and a long board's options open inside the window", async ({ page }) => {
   const cards = Array.from({ length: 40 }, (_, i) => `- card ${i}`).join("\n");
-  await open(page, `# Big ::stopwatch{at=1m5s} tail\n\nwords\n\n:::kanban{}\n## To do\n${cards}\n:::\n`);
+  await open(page, `# Big /stopwatch(at=1m5s) tail\n\nwords\n\n/kanban()\n~~~markdown\n## To do\n${cards}\n~~~\n`);
   await fonts(page);
   await line(page, "words").click();
   await page.keyboard.press("ControlOrMeta+Home");
   for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowRight");
-  await expect(source(page)).toHaveText("::stopwatch{at=1m5s}");
+  await expect(source(page)).toHaveText("/stopwatch(at=1m5s)");
   const [text, plain] = [await boxOf(source(page)), await boxOf(line(page, "words"))];
   expect(text.height).toBeLessThan(plain.height);
   await expect.poll(() => source(page).evaluate((el) => [...el.querySelectorAll("*")].map((child) => getComputedStyle(child).fontSize))).toEqual(await source(page).evaluate((el) => [...el.querySelectorAll("*")].map(() => getComputedStyle(el).fontSize)));
@@ -599,7 +599,7 @@ test("an embed's text in a heading is one small size, and a long board's options
 test("with vim on, j and k go into each of two boards that have no line between them, and into a board that ends the note from its first line", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
-  const note = await perform(page, { type: "note.create", text: "plain\n:::kanban{}\n## One\n:::\n:::kanban{}\n## Two\n- last\n:::" });
+  const note = await perform(page, { type: "note.create", text: "plain\n/kanban()\n~~~markdown\n## One\n~~~\n/kanban()\n~~~markdown\n## Two\n- last\n~~~" });
   await page.goto(`/note/${note.id}`);
   await expect(column(page, "Two")).toBeVisible();
   const cursor = page.locator(".cm-fat-cursor");
@@ -625,7 +625,7 @@ test("with vim on, j and k go into each of two boards that have no line between 
 });
 
 test("a press on an embed at the very top of a note nobody has put the cursor in leaves it drawn, and where it was", async ({ page }) => {
-  const note = await open(page, "::timer{5m}\n\nAfter the timer.\n");
+  const note = await open(page, "/timer(5m)\n\nAfter the timer.\n");
   await fonts(page);
   const card = editor(page).locator(".embed-card");
   const before = { card: await boxOf(card), after: await boxOf(line(page, "After")) };
@@ -640,7 +640,7 @@ test("a press on an embed at the very top of a note nobody has put the cursor in
 });
 
 test("a card added to a board at the very top of a note nobody has put the cursor in leaves the board drawn", async ({ page }) => {
-  const note = await open(page, ":::kanban{}\n## To do\n- write\n\n## Done\n:::\n\nAfter the board.\n");
+  const note = await open(page, "/kanban()\n~~~markdown\n## To do\n- write\n\n## Done\n~~~\n\nAfter the board.\n");
   await column(page, "To do").getByRole("button", { name: "Add a card" }).click();
   await page.keyboard.type("review");
   await page.keyboard.press("Enter");

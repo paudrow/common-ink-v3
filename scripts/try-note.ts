@@ -12,14 +12,15 @@
 // A folder is written by its name too, [[folder:Plans]], and is stored by the id of the folder of that
 // name at the top, made where there is none.
 //
-// A reference to an event or a contact is written by its record's name, [[event:Lunch with Sam]]
-// (or [[event:Lunch with Sam|words]], whose words are kept) or ::contact{Sam Okafor}, and is stored
-// as the reference of the sample record of that name, which is made for the dev user as the Calendar
-// page makes one. The sample calendar and contacts are connected for that first. Only the sample data
-// is read: no calendar or contacts that anyone connected is.
+// A reference to an event is written by its record's name, [[event:Lunch with Sam]] (or
+// [[event:Lunch with Sam|words]], whose words are kept), and is stored as the reference of the sample
+// record of that name, which is made for the dev user as the Calendar page makes one. The sample
+// calendar is connected for that first. Only the sample data is read: no calendar that anyone
+// connected is. An email is written by its thread's subject, /email(Invoice for October), among the
+// dev user's own threads. A contact is a mention, [[person:Sam Okafor]], written as it is.
 //
-// An upload is written by a sample file's name, ::image{sample.png}, ::audio{sample.wav},
-// ::video{sample.webm}, or ::file{sample.pdf} (and sample.csv, sample.txt, sample.md), and is
+// An upload is written by a sample file's name, /image(sample.png), /audio(sample.wav),
+// /video(sample.webm), or /file(sample.pdf) (and sample.csv, sample.txt, sample.md), and is
 // stored by the id of that file, sent to the address the app itself uploads to. A file of that name already there is used again. The files are made by
 // scripts/sample-files.ts: none is read from this computer.
 import { execFileSync } from "node:child_process";
@@ -28,7 +29,7 @@ import { parseArgs } from "node:util";
 import { isNoteId, linksIn, namesKind, retargeted, writtenEventLink } from "../src/core/links.ts";
 import { linkedDay } from "../src/core/dateLinks.ts";
 import { allPages } from "../src/core/allPages.ts";
-import type { CalendarEvent, Contact, MailThread, Reference, Source, Upload } from "../src/core/protocol.ts";
+import type { CalendarEvent, MailThread, Reference, Source, SourceRecord, Upload } from "../src/core/protocol.ts";
 import { namedReferences } from "../src/core/references.ts";
 import { writtenUpload } from "../src/core/uploadRefs.ts";
 import { HEAD_BYTES, typeOf } from "../src/core/filetypes.ts";
@@ -88,14 +89,13 @@ async function referring(written: string): Promise<string> {
   const DAY = 86_400_000;
   const from = Math.floor(Date.now() / DAY) * DAY;
   const { events } = await op<{ events: CalendarEvent[] }>({ type: "event.list", from, to: from + 7 * DAY, timeZone: "UTC" });
-  const { contacts } = await op<{ contacts: Contact[] }>({ type: "contact.list" });
   // A thread is named by its subject, among the threads kept for whoever runs this.
   const threads = sources.some((s) => s.kind === "email" && s.state === "connected") ? (await op<{ threads: MailThread[] }>({ type: "email.list", limit: 100 })).threads : [];
-  const records = { event: events.filter((e) => sample({ id: e.sourceId })).map((e) => ({ ...e, name: e.title })), contact: contacts.filter((c) => sample({ id: c.sourceId })), email: threads.map((t) => ({ ...t, name: t.subject })) };
+  const records: Partial<Record<SourceRecord["kind"], { sourceId: string; id: string; name: string }[]>> = { event: events.filter((e) => sample({ id: e.sourceId })).map((e) => ({ ...e, name: e.title })), email: threads.map((t) => ({ ...t, name: t.subject })) };
   let out = "";
   let at = 0;
   for (const { kind, name, display, from: start, to } of named) {
-    const record = records[kind].find((r) => r.name.toLowerCase() === name.toLowerCase());
+    const record = records[kind]?.find((r) => r.name.toLowerCase() === name.toLowerCase());
     if (!record) continue;
     const reference = await op<Reference>({ type: "record.refer", sourceId: record.sourceId, id: record.id });
     out += written.slice(at, start) + (kind === "event" ? writtenEventLink(reference.ref, display) : reference.text);
@@ -132,7 +132,7 @@ async function showing(written: string): Promise<string> {
     const upload = sent.get(name);
     if (!upload) continue;
     const plain = writtenUpload(embed, upload.id, upload.width && upload.height ? { width: upload.width, height: upload.height } : sampleSize(name));
-    out += written.slice(at, from) + (words ? `${plain.slice(0, -1)} ${words}}` : plain);
+    out += written.slice(at, from) + (words ? `${plain.slice(0, -1)} ${words})` : plain);
     at = to;
   }
   return out + written.slice(at);

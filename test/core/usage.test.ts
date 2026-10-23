@@ -34,7 +34,7 @@ describe("usage, counted on the server", () => {
     usage.points.length = 0;
     const SAID = "Launch plan for Hypatia\n\n#secret-project\n\n- [ ] call ada.lovelace@example.com\n- [ ] book the hall";
     const note = await perform(env.DB, ada, { type: "note.create", text: SAID });
-    await perform(env.DB, claude, { type: "note.write", id: note.id, baseRevision: note.revision, text: SAID.replace("- [ ] book", "- [x] book") + "\n- [ ] send the slides\n\n::timer{5m}\n::my-own-gadget{}" });
+    await perform(env.DB, claude, { type: "note.write", id: note.id, baseRevision: note.revision, text: SAID.replace("- [ ] book", "- [x] book") + "\n- [ ] send the slides\n\n/timer(5m)\n/x-my-own-gadget()" });
 
     const [person, agentFor] = [await hashOf(ada), await hashOf(claude)];
     const w = ada.workspaceId;

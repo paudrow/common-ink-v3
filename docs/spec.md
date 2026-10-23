@@ -275,7 +275,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 ### Embeds
 
-- Inline widgets use `::name{config}`. Block widgets use `:::name{config}`, then their data as markdown, then `:::`. A social post or video is its bare URL alone on a line. A third-party plugin's embed is named `::x-name{config}`, draws below its line, and can't be a block; no plugin takes over a built-in embed's name.
+- Inline widgets use `::name{config}`. Block widgets use `:::name{config}`, then their data as markdown, then `:::`. A social post or video is its bare URL alone on a line. A third-party plugin's embed is named `/x-name(config)`, draws below its line, and can't be a block; no plugin takes over a built-in embed's name.
 - Arbitrary HTML embeds run in a sandboxed frame on a separate origin. They cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission.
 
 ### Settings

@@ -273,7 +273,7 @@ test("a wide block scrolls inside itself, and nothing makes the page wider than 
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, {
     type: "note.create",
-    text: "# Board\n\nA line long enough that it has to wrap on a phone's screen to be read at all.\n\n:::kanban{}\n## To do\n\n- One\n\n## Doing\n\n- Two\n\n## Done\n\n- Three\n\n## Later\n\n- Four\n:::\n\n| Name | Role | Started | Notes |\n| --- | --- | --- | --- |\n| Ada Lovelace | Analyst | 1842 | Wrote the first program |\n",
+    text: "# Board\n\nA line long enough that it has to wrap on a phone's screen to be read at all.\n\n/kanban()\n~~~markdown\n## To do\n\n- One\n\n## Doing\n\n- Two\n\n## Done\n\n- Three\n\n## Later\n\n- Four\n~~~\n\n| Name | Role | Started | Notes |\n| --- | --- | --- | --- |\n| Ada Lovelace | Analyst | 1842 | Wrote the first program |\n",
   });
   await page.goto(`/note/${note.id}`);
   await expect(page.locator(".kanban")).toBeVisible();

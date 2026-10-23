@@ -31,10 +31,10 @@ test("a plugin whose views and embed throw is left out, the note keeps its typin
     ];
   });
   await signInAsNewPerson(page, "Ada Lovelace");
-  const note = await perform(page, { type: "note.create", text: "# Alpha\n\nSee ::broken{} here.\n" });
+  const note = await perform(page, { type: "note.create", text: "# Alpha\n\nSee /broken() here.\n" });
   await page.goto(`/note/${note.id}`);
 
-  await expect(text(page)).toContainText("See ::broken{} here.");
+  await expect(text(page)).toContainText("See /broken() here.");
   await expect(page.getByRole("tree", { name: "Folders" })).toBeVisible();
   await openAllNotes(page);
   await editOf(page, "Alpha").click();

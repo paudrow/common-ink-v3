@@ -31,7 +31,7 @@ export interface PluginState {
 export interface Added {
   commands: readonly { id: string; title: string }[];
   views: readonly { slot: keyof Slots; id: string; label: string | null }[];
-  /** `address` is on one a note writes as a web address alone on a line, and not as `::name{}`. */
+  /** `address` is on one a note writes as a web address alone on a line, and not as `/name()`. */
   embeds: readonly { name: string; title: string; block: boolean; address?: true }[];
   completions: readonly { id: string; trigger: string }[];
   editorExtensions: readonly string[];
@@ -47,7 +47,7 @@ export interface Installed {
   plugin: Plugin;
   /** Changes when the plugin is to start again: other code, another manifest, other permissions. */
   version: string;
-  /** Whose it is. One that is `installed`, which it is unless said, can't go by a name of the app's own, and its embeds are written `::x-name{}`. */
+  /** Whose it is. One that is `installed`, which it is unless said, can't go by a name of the app's own, and its embeds are written `/x-name()`. */
   origin?: "own" | "installed";
   /** For one of the app's own: the built-in plugin its contributions come after. Any other comes after them all. */
   after?: string;
@@ -394,7 +394,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
           const marked = theirs(plugin);
           if (embed.name.startsWith(INSTALLED_EMBED) !== marked) throw new Error(`${marked ? "An" : "Only an"} installed plugin's embed has a name that starts with ${INSTALLED_EMBED}, and this one is ${embed.name}`);
           const address = "claims" in embed;
-          // An address embed is in no note by its name, so it is no clash with an embed a note writes by the same one: a video by its address, and `::video{}`.
+          // An address embed is in no note by its name, so it is no clash with an embed a note writes by the same one: a video by its address, and `/video()`.
           const dispose = keep(add(embeds, address ? `address ${embed.name}` : embed.name, embed, index, address ? "an address embed named" : "an embed named"));
           owners.set(embed, owner);
           return dispose;
@@ -402,7 +402,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         list: () =>
           contributions()
             .embeds.filter((e): e is Embed => !("claims" in e) && e.menu !== false)
-            .map(({ name, title, block, starts, description, preview, pick }) => ({ name, title, block, starts, ...(description && { description }), ...(preview && { preview }), ...(pick && { pick }) })),
+            .map(({ name, title, block, content, starts, description, preview, pick }) => ({ name, title, block, ...(content && { content }), starts, ...(description && { description }), ...(preview && { preview }), ...(pick && { pick }) })),
       },
       completions: {
         register(completion) {

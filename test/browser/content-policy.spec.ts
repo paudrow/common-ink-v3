@@ -23,7 +23,7 @@ async function watchRefusals(page: Page) {
   };
 }
 
-const NOTE = "# Policy\n\nTea ::timer{5m} and ::stopwatch{} here.\n\n:::kanban{}\n## To do\n- write\n\n## Done\n:::\n\nThe end.";
+const NOTE = "# Policy\n\nTea /timer(5m) and /stopwatch() here.\n\n/kanban()\n~~~markdown\n## To do\n- write\n\n## Done\n~~~\n\nThe end.";
 
 test("the app's pages draw and run under the policy the Worker sends, and it refuses what isn't the app's own", async ({ page }) => {
   const watch = await watchRefusals(page);
@@ -120,9 +120,10 @@ const MEDIA = [
   "",
   "https://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/3l6oveex3ii2l",
   "",
-  ":::html{height=80}",
+  "/html(height=80)",
+  "```html",
   '<p id="ran">HTML ran</p><script>document.getElementById("ran").textContent += " and its script too"</script>',
-  ":::",
+  "```",
   "",
   "The end.",
 ].join("\n");
@@ -225,7 +226,7 @@ test("a PDF is drawn by pdf.js under the page's policy, in a note and over the a
     const res = await fetch(`/api/workspaces/${id}/uploads`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name: "paper.pdf" })) }, body: Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)) });
     return ((await res.json()) as { id: string }).id;
   }, pdf({ pages: 2, script: "app.alert('ran')" }).toString("base64"));
-  const note = await perform(page, { type: "note.create", text: `# Paper\n\n::file{${sent}}\n\nThe end.` });
+  const note = await perform(page, { type: "note.create", text: `# Paper\n\n/file(${sent})\n\nThe end.` });
   await page.goto(`/note/${note.id}`);
   const card = page.locator('.embed-below[data-embed="file"]');
   await expect(card.locator("canvas")).toHaveCount(2);
@@ -242,7 +243,7 @@ test("a drawing is edited in Excalidraw and saved under the page's policy, Excal
   const loaded: string[] = [];
   page.on("request", (request) => loaded.push(request.url()));
   await signInAsNewPerson(page, "Ada Lovelace");
-  const note = await perform(page, { type: "note.create", text: "# Plan\n\n::drawing{}\n\nThe end." });
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\n/drawing()\n\nThe end." });
   await page.goto(`/note/${note.id}`);
   await page.getByRole("button", { name: "Edit drawing" }).click();
   const editor = page.getByRole("dialog", { name: "Edit Drawing" });
@@ -327,7 +328,7 @@ test("a workspace's plugins run under the same policy: shut off in frames, and w
   const settings = await perform(page, { type: "settings.read" });
   await perform(page, { type: "settings.write", text: JSON.stringify({ ...JSON.parse(settings.text || "{}"), [`${id}.enabled`]: true }), baseRevision: settings.revision });
 
-  const note = await perform(page, { type: "note.create", text: "# Framed\n\n::x-boxed{}\n\nend" });
+  const note = await perform(page, { type: "note.create", text: "# Framed\n\n/x-boxed()\n\nend" });
   await page.goto(`/note/${note.id}`);
   await expect((await frameFor(page, "embed", "boxed")).locator(".said")).toHaveText("An embed");
   await expect((await frameFor(page, "view", "low")).locator(".said")).toHaveText("A bar view");

@@ -54,7 +54,7 @@ const MINUTES = Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of the minut
 test("a PDF on a line of its own shows its first three pages drawn in the note and how many it has, and a press shows every page larger over the app, with Download", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const paper = await send(page, "paper.pdf", pdf({ pages: 5 }));
-  await noteWith(page, `# Reading\n\n::file{${paper.id}}\n\nafter\n`);
+  await noteWith(page, `# Reading\n\n/file(${paper.id})\n\nafter\n`);
   const shown = card(page, "paper.pdf");
   await expect(shown.locator("canvas")).toHaveCount(3);
   await expect(shown.locator(".upload-card-head")).toContainText("5 pages, the first 3 shown");
@@ -88,7 +88,7 @@ test("a CSV shows its first rows, text and markdown their first lines, a file wi
   const readme = await send(page, "readme.md", Buffer.from("# Read me\n\n- **one**\n- two\n"));
   const archive = await send(page, "archive.zip", Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]));
   await page.setViewportSize({ width: 1280, height: 1600 });
-  await noteWith(page, `# Files\n\n::file{${cities.id}}\n\n::file{${minutes.id}}\n\n::file{${readme.id}}\n\n::file{${archive.id}}\n\nSee ::file{${cities.id}} here.\n\nafter\n`);
+  await noteWith(page, `# Files\n\n/file(${cities.id})\n\n/file(${minutes.id})\n\n/file(${readme.id})\n\n/file(${archive.id})\n\nSee /file(${cities.id}) here.\n\nafter\n`);
   await expect(cards(page)).toHaveCount(4);
 
   const table = card(page, "cities.csv").locator("table");
@@ -124,7 +124,7 @@ test("a file's card keeps the room it had before its preview came, short or long
     await route.fallback();
   });
   await page.setViewportSize({ width: 1280, height: 1600 });
-  await noteWith(page, `# Files\n\n${files.map((f) => `::file{${f.id}}`).join("\n\n")}\n\nafter\n`);
+  await noteWith(page, `# Files\n\n${files.map((f) => `/file(${f.id})`).join("\n\n")}\n\nafter\n`);
   await expect(page.locator(".upload-card-name")).toHaveCount(4);
   await expect.poll(() => held.length).toBe(4);
   const where = () => page.evaluate(() => ({ cards: [...document.querySelectorAll('.embed-below[data-embed="file"]')].map((c) => c.getBoundingClientRect().height), after: [...document.querySelectorAll(".cm-line")].find((l) => l.textContent === "after")!.getBoundingClientRect().top }));
@@ -144,12 +144,12 @@ test("pdf.js is loaded only once a PDF is shown, and only from the app's own add
   await signInAsNewPerson(page, "Ada Lovelace");
   const cities = await send(page, "cities.csv", Buffer.from(CITIES));
   const paper = await send(page, "paper.pdf", pdf());
-  await noteWith(page, `# Table\n\n::file{${cities.id}}\n\nafter\n`);
+  await noteWith(page, `# Table\n\n/file(${cities.id})\n\nafter\n`);
   await expect(card(page, "cities.csv").locator("tbody tr")).toHaveCount(6);
   const loaded = () => asked.filter((url) => /pdf/i.test(new URL(url).pathname));
   expect(loaded(), "nothing of pdf.js before a PDF is shown").toEqual([]);
 
-  await noteWith(page, `# Paper\n\n::file{${paper.id}}\n\nafter\n`);
+  await noteWith(page, `# Paper\n\n/file(${paper.id})\n\nafter\n`);
   await expect.poll(() => blueIn(card(page, "paper.pdf").locator("canvas"))).toBeGreaterThan(0.1);
   expect(loaded().some((url) => /pdf\.worker/.test(url)), "its worker").toBe(true);
   expect(loaded().filter((url) => !url.startsWith(baseURL!)), "from nowhere else").toEqual([]);
@@ -160,7 +160,7 @@ test("the Uploads page's panel is a preview of the selected file, the same as a 
   const archive = await send(page, "archive.zip", Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]));
   const cities = await send(page, "cities.csv", Buffer.from(CITIES));
   const paper = await send(page, "paper.pdf", pdf({ pages: 3 }));
-  await perform(page, { type: "note.create", text: `# Trips\n\n::file{${paper.id}}\n` });
+  await perform(page, { type: "note.create", text: `# Trips\n\n/file(${paper.id})\n` });
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto(`/uploads/${paper.id}`);
   const panel = page.getByRole("complementary", { name: "paper.pdf" });
@@ -206,7 +206,7 @@ test("a PDF whose pages can't all be drawn, whose pages lead back to themselves,
   await signInAsNewPerson(page, "Ada Lovelace");
   const sent = await Promise.all(Object.entries(UNDRAWABLE).map(([name, bytes]) => send(page, name, bytes)));
   await page.setViewportSize({ width: 1280, height: 1600 });
-  await noteWith(page, `# Broken\n\n${sent.map((upload) => `::file{${upload.id}}`).join("\n\n")}\n\nafter\n`);
+  await noteWith(page, `# Broken\n\n${sent.map((upload) => `/file(${upload.id})`).join("\n\n")}\n\nafter\n`);
   await expect(cards(page)).toHaveCount(3);
   for (const { name } of sent) {
     await expect(card(page, name).locator(".upload-card-body"), name).toContainText("This PDF couldn't be drawn. Download it to read it.");
@@ -226,7 +226,7 @@ test("a page far taller than it is wide, or far wider than it is tall, is drawn 
   const wide = await send(page, "wide.pdf", pdf({ size: [100000, 100] }));
   const letter = await send(page, "letter.pdf", pdf());
   await page.setViewportSize({ width: 1280, height: 1600 });
-  await noteWith(page, `# Shapes\n\n::file{${tall.id}}\n\n::file{${wide.id}}\n\n::file{${letter.id}}\n\nafter\n`);
+  await noteWith(page, `# Shapes\n\n/file(${tall.id})\n\n/file(${wide.id})\n\n/file(${letter.id})\n\nafter\n`);
   await page.setViewportSize({ width: 1280, height: 800 });
   const drawn = async (name: string) => {
     await card(page, name).getByRole("button", { name: `Preview ${name}` }).click();

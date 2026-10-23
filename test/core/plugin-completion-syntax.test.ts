@@ -57,12 +57,12 @@ describe("whether a trigger starts its line, where Enter picks from the list", (
 });
 
 describe("placing a picked item", () => {
-  const timer = { label: "Timer", insert: "::timer{5m}", select: [8, 10] as const };
-  const board = { label: "Kanban board", insert: ":::kanban{}\n## To do\n:::", block: true };
+  const timer = { label: "Timer", insert: "/timer(5m)", select: [7, 9] as const };
+  const board = { label: "Kanban board", insert: "/kanban()\n~~~markdown\n## To do\n~~~", block: true };
 
   it("puts an inline item where the trigger was, with its selection or the cursor after it", () => {
-    expect(placed(timer, { from: 10, to: 13, before: "Tea ", after: " now", below: "" })).toEqual({ from: 10, to: 13, insert: "::timer{5m}", anchor: 18, head: 20 });
-    expect(placed({ label: "Stopwatch", insert: "::stopwatch{}" }, { from: 0, to: 2, before: "", after: "", below: null })).toMatchObject({ insert: "::stopwatch{}", anchor: 13, head: 13 });
+    expect(placed(timer, { from: 10, to: 13, before: "Tea ", after: " now", below: "" })).toEqual({ from: 10, to: 13, insert: "/timer(5m)", anchor: 17, head: 19 });
+    expect(placed({ label: "Stopwatch", insert: "/stopwatch()" }, { from: 0, to: 2, before: "", after: "", below: null })).toMatchObject({ insert: "/stopwatch()", anchor: 12, head: 12 });
   });
 
   it("gives a block lines of its own and leaves the cursor on the line after it", () => {

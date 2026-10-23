@@ -1,7 +1,9 @@
+import { writtenEmbed } from "./embedSyntax.ts";
 import { inOrder, widened, within, type Span } from "./events.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
 import { writtenEventLink } from "./links.ts";
+import { writtenMention } from "./mentions.ts";
 import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
@@ -388,10 +390,14 @@ export async function contactCards(asker: Asker, is: (contact: Contact) => boole
  * What a note may hold of a record: its reference, and words its owner is content for every reader of the note to see.
  * An event's title can be someone else's, who invited the member: it writes no embed, link or code into the note.
  */
-const labelled = (label: string) => label.replace(/[{}[\]`\s]+/g, " ").replace(/ +/g, " ").trim().slice(0, 200);
+const labelled = (label: string) => label.replace(/[(){}[\]"`\s]+/g, " ").replace(/ +/g, " ").trim().slice(0, 200);
 
-/** A reference as a note writes it: a link to an event, which shows the event as it is, or an embed whose config is the reference, then the label. */
-export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) => (kind === "event" ? writtenEventLink(ref) : `::${kind}{${[ref, labelled(label)].filter(Boolean).join(" ")}}`);
+/**
+ * A reference as a note writes it: a link to an event, which shows the event as it is; a mention of a
+ * contact by their name, as `@` writes one; or an email's embed, whose config is the reference, then the label.
+ */
+export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) =>
+  kind === "event" ? writtenEventLink(ref) : kind === "contact" ? writtenMention({ name: label }) : writtenEmbed(kind, [ref, labelled(label)].filter(Boolean).join(" "));
 
 async function recordOf(source: DataSource, ref: string, id: string): Promise<SourceRecord | null> {
   if (source.kind === "email") {

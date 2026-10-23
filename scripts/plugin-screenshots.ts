@@ -29,7 +29,7 @@ const SHOTS: readonly Shot[] = [
   {
     id: "kanban",
     height: 430,
-    note: "# Launch plan\n\n:::kanban{}\n## To do\n\n- Write the announcement\n- Record the demo\n\n## Doing\n\n- Fix the import bug\n\n## Done\n\n- Pick a date\n- Book the room\n:::\n",
+    note: "# Launch plan\n\n/kanban()\n~~~markdown\n## To do\n\n- Write the announcement\n- Record the demo\n\n## Doing\n\n- Fix the import bug\n\n## Done\n\n- Pick a date\n- Book the room\n~~~\n",
   },
   {
     id: "tables",

@@ -4,7 +4,9 @@
 // person's id before a count leaves it (src/worker/usage.ts). Nothing is counted where no counter was handed
 // here, as on this machine, in Previews and in tests that don't look.
 
+import { inlineIn, readNote } from "./embedSyntax.ts";
 import { NOTE_SYNTAX } from "./noteSyntax.ts";
+import { blanked, codeSpans } from "./spans.ts";
 import type { OpType, Upload } from "./protocol.ts";
 import { todosIn } from "./todos.ts";
 
@@ -130,14 +132,14 @@ export function featureOf(type: OpType, result: unknown): Feature | null {
   return FEATURE_OPS[type] ?? null;
 }
 
-const EMBED = /^ {0,3}:{2,3}([a-z][a-z0-9-]*)\{/gm;
-
 /** How many of each embed `text` writes, by the name it is counted under. */
 function embedsIn(text: string): Map<string, number> {
   const found = new Map<string, number>();
-  if (!text.includes("::")) return found;
-  for (const [, name] of text.matchAll(EMBED)) {
-    const counted = BUILT_IN_EMBEDS.has(name!) ? name! : "plugin";
+  if (!text.includes("(")) return found;
+  const { lines, blocks } = readNote(text);
+  const inline = lines.flatMap(({ line, from, is }) => (is === "prose" && line.includes("(") ? inlineIn(blanked(line, codeSpans(line), " "), from) : []));
+  for (const { name } of [...blocks, ...inline]) {
+    const counted = BUILT_IN_EMBEDS.has(name) ? name : "plugin";
     found.set(counted, (found.get(counted) ?? 0) + 1);
   }
   return found;

@@ -304,7 +304,7 @@ test("a video's address takes no room until the cursor is on its line, not when 
 test("each thing below a line is one box with one radius, and what is in it fills it and is cut to it", async ({ page }) => {
   await standIns(page);
   await page.setViewportSize({ width: 1280, height: 1600 });
-  await open(page, "# Corners\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nhttps://x.com/jack/status/20\n\n:::html{height=80}\n<b>hello</b>\n:::\n\nlast\n");
+  await open(page, "# Corners\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nhttps://x.com/jack/status/20\n\n/html(height=80)\n~~~html\n<b>hello</b>\n~~~\n\nlast\n");
   await below(page, "video").getByRole("button", { name: /^Play video/ }).click();
   await expect(page.locator(".embed-below iframe")).toHaveCount(3);
   const drawn = (embed: string) =>
@@ -453,7 +453,7 @@ test("an HTML embed can't reach the app, the member's session, the browser's sto
 </script>`;
   await page.setViewportSize({ width: 1280, height: 1400 });
   // Asked first, so the page's own history is read before anything has run.
-  const note = await open(page, `# Probe\n\n:::html{height=80}\n${probe}\n:::\n\nend\n`, { "html.run": "ask first" });
+  const note = await open(page, `# Probe\n\n/html(height=80)\n~~~html\n${probe}\n~~~\n\nend\n`, { "html.run": "ask first" });
 
   // Opening the note ran nothing.
   await settled(page);
@@ -540,7 +540,7 @@ test("what is below a line is there, whole and in its place, in every frame pain
   const frames = () => page.evaluate(() => (window as unknown as { painted: { written: boolean; rooms: string[]; shown: string[]; filled: boolean }[] }).painted.splice(0));
   await page.setViewportSize({ width: 1280, height: 1400 });
   await standIns(page);
-  await open(page, "# Video\n\nabove\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nhttps://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/3l6oveex3ii2l\n\n:::html{height=120}\n<p>Hello</p>\n:::\n\nafter\n");
+  await open(page, "# Video\n\nabove\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nhttps://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/3l6oveex3ii2l\n\n/html(height=120)\n~~~html\n<p>Hello</p>\n~~~\n\nafter\n");
   await expect(page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello")).toBeVisible();
   await settled(page);
 
@@ -578,7 +578,7 @@ test("an HTML embed can't send its frame, or any frame, anywhere: not to a site 
   const asked: string[] = [];
   page.on("request", (request) => request.frame() !== page.mainFrame() && [app, shell].some((host) => request.url().startsWith(host) && asked.push(request.url().slice(host.length))));
 
-  const named = (name: string, body: string) => `:::html{height=60}\n<script>window.probe = ${JSON.stringify(name)};</script>${body}\n:::\n\n`;
+  const named = (name: string, body: string) => `/html(height=60)\n~~~html\n<script>window.probe = ${JSON.stringify(name)};</script>${body}\n~~~\n\n`;
   const later = (run: string) => `<script>setTimeout(() => { try { ${run}; window.did = "ran"; } catch (err) { window.did = "refused: " + err.name; } }, 200);</script>`;
   const embeds: [name: string, body: string][] = [
     ["to a site the app frames", later(`location.href = "https://www.youtube-nocookie.com/embed/x?leak=1"`)],
@@ -614,7 +614,7 @@ const stopped = (page: Page) => page.locator(".embed-below").getByRole("alert");
 const read = async (page: Page, id: string) => (await perform(page, { type: "note.read", id })).text;
 
 test("an HTML embed that takes the keyboard as it runs on opening the note is stopped before a key reaches it, and what the member types stays in the note", async ({ page }) => {
-  const note = await open(page, `# Typing\n\n:::html{height=80}\n${STEALS}\n:::\n\nend line\n`);
+  const note = await open(page, `# Typing\n\n/html(height=80)\n~~~html\n${STEALS}\n~~~\n\nend line\n`);
   await expect(stopped(page)).toContainText("HTML was stopped: it tried to take the keyboard while you were typing.");
   await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
   await expect(editor(page)).toBeFocused();
@@ -630,7 +630,7 @@ test("an HTML embed that takes the keyboard as it runs on opening the note is st
 
 test("a frame that waits for the member to be typing elsewhere is stopped too, with every key in the note", async ({ page }) => {
   const waits = `<input id="i"><script>setTimeout(() => setInterval(() => { window.focus(); document.getElementById("i").focus(); }, 30), 1500);</script>`;
-  const note = await open(page, `# Typing\n\n:::html{height=80}\n${waits}\n:::\n\nend line\n`);
+  const note = await open(page, `# Typing\n\n/html(height=80)\n~~~html\n${waits}\n~~~\n\nend line\n`);
   await expect(below(page, "html").locator("iframe")).toBeVisible();
   // The pointer passes over it and leaves, and the member goes back to the note.
   const box = (await below(page, "html").boundingBox())!;
@@ -646,7 +646,7 @@ test("a frame that waits for the member to be typing elsewhere is stopped too, w
 });
 
 test("a frame the member clicks into has the keyboard, and gives it back from a button or a click in the note", async ({ page }) => {
-  const note = await open(page, `# Typing\n\n:::html{height=80}\n<input id="i" aria-label="Inside">\n:::\n\nend line\n`);
+  const note = await open(page, `# Typing\n\n/html(height=80)\n~~~html\n<input id="i" aria-label="Inside">\n~~~\n\nend line\n`);
   const inside = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByRole("textbox", { name: "Inside" });
   // A pointer moves before it presses, which is what lets the press through to the frame.
   const pointAt = async () => {
@@ -818,7 +818,7 @@ test("a playing video goes on through vim's operators, undo and redo, and plugin
 
 test("an HTML block's lines fold away when the cursor leaves it, which moves the lines after it, and its frame stays where its room is", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1200 });
-  await open(page, "# Scene\n\nabove\n\n:::html{height=120}\n<p>one</p>\n<p>two</p>\n<p>three</p>\n:::\n\nafter the block\nand another\n");
+  await open(page, "# Scene\n\nabove\n\n/html(height=120)\n~~~html\n<p>one</p>\n<p>two</p>\n<p>three</p>\n~~~\n\nafter the block\nand another\n");
   await expect(below(page, "html").locator("iframe")).toBeVisible();
   await settled(page);
   const top = () => line(page, "after the block").evaluate((el) => Math.round(el.getBoundingClientRect().top));
@@ -837,7 +837,7 @@ test("an HTML block's lines fold away when the cursor leaves it, which moves the
 for (const scheme of ["light", "dark"] as const) {
   test(`an HTML embed that says nothing of colour is read in the app's own, in the ${scheme} theme, and its frame is never a white box`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme });
-    await open(page, "# Bare\n\n:::html{height=80}\n<b>hello</b>\n:::\n\nlast\n");
+    await open(page, "# Bare\n\n/html(height=80)\n~~~html\n<b>hello</b>\n~~~\n\nlast\n");
     const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
     await expect(framed.getByText("hello")).toBeVisible();
     const colours = () => {
@@ -860,7 +860,7 @@ test("HTML is not handed to a frame whose document came without what shuts it in
     delete headers["content-security-policy"];
     await route.fulfill({ response: served, headers });
   });
-  await open(page, "# Open\n\n:::html{height=80}\n<b>hello</b><script>window.ran = true;</script>\n:::\n\nlast\n");
+  await open(page, "# Open\n\n/html(height=80)\n~~~html\n<b>hello</b><script>window.ran = true;</script>\n~~~\n\nlast\n");
   await expect(below(page, "html").getByRole("alert")).toHaveText("This browser wouldn't load the frame HTML runs in, so nothing was run.", { timeout: 15_000 });
   expect(running(page)).toEqual([]);
   await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
@@ -880,7 +880,7 @@ test("HTML asks first where embeds have no site of their own, runs by itself onc
       await route.fulfill({ response, json: { ...(await response.json()), setup: { embedSite: site } } });
     });
   await embedSite(false);
-  await open(page, "# Asked\n\n:::html{height=80}\n<p>asked</p>\n:::\n\nlast\n", {});
+  await open(page, "# Asked\n\n/html(height=80)\n~~~html\n<p>asked</p>\n~~~\n\nlast\n", {});
   await expect(runHtml(page)).toBeVisible();
   await settled(page);
   expect(running(page)).toEqual([]);
@@ -892,7 +892,7 @@ test("HTML asks first where embeds have no site of their own, runs by itself onc
   await expect(choice.locator("option")).toHaveText(["automatically", "ask first"]);
   await choice.selectOption("automatically");
   await expect.poll(settings).toEqual({ "html.run": "automatically" });
-  const far = await perform(page, { type: "note.create", text: `# Far\n\n${filler}\n\n:::html{height=80}\n<p>far down</p>\n:::\n\nlast\n` });
+  const far = await perform(page, { type: "note.create", text: `# Far\n\n${filler}\n\n/html(height=80)\n~~~html\n<p>far down</p>\n~~~\n\nlast\n` });
   await page.goto(`/note/${far.id}`);
   await settled(page);
   expect(running(page), "nothing runs while its room is off screen").toEqual([]);
@@ -903,14 +903,14 @@ test("HTML asks first where embeds have no site of their own, runs by itself onc
 
   // A server whose embeds have a site of their own says so, and there a member who hasn't chosen isn't asked. Asking first is theirs to choose.
   await embedSite(true);
-  await open(page, "# Apart\n\n:::html{height=80}\n<p>apart</p>\n:::\n\nlast\n", {});
+  await open(page, "# Apart\n\n/html(height=80)\n~~~html\n<p>apart</p>\n~~~\n\nlast\n", {});
   await expect(framed.getByText("apart")).toBeVisible();
   await expect(runHtml(page)).toHaveCount(0);
   await page.goto("/settings/plugins/html");
   await expect(choice).toHaveValue("automatically");
   await choice.selectOption("ask first");
   await expect.poll(settings).toEqual({ "html.run": "ask first" });
-  const asked = await perform(page, { type: "note.create", text: "# Asked again\n\n:::html{height=80}\n<p>asked again</p>\n:::\n\nlast\n" });
+  const asked = await perform(page, { type: "note.create", text: "# Asked again\n\n/html(height=80)\n~~~html\n<p>asked again</p>\n~~~\n\nlast\n" });
   await page.goto(`/note/${asked.id}`);
   await expect(runHtml(page)).toBeVisible();
   await settled(page);
@@ -933,7 +933,7 @@ async function shells(page: Page) {
 test("an HTML body being written runs nothing at each key: what was written runs once the cursor has left the block", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1200 });
   const asked = await shells(page);
-  await open(page, "# Writing\n\n:::html{height=80}\n<p>first</p>\n:::\n\nafter\n");
+  await open(page, "# Writing\n\n/html(height=80)\n~~~html\n<p>first</p>\n~~~\n\nafter\n");
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
   await expect(framed.getByText("first")).toBeVisible();
   expect(asked()).toHaveLength(1);
@@ -956,7 +956,7 @@ test("an HTML body being written runs nothing at each key: what was written runs
 test("an HTML embed in a pane is run only once its room is in sight in that pane, not because it is inside the window", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1200 });
   const fill = Array.from({ length: 12 }, (_, n) => `p${n}`).join("\n\n");
-  const note = await open(page, `# Split\n\nintro\n\n${fill}\n\n:::html{height=60}\n<p>far in the pane</p>\n:::\n\nend\n`);
+  const note = await open(page, `# Split\n\nintro\n\n${fill}\n\n/html(height=60)\n~~~html\n<p>far in the pane</p>\n~~~\n\nend\n`);
   await page.goto("/");
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("intro");
@@ -978,14 +978,14 @@ test("an HTML embed in a pane is run only once its room is in sight in that pane
 });
 
 test("HTML that stops its own page from loading is still shown, and does not stay a placeholder", async ({ page }) => {
-  await open(page, "# Stopped\n\n:::html{height=80}\n<p>stopped early</p><script>window.stop()</script>\n:::\n\nlast\n");
+  await open(page, "# Stopped\n\n/html(height=80)\n~~~html\n<p>stopped early</p><script>window.stop()</script>\n~~~\n\nlast\n");
   await expect(page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("stopped early")).toBeAttached();
   await expect(page.locator(".embed-below .embed-loading")).toHaveCount(0, { timeout: 8000 });
   await expect(below(page, "html").locator("iframe")).not.toHaveClass(/embed-arriving/);
 });
 
 test("a change to whether HTML runs by itself reaches an open note: ask first stops what ran by itself, automatically runs what was asking, and a value that isn't a choice asks", async ({ page }) => {
-  await open(page, "# Follows\n\n:::html{height=80}\n<p>following</p>\n:::\n\nlast\n", { "html.run": "Ask first" });
+  await open(page, "# Follows\n\n/html(height=80)\n~~~html\n<p>following</p>\n~~~\n\nlast\n", { "html.run": "Ask first" });
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
   await expect(runHtml(page)).toBeVisible();
   await settled(page);
@@ -1011,7 +1011,7 @@ test("a change to whether HTML runs by itself reaches an open note: ask first st
 });
 
 test("HTML that was running when its page stopped answering asks before it runs again, in a new tab too, and runs by itself after a page left as usual", async ({ page, context, browser, baseURL }) => {
-  const note = await open(page, "# Froze\n\n:::html{height=80}\n<p>was running</p>\n:::\n\nlast\n");
+  const note = await open(page, "# Froze\n\n/html(height=80)\n~~~html\n<p>was running</p>\n~~~\n\nlast\n");
   const framed = (p: Page) => p.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
   await expect(framed(page).getByText("was running")).toBeVisible();
   // Left as usual: run again by itself.
@@ -1056,7 +1056,7 @@ test("what an HTML embed runs can't change whether HTML runs by itself, by the s
       window.tried = tried;
     })();
   </script>`;
-  const note = await open(page, `# Tries\n\n:::html{height=80}\n${tries}\n:::\n\nlast\n`, { "html.run": "ask first" });
+  const note = await open(page, `# Tries\n\n/html(height=80)\n~~~html\n${tries}\n~~~\n\nlast\n`, { "html.run": "ask first" });
   await runHtml(page).click();
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
   await expect(framed.locator("#out")).toHaveText("tried");
@@ -1072,7 +1072,7 @@ test("what an HTML embed runs can't change whether HTML runs by itself, by the s
 test("a post and an HTML embed hold their room with a placeholder its size while they load, and nothing in the note moves when they arrive", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1400 });
   await standIns(page, { postHeight: 300 });
-  const note = await open(page, "# Arriving\n\nabove\n\nhttps://x.com/jack/status/20\n\n:::html{height=120}\n<p>Hello</p>\n:::\n\nafter\n");
+  const note = await open(page, "# Arriving\n\nabove\n\nhttps://x.com/jack/status/20\n\n/html(height=120)\n~~~html\n<p>Hello</p>\n~~~\n\nafter\n");
   // Seen once, so the post's height is known, as it is from the second time a post is shown.
   await expect.poll(async () => (await below(page, "post").boundingBox())?.height).toBe(300);
 

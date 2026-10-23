@@ -313,7 +313,7 @@ test("flipping the coin leaves the note where it was scrolled", async ({ page })
 
 test("a stopwatch written in a note is drawn in it and runs, and is plain text again with its plugin off", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  const written = "# Laps\n\nTime me ::stopwatch{} here, not `::stopwatch{}` there, nor ::sundial{}.\n";
+  const written = "# Laps\n\nTime me /stopwatch() here, not `/stopwatch()` there, nor /sundial().\n";
   const note = await perform(page, { type: "note.create", text: written });
   await page.reload();
   await openNote(page, "Laps");
@@ -321,29 +321,29 @@ test("a stopwatch written in a note is drawn in it and runs, and is plain text a
   const watch = text(page).getByRole("button", { name: /^Stopwatch/ });
   await expect(watch).toHaveText(["0:00"]);
   // Code's backticks are hidden off the cursor's line, so the one in code reads as its own text.
-  await expect(text(page)).toContainText("Time me 0:00 here, not ::stopwatch{} there, nor ::sundial{}.");
+  await expect(text(page)).toContainText("Time me 0:00 here, not /stopwatch() there, nor /sundial().");
   await watch.click();
   await expect(watch).toHaveText("0:01");
   await expect(watch).toHaveAttribute("aria-pressed", "true");
   await watch.click();
   await expect(watch).toHaveAttribute("aria-pressed", "false");
   // Its time is kept in the note, so it is set back before the note is compared with what was written.
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toMatch(/Time me ::stopwatch\{at=\ds\} here/);
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toMatch(/Time me \/stopwatch\(at=\ds\) here/);
   await text(page).getByRole("button", { name: "Reset stopwatch" }).click();
   await expect(watch).toHaveText(["0:00"]);
 
   await run(page, "Disable plugin: Stopwatch");
   await expect(watch).toHaveCount(0);
-  await expect(text(page)).toContainText("Time me ::stopwatch{} here");
+  await expect(text(page)).toContainText("Time me /stopwatch() here");
 
   await run(page, "Enable plugin: Stopwatch");
   await expect(watch).toHaveText(["0:00"]);
   await text(page).click();
   await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type("Again ::stopwatch{} ok");
+  await page.keyboard.type("Again /stopwatch() ok");
   await expect(watch).toHaveText(["0:00", "0:00"]);
   await saved(page);
-  expect((await perform(page, { type: "note.read", id: note.id })).text).toBe(`${written}Again ::stopwatch{} ok`);
+  expect((await perform(page, { type: "note.read", id: note.id })).text).toBe(`${written}Again /stopwatch() ok`);
 });
 
 test("the author Agents hands to History is shown once, and not again on Back or a reload", async ({ page }) => {
@@ -563,7 +563,7 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
 
   const adds = section(page, "What it adds");
   await expect(adds.getByRole("group")).toHaveAccessibleName("Embeds");
-  await expect(adds.getByRole("group", { name: "Embeds" })).toHaveText("Embeds 1Kanban board:::kanban{}");
+  await expect(adds.getByRole("group", { name: "Embeds" })).toHaveText("Embeds 1Kanban board/kanban()");
   await expect(section(page, "Settings")).toHaveText("SettingsIt has no settings.");
 
   // Its switch is here, and what it added when it was on is still said once it is off.

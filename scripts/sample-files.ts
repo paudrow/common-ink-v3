@@ -1,8 +1,10 @@
 // The small files scripts/try-note.ts uploads for a walkthrough that names one, such as
-// ::image{sample.png}. Each is made here from nothing, so the script reads no file of anyone's.
+// /image(sample.png). Each is made here from nothing, so the script reads no file of anyone's.
 
 type Bytes = Uint8Array<ArrayBuffer>;
+import { callsIn } from "../src/core/embedSyntax.ts";
 import { linesOutsideCode } from "../src/core/lines.ts";
+import { blanked, codeSpans } from "../src/core/spans.ts";
 import { UPLOAD_EMBEDS, type UploadEmbed } from "../src/core/uploadRefs.ts";
 
 const ascii = (text: string): Bytes => Uint8Array.from(new TextEncoder().encode(text));
@@ -152,19 +154,19 @@ const SIZES: Record<string, { width: number; height: number }> = { "sample.webm"
 export const sampleSize = (name: string): { width: number; height: number } | null => SIZES[name.toLowerCase()] ?? null;
 
 const WORD = String.raw`(?:small|medium|large|\d{1,3}%|crop=\d+,\d+,\d+,\d+)`;
-const NAMED = new RegExp(`(?<!:)::(${UPLOAD_EMBEDS.join("|")})\\{([^{}\\n]*?\\.[A-Za-z0-9]+)((?:[ \\t]+${WORD})*)\\}`, "g");
+const NAMED = new RegExp(`^([^()\\n]*?\\.[A-Za-z0-9]+)((?:[ \\t]+${WORD})*)$`);
 
 /**
- * Where a text names a file by its name and holds no upload's id, as `::image{sample.png}` does,
- * outside code, with the words after it that size or crop it, if it has any (`::image{sample.png medium}`, `::image{sample.png 42% crop=0,220,640,140}`). An id has no
+ * Where a text names a file by its name and holds no upload's id, as `/image(sample.png)` does,
+ * outside code, with the words after it that size or crop it, if it has any (`/image(sample.png medium)`, `/image(sample.png 42% crop=0,220,640,140)`). An id has no
  * dot in it, so a name with an ending is never taken for one.
  */
 export function namedUploads(text: string): { embed: UploadEmbed; name: string; words?: string; from: number; to: number }[] {
   const named = [];
   for (const { line, from } of linesOutsideCode(text)) {
-    for (const found of line.matchAll(NAMED)) {
-      const inCode = (line.slice(0, found.index).match(/`/g) ?? []).length % 2 === 1;
-      if (!inCode) named.push({ embed: found[1] as UploadEmbed, name: found[2]!.trim(), ...(found[3]?.trim() ? { words: found[3].trim().split(/[ \t]+/).join(" ") } : {}), from: from + found.index, to: from + found.index + found[0].length });
+    for (const call of callsIn(blanked(line, codeSpans(line), " "), from)) {
+      const found = UPLOAD_EMBEDS.includes(call.name as UploadEmbed) ? NAMED.exec(call.config.trim()) : null;
+      if (found) named.push({ embed: call.name as UploadEmbed, name: found[1]!, ...(found[2]?.trim() ? { words: found[2].trim().split(/[ \t]+/).join(" ") } : {}), from: call.from, to: call.to });
     }
   }
   return named;

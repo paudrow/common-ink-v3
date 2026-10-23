@@ -1,4 +1,4 @@
-import type { CompletionItem, EmbedInfo, EmbedPick, Plugin } from "../plugin-api.ts";
+import { writtenEmbed, type CompletionItem, type EmbedInfo, type EmbedPick, type Plugin } from "../plugin-api.ts";
 import { starting } from "./lib/match.ts";
 import { lettering, outline, panel, sketch, words } from "./lib/sketch.ts";
 
@@ -52,34 +52,32 @@ interface Entry {
 const entriesOf = (embed: EmbedInfo): Entry[] => (embed.pick === undefined ? [{ embed }] : ("insert" in embed.pick ? [embed.pick] : embed.pick).map((pick) => ({ embed, pick })));
 
 /** How a new embed is written, with its config left selected when there is one to type over. */
-function embedItem({ embed: { name, title, block, starts, description, preview }, pick }: Entry): CompletionItem {
+function embedItem({ embed: { name, title, block, content, starts, description, preview }, pick }: Entry): CompletionItem {
   if (pick) {
     const said = pick.description ?? pick.detail;
     return { kind: "embed", label: pick.title, ...(said && { description: said }), ...(pick.preview && { preview: pick.preview }), insert: pick.insert };
   }
   const shown = { kind: "embed" as const, label: title, ...(description && { description }), ...(preview && { preview }) };
   const config = starts?.config ?? "";
-  const opening = `${block ? ":::" : "::"}${name}{`;
-  const written = `${opening}${config}}`;
-  if (!block) return { ...shown, insert: written, select: config ? [opening.length, opening.length + config.length] : undefined };
-  const body = starts?.body ?? "";
-  return { ...shown, insert: `${written}\n${body && !body.endsWith("\n") ? `${body}\n` : body}:::`, block: true };
+  const opening = `/${name}(`.length;
+  if (!block) return { ...shown, insert: writtenEmbed(name, config), select: config ? [opening, opening + config.length] : undefined };
+  return { ...shown, insert: writtenEmbed(name, config, { kind: content ?? "markdown", body: starts?.body ?? "" }), block: true };
 }
 
 /** What an item is found by: its words and not "a" or "an", as in "Upload a file", so `N /A` is still just words. */
 const found = (text: string) => text.replace(/\b(?:a|an|the)\b/gi, " ");
 
 /**
- * What `::` offers for what was typed after it, from `embeds`: those it writes, found by title or
- * name, then what it can only ask for, such as a file to upload, found by title alone, so `file`
- * finds "Upload a file" and not every way into the `file` embed.
+ * The embeds the menu offers for what was typed after `/`, from `embeds`: those it writes, found by
+ * title or name, then what it can only ask for, such as a file to upload, found by title alone, so
+ * `file` finds "Upload a file" and not every way into the `file` embed.
  */
 export function embedItems(embeds: readonly EmbedInfo[], typed: string): CompletionItem[] {
   const entries = embeds.flatMap(entriesOf).toSorted((a, b) => Number(!!a.pick) - Number(!!b.pick));
   return starting(entries, typed, (e) => found(e.pick ? e.pick.title : `${e.embed.title} ${e.embed.name}`)).map(embedItem);
 }
 
-/** What `/` offers for what was typed after it: the blocks of markdown that fit, then the embeds as `::` offers them. */
+/** What `/` offers for what was typed after it: the blocks of markdown that fit, then the embeds. */
 export function slashItems(embeds: readonly EmbedInfo[], typed: string): CompletionItem[] {
   return [...starting(BLOCKS, typed, (b) => found(`${b.label} ${b.also ?? ""}`)).map(blockItem), ...embedItems(embeds, typed)];
 }
@@ -87,15 +85,14 @@ export function slashItems(embeds: readonly EmbedInfo[], typed: string): Complet
 /**
  * The insert menu. `/` in a note lists blocks of markdown, such as a heading, a list or a table, and
  * every embed a plugin has added, each with what it makes in words and a picture, and picking one
- * writes it. `::` lists the embeds alone, so an embed's name typed as a note writes it is completed too.
+ * writes it, as `/name(args)`, with the content of one that holds some in a fence under it.
  */
 export const embedMenu: Plugin = {
   id: "embed-menu",
   name: "Insert menu",
-  description: "Type / in a note to pick a heading, a list, a table, a timer, a board or anything else to insert from a list, or :: for the embeds alone.",
+  description: "Type / in a note to pick a heading, a list, a table, a timer, a board or anything else to insert from a list.",
   icon: "slash",
   activate(host) {
     host.completions.register({ id: "embeds", trigger: "/", prose: true, items: (typed) => slashItems(host.embeds.list(), typed) });
-    host.completions.register({ id: "embeds.colons", trigger: "::", items: (typed) => embedItems(host.embeds.list(), typed) });
   },
 };

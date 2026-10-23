@@ -55,7 +55,7 @@ interface Controls {
 
 /**
  * Recording in a note: the microphone recorded right where the cursor is, in a small recorder that
- * says how long it has run, and the recording sent and written there as `::audio{id}` once it is
+ * says how long it has run, and the recording sent and written there as `/audio(id)` once it is
  * stopped, as a file picked there would be, with what was said written under it when asked. The note can be typed in meanwhile. Leaving the note
  * stops the recording and keeps it in the workspace, which is said. A recording runs ten minutes at most.
  */

@@ -39,18 +39,18 @@ describe("the sample files a Try note names", () => {
     expect(scene.elements.map((element) => (element as { type: string }).type)).toEqual(["rectangle", "text", "arrow", "ellipse", "text"]);
     expect(previewIn(scene)).toBeNull();
     expect(sampleSize("sample.excalidraw")).toEqual({ width: 512, height: 112 });
-    expect(namedUploads("::drawing{sample.excalidraw 60%}").map(({ embed, name, words }) => [embed, name, words])).toEqual([["drawing", "sample.excalidraw", "60%"]]);
+    expect(namedUploads("/drawing(sample.excalidraw 60%)").map(({ embed, name, words }) => [embed, name, words])).toEqual([["drawing", "sample.excalidraw", "60%"]]);
   });
 
   it("are named by an embed whose config is a file's name, and not by one that holds an id or sits in code", () => {
-    const text = "::image{sample.png}\n\nsee ::file{sample.pdf} here\n\n::image{aaaaaaaaaaaa 320x180}\n\n`::audio{sample.wav}`\n\n```\n::image{sample.png}\n```\n\n::timer{5m}";
+    const text = "/image(sample.png)\n\nsee /file(sample.pdf) here\n\n/image(aaaaaaaaaaaa 320x180)\n\n`/audio(sample.wav)`\n\n```\n/image(sample.png)\n```\n\n/timer(5m)";
     const named = namedUploads(text);
     expect(named.map(({ embed, name }) => [embed, name])).toEqual([["image", "sample.png"], ["file", "sample.pdf"]]);
-    expect(named.map(({ from, to }) => text.slice(from, to))).toEqual(["::image{sample.png}", "::file{sample.pdf}"]);
+    expect(named.map(({ from, to }) => text.slice(from, to))).toEqual(["/image(sample.png)", "/file(sample.pdf)"]);
   });
 
   it("keep the size word, percent and crop written after the name", () => {
-    const text = "::image{sample.png medium}\n\n::image{sample.png 42% crop=0,220,640,140}\n\n::video{sample.webm  small}\n\n::image{sample.png huge}\n\n::image{sample.png 42}";
+    const text = "/image(sample.png medium)\n\n/image(sample.png 42% crop=0,220,640,140)\n\n/video(sample.webm  small)\n\n/image(sample.png huge)\n\n/image(sample.png 42)";
     expect(namedUploads(text).map(({ name, words }) => [name, words])).toEqual([["sample.png", "medium"], ["sample.png", "42% crop=0,220,640,140"], ["sample.webm", "small"]]);
   });
 });

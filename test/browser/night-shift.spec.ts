@@ -30,14 +30,15 @@ const NOTE = [
   'function hi(x: string) { return "hi " + x; }',
   "```",
   "",
-  ":::kanban{}",
+  "/kanban()",
+  "```markdown",
   "## To do {.red}",
   "- write it",
   "## Doing {.blue}",
   "- test it",
-  ":::",
+  "```",
   "",
-  "::timer{5m}",
+  "/timer(5m)",
 ].join("\n");
 
 /** Signs in with Night shift on, and everything else as it comes. `settings` are written over that. */
@@ -541,7 +542,7 @@ test("tints a picture with a filter when asked to, so that what was blue is red,
   await signInAsNewPerson(page, "Ada Lovelace");
   await perform(page, { type: "settings.write", text: JSON.stringify({ "night-shift.enabled": true }), baseRevision: 0 });
   const photo = await send(page, "blue.png", png(400, 200, [30, 90, 230]));
-  const note = await perform(page, { type: "note.create", text: `# Pictures\n\n::image{${photo.id} 400x200}\n\nunder` });
+  const note = await perform(page, { type: "note.create", text: `# Pictures\n\n/image(${photo.id} 400x200)\n\nunder` });
   await page.goto(`/note/${note.id}`);
   const picture = page.locator('.embed-below[data-embed="image"] img');
   await expect(picture).toBeVisible();
@@ -583,9 +584,10 @@ test("tints a picture with a filter when asked to, so that what was blue is red,
 
 test("covers a frame the app can't reach into with a tint that lets every press through to it", async ({ page }) => {
   const html = [
-    ":::html{height=160}",
+    "/html(height=160)",
+    "```html",
     '<body style="margin:0;background:#1e5ae6"><button id="go" style="display:block;width:100%;height:160px;border:0;margin:0;background:#1e5ae6;color:#fff;font:20px sans-serif" onclick="this.textContent = \'pressed\'">press</button></body>',
-    ":::",
+    "```",
   ].join("\n");
   await start(page, { "html.run": "automatically", "night-shift.tint": true }, `# Frame\n\n${html}\n\nunder`);
   const box = page.locator('.embed-below[data-embed="html"]');

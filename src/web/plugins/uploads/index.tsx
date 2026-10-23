@@ -63,8 +63,8 @@ const RECORD_PICTURE = sketch(panel(16, 26, 132, 32, 16) + `<circle cx="34" cy="
 const INSERT_PICTURE = sketch([20, 76, 132].map((x) => framed(x, 18, 48, 48)).join(""));
 
 /**
- * Uploads: files in a workspace that a note shows by `::image{id 640x480}`, `::video{id 640x360}`,
- * `::audio{id}` or `::file{id}`. A file pasted, dropped or picked into a note is sent and written
+ * Uploads: files in a workspace that a note shows by `/image(id 640x480)`, `/video(id 640x360)`,
+ * `/audio(id)` or `/file(id)`. A file pasted, dropped or picked into a note is sent and written
  * there, as is a recording made in it. `@` finds one already uploaded among everything else it
  * lists, and the Uploads page lists every one the member can see. A file opens as its kind does
  * (`openUpload`): a picture, a video or a recording in a preview, a PDF in a tab, and text on its own

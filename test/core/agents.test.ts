@@ -255,7 +255,7 @@ describe("MCP protocol", () => {
     const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
     const { text, isError } = await tool(token, "note_syntax");
     expect(isError).toBe(false);
-    expect(text).toContain(":::form{}");
+    expect(text).toContain("/form()\n```json\n");
     expect(text).toContain('"answers": {}');
     expect(await tool(token, "note_syntax", { form: true })).toMatchObject({ isError: true, text: 'invalid: note_syntax takes no "form". It takes no arguments.' });
   });

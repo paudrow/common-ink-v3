@@ -613,7 +613,7 @@ describe("a plugin acting for a member", () => {
   it("is answered no more than its permission names: no uploads or members with a note, and never an email", async () => {
     const { ada, grace, id } = await permitted();
     const file = await upload(ada, "cat.png");
-    const text = `# Plan\n\n[[person:${grace.personId}|Gracie]] and [[person:Sam]]\n\n::image{${file.id}}\n- [ ] Call [[person:${grace.personId}|Gracie]]`;
+    const text = `# Plan\n\n[[person:${grace.personId}|Gracie]] and [[person:Sam]]\n\n/image(${file.id})\n- [ ] Call [[person:${grace.personId}|Gracie]]`;
     const note = await perform(env.DB, ada, { type: "note.create", text });
 
     const asMember = await perform(env.DB, ada, { type: "note.read", id: note.id });

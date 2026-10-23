@@ -2,7 +2,7 @@ import { syntaxTree } from "@codemirror/language";
 import { EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { keep } from "./belowIdentity.ts";
-import { inlineIn, rewriteOf, type Written } from "../core/embedSyntax.ts";
+import { inlineIn, rewriteOf, type KindOf, type Written } from "../core/embedSyntax.ts";
 import { closeOptions, fitSettingsButton, optionsOn, settingsOf, type Options } from "./embedOptions.ts";
 import { guardFrames } from "./frameGuard.ts";
 import type { AddressEmbed, Below, BelowBox, BelowDrawn, BelowEmbedded, Embed } from "./plugin-api.ts";
@@ -149,6 +149,14 @@ export const aloneIn = (state: EditorState, { from, to }: { from: number; to: nu
 /** A line that is one https address and nothing else. */
 const ALONE = /^[ \t]*(https:\/\/\S+)[ \t]*$/;
 
+/** What each registered name is to a note: an embed that holds content of its kind, one that holds none, or, for any other name, no embed. */
+export const kindsOf =
+  (embeds: ReadonlyMap<string, Embed>): KindOf =>
+  (name) => {
+    const embed = embeds.get(name);
+    return embed ? (embed.block ? (embed.content ?? "markdown") : null) : undefined;
+  };
+
 function claims(embed: AddressEmbed, address: string): boolean {
   try {
     return embed.claims(address) === true;
@@ -162,7 +170,7 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
   const drawnBlocks = blocks.filter((b) => embeds.get(b.name)?.block && embeds.get(b.name)?.render);
   const found: Written[] = drawnBlocks.filter((b) => has(embeds.get(b.name)));
   if ([...embeds.values()].some((e) => !e.block && has(e))) {
-    for (const written of inlineIn(state.doc.toString())) {
+    for (const written of inlineIn(state.doc.toString(), 0, kindsOf(embeds))) {
       const embed = embeds.get(written.name);
       if (!has(embed) || embed.block || drawnBlocks.some((b) => b.from <= written.from && b.to >= written.to)) continue;
       if (embed.below.alone && !aloneIn(state, written)) continue;
@@ -181,7 +189,7 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
       const embed = addresses.find((e) => claims(e, address[1]!));
       if (!embed) continue;
       const to = from + address[1]!.length;
-      const written: Written = { name: embed.name, config: address[1]!, body: "", block: false, from, to, configFrom: from, bodyFrom: to };
+      const written: Written = { name: embed.name, config: address[1]!, body: "", content: null, fence: null, from, to, configFrom: from, bodyFrom: to };
       bare.set(written, embed);
       found.push(written);
     }
@@ -190,7 +198,7 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
   const boxed = found.flatMap((written) => {
     const embed = bare.get(written) ?? (embeds.get(written.name) as Embed & { below: Below });
     const box = boxOf(embed, written);
-    const alone = bare.has(written) || (!written.block && aloneIn(state, written));
+    const alone = bare.has(written) || (!written.content && aloneIn(state, written));
     const one = { written, embed, from: written.from, name: written.name, source: `${written.config}\n${written.body}`, bare: bare.has(written), alone };
     if (box) return [{ ...one, box }];
     const wrong = "claims" in embed || embed.render ? [] : (settingsOf(embed)?.problems(written) ?? []);
@@ -212,7 +220,7 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
  * of it drawn in its line, as an uploaded picture. A block's, and one drawn in its line, open from its card.
  */
 const cornered = (shown: Shown): shown is Shown & { embed: Embed & { below: Below } } =>
-  !shown.bare && !shown.written.block && !("claims" in shown.embed) && (!shown.embed.render || (shown.alone && !!shown.embed.below.alone));
+  !shown.bare && !shown.written.content && !("claims" in shown.embed) && (!shown.embed.render || (shown.alone && !!shown.embed.below.alone));
 
 /** Whether the cursor is in what the note writes for an embed, or at its edge. */
 const within = (state: EditorState, written: Written) => state.selection.ranges.some((r) => r.from <= written.to && r.to >= written.from);
@@ -273,7 +281,7 @@ function aloneLines(state: EditorState, shown: readonly Shown[], written: boolea
 export function keptBelow(reading: (state: EditorState) => Reading): Extension {
   const rooms = (state: EditorState, shown: readonly Shown[], written: boolean) =>
     Decoration.set(
-      shown.filter((s) => !s.wrong || !aloneOn(state, s.from, written)).map((s): Range<Decoration> => Decoration.widget({ widget: new BoxWidget(s.id, s.box, s.written.block, s.alone), block: true, side: 1 }).range(s.at)),
+      shown.filter((s) => !s.wrong || !aloneOn(state, s.from, written)).map((s): Range<Decoration> => Decoration.widget({ widget: new BoxWidget(s.id, s.box, !!s.written.content, s.alone), block: true, side: 1 }).range(s.at)),
       true,
     );
 
@@ -395,7 +403,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           // Nothing is drawn until its room has been on screen, so a note costs only what was looked at.
           if (!live && place?.seen) {
             const el = document.createElement("div");
-            el.className = shown.written.block ? "embed-below embed-below-joined" : "embed-below";
+            el.className = shown.written.content ? "embed-below embed-below-joined" : "embed-below";
             el.dataset.embed = shown.embed.name;
             // In the page before it is drawn in: a frame made in an element that is put in later would load twice.
             this.dom.append(el);
@@ -409,7 +417,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           if (!live) continue;
           // The note says something else of it now: it is drawn again, in the element and the place it has. A block
           // being written is drawn again once the cursor has left it, and not at each key, half-written.
-          if (live.source !== shown.source && !(shown.written.block && within(view.state, shown.written))) {
+          if (live.source !== shown.source && !(shown.written.content && within(view.state, shown.written))) {
             if (!live.made.update) {
               this.stop(live);
               live.drawn.replaceChildren();

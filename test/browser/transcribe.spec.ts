@@ -59,7 +59,7 @@ async function whisper(page: Page, said: string) {
 async function noteWithRecording(page: Page) {
   await signInAsNewPerson(page, "Ada Lovelace");
   const clip = await send(page, "standup.wav");
-  const note = await perform(page, { type: "note.create", text: `# Standup\n\n::audio{${clip.id}}\nAfter\n` });
+  const note = await perform(page, { type: "note.create", text: `# Standup\n\n/audio(${clip.id})\nAfter\n` });
   await page.goto(`/note/${note.id}`);
   await expect(page.locator('.embed-below[data-embed="audio"] audio')).toHaveCount(1);
   return { note, clip };
@@ -69,13 +69,13 @@ test("Transcribe on a recording writes what was said on a line of its own under 
   const { note, clip } = await noteWithRecording(page);
   const asked = await whisper(page, "We shipped the recorder in Common Ink.");
   await transcribeButton(page).click();
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Standup\n\n::audio{${clip.id}}\nWe shipped the recorder in Common Ink.\nAfter\n`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Standup\n\n/audio(${clip.id})\nWe shipped the recorder in Common Ink.\nAfter\n`);
   expect(asked).toEqual([clip.id]);
   await expect(transcribeButton(page)).toBeEnabled();
 
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+z");
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Standup\n\n::audio{${clip.id}}\nAfter\n`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Standup\n\n/audio(${clip.id})\nAfter\n`);
 });
 
 test("where the server has no Workers AI, Transcribe says how to turn it on and writes nothing", async ({ page }) => {
@@ -83,7 +83,7 @@ test("where the server has no Workers AI, Transcribe says how to turn it on and 
   await transcribeButton(page).click();
   await expect(page.getByText("The recording wasn't transcribed. Transcription isn't set up here: the server has no Workers AI binding. On this machine, `npm run dev -- --ai` turns it on.")).toBeVisible();
   await expect(transcribeButton(page)).toBeEnabled();
-  expect(await noteText(page, note.id)).toBe(`# Standup\n\n::audio{${clip.id}}\nAfter\n`);
+  expect(await noteText(page, note.id)).toBe(`# Standup\n\n/audio(${clip.id})\nAfter\n`);
 });
 
 test("a recording in which nothing was heard says so and writes nothing", async ({ page }) => {
@@ -91,13 +91,13 @@ test("a recording in which nothing was heard says so and writes nothing", async 
   await whisper(page, "");
   await transcribeButton(page).click();
   await expect(page.getByText("No words were heard in the recording.")).toBeVisible();
-  expect(await noteText(page, note.id)).toBe(`# Standup\n\n::audio{${clip.id}}\nAfter\n`);
+  expect(await noteText(page, note.id)).toBe(`# Standup\n\n/audio(${clip.id})\nAfter\n`);
 });
 
 test("a member who can't change the note has no Transcribe", async ({ page }) => {
   const { note, admin } = await asViewerOfNote(page, "# Heard\n\n");
   const clip = await send(admin, "heard.wav");
-  await perform(admin, { type: "note.write", id: note.id, baseRevision: note.revision, text: `# Heard\n\n::audio{${clip.id}}\n` });
+  await perform(admin, { type: "note.write", id: note.id, baseRevision: note.revision, text: `# Heard\n\n/audio(${clip.id})\n` });
   await page.goto(`/note/${note.id}`);
   await expect(page.locator('.embed-below[data-embed="audio"] audio')).toHaveCount(1);
   await expect(transcribeButton(page)).toHaveCount(0);
@@ -126,7 +126,7 @@ test("Stop and transcribe writes the recording where the recorder was, and what 
   const recorder = page.getByRole("dialog", { name: "Recorder" });
   await expect(recorder).toContainText("Recording 0:01");
   await recorder.getByRole("button", { name: "Stop and transcribe" }).click();
-  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Dictated\n\n::audio\{[a-z0-9]{12}\}\nRemember to buy milk\.\n$/);
+  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Dictated\n\n\/audio\([a-z0-9]{12}\)\nRemember to buy milk\.\n$/);
   expect(asked).toHaveLength(1);
 });
 

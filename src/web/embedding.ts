@@ -1,7 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { Annotation, EditorState, Facet, Prec, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { aloneIn, aloneOn, boxOf, keptBelow } from "./below.ts";
+import { aloneIn, aloneOn, boxOf, keptBelow, kindsOf } from "./below.ts";
 import { closeOptions, fitSettingsButton, optionsOn, settingsOf, type Options } from "./embedOptions.ts";
 import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "../core/embedSyntax.ts";
 import { following } from "./following.ts";
@@ -31,7 +31,7 @@ function writtenAt(view: EditorView, el: HTMLElement, block: boolean): Written |
   const pos = view.posAtDOM(el);
   if (block) return view.state.field(blocks).all.find((b) => b.to === pos);
   const line = view.state.doc.lineAt(pos);
-  return inlineIn(line.text, line.from).find((w) => w.from === pos);
+  return inlineIn(line.text, line.from, kindsOf(view.state.facet(registered))).find((w) => w.from === pos);
 }
 
 /** The element an embed draws in, inside the card the host draws around it. */
@@ -65,7 +65,7 @@ class EmbedWidget extends WidgetType {
   }
 
   override toDOM(view: EditorView) {
-    const { block } = this.written;
+    const block = !!this.written.content;
     const frame = document.createElement(block ? "div" : "span");
     frame.className = block ? "embed-frame embed-frame-block" : "embed-frame embed-card";
     const card = block ? frame.appendChild(document.createElement("div")) : frame;
@@ -96,7 +96,7 @@ class EmbedWidget extends WidgetType {
    */
   override updateDOM(frame: HTMLElement, view: EditorView) {
     const el = frame.querySelector<HTMLElement>(".embed");
-    if (!el || el.dataset.embed !== this.embed.name || (el.tagName === "DIV") !== this.written.block) return false;
+    if (!el || el.dataset.embed !== this.embed.name || (el.tagName === "DIV") !== !!this.written.content) return false;
     const was = live.get(el);
     if (was?.update) {
       this.draw(frame, el, view, (handed) => (was.update!(handed), was));
@@ -117,7 +117,7 @@ class EmbedWidget extends WidgetType {
     const { embed, written } = this;
     /** What the note says here now, if it is still what this was drawn from. */
     const still = () => {
-      const now = writtenAt(view, frame, written.block);
+      const now = writtenAt(view, frame, !!written.content);
       return now && sameWritten(now, written) ? now : undefined;
     };
     const rewrite = (next: { config?: string; body?: string }) => {
@@ -128,7 +128,7 @@ class EmbedWidget extends WidgetType {
     const edit = (at?: number) => {
       const now = still();
       if (!now) return;
-      const anchor = at === undefined || !now.block ? now.configFrom : now.bodyFrom + Math.max(0, Math.min(at, now.body.length));
+      const anchor = at === undefined || !now.content ? now.configFrom : now.bodyFrom + Math.max(0, Math.min(at, now.body.length));
       view.focus();
       view.dispatch({ selection: { anchor }, scrollIntoView: true, annotations: placed.of(true) });
     };
@@ -169,10 +169,10 @@ class EmbedWidget extends WidgetType {
     const { embed, written } = this;
     const settings = settingsOf(embed);
     const problems = settings?.problems({ config: written.config, body: written.body }) ?? [];
-    const card = written.block ? frame.querySelector<HTMLElement>(".embed-card")! : frame;
+    const card = written.content ? frame.querySelector<HTMLElement>(".embed-card")! : frame;
     card.classList.toggle("embed-invalid", problems.length > 0);
     let said = card.querySelector<HTMLElement>(":scope > .embed-problems");
-    if (written.block && problems.length) {
+    if (written.content && problems.length) {
       said ??= card.insertBefore(document.createElement("p"), card.querySelector(".embed-head")?.nextSibling ?? null);
       said.className = "embed-problems";
       said.textContent = problems.join(" ");
@@ -242,7 +242,7 @@ function inlineDrawn(view: EditorView): DecorationSet {
   const byName = state.facet(registered);
   const drawnBlocks = drawnBy(state, state.field(blocks).all);
   for (const { from, to } of view.visibleRanges) {
-    for (const written of inlineIn(state.sliceDoc(from, to), from)) {
+    for (const written of inlineIn(state.sliceDoc(from, to), from, kindsOf(byName))) {
       const embed = byName.get(written.name);
       if (!embed || embed.block || /Code/.test(syntaxTree(state).resolveInner(written.from, 1).name)) continue;
       // A block's body is the block's to draw.
@@ -313,11 +313,11 @@ const asWritten = Decoration.line({ class: "embed-source-line" });
 /** Decorations that take whole lines can only come from the state, so the blocks are kept here. */
 const blocks: StateField<Blocks> = StateField.define<Blocks>({
   create(state) {
-    const all = blocksIn(state.doc.toString());
+    const all = blocksIn(state.doc.toString(), kindsOf(state.facet(registered)));
     return { all, revealed: null, drawn: blocksDrawn(state, all, null) };
   },
   update(value, tr) {
-    const all = tr.docChanged ? blocksIn(tr.state.doc.toString()) : value.all;
+    const all = tr.docChanged || tr.startState.facet(registered) !== tr.state.facet(registered) ? blocksIn(tr.state.doc.toString(), kindsOf(tr.state.facet(registered))) : value.all;
     const { head } = tr.state.selection.main;
     const revealed = tr.state.field(used) ? (all.find((b) => head >= b.from && head <= b.to)?.from ?? null) : null;
     if (all === value.all && revealed === value.revealed && tr.startState.facet(registered) === tr.state.facet(registered) && tr.startState.readOnly === tr.state.readOnly) return value;
@@ -415,7 +415,7 @@ const pressedAt = following.of((view) => {
 });
 
 /**
- * Draws each `::name{config}` and each `:::name{config}` block in note `noteId` with the embed registered
+ * Draws each `/name(config)`, and each block with the content in the fence under it, in note `noteId` with the embed registered
  * under that name, and keeps what an embed draws below its line. A name nobody registered stays as
  * text. Which embeds there are is said with `embedsAre`.
  */

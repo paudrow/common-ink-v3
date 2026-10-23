@@ -39,7 +39,7 @@ describe("a kanban board read from markdown", () => {
       "## To do\r\n- windows\r\n",
       "Setext\n======\n- before any column\n## Col\n\t- tabbed under nothing\n- a\n\n\n\n",
       "## A\n## B\n## C",
-      "## To do\n- a ::timer{5m} here\n<div>html</div>\n- b\n",
+      "## To do\n- a /timer(5m) here\n<div>html</div>\n- b\n",
     ];
     for (const body of bodies) expect(serializeBoard(parseBoard(body))).toBe(body);
   });

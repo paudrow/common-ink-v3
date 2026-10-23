@@ -2,8 +2,8 @@
 // typed. While some of the note is selected, it says how many of its words are.
 const WORDS_A_MINUTE = 230;
 
-// An embed as a note writes it, and the lines that open and close a block: what a reader doesn't read.
-const EMBED = /:::?[a-z][a-z0-9-]*\{[^{}\n]*\}/g;
+// An embed as a note writes it, and the fences around a block's content: what a reader doesn't read.
+const EMBED = /(?<=^|\s)\/[a-z][a-z0-9-]*\((?:[^()\n]|\([^()\n]*\))*\)|^ {0,3}(?:`{3,}|~{3,}).*$/gm;
 
 // Markdown's own marks aren't words, and neither is how an embed is written.
 function counted(text) {

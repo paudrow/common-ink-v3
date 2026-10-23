@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { connectAgent, me, ownPlugin, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
+import { connectAgent, mailed, me, ownPlugin, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -302,14 +302,13 @@ test("in vim, gd on a mention opens the person's page, and gd on a reference or 
   await signInAsNewPerson(page, "Ada Lovelace");
   const adaId = (await me(page)).person.id;
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
-  await perform(page, { type: "source.connect", id: "sample-contacts", back: "/contacts" });
-  const { text: sam } = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
+  const [plans] = await mailed(page, "Boiler plans");
   const minutes = await page.evaluate(async () => {
     const id = ((await (await fetch("/api/me")).json()) as { workspaces: { id: string }[] }).workspaces[0]!.id;
     const res = await fetch(`/api/workspaces/${id}/uploads`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name: "minutes.txt" })) }, body: "What was said.\n" });
     return ((await res.json()) as { id: string }).id;
   });
-  const note = await create(page, `# Boiler\n\nCalled [[person:Sam Okafor]] about it\n\nAsk [[person:${adaId}|Ada]] too\n\nCall ${sam} back\n\nRead ::file{${minutes}} first`);
+  const note = await create(page, `# Boiler\n\nCalled [[person:Sam Okafor]] about it\n\nAsk [[person:${adaId}|Ada]] too\n\nRead ${plans!.text} back\n\nRead /file(${minutes}) first`);
   const goTo = async (...presses: string[]) => {
     await page.goto(`/note/${note.id}`);
     await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
@@ -329,7 +328,7 @@ test("in vim, gd on a mention opens the person's page, and gd on a reference or 
   await expect(page).toHaveURL(/\/person\/Sam%20Okafor$/);
 
   await goTo("6", "j", "w");
-  await expect(page.getByRole("dialog", { name: "Contact" })).toContainText("+1 555 0142");
+  await expect(page.getByRole("dialog", { name: "Email" })).toContainText("Boiler plans (1 message)");
   await goTo("8", "j", "w");
   await expect(page).toHaveURL(`/file/${minutes}`);
 });
