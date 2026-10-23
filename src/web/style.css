@@ -696,7 +696,8 @@ button.link:hover {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
-.folder-row:focus-visible {
+/* The sidebar is one list, so its pages, folders and tags show the keyboard on them alike. */
+:is(.folder-row, .mode, .tag-row):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -5593,6 +5594,10 @@ kbd {
   color: var(--muted);
 }
 
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-none .cm-completionLabel {
+  color: var(--faint);
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .avatar {
     background: hsl(var(--hue) 35% 24%);
@@ -7813,6 +7818,14 @@ button.todo-chip:disabled {
   background: var(--danger);
 }
 
+/* A tag the todo has from another line of its note: outlined and quiet, as the done chip is, after the ones its own line writes. */
+.todo-chip.todo-tag-from {
+  max-width: min(14em, 100%);
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+}
+
 button.todo-tag[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
@@ -8020,6 +8033,38 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--ink);
   font: inherit;
   font-size: calc(14px * var(--text-scale));
+}
+
+/* A date's picker: the due date's list, then its time, Add time or a field with Remove time beside it. */
+.date-picker {
+  display: flex;
+  flex-direction: column;
+  width: 246px;
+}
+
+.date-picker-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.date-picker-time input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+}
+
+.date-picker-time input + .chip-choice {
+  width: auto;
+  color: var(--muted);
 }
 
 /* `@`'s Pick a date…: the date field alone. */
@@ -8558,11 +8603,6 @@ button.todo-tag[aria-pressed="true"] {
   font-weight: 550;
 }
 
-.tag-row:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
 .tag-name {
   flex: 1;
   min-width: 0;
@@ -8622,7 +8662,8 @@ button.todo-tag[aria-pressed="true"] {
 
 /* Shown by the pointer, all of it holds the pointer, so resting anywhere on it, its text or its padding, keeps it. */
 [data-showing="pointer"] > .hover-card,
-.hover-card a {
+.hover-card a,
+.hover-card button {
   pointer-events: auto;
 }
 
@@ -8662,6 +8703,29 @@ button.todo-tag[aria-pressed="true"] {
 
 .hover-card-manage {
   justify-self: start;
+  color: var(--accent);
+}
+
+/* A date's card: the whole date and how far off it is, then what can be done with it. */
+.hover-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.hover-card-actions button {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.hover-card-actions button:hover {
+  border-color: var(--accent);
   color: var(--accent);
 }
 

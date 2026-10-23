@@ -4,6 +4,7 @@ import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, TODO_SORT_WORDS, type OpInput } from "../../src/core/protocol.ts";
+import { todoTagIndex } from "../../src/core/tagScope.ts";
 import { todoIndex } from "../../src/core/todos.ts";
 import { addMember, newMember } from "./members.ts";
 import { walk } from "./walking.ts";
@@ -17,12 +18,16 @@ const codeOf = async (run: Promise<unknown>) => run.then(() => "done", (err) => 
 
 /** What the index holds for a note, read straight from the tables, in the shape the text gives. */
 async function indexed(noteId: string) {
-  const [todos, tags] = await env.DB.batch<Record<string, unknown>>([
+  const [todos, tags, todoTags] = await env.DB.batch<Record<string, unknown>>([
     env.DB.prepare("SELECT line, state, importance, due, text FROM todos WHERE note_id = ? ORDER BY line").bind(noteId),
     env.DB.prepare("SELECT tag, name FROM note_tags WHERE note_id = ? ORDER BY rowid").bind(noteId),
+    env.DB.prepare("SELECT line, tag, name FROM todo_tags WHERE note_id = ? ORDER BY rowid").bind(noteId),
   ]);
-  return { todos: todos!.results.map((r) => Object.values(r)), tags: tags!.results.map((r) => Object.values(r)) };
+  return { todos: todos!.results.map((r) => Object.values(r)), tags: tags!.results.map((r) => Object.values(r)), todoTags: todoTags!.results.map((r) => Object.values(r)) };
 }
+
+/** What the index should hold for a note's text. */
+const indexOf = (text: string) => ({ ...todoIndex(text), todoTags: todoTagIndex(text) });
 
 const PLAN = "# Plan #work\n\n- [ ] !! Call the bank due:2026-10-14 +Home\n- [x] Book flights +Trip\n\n```\n- [ ] in code +Never\n```\n  - [ ] ! Water plants +home #garden\n- [ ] Nothing set";
 
@@ -42,6 +47,14 @@ describe("the index of todos", () => {
         ["work", "work"],
         ["garden", "garden"],
       ],
+      // The heading's tag covers every todo under it, and a todo's own come first.
+      todoTags: [
+        [2, "work", "work"],
+        [3, "work", "work"],
+        [8, "garden", "garden"],
+        [8, "work", "work"],
+        [9, "work", "work"],
+      ],
     });
     expect(note.openTodos).toBe(3);
   });
@@ -49,7 +62,7 @@ describe("the index of todos", () => {
   it("follows every way a note's text changes: a write, a revert, an undo, a redo, and reverting an author", async () => {
     const ada = await newMember();
     const note = await create(ada, "# Plan\n\n- [ ] one +A");
-    const same = async (text: string) => expect(await indexed(note.id), text).toEqual(todoIndex(text));
+    const same = async (text: string) => expect(await indexed(note.id), text).toEqual(indexOf(text));
     const { agent } = await connectAgent(env.DB, ada.personId, "Claude");
     const claude: Actor = { kind: "agent", agentId: agent.id, personId: ada.personId, workspaceId: ada.workspaceId };
 
@@ -63,7 +76,7 @@ describe("the index of todos", () => {
     const byAgent = await perform(env.DB, claude, { type: "note.write", id: note.id, baseRevision: 5, text: "# Plan\n\n- [ ] one +A\n- [ ] the agent's +Z" });
     await same(byAgent.text);
     await perform(env.DB, ada, { type: "history.revertAuthor", author: { kind: "agent", id: agent.id } });
-    expect(await indexed(note.id)).toEqual(todoIndex("# Plan\n\n- [ ] one +A"));
+    expect(await indexed(note.id)).toEqual(indexOf("# Plan\n\n- [ ] one +A"));
     await same((await perform(env.DB, ada, { type: "note.revertChanges", id: note.id, revisions: [7] })).text);
     expect((await indexed(note.id)).todos.length).toBe(2);
   });
@@ -73,6 +86,7 @@ describe("the index of todos", () => {
     env.DB.batch([
       env.DB.prepare("DELETE FROM todos WHERE note_id = ?").bind(noteId),
       env.DB.prepare("DELETE FROM note_tags WHERE note_id = ?").bind(noteId),
+      env.DB.prepare("DELETE FROM todo_tags WHERE note_id = ?").bind(noteId),
       env.DB.prepare("UPDATE notes SET indexed = 0 WHERE id = ?").bind(noteId),
     ]);
 
@@ -88,10 +102,10 @@ describe("the index of todos", () => {
     // Whoever lists first mends every note they can see. One they can't waits for someone who can, so nothing about it shows in what they are told.
     expect((await list(ada)).length).toBe(45);
     expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["t"], assignees: [] });
-    for (const note of notes) expect(await indexed(note.id)).toEqual(todoIndex(note.text));
-    expect(await indexed(diary.id)).toEqual({ todos: [], tags: [] });
+    for (const note of notes) expect(await indexed(note.id)).toEqual(indexOf(note.text));
+    expect(await indexed(diary.id)).toEqual({ todos: [], tags: [], todoTags: [] });
     expect(await words(eve, { tag: "secret" })).toEqual(["hers alone #secret"]);
-    expect(await indexed(diary.id)).toEqual(todoIndex(diary.text));
+    expect(await indexed(diary.id)).toEqual(indexOf(diary.text));
   });
 
   it("mends a note on its next write, even one that leaves its todos as they were", async () => {
@@ -100,8 +114,8 @@ describe("the index of todos", () => {
     await unindex(note.id);
 
     const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "# Old, renamed\n\n- [ ] from before +P #t" });
-    expect(await indexed(note.id)).toEqual(todoIndex(written.text));
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 10 });
+    expect(await indexed(note.id)).toEqual(indexOf(written.text));
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 11 });
   });
 
   it("is made again from every note's text by an admin, another member's private note included, and the answer says nothing of how many", async () => {
@@ -121,7 +135,7 @@ describe("the index of todos", () => {
     const answer = await perform(env.DB, ada, { type: "todos.rebuild" });
 
     expect(answer).toEqual({ done: true });
-    for (const note of [plan, diary]) expect(await indexed(note.id)).toEqual(todoIndex(note.text));
+    for (const note of [plan, diary]) expect(await indexed(note.id)).toEqual(indexOf(note.text));
     expect((await env.DB.prepare("SELECT target_id FROM links WHERE source_id = ?").bind(diary.id).all()).results).toEqual([{ target_id: plan.id }]);
     expect(await words(ada, { includeCompleted: true })).toEqual(["in the open +Common"]);
     expect(await words(eve, { tag: "secret" })).toEqual([`hers alone #secret [[${plan.id}]]`]);
@@ -157,8 +171,8 @@ describe("listing todos", () => {
       recurs: null,
       lastDone: null,
       completed: null,
-      tags: ["work", "garden"],
-      tagsElsewhere: ["work"],
+      tags: ["garden", "work"],
+      tagsElsewhere: [{ name: "work", line: 0, by: "heading", under: "Plan" }],
       assignees: [],
       words: "Water plants +home #garden",
       access: "edit",
@@ -170,7 +184,7 @@ describe("listing todos", () => {
     const plan = await create(ada, PLAN);
     await create(ada, "# Later\n\n- [ ] !!! Urgent, no date\n- [ ] Taxes due:2026-04-15 +Money\n- [ ] Rent due:2026-10-15 +HOME");
 
-    expect(await words(ada, { tag: "GARDEN" })).toEqual(["Call the bank +Home", "Water plants +home #garden", "Nothing set"]);
+    expect(await words(ada, { tag: "GARDEN" })).toEqual(["Water plants +home #garden"]);
     expect(await words(ada, { importance: [2, 3] })).toEqual(["Call the bank +Home", "Urgent, no date"]);
     expect(await words(ada, { importance: [0] })).toEqual(["Taxes +Money", "Rent +HOME", "Nothing set"]);
     expect(await words(ada, { dueFrom: "2026-10-14", dueTo: "2026-10-14" })).toEqual(["Call the bank +Home"]);
@@ -191,27 +205,40 @@ describe("listing todos", () => {
     expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).revision).toBe(note.revision);
   });
 
-  it("counts a todo as tagged with the tags on its own line and with its note's, the same #tags notes have", async () => {
+  it("counts a todo as tagged with the tags on its own line and those that cover it, and says where each of those is written; the note keeps every tag", async () => {
     const ada = await newMember();
-    await create(ada, "# Garden #outside\n\n- [ ] Water plants #weekly\n- [ ] Mow\n\nSomewhere else in the note: #someday");
-    await create(ada, "# Desk\n\n- [ ] File papers #weekly\n- [ ] Dust");
+    // Today's daily note: a line of nothing but #common-ink under Building, and Chores after it.
+    await create(ada, "# 2026-10-23\n\n## Building\n\n#common-ink\n\n- [ ] Ship the chips #ui\n\n## Chores\n\n- [ ] Pour vinegar down the guest sink\n");
+    const garden = await create(ada, "#outside\n\n- [ ] Before any heading\n\n# Garden #weekly\n\n- [ ] Water plants\n- Beds #soil\n  - [ ] Weed\n- [ ] Mow\n\n```\n#not-a-tag\n# Not a heading\n```\n- [ ] After the code\n\nSomewhere else in the note: #someday");
 
-    // Its own line's tag, which tags the note too, so the note's other todo is listed under it as well.
-    expect(await words(ada, { tag: "weekly" })).toEqual(["File papers #weekly", "Dust", "Water plants #weekly", "Mow"]);
-    // The note's tag, from its title and from a line that is no todo.
-    expect(await words(ada, { tag: "outside" })).toEqual(["Water plants #weekly", "Mow"]);
-    expect(await words(ada, { tag: "SomeDay" })).toEqual(["Water plants #weekly", "Mow"]);
-    // A listed todo says its note's tags, and its own are the ones its text writes.
-    expect((await list(ada, { tag: "outside" })).map((t) => [t.text, t.tags])).toEqual([
-      ["- [ ] Water plants #weekly", ["outside", "weekly", "someday"]],
-      ["- [ ] Mow", ["outside", "weekly", "someday"]],
-    ]);
-    // What the rest of the note tags it with, so taking #weekly off the first line is not taking it off the note when another line has it.
-    expect((await list(ada, { tag: "outside" })).map((t) => [t.text, t.tagsElsewhere])).toEqual([
-      ["- [ ] Water plants #weekly", ["outside", "someday"]],
-      ["- [ ] Mow", ["outside", "weekly", "someday"]],
-    ]);
-    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["outside", "someday", "weekly"], assignees: [] });
+    expect(await words(ada, { tag: "common-ink" })).toEqual(["Ship the chips #ui"]);
+    expect(await words(ada, { tag: "ui" })).toEqual(["Ship the chips #ui"]);
+    expect(await words(ada, { tag: "outside" })).toEqual(["Before any heading"]);
+    expect(await words(ada, { tag: "WEEKLY" })).toEqual(["Water plants", "Weed", "Mow", "After the code"]);
+    expect(await words(ada, { tag: "soil" })).toEqual(["Weed"]);
+    // A tag that covers no todo, and what code says, tag none.
+    expect(await words(ada, { tag: "someday" })).toEqual([]);
+    expect(await words(ada, { tag: "not-a-tag" })).toEqual([]);
+    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["common-ink", "outside", "soil", "ui", "weekly"], assignees: [] });
+
+    // A listed todo's tags are the ones it matches by, its own first, and tagsElsewhere says where each of the others is written.
+    const listed = await list(ada);
+    const tagsOf = (text: string) => listed.filter((t) => t.text === text).map((t) => ({ tags: t.tags, tagsElsewhere: t.tagsElsewhere }))[0];
+    expect(tagsOf("- [ ] Ship the chips #ui")).toEqual({ tags: ["ui", "common-ink"], tagsElsewhere: [{ name: "common-ink", line: 4, by: "section", under: "Building" }] });
+    expect(tagsOf("- [ ] Pour vinegar down the guest sink")).toEqual({ tags: [], tagsElsewhere: [] });
+    expect(tagsOf("- [ ] Before any heading")).toEqual({ tags: ["outside"], tagsElsewhere: [{ name: "outside", line: 0, by: "note", under: null }] });
+    expect(tagsOf("  - [ ] Weed")).toEqual({
+      tags: ["soil", "weekly"],
+      tagsElsewhere: [
+        { name: "soil", line: 7, by: "item", under: "Beds" },
+        { name: "weekly", line: 4, by: "heading", under: "Garden" },
+      ],
+    });
+
+    // The note is still tagged with every tag written in it, wherever.
+    const notesTagged = async (tag: string) => (await perform(env.DB, ada, { type: "note.list", tag })).notes.map((n) => n.id);
+    for (const tag of ["outside", "weekly", "soil", "someday"]) expect(await notesTagged(tag), tag).toEqual([garden.id]);
+    expect(await notesTagged("not-a-tag")).toEqual([]);
   });
 
   it("narrows to a folder with every folder under it, inside what the asker can see, and a folder they can't see is no folder", async () => {

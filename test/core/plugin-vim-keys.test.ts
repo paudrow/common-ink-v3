@@ -86,10 +86,12 @@ describe("vim's keys outside a note", () => {
     expect(typedInto.flatMap((k) => k.keys.filter(typed))).toEqual([]);
   });
 
-  it("gives each key to one command, on a Mac and off one", () => {
+  it("gives each key to one command, on a Mac and off one, but for a field's and a region's, which never run in the same place", () => {
     for (const mac of [true, false]) {
-      const keys = KEYS.flatMap((k) => k.keys.map((key) => onPlatform(key, mac)));
-      expect(keys.filter((key, i) => keys.indexOf(key) !== i), mac ? "on a Mac" : "off a Mac").toEqual([]);
+      const keys = KEYS.flatMap((k) => k.keys.map((key) => ({ key: onPlatform(key, mac), surface: k.surface })));
+      const twice = keys.filter(({ key }, i) => keys.findIndex((o) => o.key === key) !== i);
+      expect(twice.map(({ key }) => key), mac ? "on a Mac" : "off a Mac").toEqual(mac ? ["ctrl+j", "ctrl+k"] : ["mod+j", "mod+k"]);
+      for (const { key } of twice) expect(keys.filter((o) => o.key === key).map((o) => o.surface).sort()).toEqual(["field", "window"]);
     }
   });
 

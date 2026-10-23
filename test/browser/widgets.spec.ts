@@ -115,11 +115,13 @@ test("an ordinary word after a / and Enter or Tab stays as it was typed", async 
   const note = await open(page, "# Words\n\n");
 
   // Each used to match "Kanban board" or "Timer" by scattered letters, and Enter wrote the embed over the word.
-  // Not `/h`, which starts "HTML", an embed of its own.
-  for (const typed of ["yes /no", "and /or", "km /hr", "N /A", "/an", "> /tmr"]) {
-    await page.keyboard.type(typed);
+  // Not `/h`, which starts "HTML", an embed of its own. Typed slowly, so the list is open at the `/`.
+  // After words the list closes on a word that fits nothing; at the start of a line it says so, and Enter is still a new line.
+  for (const [typed, shown] of [["yes /no", []], ["and /or", []], ["km /hr", []], ["N /A", []], ["/an", ["No matches"]], ["> /tmr", ["No matches"]]] as const) {
+    await page.keyboard.type(typed, { delay: 30 });
     await settled(page);
-    await expect(menu(page)).toHaveCount(0);
+    await expect(options(page)).toHaveText([...shown]);
+    await expect(options(page).and(page.locator("[aria-selected=true]"))).toHaveCount(0);
     await page.keyboard.press("Enter");
   }
   await page.keyboard.type("in /or", { delay: 20 });

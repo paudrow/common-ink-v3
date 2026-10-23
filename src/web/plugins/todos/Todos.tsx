@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Icon, MAX_SEARCH_LENGTH, TODO_SORT_WORDS, changeTodo, isNoteId, isPersonId, linksOn, mentionKey, mentionName, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useInspected, useNow, type App, type ListedTodo, type Mentioned, type PluginHost, type Results, type SortKey, type TodoChange, type TodoCompletion, type TodoSort, type WrittenLink } from "../../plugin-api.ts";
+import { Icon, MAX_SEARCH_LENGTH, TODO_SORT_WORDS, changeTodo, isNoteId, isPersonId, linksOn, mentionKey, mentionName, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useInspected, useNow, type App, type InheritedTag, type ListedTodo, type Mentioned, type PluginHost, type Results, type SortKey, type TodoChange, type TodoCompletion, type TodoSort, type WrittenLink } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
 import { QueryBar } from "../lib/QueryBar.tsx";
@@ -14,6 +14,7 @@ import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
 import { linksOut, type LinkOut } from "./linksOut.ts";
 import { ALT, SHIFT, openPage } from "../lib/opening.ts";
+import type { ListedAt } from "../lib/openTodo.ts";
 import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, boxHint, clicked, pickerLabel, picking, pressed, pressedWith, splitTags, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { STATE_CHOICES, stateOf, withState, type StateChoice } from "./states.ts";
@@ -41,6 +42,24 @@ const sortedAs = (text: string, sort: TodoSort): string => (choiceIn(text) === n
 
 /** How many of a todo's tags its row shows before a "+N" that lists the rest. */
 const SHOWN_TAGS = 3;
+
+/** How much of a heading's or an item's words a tag's chip says it is from. */
+const FROM_LENGTH = 40;
+
+/** Where a tag a todo has from another line of its note is written, as its chip says after "From". */
+function whereFrom(tag: InheritedTag, titleOf: TitleOf): string {
+  if (tag.under === null) return "the note";
+  const said = plainly(tag.under, titleOf);
+  const words = said.length > FROM_LENGTH ? `${said.slice(0, FROM_LENGTH - 1).trimEnd()}…` : said;
+  const kind = tag.by === "item" ? "item" : tag.by === "section" ? "section" : "heading";
+  return words ? `the ${kind} “${words}”` : `a ${kind}`;
+}
+
+/** The tags a todo has from other lines and not on its own, which its row shows after its own, quieter. */
+const inheritedOnly = (todo: ListedTodo): InheritedTag[] => {
+  const own = new Set(tagsOn(todo.words).map((tag) => nameKey(tag.name)));
+  return todo.tagsElsewhere.filter((tag) => !own.has(nameKey(tag.name)));
+};
 
 /** How long a todo checked off stays in a list of open ones, struck through, as v1's did. */
 const LINGER_MS = 1500;
@@ -78,7 +97,7 @@ function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
   const known = [...todo.assignees, ...(change.assign ? [change.assign] : [])];
   const assignees = new Map(read.assignees.map((a) => [mentionKey(a), known.find((person) => sameWho(person, mentionKey(a))) ?? { id: isPersonId(a.target) ? a.target : null, name: mentionName(a), member: false }]));
-  return { ...todo, text, state: read.state, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.state === "done" ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
+  return { ...todo, text, state: read.state, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.state === "done" ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text)].map((tag) => tag.name).some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
@@ -228,7 +247,8 @@ interface RowProps {
   onChange: (todo: ListedTodo, change: RowChange) => void;
   /** Takes one of the tags after its words off the todo's line; false when the line no longer has that tag there. */
   onUntag: (todo: ListedTodo, tag: PlacedTag) => boolean;
-  onOpen: (todo: ListedTodo, beside?: boolean) => void;
+  /** Opens the todo's note at its line, or at the line a tag it has from elsewhere is written on. */
+  onOpen: (at: ListedAt, beside?: boolean) => void;
   /** Reads each time it was checked off. */
   completions: (todo: ListedTodo) => Promise<TodoCompletion[]>;
   onPicking: (event: PickingEvent) => void;
@@ -241,7 +261,7 @@ interface RowProps {
  * there when pressed, and at the right its note's name, which opens the note at the todo's line. The
  * second, under the words, has a chip for each thing set on the todo, side by side: the due date, the
  * repeat, the last time it was done, the priority, its assignees, the first three tags and a "+N" for
- * the rest. After them, shown while the row is pointed at or has the keyboard, are Abandon and Move to
+ * the rest, and the tags it has from other lines of its note, which open the line each is written on. After them, shown while the row is pointed at or has the keyboard, are Abandon and Move to
  * backlog, a quiet icon for the date and for Assign when they aren't set, and Add tag, which keep
  * their room after what is set, so nothing moves when they show; and last Repeat and Priority when
  * they aren't set, which take room only while they show. Each chip opens a small popover under itself, and a tag's chip narrows the list
@@ -640,6 +660,19 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
             +{trailing.length - SHOWN_TAGS}
           </button>
         )}
+        {inheritedOnly(todo).map((tag) => (
+          // Not on this line, so there is nothing here to take off: it opens the line that writes it. No data-tag, so the tag's card doesn't cover the tooltip saying where it is from.
+          <button
+            key={`from ${tag.line} ${tag.name}`}
+            type="button"
+            className="todo-chip todo-tag-from"
+            title={`From ${whereFrom(tag, titleOf)}`}
+            aria-label={`#${tag.name}, from ${whereFrom(tag, titleOf)}. Opens the line it is written on`}
+            onClick={() => onOpen({ noteId: todo.noteId, line: tag.line, tag: tag.name })}
+          >
+            <span className="todo-tag-name">#{tag.name}</span>
+          </button>
+        ))}
         {todo.completed && <span className="todo-ticked">{tickedLabel(todo.completed.at, now)}</span>}
         {/* After what is set, what the row reveals while it is pointed at or has the keyboard, so that showing it moves nothing. */}
         {!readOnly && (
@@ -739,6 +772,11 @@ export function TodoGlance({ todo, now, titleOf, onOpen }: { todo: ListedTodo; n
               #{name}
             </span>
           ))}
+          {inheritedOnly(todo).map((tag) => (
+            <span key={`from ${tag.line} ${tag.name}`} className="todo-chip todo-tag-from" title={`From ${whereFrom(tag, titleOf)}`}>
+              #{tag.name}
+            </span>
+          ))}
         </span>
         <span className="todo-note">
           <span className="todo-note-title">{title}</span>
@@ -751,8 +789,8 @@ export function TodoGlance({ todo, now, titleOf, onOpen }: { todo: ListedTodo; n
 interface Props {
   host: PluginHost;
   app: App;
-  /** Opens a todo's note with the cursor on its line, in a split beside what is in front when `beside`. */
-  onOpen: (todo: ListedTodo, beside?: boolean) => void;
+  /** Opens a todo's note with the cursor on its line, or on another line of it, in a split beside what is in front when `beside`. */
+  onOpen: (at: ListedAt, beside?: boolean) => void;
 }
 
 /** Stands in for the inspector where a list of todos is part of a page that tells the inspector itself. */

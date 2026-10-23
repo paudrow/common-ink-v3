@@ -231,7 +231,7 @@ test("a mode's and a folder's menu open it in a split to the right or below, kep
   await expect(page).toHaveURL(/\/search$/);
 });
 
-test("the window has one italic tab, which is where the next thing opens whichever pane is in front, and it is kept only when the member says so", async ({ page }) => {
+test("the window has one italic tab, which comes to the pane in front when the next thing opens there, and it is kept only when the member says so", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta");
   for (const name of ["Plans", "Ideas"]) await perform(page, { type: "folder.create", name });
   await page.reload();
@@ -245,45 +245,45 @@ test("the window has one italic tab, which is where the next thing opens whichev
   await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
 
-  // A folder clicked with each pane in front in turn: the first opens in the pane in front, and the italic tab is then where the next opens, whichever pane is in front.
+  // A folder clicked with each pane in front in turn opens in that pane, after the tab showing there, and the italic tab in the other pane goes.
   for (const [pane, folder] of [[2, "Plans"], [1, "Ideas"], [2, "Unsorted"], [1, "Plans"]] as const) {
     await tab(page, pane === 1 ? "Alpha" : "Beta", pane - 1).click();
     await folderRow(page, folder).click();
-    await expect(tabs(page, 1)).toHaveText(["Beta", folder]);
-    await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
-    await expect(group(page, 2)).toHaveAttribute("data-focused", "true");
+    await expect(tabs(page, 0)).toHaveText(pane === 1 ? ["Alpha", folder, "Beta"] : ["Alpha", "Beta"]);
+    await expect(tabs(page, 1)).toHaveText(pane === 2 ? ["Beta", folder] : ["Beta"]);
+    await expect(group(page, pane)).toHaveAttribute("data-focused", "true");
     await expect.poll(() => previews(page)).toEqual([folder]);
   }
 
   // A mode's link and a note's title are the same: each takes the italic tab's place.
   await modes(page).getByRole("link", { name: "Todos" }).click();
-  await expect(tabs(page, 1)).toHaveText(["Beta", "Todos"]);
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Todos", "Beta"]);
   await expect.poll(() => previews(page)).toEqual(["Todos"]);
 
   // Turning to another tab, another pane and back, and reloading, leave it italic.
   await tab(page, "Beta", 1).click();
-  await tab(page, "Todos", 1).click();
-  await tab(page, "Alpha").click();
-  await group(page, 2).getByRole("heading", { name: "Todos", level: 1 }).click();
-  await expect(group(page, 2)).toHaveAttribute("data-focused", "true");
+  await tab(page, "Todos").click();
+  await group(page, 1).getByRole("heading", { name: "Todos", level: 1 }).click();
+  await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
   await expect.poll(() => previews(page)).toEqual(["Todos"]);
   await page.reload();
-  await expect(tabs(page, 1)).toHaveText(["Beta", "Todos"]);
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Todos", "Beta"]);
   await expect.poll(() => previews(page)).toEqual(["Todos"]);
 
   // A note opened from an italic folder tab takes the list's place in that tab, and Back returns to the list.
   await folderRow(page, "Unsorted").click();
-  await expect(tabs(page, 1)).toHaveText(["Beta", "Unsorted"]);
-  await group(page, 2).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Edit Alpha" }).click();
-  // Alpha has a kept tab in the other pane, which the click turns to: nothing opened, so the list is where it was, and italic.
-  await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
-  await expect(tabs(page, 1)).toHaveText(["Beta", "Unsorted"]);
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Unsorted", "Beta"]);
+  await group(page, 1).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Edit Alpha" }).click();
+  // Alpha has a kept tab in this pane, which the click turns to: nothing opened, so the list is where it was, and italic.
+  await expect(tab(page, "Alpha")).toHaveAttribute("aria-selected", "true");
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Unsorted", "Beta"]);
   await expect.poll(() => previews(page)).toEqual(["Unsorted"]);
-  // One with no tab yet takes the list's place.
+  // One with no tab yet takes the list's place, in the pane the list was opened in.
   await perform(page, { type: "note.create", text: "# Gamma\n\nAbout Gamma." });
   await page.reload();
   await tab(page, "Beta", 1).click();
   await folderRow(page, "Unsorted").click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
   await group(page, 2).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Edit Gamma" }).click();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
   await expect.poll(() => previews(page)).toEqual(["Gamma"]);
@@ -315,6 +315,15 @@ test("the window has one italic tab, which is where the next thing opens whichev
   await dragOnto(page, tab(page, "Plans", 2), body(page, 1), 0.5, 0.5);
   await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Plans"]);
   await expect.poll(() => previews(page)).toEqual([]);
+
+  // A note another pane has open opens in this one too, from a list here.
+  await folderRow(page, "Unsorted").click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Plans", "Unsorted"]);
+  await group(page, 1).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Edit Gamma" }).click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Plans", "Gamma"]);
+  await expect(tabs(page, 2)).toHaveText(["Gamma", "Ideas"]);
+  await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
+  await expect(group(page, 1).locator(".cm-line").first()).toHaveText("# Gamma");
 });
 
 test("a layout kept with an italic tab in each pane opens with one, in the pane in front, and no tab closed", async ({ page }) => {
@@ -595,7 +604,7 @@ for (const [name, splits, panes] of [
   ["down", ["Split down"], 2],
   ["nested", ["Split right", "Split down"], 3],
 ] as const) {
-  test(`in a split ${name}, a page from the sidebar, the palette or the address opens where the italic tab is, with every pane and both sidebars where they were`, async ({ page }) => {
+  test(`in a split ${name}, a page from the sidebar, the palette or the address opens in the pane in front, the italic tab alone in another pane is kept there, and every pane and both sidebars stay where they were`, async ({ page }) => {
     await withNotes(page, "Alpha", "Beta", "Gamma");
     await pinPanel(page, "Info");
     for (const title of ["Alpha", "Beta", "Gamma"]) await keep(page, title);
@@ -624,10 +633,11 @@ for (const [name, splits, panes] of [
 
     const pages = await modes(page).getByRole("link").allInnerTexts();
     expect(pages).toEqual(["Dashboard", "Search", "Today", "Todos", "Calendar", "Contacts", "Email", "Uploads", "History", "Trash", "Dice", "Plugins"]);
+    // It opens in the pane in front as the italic tab, after the tab showing there.
     const opensThere = async (label: string) => {
-      for (let i = 0; i < panes; i++) await expect(tabs(page, i)).toHaveText(i === there ? [label] : others[i]!);
-      await expect(group(page, there + 1)).toHaveAttribute("data-focused", "true");
-      await expect(group(page, there + 1).getByRole("heading", { name: label, level: 1 })).toBeVisible();
+      for (let i = 0; i < panes; i++) await expect(tabs(page, i)).toHaveText(i === 0 ? [others[0]![0]!, label, ...others[0]!.slice(1)] : others[i]!);
+      await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
+      await expect(group(page, 1).getByRole("heading", { name: label, level: 1 })).toBeVisible();
       await expect.poll(() => previews(page)).toEqual([label]);
       await expect.poll(() => placed(page)).toEqual(before);
     };
@@ -639,7 +649,8 @@ for (const [name, splits, panes] of [
       await expect.poll(() => placed(page)).toEqual(before);
     }
     await modes(page).getByRole("link", { name: "Dice", exact: true }).click();
-    await expect(group(page, there + 1)).toHaveAttribute("data-focused", "true");
+    await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
+    await expect(tabs(page, there)).toHaveText(["All notes"]);
     await expect(ownPlugin(page, "Dice").getByRole("button", { name: "Roll" })).toBeVisible();
     await expect.poll(() => placed(page)).toEqual(before);
     await front();

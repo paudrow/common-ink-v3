@@ -1,13 +1,16 @@
 import type { EditorState, Extension, Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
-import type { WrittenLink } from "../../plugin-api.ts";
+import { linkedFolder, type WrittenLink } from "../../plugin-api.ts";
 import { chips, editWithin, unitAtCursor, type Chip } from "../lib/chips.ts";
 import { drawnInView, within } from "../lib/live.ts";
 import { MOD } from "../lib/opening.ts";
 import { noteLinks, noteLinksOn } from "./at.ts";
-import { linkWords, type Linked } from "./words.ts";
+import { linkWords, type Linked, type LinkedKind } from "./words.ts";
 
-export type NoteOf = (noteId: string) => Linked;
+/** What a link's target is: a note, by its id, or a folder, as `folder:id`. */
+export type NoteOf = (target: string) => Linked;
+
+const kindOf = (target: string): LinkedKind => (linkedFolder(target) === null ? "note" : "folder");
 
 const isLink = (state: EditorState, link: WrittenLink) => state.field(noteLinks).has(link.from);
 
@@ -16,11 +19,13 @@ const BEFORE_END = 2;
 
 const modClick = (event: MouseEvent) => event.button === 0 && (event.metaKey || event.ctrlKey);
 
-/** A way to open a link's note: where the member is, or in a tab behind what they are reading. */
-export type Open = (noteId: string, how?: { background: boolean }) => void;
+/** A way to open what a link is to: where the member is, or in a tab behind what they are reading. */
+export type Open = (target: string, how?: { background: boolean }) => void;
 
 /** What hovering a link says of clicking it: drawn, where a click follows it, and as written, where a click is for the cursor. */
 const HOW = { drawn: `Click to open · ${MOD}-click to open in a new tab`, written: `${MOD}-click to open` };
+/** A folder opens its list in front, however it is clicked. */
+const howFor = (target: string, how: string) => (kindOf(target) === "folder" && how === HOW.drawn ? "Click to open" : how);
 
 /**
  * Draws a link as the words it shows: its display text, or its note's title as it is now. It is
@@ -39,7 +44,7 @@ function linkChip(noteOf: NoteOf, open: Open): Chip<WrittenLink> {
       return linked === undefined ? "waiting" : JSON.stringify(linked && [linked.title, linked.state]);
     },
     draw(el, link, source) {
-      const { text, suffix, hint, gone } = linkWords(noteOf(link.target), link.display, HOW.drawn);
+      const { text, suffix, hint, gone } = linkWords(noteOf(link.target), link.display, howFor(link.target, HOW.drawn), kindOf(link.target));
       el.textContent = text;
       // Words of the line's own size, so the line is as tall with them as without.
       if (suffix) el.appendChild(document.createElement("span")).append(suffix);
@@ -67,7 +72,7 @@ const asWritten = (noteOf: NoteOf) =>
       const line = state.doc.lineAt(range.head);
       for (const link of noteLinksOn(line.text, line.from)) {
         if (!within(state, link.from, link.to) || !isLink(state, link)) continue;
-        const { hint, gone } = linkWords(noteOf(link.target), link.display, HOW.written);
+        const { hint, gone } = linkWords(noteOf(link.target), link.display, HOW.written, kindOf(link.target));
         drawn.push(Decoration.mark({ class: gone ? "md-notelink md-notelink-gone" : "md-notelink", attributes: { title: hint, ...(gone ? {} : { "data-note": link.target }) } }).range(link.from, link.to));
       }
     }

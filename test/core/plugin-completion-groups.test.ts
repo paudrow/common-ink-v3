@@ -5,9 +5,10 @@ type Item = { label: string; kind?: string };
 const shown = (items: Item[]) => grouped(items, (item) => item.kind).map(({ item, group }) => (group ? `${group.heading} ${group.rank}: ${item.label}` : item.label));
 
 describe("the groups of a list at the cursor", () => {
-  it("are by kind, people then dates then notes then uploads then events then what is new, each kind's items in the order given", () => {
+  it("are by kind, people then dates then notes then folders then uploads then events then what is new, each kind's items in the order given", () => {
     const items = [
       { label: "Standup", kind: "event" },
+      { label: "Roads", kind: "folder" },
       { label: "Road map", kind: "note" },
       { label: "harbour.png", kind: "upload" },
       { label: "Ada", kind: "person" },
@@ -16,11 +17,11 @@ describe("the groups of a list at the cursor", () => {
       { label: "Tomorrow", kind: "date" },
       { label: "Create contact “Road”", kind: "new" },
     ];
-    expect(shown(items)).toEqual(["People 0: Ada", "People 0: Grace", "Dates 1: Tomorrow", "Notes 2: Road map", "Notes 2: Roadmap draft", "Uploads 3: harbour.png", "Events 4: Standup", "New 7: Create contact “Road”"]);
+    expect(shown(items)).toEqual(["People 0: Ada", "People 0: Grace", "Dates 1: Tomorrow", "Notes 2: Road map", "Notes 2: Roadmap draft", "Folders 3: Roads", "Uploads 4: harbour.png", "Events 5: Standup", "New 8: Create contact “Road”"]);
   });
 
   it("put blocks before embeds, as / lists them", () => {
-    expect(shown([{ label: "Timer", kind: "embed" }, { label: "Table", kind: "block" }, { label: "Kanban board", kind: "embed" }, { label: "Quote", kind: "block" }])).toEqual(["Blocks 5: Table", "Blocks 5: Quote", "Embeds 6: Timer", "Embeds 6: Kanban board"]);
+    expect(shown([{ label: "Timer", kind: "embed" }, { label: "Table", kind: "block" }, { label: "Kanban board", kind: "embed" }, { label: "Quote", kind: "block" }])).toEqual(["Blocks 6: Table", "Blocks 6: Quote", "Embeds 7: Timer", "Embeds 7: Kanban board"]);
   });
 
   it("are headed only where the list holds more than one kind", () => {
@@ -29,7 +30,7 @@ describe("the groups of a list at the cursor", () => {
 
   it("come after the items of no kind, which keep their order under no heading, as does a kind that isn't one", () => {
     const items = [{ label: "Standup", kind: "event" }, { label: "Timer" }, { label: "Plan", kind: "note" }, { label: "Odd", kind: "weather" }, { label: "Board" }];
-    expect(shown(items)).toEqual(["Timer", "Odd", "Board", "Notes 2: Plan", "Events 4: Standup"]);
+    expect(shown(items)).toEqual(["Timer", "Odd", "Board", "Notes 2: Plan", "Events 5: Standup"]);
   });
 
   it("leave what is new for the member to pick on purpose, and highlight any other kind or none of itself", () => {

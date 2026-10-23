@@ -1,9 +1,10 @@
+import { writtenDayLink } from "../../plugin-api.ts";
 import { daysBetween, isDay, shiftDay, weekdayOf, WEEKDAY_NAMES, type Day } from "../calendar/dates.ts";
 
 /**
- * A day a member means, and the time of day on it where they said one. A note writes it as the day
- * alone, `2026-10-21`, or with the time, `2026-10-21 15:00`: a calendar day and a clock's time where
- * the member is, with no time zone, as a due date is a day with none.
+ * A day a member means, and the time of day on it where they said one. A note writes it as a link to
+ * the day, `[[2026-10-21]]`, or with the time, `[[2026-10-21 15:00]]`: a calendar day and a clock's
+ * time where the member is, with no time zone, as a due date is a day with none.
  */
 export interface When {
   day: Day;
@@ -14,12 +15,6 @@ export interface When {
 /** A day `@` offers for what was typed, with the name it was asked for by, such as Next Friday, where it has one. */
 export interface Said extends When {
   name: string | null;
-}
-
-/** A written day or day and time found on a line, and where it is in the note. */
-export interface Written extends When {
-  from: number;
-  to: number;
 }
 
 /** Whether a day and month written in numbers put the month first, as 10/21 does in the United States, or the day, as 21/10 does elsewhere. */
@@ -169,24 +164,8 @@ export function asksToPick(typed: string): boolean {
   return words === "date" || (words.startsWith("pick") && "pick a date".startsWith(words));
 }
 
-/** How a note writes a day, or a day and a time. */
-export const written = ({ day, time }: When): string => (time === null ? day : `${day} ${time}`);
-
-/**
- * The days written on a line that starts at `offset` in the note, as `written` writes them, each on
- * its own: at the start of the line or after a space or an opening parenthesis, and before the end,
- * a space or a mark that ends words. A date that is part of something longer, such as `due:2026-10-21`,
- * a link's words after `|`, or an address, is not one.
- */
-export function writtenOn(line: string, offset: number): Written[] {
-  const found: Written[] = [];
-  for (const match of line.matchAll(/(?<=^|[\s(])(\d{4}-\d{2}-\d{2})(?: ((?:[01]\d|2[0-3]):[0-5]\d))?(?=$|[\s.,;!?)]|:(?!\d))/g)) {
-    const [whole, day, time] = match;
-    if (!isDay(day!)) continue;
-    found.push({ day: day!, time: time ?? null, from: offset + match.index, to: offset + match.index + whole.length });
-  }
-  return found;
-}
+/** How a note writes a day, or a day and a time: as a link to the day. */
+export const written = (when: When): string => writtenDayLink(when);
 
 // Chrome and Node put a narrow no-break space before AM and PM, which nobody can type or search for.
 const plain = (text: string) => text.replace(/[  ]/g, " ");

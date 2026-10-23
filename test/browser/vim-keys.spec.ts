@@ -40,7 +40,7 @@ const page = (locator: Locator) => locator.page();
 
 const rows = (list: Locator, row = ":scope > *") => list.locator(row);
 
-test("the folder tree moves with j, k, gg and G, opens with l and Enter, and h collapses a folder and then goes to its parent", async ({ page }) => {
+test("the folder tree moves with j, k, gg and G, za opens a folder out, and h collapses a folder and then goes to its parent", async ({ page }) => {
   await signIn(page);
   const work = await perform(page, { type: "folder.create", name: "Work" });
   const plans = await perform(page, { type: "folder.create", name: "Plans", parentId: work.id });
@@ -57,25 +57,23 @@ test("the folder tree moves with j, k, gg and G, opens with l and Enter, and h c
   await expectSelected(item("All notes"), "All notes");
   await page.keyboard.press("Shift+G");
   await expectSelected(item("Zebra"), "the last folder");
+  // The tree is one part of the sidebar's list, which begins with the pages.
+  const dashboard = page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: "Dashboard" });
   await keys(page, "g", "g");
-  await expectSelected(item("All notes"), "the first row");
+  await expectSelected(dashboard, "the first row");
   await page.keyboard.press("k");
-  await expectSelected(item("All notes"), "the first row still");
+  await expectSelected(dashboard, "the first row still");
 
   const down = async (to: string) => {
-    for (let i = 0; i < 8 && !(await item(to).evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press("j");
+    for (let i = 0; i < 12 && !(await item(to).evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press("j");
     await expectSelected(item(to), to);
   };
   await down("Work");
-  await page.keyboard.press("l");
-  await expect(page).toHaveURL(new RegExp(`/folder/.*${work.id}`));
+  await keys(page, "z", "a");
   await expect(item("Work")).toHaveAttribute("aria-expanded", "true");
-  await expectSelected(item("Work"), "Work, after opening it");
+  await expectSelected(item("Work"), "Work, after opening it out");
   await page.keyboard.press("j");
   await expectSelected(item("Plans"), "Plans");
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/folder/.*${plans.id}`));
-  await expectSelected(item("Plans"), "Plans, after opening it");
 
   // h on a row with nothing to collapse goes to its parent, and h there collapses it.
   await page.keyboard.press("h");
@@ -341,11 +339,14 @@ test("in Settings, Enter on a setting goes to its field and Escape comes back to
   await expect(shown("Vim: half a page down a list")).toHaveText([MAC ? /^⌃D/ : /^Ctrl\+D/]);
   await expect(shown("Vim: open the selected row")).toHaveText([/^Enter/, /^L/]);
   await expect(shown("Vim: expand or collapse the selected row")).toHaveText([/^Z A/]);
-  await expect(shown("Vim: go to the region on the left")).toHaveText([MAC ? /^⌃W H/ : /^Ctrl\+W H/]);
+  await expect(shown("Vim: preview the selected row in the editor area, and stay on it")).toHaveText([/^Space/]);
+  await expect(shown("Vim: go to the region on the left")).toHaveText([MAC ? /^⌃W H/ : /^Ctrl\+W H/, MAC ? /^⌃H/ : /^Ctrl\+H/]);
+  await expect(shown("Vim: go back to the region you were in")).toHaveText([MAC ? /^⌃W P/ : /^Ctrl\+W P/]);
+  await expect(shown("Vim: go to the next region, round to the first")).toHaveText([MAC ? /^⌃W W/ : /^Ctrl\+W W/]);
   await expect(shown("Vim: next tab")).toHaveText([/^G T/]);
   await expect(shown("Vim: next row, from a field")).toHaveText(MAC ? [/^⌃J/, /^⌃N/] : [/^Ctrl\+J/, /^Ctrl\+N/]);
-  await expect(all).toHaveCount(20);
-  await expect(shortcuts.locator("tbody tr")).toHaveCount(20);
+  await expect(all).toHaveCount(23);
+  await expect(shortcuts.locator("tbody tr")).toHaveCount(23);
 
   // Escape leaves the search box for the list, on its first row, and the keys go on through the shortcuts.
   await page.keyboard.press("Escape");
@@ -732,7 +733,7 @@ test("a sequence begun on a row and given up takes no key from a note: a press, 
   await page.keyboard.press("g");
   await expect(item("Zebra")).toBeFocused();
   await page.keyboard.press("g");
-  await expectSelected(item("All notes"), "the first row");
+  await expectSelected(page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: "Dashboard" }), "the first row");
 });
 
 test("a letter typed in a note right after a sequence was given up elsewhere arrives in its text", async ({ page }) => {

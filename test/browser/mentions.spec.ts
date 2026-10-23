@@ -195,9 +195,12 @@ test("@ opens nothing inside an address or a word, and a handle that is typed an
   await expect(page.getByRole("listbox")).toHaveCount(0);
   await page.keyboard.type("example.com or ping @");
   await expect(options(page).first()).toHaveText("Ada LovelaceYou");
+  // Nobody is called that: the list offers only to create a note of it, which Enter never takes.
   await page.keyboard.type("audrow");
-  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText(["Create note “audrow”New note in Unsorted", "Create folder “audrow”New folder at the top", "Create tag #audrowNew tag"]);
+  await expect(page.getByRole("listbox").getByRole("option", { selected: true })).toHaveCount(0);
   await page.keyboard.type(" on the bird site.");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
 
   await expect.poll(() => text(page, note.id)).toBe("# Plan\n\nWrite to ada@example.com or ping @audrow on the bird site.");
   await expect(mentions(page)).toHaveCount(0);

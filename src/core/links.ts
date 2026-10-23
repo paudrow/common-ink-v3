@@ -4,7 +4,8 @@ import { blanked, codeSpans } from "./spans.ts";
 /**
  * A link as a note writes it: `[[target]]` or `[[target|display text]]`. A note stores the target
  * as the linked note's id, which never changes, so a link follows its note through every rename.
- * A target that isn't an id is a title somebody wrote by hand, and links nothing until it is resolved.
+ * A link to a folder is `[[folder:id]]` the same way. A target that is neither is a title somebody
+ * wrote by hand, and links nothing until it is resolved.
  */
 export interface WrittenLink {
   from: number;
@@ -19,6 +20,14 @@ const LINK = /(?<!(?<![\p{L}\p{N}_@])@)\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/gu
 const ID = /^[a-z0-9]{12}$/;
 
 export const isNoteId = (target: string) => ID.test(target);
+
+const FOLDER = /^folder:([a-z0-9]{12})$/;
+
+/** The folder a link's target is to, as `[[folder:id]]` writes it, or null where it is to no folder. */
+export const linkedFolder = (target: string): string | null => FOLDER.exec(target)?.[1] ?? null;
+
+/** How a link to a folder is written: by the folder's id, so it follows the folder through every rename. */
+export const writtenFolderLink = (folderId: string) => `[[folder:${folderId}]]`;
 
 /** How a link is written. */
 export const writtenLink = (target: string, display?: string | null) => (display ? `[[${target}|${display}]]` : `[[${target}]]`);

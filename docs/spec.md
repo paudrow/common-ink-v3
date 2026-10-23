@@ -80,14 +80,14 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 47. As a member, I want to set a due date through a chip, so that I know when something is due.
 48. As a member, I want to set a priority of High, Medium, Low, or None, so that urgent work stands out. In a note the chip shows the marks as written (`!!`); the Todos page says the words.
 49. As a member, I want to assign a todo to a member, a grant holder, or a contact, so that responsibility is recorded.
-50. ~~As a member, I want to put a todo in a project with `+Name`.~~ Removed: there are no projects. Todos group by their note's tags and folder (`docs/todos.md`).
-51. As a member, I want `#tag` on a todo line to tag the note, so that todos group by tag and folder.
+50. ~~As a member, I want to put a todo in a project with `+Name`.~~ Removed: there are no projects. Todos group by tag and by their note's folder (`docs/todos.md`).
+51. As a member, I want `#tag` on a todo line to tag the todo and the note, and a tag in a heading, on a line of its own, or on a list item to tag the todos under it, so that todos group by tag and folder.
 52. As a member, I want simple recurrence such as every N days, weeks, months, or years, or on specific weekdays, so that common repeats are easy to set.
 53. As a member, I want advanced recurrence such as N days after last completed, a weekday or day of every Nth week or month, a day counted from the start or end of the month, the second Tuesday of each month, or a date each year, so that complicated schedules are possible. A plain `every:3d` counts from the due date and skips what was missed, so a late todo is never left overdue.
 54. As a member, I want checking off a recurring todo to keep the open line in place with its next due date and add the checked line, with a link back to its note, to my daily note, so that my history of completions is kept without clutter. When my daily note's readers couldn't see the todo's note, only the link is filed.
 55. As a member, I want a chip showing when a recurring todo was last done and how many times, with a clickable history, so that I can see my consistency.
 56. As a member, I want a Todos view that lists open todos in notes I can see, so that I can work through everything in one place.
-57. As a member, I want to filter the Todos view with a query, by the note's tags and folder, by assignee, by due date, and by priority (`tag:`, `folder:`, `assignee:@me`, `due:`, `priority:`), so that I can focus.
+57. As a member, I want to filter the Todos view with a query, by tag and by the note's folder, by assignee, by due date, and by priority (`tag:`, `folder:`, `assignee:@me`, `due:`, `priority:`), so that I can focus.
 58. As a member, I want `is:done` in the Todos query to include completed todos, so that I can review finished work.
 59. As a member, I want due dates and today's daily note to be judged in my timezone, including for my agents and for completions filed by the server, so that "today" matches my day.
 
@@ -248,7 +248,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 - A todo is a markdown checkbox line. Its options are tokens on that line, and the editor renders each token as a chip; the priority chip shows its marks. Changing a chip rewrites the token.
 - Tokens: a mention for an assignee, `due:` followed by a date, `!`, `!!`, or `!!!` immediately after the checkbox for Low, Medium, or High priority, `every:` and a rule for Repeat (`every:2w`, `every:3d-after-done`, `every:mon,thu`, `every:2nd-tue`, `every:last-day`, `every:mar-1`, optionally ending `-times-N` or `-until-DATE`), and `done:2026-10-10x12` for the latest completion and count. The full grammar is in `docs/todos.md` and ADR 4. There are no projects: a `+Name` is plain words.
-- A `#tag` anywhere on the line tags the note, not the todo. Tags match ignoring case.
+- A `#tag` anywhere in a note tags the note. A todo has the tags on its line and the ones that cover it, and no other tag of its note. A tag in a heading covers the lines under the heading, up to the next heading at the same or a higher level. A line of nothing but tags, outside a list, covers the lines after it to the end of its section: up to the next heading at the same or a higher level than the one it is under, or, before the first heading, up to that heading, or to the end of a note with none. A tag anywhere else in a line covers that line and the list items nested under it. Code is not read. Each tag a todo has shows on its row in the Todos view, the ones from other lines quieter, opening the line that writes them. Tags match ignoring case.
 - Checking a non-recurring todo writes it as checked. Checking a recurring todo keeps the open line, advances its due date, and appends the checked line, without `every:` and `done:` and with a link back to its note, to the daily note of the member who checked it, or of the agent's member. Where the daily note's readers couldn't see the todo's note, only the link is filed. A guest, or a member who can't write in their daily folder, files nothing.
 - The recurrence engine computes the next due date for all simple and advanced rules and is a pure function, tested directly.
 - Assignees can be members, non-members with a grant on the note, or contacts. A contact's name is stored on the note.

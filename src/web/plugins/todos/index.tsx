@@ -55,7 +55,7 @@ export const todos: Plugin = {
 
     const open = todoOpener(host);
 
-    host.views.register("page", { id: "todos", path: "/todos", label: "Todos", icon: "todos", nav: "primary", order: 30, component: ({ app }) => <TodosPage host={host} app={app} onOpen={open} /> });
+    host.views.register("page", { id: "todos", path: "/todos", label: "Todos", description: "Every todo in the workspace, with its due date, priority and note.", icon: "todos", nav: "primary", order: 30, component: ({ app }) => <TodosPage host={host} app={app} onOpen={open} /> });
 
     // Keys for the row of a list of todos the keyboard is on, whether or not vim's are on: vim's dd presses the row's Abandon.
     for (const [to, { command, title, keys }] of Object.entries(PUTTING) as [PutAway, (typeof PUTTING)[PutAway]][]) {

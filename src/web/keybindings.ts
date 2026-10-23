@@ -103,6 +103,8 @@ export interface Bindable {
   chords: readonly string[];
   /** Whether the member chose these chords. A chosen chord is taken before another command's default. */
   chosen: boolean;
+  /** Whether it says where it runs. Only such commands share a chord: of two that run anywhere, the first would always run. */
+  placed?: boolean;
 }
 
 /**
@@ -112,10 +114,21 @@ export interface Bindable {
  * leaves with no key at all, since that command may be the only way to do what it does: undo is.
  * Keys the member chose that are the first keys of another command's sequence, or go on from
  * another's keys, are a conflict too: the shorter keys run on their last press, so the longer never do.
+ * A chord several commands have by default, none of them by the member's choosing and each saying
+ * where it runs, is `shared`: it runs whichever of them can run where focus is, as vim's Ctrl-j is
+ * the next row in a field and the pane below elsewhere.
  */
 export function bind(commands: readonly Bindable[]) {
   const keybindings: Record<string, string> = {};
   for (const chosen of [true, false]) for (const c of commands) if (c.chosen === chosen) for (const chord of c.chords) keybindings[chord] ??= c.id;
+  const shared: Record<string, string[]> = {};
+  for (const c of commands) {
+    if (c.chosen || !c.placed) continue;
+    for (const chord of c.chords) {
+      const owner = commands.find((o) => o.id === keybindings[chord])!;
+      if (owner.id !== c.id && !owner.chosen && owner.placed) (shared[chord] ??= [owner.id]).push(c.id);
+    }
+  }
   const conflicts = commands
     .filter((c) => c.chosen)
     .flatMap((c) =>
@@ -138,10 +151,11 @@ export function bind(commands: readonly Bindable[]) {
         return found;
       }),
     );
-  return { keybindings, conflicts };
+  return { keybindings, shared, conflicts };
 }
 
-export const chordFor = (commandId: string, bindings: Readonly<Record<string, string>>) => Object.keys(bindings).find((chord) => bindings[chord] === commandId);
+export const chordFor = (commandId: string, bindings: Readonly<Record<string, string>>, shared: Readonly<Record<string, readonly string[]>> = {}) =>
+  Object.keys(bindings).find((chord) => bindings[chord] === commandId || shared[chord]?.includes(commandId));
 
 /** A command as far as a plugin frame's keyboard is concerned. */
 interface Framed {

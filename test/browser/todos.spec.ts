@@ -297,11 +297,13 @@ for (const width of [1600, 1100]) {
 
 const HOME = "# Home\n\n- [ ] !! Call the bank due:2026-10-14 +Home\n- [x] Book flights\n- [ ] ! Water plants #outside\n";
 const WORK = "# Work #office\n\n- [ ] !!! Ship it due:2026-10-12\n- [ ] Write notes\n";
+/** The same note with no tag over its todos, for a row with nothing set at all. */
+const BARE_WORK = WORK.replace(" #office", "");
 
-async function twoNotes(page: Page, homeText = HOME) {
+async function twoNotes(page: Page, homeText = HOME, workText = WORK) {
   await signInAsNewPerson(page, "Ada Lovelace");
   const home = await perform(page, { type: "note.create", text: homeText });
-  const work = await perform(page, { type: "note.create", text: WORK });
+  const work = await perform(page, { type: "note.create", text: workText });
   await page.goto("/todos");
   return { home, work };
 }
@@ -553,7 +555,7 @@ test("what a browser kept of the Todos page's old filters opens as the query tha
   });
   await page.reload();
   await expect(bar(page)).toHaveValue("tag:outside (is:open OR is:done)");
-  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants", "Book flights"]);
+  await expect(words(page)).toHaveText(["Water plants"]);
   await expect(todosPage(page).getByRole("alert")).toHaveCount(0);
   // A link to the page can name its query, which is then what the page is left at.
   await page.goto("/todos?q=is%3Adone+-tag%3Aoffice");
@@ -571,7 +573,7 @@ test("what a browser kept of the Todos page's old filters opens as the query tha
   await expect(bar(page)).toHaveValue("bank");
 });
 
-test("a todo has the tags on its own line and its note's: its own are drawn as chips after its words, and its note's name is said alone, narrowed to a tag or not", async ({ page }) => {
+test("a todo has the tags on its own line and the ones over it: its own are drawn as chips after its words, a heading's after them, and its note's name is said alone, narrowed to a tag or not", async ({ page }) => {
   await twoNotes(page);
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
   const names = () => rows(page).locator(".todo-note");
@@ -579,30 +581,64 @@ test("a todo has the tags on its own line and its note's: its own are drawn as c
   await expect(names()).toHaveText(["Work", "Home", "Home", "Work"]);
   await expect(row(page, "Ship it").locator(".todo-note")).toHaveAttribute("title", "Open Work");
 
-  // A tag written at the end of its words is a chip under them, and no row says a tag its line doesn't write.
+  // A tag written at the end of its words is a chip under them, and only on its own line. The tag of the heading over a todo is a quieter chip after its own.
   await expect(row(page, "Water plants").locator(".todo-chips .todo-tag")).toHaveText(["#outside"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
+  await expect(rows(page).locator(".todo-tag-from")).toHaveText(["#office", "#office"]);
+  await expect(row(page, "Ship it").locator(".todo-tag-from")).toHaveAttribute("title", "From the heading “Work”");
 
-  // Under the tag of one todo's line: both todos of the note are tagged with it, and only the one whose line writes it has its chip. The builder offers the tags todos have.
+  // Under the tag of one todo's line: that todo alone. The builder offers the tags todos have.
   await advanced(page).click();
   await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Tag" });
   await expect.poll(() => condition(page, 1).locator("datalist option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))).toEqual(["office", "outside"]);
   await condition(page, 1).getByRole("combobox", { name: "Value" }).fill("outside");
   await expect(bar(page)).toHaveValue("tag:outside");
-  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
+  await expect(words(page)).toHaveText(["Water plants"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
-  await expect(names()).toHaveText(["Home", "Home"]);
-  await expect(row(page, "Call the bank").locator(".todo-note")).toHaveAttribute("title", "Open Home");
+  await expect(names()).toHaveText(["Home"]);
 
-  // Under a tag only the note's title writes: every todo of the note, and still only the note's name.
+  // Under a tag only the note's title writes: every todo under it, each showing it, and still only the note's name.
   await bar(page).fill("#office");
   await expect(condition(page, 1).getByRole("combobox", { name: "Value" })).toHaveValue("office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
   await expect(names()).toHaveText(["Work", "Work"]);
   await expect(rows(page).locator(".todo-tag")).toHaveCount(0);
+  await expect(rows(page).locator(".todo-tag-from")).toHaveText(["#office", "#office"]);
 
   await bar(page).fill("");
   await expect(names()).toHaveText(["Work", "Home", "Home", "Work"]);
+});
+
+test("a todo's row shows the tags it has from other lines, quieter than its own, each saying where it is written and opening that line; a line of tags covers only its own section", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const daily = await perform(page, {
+    type: "note.create",
+    text: "# 2026-10-23\n\n## Building\n\n#common-ink\n\n- [ ] Ship the chips #ui\n\n## Chores\n\n- [ ] Pour vinegar down the guest sink\n\n## Garden #outside\n\n- Beds #soil\n  - [ ] Weed\n",
+  });
+  await page.goto("/todos");
+  await bar(page).fill("#common-ink");
+  // Only the section the line of tags is in: Chores, after it, has none of Building's tags.
+  await expect(words(page)).toHaveText(["Ship the chips"]);
+  await expect(row(page, "Ship the chips").locator(".todo-tag")).toHaveText(["#ui"]);
+  const inherited = row(page, "Ship the chips").locator(".todo-tag-from");
+  await expect(inherited).toHaveText(["#common-ink"]);
+  await expect(inherited).toHaveAttribute("title", "From the section “Building”");
+  await expect(inherited).toHaveAccessibleName("#common-ink, from the section “Building”. Opens the line it is written on");
+  expect(await inherited.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  // It is not on the todo's line, so it has no cross to take it off.
+  await expect(row(page, "Ship the chips").getByRole("button", { name: "Remove #common-ink" })).toHaveCount(0);
+
+  await bar(page).fill("");
+  await expect(row(page, "Pour vinegar").locator(".todo-tag, .todo-tag-from")).toHaveCount(0);
+  // The nearest first: the item it is nested in, then the heading over both.
+  await expect(row(page, "Weed").locator(".todo-tag-from")).toHaveText(["#soil", "#outside"]);
+  await expect(row(page, "Weed").locator(".todo-tag-from").first()).toHaveAttribute("title", "From the item “Beds”");
+  await expect(row(page, "Weed").locator(".todo-tag-from").last()).toHaveAttribute("title", "From the heading “Garden”");
+
+  await bar(page).fill("#common-ink");
+  await inherited.click();
+  await expect(page).toHaveURL(new RegExp(`${daily.id}$`));
+  await expect.poll(() => cursorLine(page)).toBe("#common-ink");
 });
 
 test("a tag's chip narrows the list through the query: it adds #tag to the bar, pressed again takes it off, and the rest of the query stays; a tag inside the words stays in them", async ({ page }) => {
@@ -688,9 +724,10 @@ test("a row is two lines: the first only its checkbox, its words and its note's 
   // The tag's cross, named "Remove #outside", has no words of its own, nor have Abandon and Move to backlog.
   await expect(water.getByRole("button")).toHaveText(["Water plants", "Low", "#outside", "", "", "", "Add date", "Add tag", "Repeat", "Home"]);
   expect(await water.locator(".todo-state").evaluateAll((all) => all.map((el) => el.ariaLabel))).toEqual(["Abandon", "Move to backlog"]);
-  await expect(row(page, "Write notes").locator(".todo-chip")).toHaveText(["Add date", "Add tag", "Repeat", "Priority"]);
+  // The tag its heading gives it is set, after the tags its line writes.
+  await expect(row(page, "Write notes").locator(".todo-chip")).toHaveText(["#office", "Add date", "Add tag", "Repeat", "Priority"]);
   await expect(row(page, "Write notes").locator(".todo-chip[data-unset]")).toHaveCount(4);
-  await expect(row(page, "Ship it").locator(".todo-chip")).toHaveText([/\S/, "High", "Add tag", "Repeat"]);
+  await expect(row(page, "Ship it").locator(".todo-chip")).toHaveText([/\S/, "High", "#office", "Add tag", "Repeat"]);
   await expect(row(page, "Ship it").locator(".todo-chip[data-unset]")).toHaveText(["Add tag", "Repeat"]);
   await expect(water.getByRole("checkbox")).toHaveCount(1);
 
@@ -1374,10 +1411,10 @@ test("a chip of what isn't set opens the same popover as a set one: Priority and
   await page.keyboard.press("Enter");
   await expect.poll(() => lineIn(3)).toBe("- [ ] !! Write notes #office #desk");
   await expect(notes.locator(".todo-chip")).toHaveText(["Medium", "#office", "#desk", "Add date", "Add tag", "Repeat"]);
-  // Each tag's chip still narrows the list, to the todos of the notes with that tag.
+  // Each tag's chip still narrows the list, to the todos with that tag.
   await notes.getByRole("button", { name: "#desk", exact: true }).click();
   await expect(bar(page)).toHaveValue("#desk");
-  await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
+  await expect(words(page)).toHaveText(["Write notes"]);
   await expect(notes.getByRole("button", { name: "#desk", exact: true })).toHaveAttribute("aria-pressed", "true");
   await notes.getByRole("button", { name: "#desk", exact: true }).click();
   await expect(bar(page)).toHaveValue("");
@@ -1569,7 +1606,7 @@ test("a todo's words being edited are left alone when the list is read again wit
 });
 
 test("a row has nothing at its right but its note's name, and its two states, shown when pointed at, come after what is set: pointing at it moves nothing, Tab goes words, what is set, states, what isn't, name, each chip opens its popover under itself, and the menu opens the note, in front or beside the list", async ({ page }) => {
-  const { home, work } = await twoNotes(page);
+  const { home, work } = await twoNotes(page, HOME, BARE_WORK);
   // Tall enough that each popover of the last row fits under it, below the bar, the state choices and the Add field.
   await page.setViewportSize({ width: page.viewportSize()!.width, height: 900 });
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
@@ -1815,7 +1852,7 @@ test("a read of the list or of the notes that fails, as one can under load, is a
 });
 
 test("setting a chip moves it to what is set, in its order, and clearing it moves it back among what isn't: nothing set before it moves, and only Repeat and Priority not set come after Add tag", async ({ page }) => {
-  await twoNotes(page);
+  await twoNotes(page, HOME, BARE_WORK);
   const notes = row(page, "Write notes");
   const placed = () =>
     notes.locator(".todo-chips > *").evaluateAll((all) => all.map((el) => [el.matches(".todo-states") ? "states" : el.matches(".todo-tag-chip") ? "tag" : el.classList[1]!, Math.round(el.getBoundingClientRect().left * 10) / 10] as const));

@@ -17,7 +17,7 @@ export const email: Plugin = {
   description: "Keeps the mail you send, copy or forward to notes@ as threads only you see, and lets a note reference one.",
   icon: "mail",
   activate(host) {
-    host.views.register("page", { id: "email", path: EMAIL_PATH, label: "Email", icon: "mail", nav: "more", order: 12, component: (props) => <EmailPage host={host} {...props} /> });
+    host.views.register("page", { id: "email", path: EMAIL_PATH, label: "Email", description: "The mail you send or forward to notes@, kept as threads only you see.", icon: "mail", nav: "more", order: 12, component: (props) => <EmailPage host={host} {...props} /> });
     host.views.register("settings", { id: "email", label: "Email", component: () => <Senders host={host} /> });
     host.embeds.register(
       referenceEmbed({

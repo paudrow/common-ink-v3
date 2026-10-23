@@ -59,6 +59,32 @@ interface Props {
   focusMode: { on: boolean; keys?: string; toggle: (groupId: string) => void };
 }
 
+/**
+ * Whether the member is pressing a key just now, and whether it is Tab. A group is turned to by a
+ * press in it, by tabbing into it, or by a key that moves the cursor into it from elsewhere on the
+ * page, as vim's Ctrl-w does. What takes the cursor as it is drawn, as the Search page's box does,
+ * isn't the member turning to its group, in whichever half of a split it is drawn, nor is the
+ * cursor given back by a dialog or a menu as it closes, as the command palette's is. Watched from the
+ * first, ahead of the app's own keys, one of which may be what moves the cursor. A key let go of in
+ * another window isn't heard, so leaving the window lets go of it.
+ */
+const pressing = { key: false, tab: false };
+const letGo = () => void (pressing.key = pressing.tab = false);
+globalThis.window?.addEventListener(
+  "keydown",
+  (e) => {
+    pressing.key = true;
+    pressing.tab = e.key === "Tab";
+  },
+  true,
+);
+globalThis.window?.addEventListener("keyup", letGo, true);
+globalThis.window?.addEventListener("blur", letGo);
+/** Whether a key moved the cursor here from `from` and into what a member reads or moves through, and not into a field that took it as it was drawn. */
+const keyedInto = (to: EventTarget, from: EventTarget | null) =>
+  pressing.tab ||
+  (pressing.key && from instanceof Element && !from.closest('[role="dialog"], dialog, [role="menu"]') && !(to instanceof HTMLInputElement || to instanceof HTMLTextAreaElement || to instanceof HTMLSelectElement));
+
 /** Opens the menu of the tab in front, at the tab's foot, as a right click on the tab does: the way to the menu from the keyboard. */
 export function showTabMenu() {
   const selected = '[role="tab"][aria-selected="true"]';
@@ -75,12 +101,6 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
   const menuAt = menu && menuGroup ? menuGroup.tabs.findIndex((t) => same(t, menu.tab)) : -1;
   const menuTab = menu && { groupId: menu.groupId, tab: menu.tab };
   /**
-   * Whether the member is moving the cursor with the Tab key just now. A group is turned to by a
-   * press in it or by tabbing into it. What takes the cursor as it is drawn, as the Search page's
-   * box does, isn't the member turning to its group, in whichever half of a split it is drawn.
-   */
-  const tabbing = useRef(false);
-  /**
    * The address of the app's own a link being dragged from inside the window goes to, while one is.
    * One dragged in from elsewhere, or to another site, is left to whatever is under it, as it always was.
    */
@@ -88,8 +108,6 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
   const opens = useRef(opensAt);
   opens.current = opensAt;
   useEffect(() => {
-    const down = (e: KeyboardEvent) => void (tabbing.current = e.key === "Tab");
-    const up = () => void (tabbing.current = false);
     // A link dragged from inside the window is known as it starts: over a group only what a drag holds can be told, not what it says.
     // Text that only reads as an address is no link, so it is taken only from a link or what the browser says is one.
     const started = (e: globalThis.DragEvent) => {
@@ -106,15 +124,11 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
     };
     const forgotten = () => void (link.current = null);
     const moved = (e: PointerEvent) => void (e.buttons === 0 && forgotten());
-    addEventListener("keydown", down, true);
-    addEventListener("keyup", up, true);
     addEventListener("dragstart", started, true);
     addEventListener("dragend", ended, true);
     addEventListener("drop", forgotten);
     addEventListener("pointermove", moved, true);
     return () => {
-      removeEventListener("keydown", down, true);
-      removeEventListener("keyup", up, true);
       removeEventListener("dragstart", started, true);
       removeEventListener("dragend", ended, true);
       removeEventListener("drop", forgotten);
@@ -266,7 +280,7 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, no
         <div
           className="group-body"
           onPointerDown={focus}
-          onFocus={() => tabbing.current && focus()}
+          onFocus={(e) => keyedInto(e.target, e.relatedTarget) && focus()}
           onDragOverCapture={(e) => over(e, { groupId: group.id, at: zone(e) })}
           onDragLeave={left}
           onDropCapture={(e) => {

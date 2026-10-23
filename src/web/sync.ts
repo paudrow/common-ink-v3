@@ -226,6 +226,12 @@ export async function performInSync<T extends OpInput>(workspaceId: string, op: 
   // A note goes to Trash with what was typed in it, which it wouldn't take afterwards.
   if (op.type === "todo.history" || op.type === "note.trash") await open.get(op.id)?.commit();
   if (op.type === "history.revert") return revertMany(workspaceId, op.changes, by) as Promise<Results[T["type"]]>;
+  // Dates written as links on opening are pulled into the open note at once, so they are drawn as dates from the first.
+  if (op.type === "note.linkDates") {
+    const result = (await by(workspaceId, op)) as Results["note.linkDates"];
+    if (result.changed) await open.get(op.id)?.pull(result.revision);
+    return result as Results[T["type"]];
+  }
   if (op.type === "history.previewRevert") {
     // What is typed and not yet saved would change the note under the preview.
     await commitTyping(op.changes.map((c) => c.noteId)).catch(() => {});

@@ -86,7 +86,7 @@ export const calendar: Plugin = {
     host.completions.register({ id: "events", trigger: "[[", spaces: true, anywhere: true, items: (typed) => events(typed, "[[") });
     host.completions.register({ id: "events.at", trigger: "@", spaces: true, items: (typed) => (namable(typed) ? events(typed, "@") : []) });
     host.commands.register({ id: "calendar.copyReference", title: "Copy event reference", group: "Calendar", run: () => void copyEventReference(host) });
-    host.views.register("page", { id: "calendar", path: "/calendar", label: "Calendar", icon: "calendar", nav: "primary", order: 40, component: (props) => <CalendarPage host={host} {...props} /> });
+    host.views.register("page", { id: "calendar", path: "/calendar", label: "Calendar", description: "The events of the calendars you connect, which only you see.", icon: "calendar", nav: "primary", order: 40, component: (props) => <CalendarPage host={host} {...props} /> });
     host.embeds.register(
       referenceEmbed({
         host,

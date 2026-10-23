@@ -88,9 +88,9 @@ function TagLinks({ host, app, store, tags, labelledBy, described = false }: { h
   const [deleting, setDeleting] = useState<string | null>(null);
   return (
     <>
-      <ul className="tag-rows" aria-labelledby={labelledBy}>
+      <ul className="tag-rows" aria-labelledby={labelledBy} data-joins>
         {tags.map((tag) => (
-          <li key={tag.name}>
+          <li key={tag.name} data-row>
             <a
               className="tag-row"
               data-tag={tag.name}
@@ -157,7 +157,7 @@ export function TagSection({ host, app, store }: { host: PluginHost; app: App; s
       </div>
       {tags && (tags.length ? <TagLinks host={host} app={app} store={store} tags={tags.slice(0, MOST_IN_SECTION)} labelledBy={`${ids}-label`} /> : <p className="tags-hint">Write #tag in a note to tag it.</p>)}
       {tags && (tags.length > MOST_IN_SECTION || more) && (
-        <a className="tag-row tags-all" {...going(app, TAGS_PATH)} {...draggableAs({ kind: "page", id: TAGS_PAGE, path: TAGS_PATH })}>
+        <a className="tag-row tags-all" data-row {...going(app, TAGS_PATH)} {...draggableAs({ kind: "page", id: TAGS_PAGE, path: TAGS_PATH })}>
           {more ? "All tags" : `All ${every.length} tags`}
         </a>
       )}

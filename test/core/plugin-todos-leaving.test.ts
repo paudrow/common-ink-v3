@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { InheritedTag } from "../../src/core/tagScope.ts";
 import type { TodoState } from "../../src/core/todos.ts";
 import { leaving, narrowingOf, type Narrowing } from "../../src/web/plugins/todos/leaving.ts";
 
 const NOW = "2026-10-15";
 const ANY: Narrowing = { states: ["open"], due: "any", importance: "", tag: "", folder: null };
-const todo = (over: Partial<{ state: TodoState; due: string | null; importance: 0 | 1 | 2 | 3; words: string; tagsElsewhere: string[] }> = {}) => ({ state: "open" as TodoState, due: null, importance: 0 as const, words: "Gym #health", tagsElsewhere: [] as string[], ...over });
+const todo = (over: Partial<{ state: TodoState; due: string | null; importance: 0 | 1 | 2 | 3; words: string; tagsElsewhere: InheritedTag[] }> = {}) => ({ state: "open" as TodoState, due: null, importance: 0 as const, words: "Gym #health", tagsElsewhere: [] as InheritedTag[], ...over });
+/** A tag a todo has from the first line of its note. */
+const fromNote = (name: string): InheritedTag => ({ name, line: 0, by: "note", under: null });
 const says = (row: ReturnType<typeof todo>, by: Partial<Narrowing>) => leaving(row, { ...ANY, ...by }, NOW)?.says ?? null;
 
 describe("why a changed row leaves the Todos page's list", () => {
@@ -81,9 +84,9 @@ describe("what a todos query narrows to, for those sentences", () => {
     expect(leaving(todo({ words: "Gym" }), by("#health"), NOW)?.says).toBe("#health was taken off, so it no longer shows under #health. It leaves when you refresh.");
     expect(leaving(todo(), by("bank due:today..+6d"), NOW)?.says).toBe("Its date was taken off, so it no longer shows under Next 7 days. It leaves when you refresh.");
     expect(leaving(todo({ due: "2026-10-15" }), by("bank due:today"), NOW)?.says).toBe("Changed, so it no longer matches “bank due:today”. It leaves when you refresh.");
-    expect(leaving(todo({ words: "call", tagsElsewhere: ["work"] }), by("#work budget"), NOW)?.says).toBe("Changed, so it no longer matches “#work budget”. It leaves when you refresh.");
-    expect(leaving(todo({ words: "Gym", tagsElsewhere: ["health"] }), by("#health"), NOW)?.says).toBe("Changed, so it no longer matches “#health”. It leaves when you refresh.");
-    expect(leaving(todo({ words: "Gym", tagsElsewhere: ["health"] }), { ...ANY, tag: "health" }, NOW)).toBeNull();
+    expect(leaving(todo({ words: "call", tagsElsewhere: [fromNote("work")] }), by("#work budget"), NOW)?.says).toBe("Changed, so it no longer matches “#work budget”. It leaves when you refresh.");
+    expect(leaving(todo({ words: "Gym", tagsElsewhere: [fromNote("health")] }), by("#health"), NOW)?.says).toBe("Changed, so it no longer matches “#health”. It leaves when you refresh.");
+    expect(leaving(todo({ words: "Gym", tagsElsewhere: [fromNote("health")] }), { ...ANY, tag: "health" }, NOW)).toBeNull();
     expect(leaving(todo(), by(""), NOW)).toBeNull();
   });
 });

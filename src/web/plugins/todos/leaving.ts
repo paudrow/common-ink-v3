@@ -48,7 +48,7 @@ export function leaving(todo: Pick<ListedTodo, "state" | "due" | "importance" | 
   if (by.importance !== "" && Number(by.importance) !== todo.importance) {
     return say("priority", `${todo.importance ? `Set to ${PRIORITY[todo.importance]}` : "Its priority was taken off"}, so it no longer shows under Priority: ${PRIORITY[Number(by.importance)]}.`);
   }
-  const tagged = tagsOn(todo.words).some((tag) => nameKey(tag.name) === nameKey(by.tag)) || todo.tagsElsewhere.some((name) => nameKey(name) === nameKey(by.tag));
+  const tagged = tagsOn(todo.words).some((tag) => nameKey(tag.name) === nameKey(by.tag)) || todo.tagsElsewhere.some((tag) => nameKey(tag.name) === nameKey(by.tag));
   if (by.tag && !tagged) return say("tag", `#${by.tag} was taken off, so it no longer shows under #${by.tag}.`);
   if (by.folder && !by.folder.holds) return say("folder", `Its note is no longer in ${by.folder.name}, so it no longer shows there.`);
   if (by.search) return say("search", `Changed, so it no longer matches “${by.search}”.`);

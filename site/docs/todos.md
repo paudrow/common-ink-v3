@@ -18,7 +18,15 @@ Any list mark works (`-`, `*`, `+`, `1.`), at any indent. `- [x]` is a done todo
 | Due date | `due:2026-10-14` | A calendar date as `YYYY-MM-DD`, with no time. Typing `due:` offers the days ahead |
 | Repeat | `every:2w` | One of the rules below |
 | Assignee | `@` and a name | A mention on the line. A todo can have several |
-| Tag | `#money` | Tags the whole note. Every todo in a note has the note's tags |
+| Tag | `#money` | Tags the todo, and its note. A todo also has the tags over it: see below |
+
+A todo has the tags written on its line and the ones over it, and no other tag of its note:
+
+- A tag in a heading covers everything under the heading, up to the next heading at the same or a higher level.
+- A line of nothing but tags covers the rest of its section. Right under the note's title it covers the whole note, and before the first heading it covers the lines up to it.
+- A tag in a list item covers the items nested under it.
+
+So in a daily note, `#common-ink` on a line of its own under **Building** tags Building's todos and not those under **Chores**. The note itself has every tag written in it, wherever it is.
 
 The due date's popover offers **Today**, **Tomorrow**, **Next week**, **Clear**, and a date field. The priority's offers High, Medium, Low, and None.
 
@@ -72,7 +80,7 @@ Type `@` on the todo's line and pick a member or one of your contacts. Assigning
 
 ## The Todos page
 
-**Todos** in the sidebar lists the open todos in every note you can see, leaving out archived notes and notes in Trash. Each row shows the todo, its chips, and its note's name. Press the note's name to open the note at that line. Press the words to edit them in place. Right-click a row for **Open note**, **Open to the side**, **Complete**, **Abandon**, and **Move to backlog**.
+**Todos** in the sidebar lists the open todos in every note you can see, leaving out archived notes and notes in Trash. Each row shows the todo, its chips, and its note's name. Press the note's name to open the note at that line. A tag the todo has from another line, a heading or a list item over it, shows after its own tags, outlined: point at it to see where it is from, and press it to open that line. Press the words to edit them in place. Right-click a row for **Open note**, **Open to the side**, **Complete**, **Abandon**, and **Move to backlog**.
 
 A row's second line shows only what is set on the todo. Point at a row, or give it the keyboard, and the rest shows after it: **Abandon**, **Move to backlog**, and a button for each thing not set yet, with **Repeat** and **Priority** last. With the keyboard on a row, these keys do the same:
 

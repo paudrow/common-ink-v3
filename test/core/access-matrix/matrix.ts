@@ -316,6 +316,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "tag.delete": { on: "workspace", who: ["admin", "editor"], args: () => ({ name: "matrix" }) },
   search: { on: "everything", covers: "live", archived: true, only: true, args: () => ({ query: "body", limit: 50 }) },
   "note.label": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revision: 1, name: "Start" }) },
+  "note.linkDates": { on: "note", needs: "E", trashed: "refused", members: true, args: (id) => ({ id }) },
   "note.revert": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
   "note.revertChanges": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revisions: [99] }) },
   "note.previewRevert": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, revisions: [1] }) },

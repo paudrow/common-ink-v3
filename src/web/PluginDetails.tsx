@@ -242,7 +242,7 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
 
       <Section title="What it adds">
         {adds ? (
-          <Adds adds={adds} options={options.length} off={!state?.enabled} keys={(commandId) => chordFor(commandId, contributed.keybindings)} mac={mac} />
+          <Adds adds={adds} options={options.length} off={!state?.enabled} keys={(commandId) => chordFor(commandId, contributed.keybindings, contributed.shared)} mac={mac} />
         ) : (
           <p className="soon">It hasn't been on since the app loaded, so what it adds isn't listed yet. Turn it on to see.</p>
         )}

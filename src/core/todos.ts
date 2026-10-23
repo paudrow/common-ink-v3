@@ -19,7 +19,8 @@ export { BOX_PATTERN, STATES_WRITTEN, TODO_STATES, markOf, stateOfMark, type Tod
  * - `due:YYYY-MM-DD` is the day it is due: a calendar date, with no time and no time zone.
  * - `every:2w` is how it recurs. `recurrence.ts` has the rules.
  * - `done:2026-10-10x12` is the day a recurring todo was last checked off, and how many times it has been.
- * - `#tag` tags the whole note, on this line as on any other.
+ * - `#tag` tags the todo, and its note as a tag on any line does. A todo also has the tags of the lines
+ *   that cover it, as `tagScope.ts` reads them.
  * - `@[[id|Name]]` or `@[[Name]]` assigns it to a person. `mentions.ts` has how a mention is written.
  *
  * A token stands alone: after a space, and before a space, the end of the line, or `.,;:!?)`. Text
@@ -39,7 +40,7 @@ export interface Todo {
   every: (Span & { rule: Rule; written: string }) | null;
   /** The first `done:` with a real date. With no count it was done once. */
   lastDone: (Span & LastDone) | null;
-  /** The tags written on this line. They tag its note, as a tag on any line does. */
+  /** The tags written on this line. They tag its note too, as a tag on any line does. */
   tags: (Span & { name: string })[];
   /** The people mentioned on the line, who are who it is assigned to. */
   assignees: WrittenMention[];
@@ -445,14 +446,6 @@ export function deletedTags(text: string, name: string): string {
     }
   }
   return left.join("\n");
-}
-
-/** The tags a note has on its lines but one, each once ignoring case, outside code. */
-export function tagsBesides(text: string, line: number): string[] {
-  if (!text.includes("#")) return [];
-  const tags = new Map<string, string>();
-  for (const { line: written, index } of linesOutsideCode(text)) if (index !== line) for (const { name } of tagsOn(written)) if (!tags.has(nameKey(name))) tags.set(nameKey(name), name);
-  return [...tags.values()];
 }
 
 /**

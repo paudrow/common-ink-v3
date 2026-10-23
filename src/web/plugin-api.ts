@@ -68,7 +68,8 @@ export { allPages } from "../core/allPages.ts";
 export { reline } from "../core/blame.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
-export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
+export { isNoteId, linkedFolder, linksIn, linksOn, writtenFolderLink, writtenLink, type WrittenLink } from "../core/links.ts";
+export { dayLinksOn, linkedDay, writtenDayLink, type DayLink, type LinkedDay } from "../core/dateLinks.ts";
 
 /** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
 export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, readableName, writtenMention, type WrittenMention } from "../core/mentions.ts";
@@ -323,7 +324,7 @@ export interface PluginHost {
   report(error: unknown): void;
   /** Calls `listener` each time the app arrives at an address, and once for the address it is at when the plugin starts later than the app. */
   onNavigate(listener: () => void): Dispose;
-  /** Calls `listener` each time the notes the member can see change: one made, renamed, moved, or changed by anyone. `app().notes` then holds them as they are. */
+  /** Calls `listener` each time the notes the member can see change: one made, renamed, moved, or changed by anyone, and each time the folders do. `app().notes` and `app().folders` then hold them as they are. */
   onItems(listener: () => void): Dispose;
   /** The app as it is now. A view is handed this as `app`; a command reads it when it runs. It isn't there yet during `activate`. */
   app(): App;
@@ -504,7 +505,8 @@ export interface Slots {
     /**
      * Asked to open a note, a folder's list or a page, in place of the app going to it. Call
      * `app.show` with what ends up in front. With `background` it is opened without being put in front.
-     * With `here`, a note open in another pane opens in the one in front too, and isn't gone to there.
+     * With `here`, as from `app.openNote`, a note open in another pane opens in the one in front too,
+     * and isn't gone to there, as going to an address, Back among them, does.
      */
     open?: (tab: Opened, options: { preview: boolean; background?: boolean; here?: boolean }) => void;
     /**
@@ -521,6 +523,8 @@ export interface Slots {
      * offer "Open in a split".
      */
     split?: (tab: Opened, side: "right" | "down") => void;
+    /** Asked to open a note, a folder's list or a page to the side, for `app.openToSide`. With `stay` the pane in front stays so. */
+    aside?: (tab: Opened, options: { preview: boolean; stay: boolean }) => void;
     /** Every tab open, pane by pane in reading order and each pane's left to right, for `app.openTabs`. */
     tabs?: () => readonly OpenTab[];
   };
@@ -560,8 +564,10 @@ export interface Slots {
    * its path are tabs of their own, one for each `key` that `tabAt` gives an address (its path, without
    * the query), called its `title`. Each tag's page is "#name" beside the others and the page of every
    * tag, its key the tag's name in lower case, so `/tags/Garden` and `/tags/garden` are one tab.
+   * `description` says what the page is for, in a sentence, on the card its link shows; one left
+   * out is its plugin's description.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: true | (() => Promise<Opened>); home?: boolean; tabAt?: (path: string) => { key: string; title: string }; command?: { id: string; title: string }; component: View };
+  page: { id: string; path: `/${string}`; label: string; description?: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: true | (() => Promise<Opened>); home?: boolean; tabAt?: (path: string) => { key: string; title: string }; command?: { id: string; title: string }; component: View };
   /**
    * A panel on the Dashboard. It is listed in Add panel and drawn in a card once the member adds it.
    * The member's arrangement still decides whether it is shown, as it does for the Dashboard's own panels.
@@ -921,6 +927,7 @@ export const COMPLETION_KINDS = [
   { kind: "person", heading: "People" },
   { kind: "date", heading: "Dates" },
   { kind: "note", heading: "Notes" },
+  { kind: "folder", heading: "Folders" },
   { kind: "upload", heading: "Uploads" },
   { kind: "event", heading: "Events" },
   { kind: "block", heading: "Blocks" },
@@ -1064,7 +1071,7 @@ export interface OpenTab {
   pane: number;
 }
 
-export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav" | "home" | "transient" | "tabAt">;
+export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "description" | "icon" | "nav" | "home" | "transient" | "tabAt">;
 
 /** The app at one moment: what is open, and what can be done about it. */
 export interface App {
@@ -1147,21 +1154,27 @@ export interface App {
   /** Where a note lives, such as `/note/plan-3k2j5h8d9f0a`. */
   notePath(noteId: string): string;
   /**
-   * Opens a note. There is one preview in the window at most: a preview takes the place of the one there, a folder's list among them, wherever in the
-   * editor area that is. `focus` puts the cursor in its
-   * editor. `background` opens it in a tab of its own, which is kept, without leaving what is in
-   * front. Where the editor area has no tabs the note is opened as it otherwise would be. A note
-   * already open in another pane is gone to there, and a preview opens where the window's preview
-   * is, unless `here`: picked by the member in the pane in front, from a breadcrumb's list, a link or a search, it opens in that pane. A folder's list leaves it out, so a list beside a note shows each note it opens in the pane that has it.
+   * Opens a note in the pane in front, even where another pane has it too. There is one preview in
+   * the window at most: a preview takes the place of the one there, a folder's list among them, and
+   * one in another pane goes. `focus` puts the cursor in its editor. `background` opens it in a tab
+   * of its own, which is kept, without leaving what is in front. Where the editor area has no tabs
+   * the note is opened as it otherwise would be.
    */
-  openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean; here?: boolean }): void;
-  /** Opens a folder's list of notes: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
+  openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean }): void;
+  /** Opens a folder's list of notes in the pane in front, unless another pane keeps it: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
   openFolder(folderId: string, options?: { preview?: boolean }): void;
   /**
    * Opens a note, a folder's list or a page in a split: a part of the editor area of its own, right
    * of or under what is in front, where it is kept. Null where the editor area has no splits.
    */
   openBeside: ((tab: Opened, side: "right" | "down") => void) | null;
+  /**
+   * Opens a note, a folder's list or a page to the side: in the pane after the one in front, or in a
+   * new pane right of it when there is one pane, as a preview unless `preview` is false. With `focus`
+   * the pane it opens in comes in front, and a note's editor takes the cursor; without, the pane in
+   * front stays so. Null where the editor area has no splits.
+   */
+  openToSide: ((tab: Opened, options?: { preview?: boolean; focus?: boolean }) => void) | null;
   /** Where a folder's list lives, such as `/folder/all`. */
   folderPath(folderId: string): string;
   /**

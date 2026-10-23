@@ -10,6 +10,53 @@ const backlinks = async (actor: Actor, id: string) => (await perform(env.DB, act
 const recorded = async (sourceId: string) => (await env.DB.prepare("SELECT target_id FROM links WHERE source_id = ? ORDER BY target_id").bind(sourceId).all<{ target_id: string }>()).results.map((r) => r.target_id);
 
 describe("a link", () => {
+  it("to a day is the day's, left as written however strict the write, though a daily note is titled its date, and lists the note among each daily note's backlinks for that day", async () => {
+    const ada = await newMember();
+    const daily = await perform(env.DB, ada, { type: "daily.open", on: "2026-10-23" });
+    expect(daily.title).toBe("2026-10-23");
+    const text = "# Plan\n\nLunch [[2026-10-23]] and again [[2026-10-23 15:00]], not [[2026-10-24|the next]].";
+    const made = await strict(ada, text);
+
+    expect(made.text).toBe(text);
+    expect(made).not.toHaveProperty("unresolved");
+    expect(await recorded(made.id)).toEqual(["day:2026-10-23", "day:2026-10-24"]);
+    expect(await backlinks(ada, daily.id)).toEqual(["Plan"]);
+    expect(await backlinks(ada, made.id)).toEqual([]);
+  });
+
+  it("to a day is a backlink of the daily note, and the daily note's own title, its date as words, links nothing", async () => {
+    const ada = await newMember();
+    const daily = await perform(env.DB, ada, { type: "daily.open", on: "2026-10-25" });
+    await perform(env.DB, ada, { type: "note.write", id: daily.id, baseRevision: daily.revision, text: `${daily.text}\n\nToday: [[2026-10-25]]` });
+    await create(ada, "# Elsewhere\n\nOn 2026-10-25, written bare");
+    expect(await recorded(daily.id)).toEqual(["day:2026-10-25"]);
+    // Linking its own day is no backlink of its own, and a bare date links nothing.
+    expect(await backlinks(ada, daily.id)).toEqual([]);
+  });
+
+  it("to a folder is the folder's, left as written however strict the write, and is nobody's backlink", async () => {
+    const ada = await newMember();
+    const { folderId } = await create(ada, "# Somewhere");
+    const text = `# Diary\n\nSee [[folder:${folderId}]] and [[folder:${folderId}|the drafts]].`;
+    const made = await strict(ada, text);
+
+    expect(made.text).toBe(text);
+    expect(made).not.toHaveProperty("unresolved");
+    expect(await recorded(made.id)).toEqual([]);
+  });
+
+  it("to a folder stays as written beside a link by title in the same write, which is stored by id", async () => {
+    const ada = await newMember();
+    const plan = await create(ada, "# Plan");
+    const folder = `[[folder:${plan.folderId}]]`;
+    const made = await strict(ada, `# Diary\n\n${folder} and [[Plan]]`);
+    const loose = await create(ada, `# Notes\n\n${folder} and [[Plan]] and [[Nowhere]]`);
+
+    expect(made.text).toBe(`# Diary\n\n${folder} and [[${plan.id}]]`);
+    expect(loose.text).toBe(`# Notes\n\n${folder} and [[${plan.id}]] and [[Nowhere]]`);
+    expect(loose.unresolved).toEqual([{ target: "Nowhere", matches: [] }]);
+  });
+
   it("is stored by its note's id, so it reads the note's new title after a rename with the linking note untouched", async () => {
     const ada = await newMember();
     const plan = await create(ada, "# Plan");
@@ -268,5 +315,66 @@ describe("a note's snippet", () => {
     const diary = await create(ada, `# Diary\n\nSee [[${plan.id}]] and [[${plan.id}|what we agreed]].`);
 
     expect(diary.snippet).toBe("See and what we agreed.");
+  });
+});
+
+describe("dates written bare before dates were links", () => {
+  const bare = "# Trip\n\n# 2026-10-23\n\nLeave 2026-10-24 at 2026-10-24 09:30, back due:2026-10-26.\n\n`2026-10-27` and [[2026-10-28]]";
+  /** A note as one written before dates were links: not yet converted. */
+  const before = async (actor: Actor, text: string) => {
+    const note = await create(actor, text);
+    await env.DB.prepare("UPDATE notes SET dates_linked = 0 WHERE id = ?").bind(note.id).run();
+    return note;
+  };
+
+  it("are written as links once, as a change of the member's labeled for what it did, which can be put back", async () => {
+    const ada = await newMember();
+    const note = await before(ada, bare);
+    const done = await perform(env.DB, ada, { type: "note.linkDates", id: note.id });
+    expect(done).toEqual({ id: note.id, revision: 2, changed: true });
+    const read = await perform(env.DB, ada, { type: "note.read", id: note.id });
+    expect(read.text).toBe("# Trip\n\n# 2026-10-23\n\nLeave [[2026-10-24]] at [[2026-10-24 09:30]], back due:2026-10-26.\n\n`2026-10-27` and [[2026-10-28]]");
+    const history = await perform(env.DB, ada, { type: "note.history", id: note.id });
+    expect(history.at(-1)).toMatchObject({ revision: 2, label: "Dates written as links" });
+
+    expect(await perform(env.DB, ada, { type: "note.linkDates", id: note.id })).toEqual({ id: note.id, revision: 2, changed: false });
+    await perform(env.DB, ada, { type: "note.revert", id: note.id, revision: 1 });
+    expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe(bare);
+    // Put back, they are left bare: it converts a note once.
+    expect((await perform(env.DB, ada, { type: "note.linkDates", id: note.id })).changed).toBe(false);
+  });
+
+  it("are left as they are in a note made since, and a note with none is only marked", async () => {
+    const ada = await newMember();
+    const made = await create(ada, bare);
+    expect(await perform(env.DB, ada, { type: "note.linkDates", id: made.id })).toEqual({ id: made.id, revision: 1, changed: false });
+    const none = await before(ada, "# Nothing\n\nNo dates here.");
+    expect(await perform(env.DB, ada, { type: "note.linkDates", id: none.id })).toEqual({ id: none.id, revision: 1, changed: false });
+    expect((await env.DB.prepare("SELECT dates_linked FROM notes WHERE id = ?").bind(none.id).first<{ dates_linked: number }>())!.dates_linked).toBe(1);
+  });
+
+  it("are written as links once when two openings ask at once", async () => {
+    const ada = await newMember();
+    const note = await before(ada, "# Trip\n\nLeave 2026-10-24, back 2026-10-26.");
+    const both = await Promise.all([perform(env.DB, ada, { type: "note.linkDates", id: note.id }), perform(env.DB, ada, { type: "note.linkDates", id: note.id })]);
+    expect(both.map((b) => b.changed).sort()).toEqual([false, true]);
+    expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe("# Trip\n\nLeave [[2026-10-24]], back [[2026-10-26]].");
+  });
+
+  it("are left for someone who may change the note: one who may only read it is refused", async () => {
+    const ada = await newMember();
+    const grace = await addMember(ada, "editor");
+    const note = await before(ada, bare);
+    await perform(env.DB, ada, { type: "note.setPrivate", id: note.id, private: true });
+    await perform(env.DB, ada, { type: "grant.set", noteId: note.id, memberId: grace.personId!, access: "view" });
+    await expect(perform(env.DB, grace, { type: "note.linkDates", id: note.id })).rejects.toMatchObject({ code: "forbidden" });
+    expect((await perform(env.DB, ada, { type: "note.linkDates", id: note.id })).changed).toBe(true);
+  });
+
+  it("are converted only by someone who may change the note", async () => {
+    const ada = await newMember();
+    const note = await before(ada, bare);
+    const vera = await addMember(ada, "viewer", "Vera Viewer");
+    await expect(perform(env.DB, vera, { type: "note.linkDates", id: note.id })).rejects.toMatchObject({ code: "forbidden" });
   });
 });

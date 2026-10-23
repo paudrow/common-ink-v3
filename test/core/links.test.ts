@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { linkedIds, linksIn, linksOn, retargeted } from "../../src/core/links.ts";
+import { linkedFolder, linkedIds, linksIn, linksOn, retargeted, writtenFolderLink } from "../../src/core/links.ts";
 
 const A = "aaaaaaaaaaaa";
 const B = "bbbbbbbbbbbb";
@@ -39,5 +39,17 @@ describe("links as a note writes them", () => {
     const to = (target: string) => ({ Plan: A, Trip: B })[target];
 
     expect(retargeted("# T\n\n[[Plan]] then [[Trip|go]] and [[Other]]\n`[[Plan]]`", to)).toBe(`# T\n\n[[${A}]] then [[${B}|go]] and [[Other]]\n\`[[Plan]]\``);
+  });
+});
+
+describe("a link to a folder", () => {
+  it("is written by the folder's id, and read back as that folder; any other target is no folder's", () => {
+    expect(writtenFolderLink(A)).toBe(`[[folder:${A}]]`);
+    expect(linksOn(`See ${writtenFolderLink(A)}.`).map((link) => linkedFolder(link.target))).toEqual([A]);
+    expect([A, "folder:", "folder:short", `folder:${A}x`, `Folder:${A}`].map(linkedFolder)).toEqual([null, null, null, null, null]);
+  });
+
+  it("names no note", () => {
+    expect(linkedIds(`[[folder:${A}]] [[${B}]]`)).toEqual([B]);
   });
 });

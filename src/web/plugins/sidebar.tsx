@@ -1,6 +1,8 @@
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { Icon, draggableAs, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
+import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { Icon, draggableAs, openedAt, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
+import { hoverCards } from "./lib/hoverCard.tsx";
 import { ContextMenu } from "./lib/Menu.tsx";
+import { arrive, goes, hold, listOf, preview, step } from "./lib/rows.ts";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
@@ -25,13 +27,56 @@ function Sidebar({ app }: ViewProps) {
   const pages = (
     <>
       {links("primary")}
-      <button type="button" className="mode more-toggle" aria-expanded={more} aria-label={open ? undefined : more ? "Less" : "More"} title={open ? undefined : more ? "Less" : "More"} onClick={() => setMore(!more)}>
+      <button type="button" className="mode more-toggle" data-row data-row-toggle data-page={MORE} data-page-card="beside" aria-expanded={more} aria-label={open ? undefined : more ? "Less" : "More"} title={open ? undefined : more ? "Less" : "More"} onClick={() => setMore(!more)}>
         <Icon name="chevron" />
         {open && <span>{more ? "Less" : "More"}</span>}
       </button>
       {more && links("more")}
     </>
   );
+  /**
+   * Shift with Enter or Space opens a row to the side, as they open it in the pane in front: Enter goes there with the keyboard,
+   * and Space stays. A row says what it opens by its address: a link's, or the one it is marked `data-opens` with.
+   */
+  const aside = (row: HTMLElement, go: boolean) => {
+    const address = row.getAttribute("href") ?? row.dataset.opens;
+    const page = app.pages.find((p) => p.path === address);
+    const tab = typeof page?.transient === "function" ? page.transient() : Promise.resolve(address ? openedAt(address, app.pages) : null);
+    tab.then(
+      (opened) => {
+        if (!opened || !app.openToSide) return;
+        app.openToSide(opened, { focus: go });
+        if (go) arrive();
+        else hold(row);
+      },
+      (err: Error) => app.notify({ message: err.message }),
+    );
+  };
+  const onKey = (e: KeyboardEvent<HTMLElement>) => {
+    const row = e.target instanceof HTMLElement && listOf(e.target) === e.currentTarget && !(e.altKey || e.ctrlKey || e.metaKey) ? e.target : null;
+    if (!row) return;
+    if (e.shiftKey) {
+      if ((e.key === "Enter" || e.key === " ") && goes(row) && app.openToSide) {
+        e.preventDefault();
+        aside(row, e.key === "Enter");
+      }
+      return;
+    }
+    // A folder's row has opened itself by now.
+    if (e.key === "Enter") return void (goes(row) && arrive());
+    if (e.defaultPrevented) return;
+    if (step(e, e.currentTarget)) e.preventDefault();
+    // Right opens More out and Left shuts it, as they do a folder.
+    else if (row.matches("[data-row-toggle]") && row.ariaExpanded === { ArrowRight: "false", ArrowLeft: "true" }[e.key]) {
+      e.preventDefault();
+      row.click();
+    }
+    // Space opens a link and stays on it, as it opens a folder, so the member can look through them and go to one with Enter.
+    else if (e.key === " " && row.matches("a[href]")) {
+      e.preventDefault();
+      preview(row);
+    }
+  };
   // Closed, it is a narrow bar with an icon for each thing the open sidebar lists, in the same order.
   if (!open)
     return (
@@ -58,7 +103,9 @@ function Sidebar({ app }: ViewProps) {
       </nav>
     );
   return (
-    <aside className="sidebar" aria-label="Sidebar">
+    // One list from the pages through the folders to the tags, whose rows the arrow keys go through. Enter on a link or a folder
+    // opens it and goes there with the keyboard, and Space opens it and stays.
+    <aside className="sidebar" aria-label="Sidebar" data-list data-beside onKeyDown={onKey}>
       <WorkspaceMenu app={app} />
       <NewNote app={app} />
       <nav aria-label="Modes" className="modes">
@@ -174,6 +221,9 @@ function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelle
       <a
         href={page.path}
         className="mode"
+        data-row
+        data-page={page.id}
+        data-page-card="beside"
         aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) || (page.home && app.path === "/") ? "page" : undefined}
         aria-label={labelled ? undefined : page.label}
         title={labelled ? undefined : page.label}
@@ -276,6 +326,33 @@ function WorkspaceMenu({ app }: ViewProps) {
   );
 }
 
+/** The key of More's card, which no page's id can be: a page's has no colon. */
+const MORE = "nav:more";
+
+/** What a page's link, or More, says it is for on its card: the page's description, which is its plugin's where it has none of its own. */
+function PageCard({ app, id }: { app: App; id: string }) {
+  if (id === MORE) {
+    const under = app.pages.filter((p) => p.nav === "more").map((p) => p.label);
+    return (
+      <>
+        <div className="hover-card-head">
+          <span className="hover-card-name">More</span>
+        </div>
+        <p className="hover-card-description">The pages used less often: {under.join(", ")}.</p>
+      </>
+    );
+  }
+  const page = app.pages.find((p) => p.id === id)!;
+  return (
+    <>
+      <div className="hover-card-head">
+        <span className="hover-card-name">{page.label}</span>
+      </div>
+      <p className="hover-card-description">{page.description}</p>
+    </>
+  );
+}
+
 export const sidebar: Plugin = {
   id: "sidebar",
   name: "Sidebar",
@@ -283,5 +360,10 @@ export const sidebar: Plugin = {
   icon: "sidebar",
   activate(host) {
     host.views.register("column", { id: "sidebar", component: Sidebar });
+    const cards = hoverCards("page", (id) => {
+      const app = host.app();
+      return id === MORE || app.pages.find((p) => p.id === id)?.description ? <PageCard app={app} id={id} /> : null;
+    });
+    return () => cards.dispose();
   },
 };

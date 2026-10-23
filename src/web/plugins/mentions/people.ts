@@ -1,6 +1,6 @@
 import type { CompletionItem, Contact, Member, Role, Source, WrittenMention } from "../../plugin-api.ts";
 import { isPersonId, mentionName, readableName, writtenMention } from "../../plugin-api.ts";
-import { AT_ALONE, namable, startsWords } from "../lib/pointing.ts";
+import { AT_ALONE, namable, sameName, startsWords } from "../lib/pointing.ts";
 
 /** The people a mention can be of, as the member's own browser knows them: the workspace's members, and the member's own contacts. */
 export interface People {
@@ -30,9 +30,9 @@ const ROLE_LABEL: Record<Role, string> = { admin: "Admin", editor: "Editor", vie
  * for what can't be the start of a name, which closes the list. For nothing typed, a few people,
  * the member first.
  *
- * Where nobody is found for words with a letter in them and the member has somewhere to add a
- * contact, `adding`, it offers to create a contact of that name, which picked is mentioned as any
- * contact is. It is of the kind that comes after every other and waits to be picked on purpose, so
+ * Where nobody is named the words typed, ignoring case, they have a letter in them, and the member
+ * has somewhere to add a contact, `adding`, it offers last to create a contact of that name, which
+ * picked is mentioned as any contact is. It is of the kind that comes after every other and waits to be picked on purpose, so
  * Enter never takes it.
  */
 export function offered(typed: string, { members, contacts }: People, meId: string, adding: Adding | null = null): CompletionItem[] {
@@ -58,8 +58,9 @@ export function offered(typed: string, { members, contacts }: People, meId: stri
     .filter((item) => item.insert);
   const found = [...fromMembers, ...fromContacts].slice(0, typed ? MOST_OFFERED : AT_ALONE.person);
   const name = readableName(typed.replace(/\s+/g, " "));
-  if (found.length || !adding || !/\p{L}/u.test(name)) return found;
-  return [{ kind: "new", label: `Create contact “${name}”`, description: `New contact in ${adding.into}`, insert: () => adding.create(name) }];
+  const taken = [...[...members.values()].map((m) => m.name), ...(contacts ?? []).map((c) => c.name)].some((other) => sameName(other, name));
+  if (taken || !adding || !/\p{L}/u.test(name)) return found;
+  return [...found, { kind: "new", label: `Create contact “${name}”`, description: `New contact in ${adding.into}`, insert: () => adding.create(name) }];
 }
 
 /** How a mention is shown: a member by their name now, in the theme colour, and anyone else by the name as written, in gray. */

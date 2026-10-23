@@ -1,8 +1,18 @@
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import { locateTodo, type ListedTodo, type PluginHost } from "../../plugin-api.ts";
+import { linesOutsideCode, locateTodo, nameKey, tagsOn, type ListedTodo, type PluginHost } from "../../plugin-api.ts";
 
-/** A todo as a listing gave it, which is what it is found again by. */
-export type ListedAt = Pick<ListedTodo, "noteId" | "line" | "text">;
+/** A todo as a listing gave it, which is what it is found again by, or a line of its note that writes a tag, found again by the tag. */
+export type ListedAt = Pick<ListedTodo, "noteId" | "line"> & ({ text: string } | { tag: string });
+
+/** Which line writes tag `name`, ignoring case, outside code: the one nearest `near`, or undefined when none does. */
+function lineWithTag(text: string, name: string, near: number): number | undefined {
+  let nearest: number | undefined;
+  for (const { line, index } of linesOutsideCode(text)) {
+    if (!tagsOn(line).some((tag) => nameKey(tag.name) === nameKey(name))) continue;
+    if (nearest === undefined || Math.abs(index - near) < Math.abs(nearest - near)) nearest = index;
+  }
+  return nearest;
+}
 
 /**
  * A way to open a todo's note with the cursor on the todo's line, in front or beside it, for a plugin that lists todos. The
@@ -21,8 +31,9 @@ export function todoOpener(host: PluginHost): (todo: ListedAt, beside?: boolean)
     going = null;
     if (!at) return;
     const { doc } = view.state;
+    const text = doc.toString();
     // The line it was listed on, when the note has since been written another way.
-    const line = locateTodo(doc.toString(), at)?.line ?? Math.min(at.line, doc.lines - 1);
+    const line = ("tag" in at ? lineWithTag(text, at.tag, at.line) : locateTodo(text, at)?.line) ?? Math.min(at.line, doc.lines - 1);
     const { from, to } = doc.line(line + 1);
     view.dispatch({ selection: { anchor: to }, effects: EditorView.scrollIntoView(from, { y: "center" }) });
   };
@@ -45,7 +56,7 @@ export function todoOpener(host: PluginHost): (todo: ListedAt, beside?: boolean)
   });
 
   return (todo, beside) => {
-    going = { noteId: todo.noteId, line: todo.line, text: todo.text };
+    going = "tag" in todo ? { noteId: todo.noteId, line: todo.line, tag: todo.tag } : { noteId: todo.noteId, line: todo.line, text: todo.text };
     const app = host.app();
     // In a split beside what is in front, whose editor arrives at the line once it is made.
     if (beside && app.openBeside) return app.openBeside({ kind: "note", id: todo.noteId }, "right");

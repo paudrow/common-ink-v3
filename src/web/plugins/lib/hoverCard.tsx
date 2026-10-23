@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { contextMenus } from "./Menu.tsx";
 
-/** How long the pointer rests on an anchor before its card shows, so passing over one shows nothing. */
+/** How long the pointer rests on an anchor, or the keyboard, before its card shows, so passing over one or through a list shows nothing. */
 const SHOW_MS = 350;
 /** How long the card stays once the pointer leaves its anchor and the card, and again each time it moves nearer the card on its way there. */
 const HIDE_MS = 300;
@@ -23,11 +23,11 @@ export interface HoverCards {
  * The card anything marked `data-<kind>` shows while it is pointed at or has the keyboard, wherever
  * it is drawn: a tag's (`data-tag` with its name) or a folder's (`data-folder` with its id). One
  * marked `data-<kind>-card="beside"` too, a row of a list, has it beside it rather than under it.
- * `content` draws what the card says of that key, or null for a key it knows nothing of, which shows
- * no card. It is laid over the app at the end of the page,
+ * `content` draws what the card says of that key, told the anchor it is for, or null for a key it
+ * knows nothing of, which shows no card. It is laid over the app at the end of the page,
  * or of the dialog the anchor is in, so it moves nothing, and is a tooltip the anchor is described by.
  */
-export function hoverCards(kind: string, content: (key: string, close: () => void) => ReactNode): HoverCards {
+export function hoverCards(kind: string, content: (key: string, close: () => void, anchor: HTMLElement) => ReactNode): HoverCards {
   const beside = `${kind}Card`;
   const anchorOf = (target: EventTarget | null) => (target instanceof Element ? target.closest<HTMLElement>(`[data-${kind}]`) : null);
   let shown: { anchor: HTMLElement; key: string; how: Showing } | null = null;
@@ -63,7 +63,7 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
       return;
     }
     close();
-    const drawn = content(key, close);
+    const drawn = content(key, close, anchor);
     if (drawn === null) return;
     shown = { anchor, key, how };
     // Inside a modal dialog, such as Settings, only what is in the dialog is drawn over it.
@@ -132,7 +132,9 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
   const focused = (e: FocusEvent) => {
     const anchor = e.target instanceof HTMLElement && e.target.dataset[kind] !== undefined && e.target.matches(":focus-visible") ? e.target : null;
     const key = anchor?.dataset[kind];
-    if (anchor && key) open(anchor, key, "focus");
+    if (!anchor || !key) return;
+    clearTimeout(showing);
+    showing = setTimeout(() => document.activeElement === anchor && open(anchor, key, "focus"), SHOW_MS);
   };
   const blurred = (e: FocusEvent) => {
     if (shown?.how === "focus" && e.target === shown.anchor && !(e.relatedTarget instanceof Node && holder?.contains(e.relatedTarget))) close();

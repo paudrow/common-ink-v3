@@ -22,7 +22,7 @@ import { MarkdownReader } from "./MarkdownReader.tsx";
 import { NoteReader } from "./NoteReader.tsx";
 import { cursorIn, onNoteMoves, putCursor } from "./openNotes.ts";
 import { stacked, type Told } from "./notices.ts";
-import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
+import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Command, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
@@ -365,7 +365,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
         // Its command is `settings.openJson`, so a key a member bound to that opens it.
         h.views.register("page", { id: "settings-json", path: SETTINGS_FILE, label: "Settings (JSON)", command: { id: "settings.openJson", title: "Go to settings (JSON)" }, component: () => <SettingsFile store={settings} host={created} /> });
         h.views.register("page", { id: "agents-file", path: AGENTS_FILE, label: "Agents file", command: { id: "go.agents-file", title: "Go to agents file" }, component: () => <AgentsFile store={agentsFile} host={created} canEdit={role === "admin" || role === "editor"} /> });
-        h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage });
+        h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", description: "Turn plugins on and off, add your own, and see what each one adds.", nav: "more", component: PluginsPage });
       },
     };
     created = createPluginHost({
@@ -535,7 +535,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     return () => void delete document.documentElement.dataset.theme;
   }, [theme]);
   const shortcut = (commandId: string) => {
-    const chord = chordFor(commandId, contributed.keybindings);
+    const chord = chordFor(commandId, contributed.keybindings, contributed.shared);
     return chord && chordLabel(chord, MAC);
   };
 
@@ -761,21 +761,25 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     addEventListener("focusin", elsewhere, true);
     return () => removeEventListener("focusin", elsewhere, true);
   }, [toFocus]);
-  const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean; here?: boolean } = {}) => {
+  /** Opens a tab: `here`, as what the member opens does, in the pane in front, a note even where another pane has it; or else where it is open, as going back does. */
+  const openTab = (tab: Opened, options: { preview: boolean; here: boolean; focus?: boolean }) => {
     const area = host.contributions().views.editor.at(-1);
-    const here = options.here ? { here: true } : {};
-    if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true, ...here });
-    setToFocus(options.focus ? noteId : null);
-    if (area?.open) area.open({ kind: "note", id: noteId }, { preview: options.preview ?? false, ...here });
-    else show({ kind: "note", id: noteId });
+    setToFocus(options.focus && tab.kind === "note" ? tab.id : null);
+    if (area?.open) area.open(tab, { preview: options.preview, here: options.here });
+    else show(tab);
   };
-  const openFolder = (folderId: string, options: { preview?: boolean } = {}) => {
+  const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean } = {}) => {
     const area = host.contributions().views.editor.at(-1);
-    if (area?.open) area.open({ kind: "folder", id: folderId }, { preview: options.preview ?? true });
-    else show({ kind: "folder", id: folderId });
+    if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true, here: true });
+    openTab({ kind: "note", id: noteId }, { preview: options.preview ?? false, here: true, focus: options.focus });
   };
+  const openFolder = (folderId: string, options: { preview?: boolean } = {}) => openTab({ kind: "folder", id: folderId }, { preview: options.preview ?? true, here: true });
 
   const openBeside = (tab: Opened, side: "right" | "down") => host.contributions().views.editor.at(-1)?.split?.(tab, side);
+  const openToSide = (tab: Opened, { preview = true, focus = false }: { preview?: boolean; focus?: boolean } = {}) => {
+    setToFocus(focus && tab.kind === "note" ? tab.id : null);
+    host.contributions().views.editor.at(-1)?.aside?.(tab, { preview, stay: !focus });
+  };
 
   /** Where the member has been, kept in this browser, which Go back and Go forward walk. Settings is a place to change things from and no place in it. */
   const travelsKey = `ink.travels.${workspaceId}.${me.person.id}`;
@@ -830,13 +834,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     const { place, cursor } = next.stops[next.at]!;
     if (place.kind === "note") {
       if (cursor !== null) putCursor(place.id, cursor);
-      if (!samePlace(place, inFront)) openNote(place.id, { preview: true, focus: true });
-    } else if (place.kind === "folder") openFolder(place.id, { preview: true });
-    else {
-      const area = host.contributions().views.editor.at(-1);
-      if (area?.open) area.open(place, { preview: true });
-      else show(place);
-    }
+      if (!samePlace(place, inFront)) openTab(place, { preview: true, here: false, focus: true });
+    } else openTab(place, { preview: true, here: false });
   };
 
   const createNote = async (folderId?: string, { open = true }: { open?: boolean } = {}) => {
@@ -999,22 +998,22 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       if (e.target instanceof Element && e.target.closest("[data-records-keys], [data-keeps-keys]")) return;
       // Escape and then Tab in a note leaves it for what comes next on the page, whatever Tab is bound to there.
       if (e.key === "Tab" && tabLeaves(e.target)) return;
-      const { keybindings, commands } = host.contributions();
+      const { keybindings, shared, commands } = host.contributions();
       const chord = chordOf(e, MAC);
       const begun = pending;
       giveUp();
       const press = pressing(chord);
       const pressesIt = press !== null && e.target instanceof Element && e.target.matches(TAKES[press]);
-      const commandFor = (keys: string) => commands.find((c) => c.id === keybindings[keys]);
-      const ready = Object.keys(keybindings).filter((keys) => {
-        if (keys !== chord && !keys.startsWith(`${chord} `) && !(begun && keys.startsWith(`${begun} `))) return false;
-        const command = commandFor(keys)!;
+      const runs = (keys: string, command: Command) => {
         // Keys that would type are left to what is being typed in, unless their command says for itself when it runs.
         if (!command.when && typed(keys) && (inField(e.target) || (e.target instanceof HTMLElement && e.target.isContentEditable))) return false;
         // Enter and Space are a button's, a link's or a checkbox's own while it has focus.
         if (!command.when && pressesIt && (keys === chord || keys.startsWith(`${chord} `))) return false;
         return !(inField(e.target) && command.leaveToFields) && command.when?.() !== false;
-      });
+      };
+      // Keys several commands share run the first that can run here.
+      const commandFor = (keys: string) => (shared[keys] ?? [keybindings[keys]!]).map((id) => commands.find((c) => c.id === id)!).find((c) => runs(keys, c));
+      const ready = Object.keys(keybindings).filter((keys) => (keys === chord || keys.startsWith(`${chord} `) || (begun && keys.startsWith(`${begun} `))) && !!commandFor(keys));
       const next = advance(begun, chord, ready);
       if (!next) return;
       if (next === "dropped") {
@@ -1042,7 +1041,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
   // Back and Forward arrive without going through `navigate`.
   useEffect(() => setSidebarInFront(false), [place.path, place.query]);
   useLayoutEffect(() => host.deviceChanged({ phone: device.phone, touch: device.touch, keyboard: device.keyboard }), [host, device.phone, device.touch, device.keyboard]);
-  useEffect(() => host.notesChanged(), [host, notes]);
+  // A folder renamed changes how a link to it reads, as a note renamed does.
+  useEffect(() => host.notesChanged(), [host, notes, tree]);
 
   const actions = useLatest({
     go,
@@ -1050,6 +1050,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     openNote,
     openFolder,
     openBeside,
+    openToSide,
     folderPath,
     show,
     createNote,
@@ -1135,6 +1136,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     overlay: overlay?.id ?? null,
     ...actions,
     openBeside: contributed.views.editor.at(-1)?.split ? actions.openBeside : null,
+    openToSide: contributed.views.editor.at(-1)?.aside ? actions.openToSide : null,
   };
   appNow.current = app;
   const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
@@ -1152,7 +1154,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     contributed.views.section.flatMap((section) => {
       if (only !== undefined && section.id !== only) return [];
       const telling = <A extends unknown[]>(open: (...args: A) => void) => (...args: A) => (open(...args), opened?.());
-      const as = (its: App): App => ({ ...its, openNote: telling(its.openNote), openFolder: telling(its.openFolder), openBeside: its.openBeside && telling(its.openBeside), go: telling(its.go) });
+      const as = (its: App): App => ({ ...its, openNote: telling(its.openNote), openFolder: telling(its.openFolder), openBeside: its.openBeside && telling(its.openBeside), openToSide: its.openToSide && telling(its.openToSide), go: telling(its.go) });
       return <Drawn key={section.id} host={host} view={section} as={opened && as} />;
     });
   app.sections = contributed.views.section.length === 0 ? null : sections();

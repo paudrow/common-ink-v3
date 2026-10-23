@@ -210,12 +210,18 @@ export type CloseScope = keyof typeof KEEPS;
 
 export type EditorAction =
   /**
-   * `background` adds a kept tab and leaves showing what is. A tab it already has is kept where it is.
-   * A note open in another group is gone to there, and a preview goes where the window's preview is,
-   * unless `here`: picked in the focused group, it opens there, a preview only where the window's
-   * preview is that group's or nowhere, since the window has one; a folder or a page open in another group is still gone to.
+   * Opens in the focused group, as a preview where `preview`, which takes the place of the window's
+   * preview wherever that is. `background` adds a kept tab and leaves showing what is. A tab another
+   * group keeps is gone to there, as going back does, unless it is a note picked `here`, by the member
+   * in that group or beside the editor area, which then opens in the focused group too.
    */
   | { type: "open"; tab: Opened; preview: boolean; background?: boolean; here?: boolean }
+  /**
+   * Opens the tab to the side, as a preview where `preview`: in the group after the focused one,
+   * round to the first, or with one group, in a new group right of it. With `stay` the focused group
+   * stays the one in front.
+   */
+  | { type: "aside"; tab: Opened; preview: boolean; stay?: boolean }
   | { type: "pin"; groupId: string; tab: Opened }
   | { type: "close"; scope: CloseScope; groupId: string; tab: Opened }
   | { type: "activate"; groupId: string; tab: Opened }
@@ -248,8 +254,8 @@ const withGroup = (layout: EditorLayout, id: string, change: (group: Group) => G
 const placeForNew = (group: Group) => (group.active?.kind === "note" && indexOf(group, group.active) + 1) || group.tabs.length;
 
 /**
- * The window has one preview, and the next thing previewed takes its place, whatever either is of
- * and whichever group it is in: the reducer's `open` picks that group. Nothing else
+ * The window has one preview, and the next thing previewed takes its place, whatever either is of:
+ * the reducer's `open` takes it out of any other group. Nothing else
  * about a tab changes by being opened from: a note previewed from a previewed list takes the list's
  * place, and the list is a kept tab only once the member keeps it.
  */
@@ -293,6 +299,13 @@ function dropEmpty(layout: EditorLayout): EditorLayout {
   return arranged({ groups, focusedGroupId }, without(arrangement(layout), gone));
 }
 
+/** The window has one preview: one in any group but `into` goes, unless it is all its group has, which keeps it rather than close. */
+function previewOnlyIn(layout: EditorLayout, into: string): EditorLayout {
+  const there = layout.groups.find((g) => g.id !== into && g.tabs.some((t) => t.preview));
+  if (!there) return layout;
+  return withGroup(layout, there.id, (g) => (g.tabs.length > 1 ? close(g, "tab", refOf(g.tabs.find((t) => t.preview)!)) : { ...g, tabs: g.tabs.map((t) => ({ ...t, preview: false })) }));
+}
+
 /**
  * Takes a tab out of every group but `keepIn`, ahead of placing it somewhere else. A note, which can
  * be in several, comes out of `from` alone, the group it is moved from, and out of none when it came from outside them.
@@ -309,20 +322,35 @@ export function editorReducer(layout: EditorLayout, action: EditorAction): Edito
   switch (action.type) {
     case "open": {
       const front = layout.groups.find((g) => g.id === layout.focusedGroupId)!;
-      // Picked in the group in front, it opens there: a note even where another group has it, and anything not open yet.
-      if (action.here && !has(front, tab!) && (tab!.kind === "note" || !layout.groups.some((g) => has(g, tab!)))) {
-        if (action.background) return withGroup(layout, front.id, (g) => openBehind(g, tab!));
-        // A preview where the window's one is in this group or nowhere; with it in another group, kept.
-        const preview = action.preview && (front.tabs.some((t) => t.preview) || !layout.groups.some((g) => g.tabs.some((t) => t.preview)));
-        return { ...withGroup(layout, front.id, (g) => open(g, tab!, preview)), focusedGroupId: front.id };
+      const elsewhere = has(front, tab!) ? undefined : layout.groups.find((g) => has(g, tab!));
+      const theirs = elsewhere?.tabs.find((t) => same(t, tab));
+      // A tab open in another pane is gone to there, as going back does. Picked `here`, a preview there comes to this pane, unless it is all
+      // that pane has, and a note opens in front all the same, since two panes can show one note.
+      const stays = !!theirs && (!action.here || !theirs.preview || elsewhere!.tabs.length === 1 || (!!action.background && tab!.kind !== "note"));
+      const into = stays && !(action.here && tab!.kind === "note") ? elsewhere! : front;
+      if (action.background) return has(into, tab!) ? editorReducer(layout, { type: "pin", groupId: into.id, tab: tab! }) : withGroup(layout, into.id, (g) => openBehind(g, tab!));
+      // The window has one preview, which comes to where it is opened.
+      const cleared = !has(into, tab!) && (action.preview || theirs?.preview) ? previewOnlyIn(layout, into.id) : layout;
+      return { ...withGroup(cleared, into.id, (g) => open(g, tab!, action.preview)), focusedGroupId: into.id };
+    }
+    case "aside": {
+      const from = layout.focusedGroupId;
+      const at = layout.groups.findIndex((g) => g.id === from);
+      const only = layout.groups.length === 1 ? layout.groups[0]! : undefined;
+      // A folder or a page has one tab, which the only group keeps, or has alone: it is gone to there.
+      const kept = only && tab!.kind !== "note" && only.tabs.some((t) => same(t, tab) && (!t.preview || only.tabs.length === 1));
+      let opened: EditorLayout;
+      if (!only || kept) {
+        const next = only ?? layout.groups[(at + 1) % layout.groups.length]!;
+        opened = editorReducer({ ...layout, focusedGroupId: next.id }, { type: "open", tab: tab!, preview: action.preview, here: true });
+      } else {
+        const id = String(Math.max(...layout.groups.map((g) => Number(g.id))) + 1);
+        const cleared = action.preview ? previewOnlyIn(layout, id) : layout;
+        // A folder or a page moves, having one tab; a note is copied, as split off from its menu.
+        const base = tab!.kind === "note" ? cleared : lift(cleared, tab!, id);
+        opened = dropEmpty(arranged({ groups: [...base.groups, { id, tabs: [{ ...tab!, preview: action.preview }], active: tab }], focusedGroupId: id }, beside(arrangement(layout), from, id, "right")));
       }
-      // A note open in several groups is gone to in the one in front.
-      const holder = [front, ...layout.groups].find((g) => has(g, tab!))?.id;
-      if (action.background) return holder ? editorReducer(layout, { type: "pin", groupId: holder, tab: tab! }) : withGroup(layout, layout.focusedGroupId, (g) => openBehind(g, tab!));
-      // A new preview is the window's only one, and goes where the preview is, in whichever group: closing that one to open in another would close a group that held nothing else.
-      const previewed = action.preview ? layout.groups.find((g) => g.tabs.some((t) => t.preview))?.id : undefined;
-      const groupId = holder ?? previewed ?? layout.focusedGroupId;
-      return { ...withGroup(layout, groupId, (g) => open(g, tab!, action.preview)), focusedGroupId: groupId };
+      return action.stay && opened.groups.some((g) => g.id === from) ? { ...opened, focusedGroupId: from } : opened;
     }
     case "pin": {
       const group = layout.groups.find((g) => g.id === action.groupId);

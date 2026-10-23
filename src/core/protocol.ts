@@ -7,7 +7,11 @@ import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Or
 import { parseRule } from "./recurrence.ts";
 import { dayIn } from "./history.ts";
 import { MAX_SEARCH_LENGTH, type SortKey } from "./query.ts";
+import type { InheritedTag } from "./tagScope.ts";
 import { TODO_STATES, isDay, isTagName, type LastDone, type TodoState } from "./todos.ts";
+
+/** A tag a todo has from another line of its note, as list_todos says it. */
+export type { InheritedTag };
 
 export { MAX_SEARCH_LENGTH };
 
@@ -430,6 +434,14 @@ export const Op = z.discriminatedUnion("type", [
   }),
   /** Names a revision, or takes its name away when `name` is null. */
   z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
+  /**
+   * Writes the dates a note wrote bare before dates were links, as links to their days, once: the
+   * dates the date chip drew then, `2026-10-21` in prose, and not one in a heading, code, a link, an
+   * address, an embed or `due:`. It is a change of the asker's, labeled "Dates written as links", so it
+   * can be put back. The app sends it when someone who may change a note opens it. A note it has run
+   * on, or made since, is left as it is.
+   */
+  z.object({ type: z.literal("note.linkDates"), id: Id }),
   /** Puts the note back to how it was at `revision`, as a new change. */
   z.object({ type: z.literal("note.revert"), id: Id, revision: Revision, resolve: Resolve.optional() }),
   /**
@@ -506,7 +518,7 @@ export const Op = z.discriminatedUnion("type", [
    * The fields beside `query` are from before it could say them, and narrow it further. `dueFrom` and
    * `dueTo` are days, both included, and leave out todos with no due date; `noDue` lists only those.
    * `importance` lists the priority levels wanted, 0 for None to 3 for High. `tag` matches ignoring case, and is a tag
-   * of the todo's note: one written on the todo's own line, or anywhere else in the note. `assignee`
+   * of the todo: one written on its own line, or one that covers it, as `tagScope.ts` says. `assignee`
    * is `assignee:` of the query: a member's id, or anyone else's name, ignoring case. `assignedToMe`
    * is `assignee:@me`: the asker, or the member an agent acts for. `folderId`
    * lists the todos of the notes in that folder and in every folder under it; one the asker can't see
@@ -1207,10 +1219,14 @@ export interface ListedTodo {
   lastDone: LastDone | null;
   /** When its line was ticked and by whom: the change that last made it done. Null for a todo that isn't done. */
   completed: Ticking | null;
-  /** The tags of the note it is in. The ones written on its own line are those `text` has. */
+  /** The tags it has, which a tag: filter matches: the ones written on its line, which `text` has, then the ones in `tagsElsewhere`. */
   tags: string[];
-  /** The note's tags written on its other lines, which stay with the note whatever this line becomes. */
-  tagsElsewhere: string[];
+  /**
+   * The tags it has from other lines of its note, nearest first and at most ten, each with the line it is written on and what
+   * that line is: a heading over it, a line of tags in its section or under the title, or a list item it is nested in. A tag
+   * its own line writes too is among them. They stay whatever this line becomes.
+   */
+  tagsElsewhere: InheritedTag[];
   /** Who it is assigned to: each person mentioned on its line. */
   assignees: Mentioned[];
   /** The line without its list mark, checkbox, importance, due date and assignees. */
@@ -1744,6 +1760,8 @@ export interface Results {
   /** `indexing` is as for tag.list. */
   search: { results: SearchResult[]; next: string | null; indexing: boolean };
   "note.label": { id: string; revision: number; label: string | null };
+  /** `changed` when its dates were written as links, at `revision`. */
+  "note.linkDates": { id: string; revision: number; changed: boolean };
   "note.revert": Written;
   "note.revertChanges": Written;
   "note.previewRevert": RevertPreview;
