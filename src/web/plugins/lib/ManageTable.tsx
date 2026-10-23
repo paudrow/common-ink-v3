@@ -21,7 +21,7 @@ export interface ManageItem {
   dragged: Opened;
   /** Comes before the rows beside it, whatever its name, as Unsorted does among folders. */
   first?: boolean;
-  /** `delete` is offered only with `ManageActions.delete`, which Tags has for a tag no note has. */
+  /** `delete` is offered only with `ManageActions.delete`, which Tags has. */
   may: { rename: boolean; describe: boolean; add: boolean; move: boolean; delete?: boolean };
   children: readonly ManageItem[];
 }
@@ -51,8 +51,8 @@ export interface ManageActions {
   movedPath(item: ManageItem, to: ManageItem | null): string;
   /** Why `name` can't be one inside `parent`, or null. */
   problem(name: string, parent: ManageItem | null): string | null;
-  /** Takes the row away, and the rows inside it, for a row whose `may.delete` says so. */
-  delete?(item: ManageItem): Promise<void>;
+  /** Takes the row away, and the rows inside it, for a row whose `may.delete` says so, once the plugin has asked. Answers whether it went. */
+  delete?(item: ManageItem): Promise<boolean>;
 }
 
 /** What the table is doing. One row at a time is, as one form being filled in. */
@@ -235,7 +235,7 @@ export function ManageTable({ label, column, noun, notesHeading, adding, icon, r
   };
 
   const deletes = (item: ManageItem) => !!(item.may.delete && actions.delete);
-  /** Deletes the row, at once: the plugin's notice after has Undo. From the keyboard, the keyboard goes on to the row after it, or the one before. */
+  /** Deletes the row, as the plugin asks: its notice after has Undo. From the keyboard, the keyboard goes on to the row after it, or the one before. */
   const remove = (item: ManageItem, fromKeyboard: boolean) => {
     setMenu(null);
     if (busy) return;
@@ -247,8 +247,8 @@ export function ManageTable({ label, column, noun, notesHeading, adding, icon, r
     const next = all.slice(at + 1).find((key) => !inside.has(key)) ?? all[at - 1] ?? null;
     // A refusal is said on the row, and leaves whatever another row is doing as it is.
     working(null, item.key, () =>
-      actions.delete!(item).then(() => {
-        if (fromKeyboard && next) focusing.current = next;
+      actions.delete!(item).then((gone) => {
+        if (gone && fromKeyboard && next) focusing.current = next;
       }),
     );
   };

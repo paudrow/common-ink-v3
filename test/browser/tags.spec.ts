@@ -304,7 +304,7 @@ test("a click on a tag with the modifier opens the tag's page, and a plain click
   await expect(notesOf(page, "beta-2")).toHaveText(["Tagged"]);
 });
 
-test("a tag in the sidebar has a menu, as a folder's row has: a right-click, Shift+F10 or the menu key opens it, and it opens the tag's page here or in a split, or its row in Settings, to describe it there or to rename it", async ({ page }) => {
+test("a tag in the sidebar has a menu, as a folder's row has: a right-click, Shift+F10 or the menu key opens it, and it opens the tag's page here or in a split, or its row in Settings, to describe it there or to rename it, or deletes it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const seeds = await create(page, "# Seeds\n\nOrder seeds #garden\n");
   await page.goto(`/note/${seeds.id}`);
@@ -313,7 +313,7 @@ test("a tag in the sidebar has a menu, as a folder's row has: a right-click, Shi
   const menu = page.getByRole("menu", { name: "#garden actions" });
 
   await garden.click({ button: "right" });
-  await expect(menu.getByRole("menuitem")).toHaveText(["Open", "Open in a split right", "Open in a split down", "Manage tags", "Rename tag"]);
+  await expect(menu.getByRole("menuitem")).toHaveText(["Open", "Open in a split right", "Open in a split down", "Manage tags", "Rename tag", "Delete tag"]);
   await menu.getByRole("menuitem", { name: "Open in a split right" }).click();
   const groups = page.getByRole("tablist", { name: "Open notes" });
   await expect(groups).toHaveCount(2);
@@ -542,7 +542,7 @@ test("a tag is made ahead with New tag or inside another from its menu, named be
 
   await manageRow(page, "project").getByRole("rowheader").click({ button: "right" });
   const menu = page.getByRole("menu", { name: "#project actions" });
-  await expect(menu.getByRole("menuitem")).toHaveText(["Open", "RenameF2", "Edit descriptionEnter", "New tag inside", "Move to…"]);
+  await expect(menu.getByRole("menuitem")).toHaveText(["Open", "RenameF2", "Edit descriptionEnter", "New tag inside", "Move to…", "Delete tagDelete"]);
   await menu.getByRole("menuitem", { name: "New tag inside" }).click();
   await page.keyboard.type("alpha");
   await page.keyboard.press("Enter");
@@ -562,65 +562,111 @@ test("a tag is made ahead with New tag or inside another from its menu, named be
   await expect(listed(page)).toHaveText(["#project1"]);
 });
 
-test("a tag no note has, nor a tag inside it, is deleted from its menu or with Delete, with Undo, and stays deleted after a reload; a tag a note has, or one inside it, has no Delete", async ({ page }) => {
+test("every tag in Settings has Delete in its menu, and Delete or Backspace on its row, which asks in a dialog first: a tag no note has goes with its description, with Undo, and a tag notes have is taken out of them with the tags inside it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  await create(page, "# Plan\n\n#project/beta\n");
-  const old = await create(page, "# Old\n\n#old\n");
-  await perform(page, { type: "note.archive", id: old.id, archived: true });
-  await perform(page, { type: "tag.describe", name: "old", description: "Done with" });
+  const plan = await create(page, "# Plan\n\nShip the #project soon\n\n#project/beta\n");
   await perform(page, { type: "tag.describe", name: "Reading", description: "Books to read" });
-  await perform(page, { type: "tag.describe", name: "later", description: "" });
   await perform(page, { type: "tag.describe", name: "trip", description: "" });
   await perform(page, { type: "tag.describe", name: "trip/Paris", description: "Spring" });
   const toast = page.locator(".toast-card");
+  const dialog = page.getByRole("dialog", { name: /^Delete #/ });
   const tagNames = async () => (await perform(page, { type: "tag.list", includeArchived: true })).tags.map((t) => t.name);
   await page.goto("/settings/tags");
-  await expect(names(page)).toHaveText(["#later", "#old", "#project", "beta", "#Reading", "#trip", "Paris"]);
+  await expect(names(page)).toHaveText(["#project", "beta", "#Reading", "#trip", "Paris"]);
 
   const menuOf = async (key: string) => {
     await manageRow(page, key).getByRole("rowheader").click({ button: "right" });
     return page.getByRole("menu", { name: /actions$/ });
   };
-  // #old has a note in Archive, which the table doesn't count.
-  for (const key of ["project", "project/beta", "old"]) {
-    await expect((await menuOf(key)).getByRole("menuitem")).toHaveText(["Open", "RenameF2", "Edit descriptionEnter", "New tag inside", "Move to…"]);
-    await page.keyboard.press("Escape");
-  }
-  await manageRow(page, "project").focus();
-  await page.keyboard.press("Delete");
-  await page.keyboard.press("Backspace");
-  await expect(manageRow(page, "project")).toBeFocused();
-  await expect(toast).toHaveCount(0);
-  expect(await tagNames()).toEqual(["later", "old", "project", "project/beta", "Reading", "trip", "trip/Paris"]);
-
   const menu = await menuOf("reading");
   await expect(menu.getByRole("menuitem")).toHaveText(["Open", "RenameF2", "Edit descriptionEnter", "New tag inside", "Move to…", "Delete tagDelete"]);
   await menu.getByRole("menuitem", { name: "Delete tag" }).click();
-  await expect(toast).toContainText("Deleted #Reading");
-  await expect(names(page)).toHaveText(["#later", "#old", "#project", "beta", "#trip", "Paris"]);
+  await expect(dialog).toHaveAccessibleName("Delete #Reading?");
+  await expect(dialog).toContainText("Its description goes with it.");
+  await dialog.getByRole("button", { name: "Delete tag" }).click();
+  await expect(toast).toContainText("Deleted #Reading.");
+  await expect(names(page)).toHaveText(["#project", "beta", "#trip", "Paris"]);
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(toast).toContainText("#Reading is back");
   await expect(manageRow(page, "reading").locator(".manage-description")).toHaveText("Books to read");
 
-  // From the keyboard the row after it takes the keyboard, and a parent goes with the tags inside it.
-  await manageRow(page, "reading").focus();
+  // From the keyboard: Cancel has it first and Escape gives it back to the row; once deleted, the row before takes it.
+  await manageRow(page, "trip").focus();
   await page.keyboard.press("Delete");
-  await expect(names(page)).toHaveText(["#later", "#old", "#project", "beta", "#trip", "Paris"]);
+  await expect(dialog).toHaveAccessibleName("Delete #trip?");
+  await expect(dialog).toContainText("The tag under it goes too: #trip/Paris.");
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
   await expect(manageRow(page, "trip")).toBeFocused();
   await page.keyboard.press("Backspace");
-  await expect(toast.filter({ hasText: "Deleted #trip and the tag inside it" })).toBeVisible();
-  await expect(names(page)).toHaveText(["#later", "#old", "#project", "beta"]);
-  await expect(manageRow(page, "project/beta")).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "Delete tag" })).toBeVisible();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Enter");
+  await expect(toast.filter({ hasText: "Deleted #trip." })).toBeVisible();
+  await expect(names(page)).toHaveText(["#project", "beta", "#Reading"]);
+  await expect(manageRow(page, "reading")).toBeFocused();
 
-  // A note given the tag since the table was read keeps it, and the row says so.
-  await create(page, "# Someday\n\n#later\n");
-  await (await menuOf("later")).getByRole("menuitem", { name: "Delete tag" }).click();
-  await expect(manage(page).getByRole("alert")).toHaveText("#later is in use, so it stays.");
-  await expect(names(page)).toHaveText(["#later", "#old", "#project", "beta"]);
+  await (await menuOf("project")).getByRole("menuitem", { name: "Delete tag" }).click();
+  await expect(dialog).toHaveAccessibleName("Delete #project from 1 note?");
+  await expect(dialog.getByRole("list", { name: "Notes it changes" }).getByRole("listitem")).toHaveText(["Plan"]);
+  await dialog.getByRole("button", { name: "Delete from 1 note" }).click();
+  await expect(toast.filter({ hasText: "Deleted #project from 1 note." })).toBeVisible();
+  await expect(names(page)).toHaveText(["#Reading"]);
+  expect((await perform(page, { type: "note.read", id: plan.id })).text).toBe("# Plan\n\nShip the project soon\n");
 
   await page.reload();
-  await expect(names(page)).toHaveText(["#later", "#old", "#project", "beta"]);
-  expect(await tagNames()).toEqual(["later", "old", "project", "project/beta"]);
+  await expect(names(page)).toHaveText(["#Reading"]);
+  expect(await tagNames()).toEqual(["Reading"]);
+});
+
+test("Delete tag in a tag's menu in the sidebar asks first, saying the notes it changes, the tags under it, and the notes the member can't change, which keep it; deleting keeps the tag's word in a sentence and takes it from the end of a line, and Undo puts every note back", async ({ page }) => {
+  await signInAsNewPerson(page, "Ned Narrowed");
+  const ada = await anotherPerson(page, "Ada Lovelace");
+  const team = await perform(ada, { type: "folder.create", name: "Team" });
+  await perform(ada, { type: "note.create", folderId: team.id, text: "# Shed\n\nSharpen the #garden tools\n" });
+  const SEEDS = "# Seeds\n\nWater the #garden today\n- [ ] Call about seeds #garden #errands\n\n#garden/beds\n";
+  const BEDS = "# Beds\n\nDig the #Garden/beds deep\n";
+  const seeds = await perform(ada, { type: "note.create", text: SEEDS });
+  const beds = await perform(ada, { type: "note.create", text: BEDS });
+  const { workspaceId } = await join(page, ada, "editor");
+  await perform(ada, { type: "grant.set", folderId: team.id, email: (await me(page)).person.email, access: "view" });
+  const textOf = async (id: string) => (await perform(page, { type: "note.read", id }, workspaceId)).text;
+  const toast = page.locator(".toast-card");
+  const dialog = page.getByRole("dialog", { name: /^Delete #garden/ });
+
+  await page.goto(`/note/${seeds.id}`);
+  await expect(editor(page)).toContainText("Water the");
+  await expect(listed(page)).toHaveText(["#errands1", "#garden3", "#Garden/beds2"]);
+  const garden = listed(page).filter({ hasText: /^#garden\d/ });
+  await garden.click({ button: "right" });
+  await page.getByRole("menu", { name: "#garden actions" }).getByRole("menuitem", { name: "Delete tag" }).click();
+  await expect(dialog).toHaveAccessibleName("Delete #garden from 2 notes?");
+  await expect(dialog.getByRole("list", { name: "Notes it changes" }).getByRole("listitem")).toHaveText(["Beds", "Seeds"]);
+  await expect(dialog).toContainText("“the #garden plan” becomes “the garden plan”");
+  await expect(dialog).toContainText("The tag under it goes too: #Garden/beds.");
+  await expect(dialog).toContainText("1 note you can't edit keeps it, such as a note shared with you only to view. The tag stays in the sidebar for that note.");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(garden).toBeFocused();
+  expect(await textOf(seeds.id)).toBe(SEEDS);
+
+  await garden.click({ button: "right" });
+  await page.getByRole("menu", { name: "#garden actions" }).getByRole("menuitem", { name: "Delete tag" }).click();
+  await dialog.getByRole("button", { name: "Delete from 2 notes" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(toast.filter({ hasText: "Deleted #garden from 2 notes." })).toBeVisible();
+  await expect(listed(page)).toHaveText(["#errands1", "#garden1"]);
+  await expect(editor(page)).toContainText("Water the garden today");
+  expect(await textOf(seeds.id)).toBe("# Seeds\n\nWater the garden today\n- [ ] Call about seeds #errands\n");
+  expect(await textOf(beds.id)).toBe("# Beds\n\nDig the beds deep\n");
+  expect((await perform(page, { type: "note.history", id: beds.id }, workspaceId)).map((change) => change.label)).toEqual([null, "Deleted #garden"]);
+
+  await toast.getByRole("button", { name: "Undo" }).click();
+  await expect(toast.filter({ hasText: "#garden is back" })).toBeVisible();
+  await expect(listed(page)).toHaveText(["#errands1", "#garden3", "#Garden/beds2"]);
+  expect(await textOf(seeds.id)).toBe(SEEDS);
+  expect(await textOf(beds.id)).toBe(BEDS);
 });
 
 test("a viewer and a guest read every tag's description in Settings and are given nothing to change it with, and the server refuses them", async ({ page }) => {

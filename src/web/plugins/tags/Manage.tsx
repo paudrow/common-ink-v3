@@ -1,6 +1,7 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { MAX_TAG_DESCRIPTION, isTagName, nameKey, type App, type ListedTag, type PluginHost } from "../../plugin-api.ts";
+import { useState, useSyncExternalStore } from "react";
+import { MAX_TAG_DESCRIPTION, isTagName, nameKey, type App, type PluginHost } from "../../plugin-api.ts";
 import { ManageTable, type Done, type ManageActions, type ManageItem } from "../lib/ManageTable.tsx";
+import { DeleteTagDialog } from "./Deleting.tsx";
 import { TAGS_PAGE, tagPath } from "./path.ts";
 import { confirmation, notes, renamedWords, undoRename } from "./renaming.ts";
 import { describes, type TagStore } from "./Tags.tsx";
@@ -13,8 +14,8 @@ const NOT_A_NAME = "That isn't a tag's name: letters, digits, _, / and -, with s
  * how many notes have it or a tag inside it, said for the agents that choose tags and the people
  * resting on one. An admin or an editor says it here, renames a tag, moves it inside another, which
  * renames it, and makes one ahead that no note has yet. A rename that changes notes says what it
- * will change first, and Undo in the notice after takes it back. A tag no note has, nor a tag inside
- * it, can be deleted, with Undo. A viewer and a guest read it and are given nothing to change.
+ * will change first, and Undo in the notice after takes it back. Deleting a tag asks first too, in
+ * a dialog, with Undo after. A viewer and a guest read it and are given nothing to change.
  */
 export function ManageTags({ host, app, store }: { host: PluginHost; app: App; store: TagStore }) {
   const tags = useSyncExternalStore(store.subscribe, store.tags);
@@ -23,22 +24,9 @@ export function ManageTags({ host, app, store }: { host: PluginHost; app: App; s
   const may = describes(app);
   /** What a tag's menu or card asked for when it brought the member here. */
   const [asked] = useState(() => store.take());
-  /** Every tag, those only notes in Archive have too, which the store leaves out as the sidebar does: what Delete goes by, read again with the store. */
-  const version = useSyncExternalStore(store.subscribe, store.version);
-  const [every, setEvery] = useState<readonly ListedTag[] | null>(null);
-  useEffect(() => {
-    if (!may) return;
-    let live = true;
-    host.perform({ type: "tag.list", includeArchived: true, limit: 1000 }).then(
-      (answer) => live && setEvery(answer.tags),
-      () => {},
-    );
-    return () => void (live = false);
-  }, [version, may]);
+  /** The tag Delete is asking about, and what to tell the table once it is answered. */
+  const [deleting, setDeleting] = useState<{ name: string; answer: (gone: boolean) => void } | null>(null);
   if (!tags) return null;
-
-  // A tag no note has, archived or not, nor a tag inside it, is listed with no notes and no count of the tags inside. While notes are still being indexed, none is sure.
-  const free = new Map(indexing ? [] : (every ?? []).filter((t) => t.notes === 0 && t.inside === undefined).map((t) => [nameKey(t.name), t]));
 
   const nodes = new Map<string, TagNode>();
   const itemOf = (node: TagNode, depth: number): ManageItem => {
@@ -54,7 +42,7 @@ export function ManageTags({ host, app, store }: { host: PluginHost; app: App; s
       notes: all,
       notesTitle: node.tag?.inside === undefined ? undefined : `${notes(own)} tagged #${node.name} itself, ${all} counting the tags inside it`,
       dragged: { kind: "page", id: TAGS_PAGE, path: tagPath(node.name) },
-      may: { rename: may, describe: may, add: may, move: may, delete: may && free.has(node.key) },
+      may: { rename: may, describe: may, add: may, move: may, delete: may },
       children: node.children.map((child) => itemOf(child, depth + 1)),
     };
   };
@@ -105,35 +93,7 @@ export function ManageTags({ host, app, store }: { host: PluginHost; app: App; s
     canMove: (item, to) => (to === null ? item.key.includes("/") : to.key !== item.key && !to.key.startsWith(`${item.key}/`) && to.key !== parentOf(item.key)),
     movedPath: (item, to) => `#${inside(to && nameOf(to), item.name)}`,
     problem: (name, parent) => (isTagName(inside(parent && nameOf(parent), name)) ? null : NOT_A_NAME),
-    async delete(item) {
-      const node = nodes.get(item.key)!;
-      // The tags inside a tag no note has are no note's either.
-      const gone = [...free].filter(([key]) => key === item.key || key.startsWith(`${item.key}/`)).map(([, t]) => ({ name: t.name, description: t.description ?? "" }));
-      const say = async () => {
-        for (const { name, description } of gone) await host.perform({ type: "tag.describe", name, description });
-      };
-      for (const { name } of gone) await host.perform({ type: "tag.describe", name, description: null });
-      // The server keeps a tag a note has, which one may have been given since the list was read, or have where the member can't see; what went is put back.
-      if ((await host.perform({ type: "tag.list", name: node.name, includeArchived: true, limit: 1 })).tags.length) {
-        await say();
-        await store.reload();
-        throw new Error(`#${node.name} is in use, so it stays.`);
-      }
-      await store.reload();
-      const inner = gone.length - 1;
-      app.notify({
-        message: `Deleted #${node.name}${inner ? ` and the ${inner === 1 ? "tag" : `${inner} tags`} inside it` : ""}`,
-        icon: "tag",
-        action: {
-          label: "Undo",
-          async run() {
-            await say();
-            await store.reload();
-            return { message: `#${node.name} is back` };
-          },
-        },
-      });
-    },
+    delete: (item) => new Promise((answer) => setDeleting({ name: nameOf(item), answer })),
   };
 
   return (
@@ -168,6 +128,18 @@ export function ManageTags({ host, app, store }: { host: PluginHost; app: App; s
         <button type="button" className="button small" onClick={more}>
           Show more
         </button>
+      )}
+      {deleting && (
+        <DeleteTagDialog
+          host={host}
+          app={app}
+          store={store}
+          name={deleting.name}
+          onClose={(gone) => {
+            setDeleting(null);
+            deleting.answer(gone);
+          }}
+        />
       )}
     </>
   );

@@ -12905,6 +12905,22 @@ button.dash-row:hover {
   gap: 12px;
 }
 
+/* Delete tag's dialog: the notes it changes, a list that scrolls when it is long. */
+.tag-delete-what {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trust-dialog .tag-delete-notes {
+  max-height: min(240px, 40vh);
+  overflow-y: auto;
+  gap: 2px;
+  padding: 6px 8px 6px 26px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 /* Breadcrumbs above an open note: the workspace, its folders and the note, one line that gives way at the front. */
 .crumbs {
   flex: none;
