@@ -389,3 +389,48 @@ test("Ctrl-w h lands on the row of what is open, Ctrl-w l puts the note's cursor
   await keys(page, "Control+w", "h");
   await expectMarked(sidebar(page).getByRole("link", { name: "Todos" }), "Todos, the page open");
 });
+
+test("the keyboard shortcuts list the sidebar's keys under a heading of their own, with vim's for each while vim mode is on, and Ctrl-w p and w among vim's", async ({ page }) => {
+  const MAC = process.platform === "darwin";
+  const sheetOf = async () => {
+    await page.keyboard.press("ControlOrMeta+Shift+P");
+    await page.getByRole("combobox", { name: "Commands" }).fill("Keyboard shortcuts");
+    await page.keyboard.press("Enter");
+    const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+    await expect(sheet).toBeVisible();
+    return sheet;
+  };
+  const rowsOf = (table: Locator) => table.locator("tr").evaluateAll((rows) => rows.map((row) => [row.querySelector("th")!.textContent, ...[...row.querySelectorAll("kbd")].map((k) => k.textContent)]));
+
+  await setUp(page, false);
+  await expect(tag(page, "idea")).toBeVisible();
+  let sheet = await sheetOf();
+  await expect(sheet.getByRole("heading", { level: 3 }).first()).toHaveText("Navigation");
+  await expect(sheet.getByRole("heading", { level: 3 }).nth(1)).toHaveText("Sidebar");
+  expect(await rowsOf(sheet.getByRole("table", { name: "Sidebar" }))).toEqual([
+    ["Next or previous row", "↓", "↑"],
+    ["First or last row", "Home", "End"],
+    ["Open a folder or More out, or shut it", "→", "←"],
+    ["Open the row and go to it", "Enter"],
+    ["Open the row and stay in the sidebar", "Space"],
+  ]);
+  await page.keyboard.press("Escape");
+
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: (await perform(page, { type: "settings.read" })).revision });
+  await page.reload();
+  await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
+  sheet = await sheetOf();
+  const ctrlW = (key: string) => (MAC ? `⌃W ${key}` : `Ctrl+W ${key}`);
+  expect(await rowsOf(sheet.getByRole("table", { name: "Sidebar" }))).toEqual([
+    ["Next or previous row", "↓", "↑", "J", "K"],
+    ["First or last row", "Home", "End", "G G", MAC ? "⇧G" : "Shift+G"],
+    ["Open a folder or More out, or shut it", "→", "←", "Z A", "H"],
+    ["Open the row and go to it", "Enter", "L"],
+    ["Open the row and stay in the sidebar", "Space"],
+    ["Go to the sidebar, on the row of what is open", ctrlW("H")],
+    ["Go back to the region you were in", ctrlW("P")],
+  ]);
+  const vim = sheet.getByRole("table", { name: "Vim" });
+  await expect(vim.getByRole("row", { name: "Vim: go back to the region you were in" }).locator("kbd")).toHaveText([ctrlW("P")]);
+  await expect(vim.getByRole("row", { name: "Vim: go to the next region, round to the first" }).locator("kbd")).toHaveText([ctrlW("W")]);
+});
