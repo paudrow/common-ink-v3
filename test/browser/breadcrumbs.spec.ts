@@ -134,7 +134,7 @@ test("someone who can see only a shared note sees it under Shared with me, and n
   await expect(crumbs(vera).getByRole("listitem")).toContainText(["Projects", "Engines", "Analytical", "Punch cards"]);
 });
 
-test("a note picked from a crumb's list opens in that pane, though another pane has it open", async ({ page }) => {
+test("a note picked from a crumb's list opens in that pane, and the italic tab it was in another pane moves there", async ({ page }) => {
   await withTree(page);
   const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
   const tabsIn = (n: number) => group(n).getByRole("tablist", { name: "Open notes" }).getByRole("tab");
@@ -148,12 +148,12 @@ test("a note picked from a crumb's list opens in that pane, though another pane 
   await list(page).getByRole("option", { name: "Mill" }).click();
   await expect(group(2).getByRole("tab", { selected: true })).toHaveText("Mill");
 
-  // Picked from the first pane's crumbs, Mill opens there too, and the first pane is the one in front.
+  // Picked from the first pane's crumbs, Mill opens there, and the first pane is the one in front. It was the window's italic tab in the second, which it leaves.
   await group(1).getByRole("navigation", { name: "Breadcrumbs" }).getByRole("button", { name: "Analytical", exact: true }).click();
   await list(page).getByRole("option", { name: "Mill" }).click();
   await expect(group(1).getByRole("tab", { selected: true })).toHaveText("Mill");
   await expect(group(1)).toHaveAttribute("data-focused", "true");
-  await expect(group(2).getByRole("tab", { selected: true })).toHaveText("Mill");
+  await expect(tabsIn(2)).toHaveText(["Punch cards"]);
   await expect(group(1).getByRole("textbox", { name: "Note text" })).toContainText("The mill.");
 });
 

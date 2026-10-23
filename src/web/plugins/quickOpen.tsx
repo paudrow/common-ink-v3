@@ -113,11 +113,9 @@ function QuickOpen({ host, app, close }: ViewProps & { host: PluginHost; close: 
       });
   const open = (event: CalendarEvent) => app.go(eventAddress(event, timeZone));
   const [places] = useState(() => placesFor(app));
-  const toPlace = ({ opened, tab }: (typeof places)[number]) => {
-    // A tab is put in front where it is, kept or a preview as it was.
-    if (opened.kind === "note") app.openNote(opened.id, { preview: tab });
-    else if (opened.kind === "folder") app.openFolder(opened.id);
-    else app.go(opened.path);
+  const toPlace = ({ opened }: (typeof places)[number]) => {
+    // A tab is put in front where it is, kept or a preview as it was, as going to its address does.
+    app.go(opened.kind === "note" ? app.notePath(opened.id) : opened.kind === "folder" ? app.folderPath(opened.id) : opened.path);
   };
   return (
     <Palette
@@ -136,7 +134,7 @@ function QuickOpen({ host, app, close }: ViewProps & { host: PluginHost; close: 
         if (event) open(event);
         else if (upload) app.go(uploadPath(upload));
         // A note found by its title opens in the pane in front; a tab listed with its pane is gone to there.
-        else app.openNote(id, { here: true });
+        else app.openNote(id);
       }}
       onClose={close}
     />

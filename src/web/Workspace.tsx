@@ -761,19 +761,19 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     addEventListener("focusin", elsewhere, true);
     return () => removeEventListener("focusin", elsewhere, true);
   }, [toFocus]);
-  const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean; here?: boolean } = {}) => {
+  /** Opens a tab: `here`, as what the member opens does, in the pane in front, a note even where another pane has it; or else where it is open, as going back does. */
+  const openTab = (tab: Opened, options: { preview: boolean; here: boolean; focus?: boolean }) => {
     const area = host.contributions().views.editor.at(-1);
-    const here = options.here ? { here: true } : {};
-    if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true, ...here });
-    setToFocus(options.focus ? noteId : null);
-    if (area?.open) area.open({ kind: "note", id: noteId }, { preview: options.preview ?? false, ...here });
-    else show({ kind: "note", id: noteId });
+    setToFocus(options.focus && tab.kind === "note" ? tab.id : null);
+    if (area?.open) area.open(tab, { preview: options.preview, here: options.here });
+    else show(tab);
   };
-  const openFolder = (folderId: string, options: { preview?: boolean } = {}) => {
+  const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean } = {}) => {
     const area = host.contributions().views.editor.at(-1);
-    if (area?.open) area.open({ kind: "folder", id: folderId }, { preview: options.preview ?? true });
-    else show({ kind: "folder", id: folderId });
+    if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true, here: true });
+    openTab({ kind: "note", id: noteId }, { preview: options.preview ?? false, here: true, focus: options.focus });
   };
+  const openFolder = (folderId: string, options: { preview?: boolean } = {}) => openTab({ kind: "folder", id: folderId }, { preview: options.preview ?? true, here: true });
 
   const openBeside = (tab: Opened, side: "right" | "down") => host.contributions().views.editor.at(-1)?.split?.(tab, side);
 
@@ -830,13 +830,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     const { place, cursor } = next.stops[next.at]!;
     if (place.kind === "note") {
       if (cursor !== null) putCursor(place.id, cursor);
-      if (!samePlace(place, inFront)) openNote(place.id, { preview: true, focus: true });
-    } else if (place.kind === "folder") openFolder(place.id, { preview: true });
-    else {
-      const area = host.contributions().views.editor.at(-1);
-      if (area?.open) area.open(place, { preview: true });
-      else show(place);
-    }
+      if (!samePlace(place, inFront)) openTab(place, { preview: true, here: false, focus: true });
+    } else openTab(place, { preview: true, here: false });
   };
 
   const createNote = async (folderId?: string, { open = true }: { open?: boolean } = {}) => {

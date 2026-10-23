@@ -505,7 +505,8 @@ export interface Slots {
     /**
      * Asked to open a note, a folder's list or a page, in place of the app going to it. Call
      * `app.show` with what ends up in front. With `background` it is opened without being put in front.
-     * With `here`, a note open in another pane opens in the one in front too, and isn't gone to there.
+     * With `here`, as from `app.openNote`, a note open in another pane opens in the one in front too,
+     * and isn't gone to there, as going to an address, Back among them, does.
      */
     open?: (tab: Opened, options: { preview: boolean; background?: boolean; here?: boolean }) => void;
     /**
@@ -1149,15 +1150,14 @@ export interface App {
   /** Where a note lives, such as `/note/plan-3k2j5h8d9f0a`. */
   notePath(noteId: string): string;
   /**
-   * Opens a note. There is one preview in the window at most: a preview takes the place of the one there, a folder's list among them, wherever in the
-   * editor area that is. `focus` puts the cursor in its
-   * editor. `background` opens it in a tab of its own, which is kept, without leaving what is in
-   * front. Where the editor area has no tabs the note is opened as it otherwise would be. A note
-   * already open in another pane is gone to there, and a preview opens where the window's preview
-   * is, unless `here`: picked by the member in the pane in front, from a breadcrumb's list, a link or a search, it opens in that pane. A folder's list leaves it out, so a list beside a note shows each note it opens in the pane that has it.
+   * Opens a note in the pane in front, even where another pane has it too. There is one preview in
+   * the window at most: a preview takes the place of the one there, a folder's list among them, and
+   * one in another pane goes. `focus` puts the cursor in its editor. `background` opens it in a tab
+   * of its own, which is kept, without leaving what is in front. Where the editor area has no tabs
+   * the note is opened as it otherwise would be.
    */
-  openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean; here?: boolean }): void;
-  /** Opens a folder's list of notes: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
+  openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean }): void;
+  /** Opens a folder's list of notes in the pane in front, unless another pane keeps it: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
   openFolder(folderId: string, options?: { preview?: boolean }): void;
   /**
    * Opens a note, a folder's list or a page in a split: a part of the editor area of its own, right

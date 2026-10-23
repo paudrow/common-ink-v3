@@ -434,3 +434,52 @@ test("the keyboard shortcuts list the sidebar's keys under a heading of their ow
   await expect(vim.getByRole("row", { name: "Vim: go back to the region you were in" }).locator("kbd")).toHaveText([ctrlW("P")]);
   await expect(vim.getByRole("row", { name: "Vim: go to the next region, round to the first" }).locator("kbd")).toHaveText([ctrlW("W")]);
 });
+
+test.describe("opening goes to the pane you're in", () => {
+  const pane = (page: Page, n: number) => page.getByRole("region", { name: `Editor group ${n}` });
+  async function split(page: Page, vim: boolean) {
+    const { work } = await setUp(page, vim);
+    const note = await perform(page, { type: "note.create", text: "# Delta\n\nwords" });
+    await page.goto(`/note/${note.id}`);
+    await expect(page.locator("html[data-vim-keys]")).toHaveCount(vim ? 1 : 0);
+    await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("words");
+    await page.keyboard.press("ControlOrMeta+Shift+P");
+    await page.getByRole("combobox", { name: "Commands" }).fill("Split editor right");
+    await page.keyboard.press("Enter");
+    await expect(pane(page, 2).getByRole("textbox", { name: "Note text" })).toContainText("words");
+    return { work };
+  }
+
+  test("without vim mode, the sidebar opens into the pane last clicked, and the keyboard goes to its list there", async ({ page }) => {
+    const { work } = await split(page, false);
+    await pane(page, 1).getByRole("textbox", { name: "Note text" }).click();
+    await folder(page, "Work").focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`/folder/.*${work.id}`));
+    await expect(pane(page, 1).locator(".cards > li")).toHaveCount(3);
+    await expect(pane(page, 2).locator(".cards")).toHaveCount(0);
+    await expectAt(pane(page, 1).locator(".cards > li").nth(0), "Work's first note, in the first pane");
+
+    await pane(page, 2).getByRole("textbox", { name: "Note text" }).click();
+    await tag(page, "idea").focus();
+    await page.keyboard.press("Enter");
+    await expect(pane(page, 2).locator(".cards > li")).toHaveCount(2);
+    await expectAt(pane(page, 2).locator(".cards > li").nth(0), "the tag's first note, in the second pane");
+    // Work's list, the italic tab, was all the first pane had, so it is kept there.
+    await expect(pane(page, 1).locator(".cards > li")).toHaveCount(3);
+  });
+
+  test("in vim mode, Ctrl-w into a pane turns to it, so the sidebar opens there", async ({ page }) => {
+    await split(page, true);
+    // The split is in front. Ctrl-w h goes to the first pane, and Ctrl-w h again to the sidebar.
+    await expect(pane(page, 2).getByRole("textbox", { name: "Note text" })).toBeFocused();
+    await keys(page, "Control+w", "h");
+    await expect(pane(page, 1).getByRole("textbox", { name: "Note text" })).toBeFocused();
+    await keys(page, "Control+w", "h");
+    await focusIn(sidebar(page));
+    await folder(page, "Work").focus();
+    await page.keyboard.press("Enter");
+    await expect(pane(page, 1).locator(".cards > li")).toHaveCount(3);
+    await expectMarked(pane(page, 1).locator(".cards > li").nth(0), "Work's first note, in the first pane");
+  });
+});

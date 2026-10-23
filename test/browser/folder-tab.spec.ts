@@ -167,18 +167,18 @@ test("a folder's tab splits and moves between groups like a note's", async ({ pa
   await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
   expect(await group(1).boundingBox()).toEqual(listBox);
 
-  // The list stays beside the note: a title clicked in it shows its note in the group that already has it.
+  // A title clicked in the list opens its note in the list's group, though the other group has it open.
   await group(1).getByRole("link", { name: "Plan" }).click();
-  await expect(tabs(page, 0)).toHaveText(["Projects"]);
-  await expect(editor(page)).toBeFocused();
+  await expect(tabs(page, 0)).toHaveText(["Projects", "Plan"]);
+  await expect(group(1).getByRole("textbox", { name: "Note text" })).toBeFocused();
 
   await page.reload();
-  await expect(tabs(page, 0)).toHaveText(["Projects"]);
+  await expect(tabs(page, 0)).toHaveText(["Projects", "Plan"]);
   await expect(tabs(page, 1)).toHaveText(["Plan"]);
 
-  await page.getByRole("tablist", { name: "Open notes" }).nth(0).getByRole("tab").dragTo(page.getByRole("tablist", { name: "Open notes" }).nth(1));
-  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(1);
-  await expect(tabs(page)).toHaveText(["Plan", "Projects"]);
+  await tab(page, "Projects").dragTo(page.getByRole("tablist", { name: "Open notes" }).nth(1));
+  await expect(tabs(page, 0)).toHaveText(["Plan"]);
+  await expect(tabs(page, 1)).toHaveText(["Plan", "Projects"]);
 });
 
 test("a card draws its note to be read, which nothing in it changes, and Edit opens the note with the cursor in it", async ({ page }) => {

@@ -53,7 +53,7 @@ export const links: Plugin = {
       const folderId = linkedFolder(target);
       // A page that only reads a note, as a share link's, has no folders to open.
       if (folderId !== null) return void (typeof host.app().openFolder === "function" && host.app().openFolder(folderId));
-      host.app().openNote(target, how?.background ? { background: true, here: true } : { preview: true, focus: true, here: true });
+      host.app().openNote(target, how?.background ? { background: true } : { preview: true, focus: true });
     };
 
     /** A listing, so archived notes are left out of it. A link already written to one still opens it. */

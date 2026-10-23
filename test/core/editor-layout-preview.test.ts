@@ -61,13 +61,15 @@ describe("the window's preview tab", () => {
       for (let step = 0; step < 250; step++) {
         const action = anyAction(layout, pick);
         const was = previewsIn(layout)[0];
+        // A preview that is all its pane has is kept there when the next preview opens in another pane, so no pane closes.
+        const alone = !!was && action.type === "open" && layout.groups.find((g) => g.id === was.groupId)!.tabs.length === 1;
         const groupsBefore = layout.groups.map((g) => g.id);
         layout = editorReducer(layout, action);
         if (action.type === "open" && layout.groups.map((g) => g.id).join() !== groupsBefore.join()) throw new Error(`seed ${seed}, step ${step}: a group came or went by ${JSON.stringify(action)}`);
         const previews = previewsIn(layout);
         // The preview is still one, or has gone: it is a kept tab only by the member's saying so.
         const now = was && nowOf(layout, was);
-        if (now && !now.preview && !keeps(action)) throw new Error(`seed ${seed}, step ${step}: ${keyOf(was!.tab)} was kept by ${JSON.stringify(action)}`);
+        if (now && !now.preview && !keeps(action) && !alone) throw new Error(`seed ${seed}, step ${step}: ${keyOf(was!.tab)} was kept by ${JSON.stringify(action)}`);
         if (now && !now.preview) converted++;
         if (previews.length > 1) throw new Error(`seed ${seed}, step ${step}: ${previews.length} previews after ${JSON.stringify(action)}`);
         most = Math.max(most, previews.length);
@@ -83,7 +85,7 @@ describe("the window's preview tab", () => {
     expect(converted).toBeGreaterThan(50);
   });
 
-  it("is where the next thing opens, in whichever group it is, so a group that holds nothing else is not closed by an open in another", () => {
+  it("comes to the group in front when the next thing is previewed there, and one that is all its group has is kept there, so the group stays", () => {
     const page = { kind: "page" as const, id: "todos", path: "/todos" };
     const layout: EditorLayout = {
       groups: [
@@ -93,8 +95,8 @@ describe("the window's preview tab", () => {
       focusedGroupId: "1",
     };
     expect(editorReducer(layout, { type: "open", tab: page, preview: true })).toEqual({
-      groups: [layout.groups[0], { id: "2", tabs: [{ ...page, preview: true }], active: page }],
-      focusedGroupId: "2",
+      groups: [{ id: "1", tabs: [{ kind: "note", id: "a", preview: false }, { ...page, preview: true }], active: page }, { ...layout.groups[1], tabs: [{ kind: "folder", id: "all", preview: false }] }],
+      focusedGroupId: "1",
     });
     // With no preview anywhere, it opens in the group in front.
     const kept = editorReducer(layout, { type: "pin", groupId: "2", tab: { kind: "folder", id: "all" } });
