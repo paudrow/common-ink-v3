@@ -22,7 +22,8 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { isNoteId, linksIn, retargeted } from "../src/core/links.ts";
+import { isNoteId, linkedFolder, linksIn, retargeted } from "../src/core/links.ts";
+import { linkedDay } from "../src/core/dateLinks.ts";
 import { allPages } from "../src/core/allPages.ts";
 import type { CalendarEvent, Contact, MailThread, Reference, Source, Upload } from "../src/core/protocol.ts";
 import { namedReferences } from "../src/core/references.ts";
@@ -60,7 +61,8 @@ type Summary = { id: string; title: string; slug: string; revision: number };
 const notes = await allPages((after) => op<{ notes: Summary[]; next: string | null }>({ type: "note.list", limit: 1000, after }), (page) => page.notes);
 
 const idOf = new Map<string, string>();
-for (const title of new Set(linksIn(text).map((link) => link.target).filter((target) => !isNoteId(target)))) {
+// A link to a day or a folder is that day's or folder's, and names no note.
+for (const title of new Set(linksIn(text).map((link) => link.target).filter((target) => !isNoteId(target) && linkedDay(target) === null && linkedFolder(target) === null))) {
   const titled = notes.filter((n) => n.title.toLowerCase() === title.toLowerCase());
   if (titled.length > 1) throw new Error(`${titled.length} notes are titled ${JSON.stringify(title)}, so [[${title}]] could mean any of them`);
   // A link to this note itself has nothing to point at until the note is there, and making a second note of its title would leave two.

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { today, type PluginHost } from "../../plugin-api.ts";
 import { hoverCards, type HoverCards } from "../lib/hoverCard.tsx";
-import { MOD } from "../lib/opening.ts";
 import { changeDate, type DrawnDates, type OpenDay } from "./drawing.ts";
 import { picking } from "./picking.tsx";
 import { fullWords, howFar } from "./when.ts";
@@ -37,8 +36,6 @@ function DateCard({ host, anchor, drawn, open, onClose }: { host: PluginHost; an
       <p className="hover-card-date">
         {fullWords(date)} · {far.charAt(0).toLocaleLowerCase() + far.slice(1)}
       </p>
-      {/* gd is vim's, and named only where vim is on. */}
-      {open && <p className="hover-card-none">{`${MOD}-click${host.commands.list().some((c) => c.id === "vim.follow") ? " or gd" : ""} opens the daily note`}</p>}
       {(!source.readOnly || open) && (
         <div className="hover-card-actions">
           {!source.readOnly && (

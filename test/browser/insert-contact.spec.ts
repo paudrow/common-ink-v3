@@ -69,7 +69,7 @@ test("creating a contact comes after everyone and everything @ finds, so Enter t
   await expect(options(page).first()).toHaveText(/^Friday/);
   await expect(options(page).filter({ hasText: "Create" })).toHaveText(["Create contact “Fri”New contact in Sample contacts", "Create note “Fri”New note in Unsorted", "Create folder “Fri”New folder at the top", "Create tag #FriNew tag"]);
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toMatch(/^# Plan\n\nMet \d{4}-\d{2}-\d{2}$/);
+  await expect.poll(() => text(page, note.id)).toMatch(/^# Plan\n\nMet \[\[\d{4}-\d{2}-\d{2}\]\]$/);
   expect(await contactNames(page, "fri")).toEqual([]);
 });
 

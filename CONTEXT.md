@@ -85,7 +85,7 @@ The day a todo is due, written `due:2026-10-14` on its line. It is a calendar da
 _Avoid_: Deadline
 
 **Date**:
-A day written in a note's text on its own, `2026-10-21`, or a day and a time, `2026-10-21 15:00`. It is a calendar day and a clock's time where the member is, with no time zone, the same words wherever it is read. `@` writes one from what is typed (`@today`, `@next friday`, `@tomorrow 3pm`) or from a picked day. The editor draws it as it reads, Wed, Oct 21, and a click on it opens that day's daily note. A date that is part of something longer, such as a due date's `due:2026-10-21`, and a date in a heading are left as written.
+A link to a day in a note's text, `[[2026-10-21]]`, or to a day and a time, `[[2026-10-21 15:00]]`. It is a calendar day and a clock's time where the member is, with no time zone, the same words wherever it is read, and it links that day's daily note, which lists it among its backlinks. `@` writes one from what is typed (`@today`, `@next friday`, `@tomorrow 3pm`) or from a picked day. The editor draws it as it reads, Wed, Oct 21; a click on it opens a picker that changes it, and ⌘-click or vim's gd opens that day's daily note. A date written bare, `2026-10-21`, is words, as are a due date's `due:2026-10-21` and a daily note's own title. Notes written when dates were bare have them written as links once, the first time someone who may change the note opens it.
 _Avoid_: Date chip (the chip is how a date is drawn), timestamp
 
 **Repeat**:

@@ -12,6 +12,7 @@ import { dayIn, dayStartIn, linesAsOf, rebased, redoTarget, revertOfAuthor, reve
 import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
 import { newId } from "./ids.ts";
 import { isNoteId, linkedFolder, linkedIds, linksIn, retargeted } from "./links.ts";
+import { datesAsLinks, linkedDay, linkedDayTargets } from "./dateLinks.ts";
 import { summarize } from "./markdown.ts";
 import { tagsCovering, todoTagIndex, type InheritedTag } from "./tagScope.ts";
 import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, mentionsOn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
@@ -523,6 +524,9 @@ async function linksOf(ctx: Context, text: string, covering: Covering): Promise<
 
 const quoted = (title: string) => JSON.stringify(title);
 
+/** The label of the change that wrote a note's bare dates as links. */
+export const DATES_LINKED = "Dates written as links";
+
 /**
  * The text with each link the write introduces stored by its note's id. A write introduces a link
  * when no link in `base`, the text it was based on, has the same target as written. So a link the
@@ -530,14 +534,15 @@ const quoted = (title: string) => JSON.stringify(title);
  * and a writer is only ever refused for a link they wrote themselves. A new target is looked up as
  * an id and as a title: a note with that id is the one meant, and otherwise the one note so titled.
  * A note in Trash is never the one meant. An archived note is, by its id, and by its title when no
- * live note has that title. A link to a folder is a folder's, and is left as it is.
+ * live note has that title. A link to a folder is a folder's, and one to a day is that day's, and
+ * each is left as it is: a daily note is titled its date, and a date link isn't to it by its title.
  * A target that is neither is left as written and named in `unresolved`, or refused when `how` is
  * `resolve-strict`.
  */
 async function linkedById(ctx: Context, text: string, base: string, how: LinkTitles): Promise<{ text: string; unresolved: UnresolvedLink[] }> {
   if (how === "keep") return { text, unresolved: [] };
   const had = new Set(linksIn(base).map((link) => link.target));
-  const introduced = [...new Set(linksIn(text).map((link) => link.target))].filter((target) => !had.has(target) && linkedFolder(target) === null);
+  const introduced = [...new Set(linksIn(text).map((link) => link.target))].filter((target) => !had.has(target) && linkedFolder(target) === null && linkedDay(target) === null);
   if (!introduced.length) return { text, unresolved: [] };
   // A title is looked up as it is made now, for a note last written under an older rule too.
   await mend(ctx);
@@ -553,7 +558,7 @@ async function linkedById(ctx: Context, text: string, base: string, how: LinkTit
   const byTitle = Map.groupBy(found, (row) => row.title.toLowerCase());
   const unresolved = new Map<string, UnresolvedLink>();
   const stored = retargeted(text, (target) => {
-    if (had.has(target) || ids.has(target) || linkedFolder(target) !== null) return undefined;
+    if (had.has(target) || ids.has(target) || linkedFolder(target) !== null || linkedDay(target) !== null) return undefined;
     const titled = byTitle.get(target.toLowerCase()) ?? [];
     const live = titled.filter((n) => n.state === "live");
     const notes = live.length ? live : titled;
@@ -689,7 +694,8 @@ const linked = <T extends object>(result: T, unresolved: UnresolvedLink[]): Link
  * `atRevision`, they do nothing unless the note is still at that revision.
  */
 function linking(ctx: Context, noteId: string, text: string, { was, atRevision }: { was?: string; atRevision?: number } = {}): D1PreparedStatement[] {
-  const ids = (of: string) => linkedIds(of).filter((id) => id !== noteId);
+  // A link to a day is recorded by its day, which every daily note for that day is linked by.
+  const ids = (of: string) => [...linkedIds(of).filter((id) => id !== noteId), ...linkedDayTargets(of)];
   const targets = JSON.stringify(ids(text));
   if (was !== undefined && JSON.stringify(ids(was)) === targets) return [];
   const current = "(?3 IS NULL OR EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND revision = ?3))";
@@ -1094,8 +1100,8 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
       ...(folder.id ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, NULL, ?, ?)").bind(folderId, ctx.workspaceId, folder.name, folderKey(folder.name))]),
       ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, private_owner, indexed)
-           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, private_owner, indexed, dates_linked)
+           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.private_owner, row.indexed),
       insertChange(ctx, id, 1, 0, "", changesBetween("", text)),
@@ -1952,8 +1958,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, indexed)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, indexed, dates_linked)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed);
       await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text), { writeId: op.writeId }), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
@@ -1979,7 +1985,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       const row = await loadNote(ctx, op.id, "view", "opens");
       // An archived note keeps its links, so it is still what links here. A note in Trash is in no listing but Trash.
-      return (await seenAmong(ctx, "kept", "SELECT source_id FROM links WHERE target_id = ?2", row.id)).map((from) => toSummary(ctx, from));
+      // A daily note is linked by its own id, and by the date links to its day from any note but itself.
+      const linking = "SELECT source_id FROM links WHERE (target_id = ?2 OR target_id IN (SELECT 'day:' || day FROM daily_notes WHERE note_id = ?2)) AND source_id <> ?2";
+      return (await seenAmong(ctx, "kept", linking, row.id)).map((from) => toSummary(ctx, from));
     },
   },
 
@@ -2281,6 +2289,36 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             .all<{ id: string; name: string }>()
         : { results: [] };
       return { revision: row.revision, text: row.text, lines, changes, owners: Object.fromEntries(members.map((p) => [p.id, p.name])) };
+    },
+  },
+
+  "note.linkDates": {
+    needs: "edit",
+    // The app's, as a member opens a note: an agent writes date links itself, and a guest's opening leaves the note for a member's.
+    by: "member",
+    members: true,
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "edit", "refused");
+      const unchanged = { id: row.id, revision: row.revision, changed: false };
+      // Claimed before it is converted, so two openings at once convert it once: both would add the same brackets, and a merge keeps both.
+      const claimed = await ctx.db.prepare("UPDATE notes SET dates_linked = 1 WHERE id = ? AND dates_linked = 0").bind(row.id).run();
+      if (claimed.meta.changes !== 1) return unchanged;
+      const text = datesAsLinks(row.text);
+      if (text === row.text) return unchanged;
+      let written: Written;
+      try {
+        written = await commitNote(ctx, { id: row.id, baseRevision: row.revision, text, linkTitles: "keep", mentionNames: "keep" });
+      } catch (err) {
+        // Left for the next opening to convert.
+        await ctx.db.prepare("UPDATE notes SET dates_linked = 0 WHERE id = ?").bind(row.id).run();
+        if (err instanceof OpError && err.code === "conflict") return unchanged;
+        throw err;
+      }
+      await ctx.db
+        .prepare(`INSERT INTO labels (note_id, revision, name, author_kind, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`)
+        .bind(row.id, written.revision, DATES_LINKED, ctx.author.kind, authorId(ctx), ctx.now)
+        .run();
+      return { id: row.id, revision: written.revision, changed: true };
     },
   },
 

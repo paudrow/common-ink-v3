@@ -69,6 +69,7 @@ export { reline } from "../core/blame.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linkedFolder, linksIn, linksOn, writtenFolderLink, writtenLink, type WrittenLink } from "../core/links.ts";
+export { dayLinksOn, linkedDay, writtenDayLink, type DayLink, type LinkedDay } from "../core/dateLinks.ts";
 
 /** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
 export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, readableName, writtenMention, type WrittenMention } from "../core/mentions.ts";

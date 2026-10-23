@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { EditorState } from "@codemirror/state";
 import { dateAt } from "../../src/web/plugins/dates/drawing.ts";
-import { asksToPick, chipWords, fullWords, howFar, orderIn, saidFor, soon, written, writtenOn } from "../../src/web/plugins/dates/when.ts";
+import { asksToPick, chipWords, fullWords, howFar, orderIn, saidFor, soon, written, type When } from "../../src/web/plugins/dates/when.ts";
 
 /** Tuesday, October 20, 2026, at 9:41 in the morning where the member is. */
 const NOW = { day: "2026-10-20", time: "09:41" };
-const said = (typed: string, order: "month-day" | "day-month" = "month-day") => saidFor(typed, NOW, order).map((s) => [s.name, written(s)]);
+/** A day and its time as words, which the link `written` writes holds. */
+const words = ({ day, time }: When) => (time === null ? day : `${day} ${time}`);
+const said = (typed: string, order: "month-day" | "day-month" = "month-day") => saidFor(typed, NOW, order).map((s) => [s.name, words(s)]);
 
 describe("the days @ offers for what was typed", () => {
   it("for nothing typed, is today and tomorrow, with no time", () => {
-    expect(soon(NOW).map((s) => [s.name, written(s)])).toEqual([
+    expect(soon(NOW).map((s) => [s.name, words(s)])).toEqual([
       ["Today", "2026-10-20"],
       ["Tomorrow", "2026-10-21"],
     ]);
@@ -26,8 +28,8 @@ describe("the days @ offers for what was typed", () => {
     expect(said("tuesday")).toEqual([["Tuesday", "2026-10-27"]]);
     expect(said("next fri")).toEqual([["Next Friday", "2026-10-30"]]);
     expect(said("next monday")).toEqual([["Next Monday", "2026-10-26"]]);
-    expect(saidFor("next fri", { day: "2026-10-24", time: "09:00" }, "month-day").map(written)).toEqual(["2026-10-30"]);
-    expect(saidFor("next mon", { day: "2026-10-25", time: "09:00" }, "month-day").map(written)).toEqual(["2026-10-26"]);
+    expect(saidFor("next fri", { day: "2026-10-24", time: "09:00" }, "month-day").map(words)).toEqual(["2026-10-30"]);
+    expect(saidFor("next mon", { day: "2026-10-25", time: "09:00" }, "month-day").map(words)).toEqual(["2026-10-26"]);
   });
 
   it("offers every day a letter or two starts, soonest first, and the days after next only once next is typed whole", () => {
@@ -101,18 +103,8 @@ describe("the days @ offers for what was typed", () => {
 });
 
 describe("a day written in a note", () => {
-  it("is a date, or a date and a time, standing on its own", () => {
-    expect(writtenOn("Call Sam 2026-10-21 and again (2026-11-02 15:30).", 100)).toEqual([
-      { day: "2026-10-21", time: null, from: 109, to: 119 },
-      { day: "2026-11-02", time: "15:30", from: 131, to: 147 },
-    ]);
-    expect(writtenOn("2026-10-21: the plan", 0)).toEqual([{ day: "2026-10-21", time: null, from: 0, to: 10 }]);
-  });
-
-  it("is not a date inside something longer, nor one that isn't a day, and a time that isn't one is left off", () => {
-    expect(writtenOn("- [ ] Pay due:2026-10-21 every:1m-until-2026-12-31 done:2026-10-10x2", 0)).toEqual([]);
-    expect(writtenOn("[[abc123|2026-10-21]] https://x.test/2026-10-21 2026-10-21x 2026-02-30", 0)).toEqual([]);
-    expect(writtenOn("At 2026-10-21 24:00 sharp", 0)).toEqual([{ day: "2026-10-21", time: null, from: 3, to: 13 }]);
+  it("is a link to the day, with its time where there is one", () => {
+    expect([written({ day: "2026-10-21", time: null }), written({ day: "2026-10-21", time: "15:30" })]).toEqual(["[[2026-10-21]]", "[[2026-10-21 15:30]]"]);
   });
 });
 
@@ -142,16 +134,16 @@ describe("how a day reads", () => {
   });
 });
 
-describe("the date at the cursor, which Alt+Enter changes", () => {
+describe("the date at the cursor, which Alt+Shift+D changes and gd follows", () => {
   const at = (doc: string, pos: number) => dateAt(EditorState.create({ doc }), pos);
 
-  it("is the date the cursor is in or at the edge of, with its time", () => {
-    expect(at("Due 2026-10-21 15:00 then", 4)).toMatchObject({ day: "2026-10-21", time: "15:00", from: 4, to: 20 });
-    expect(at("Due 2026-10-21 then", 14)).toMatchObject({ day: "2026-10-21", time: null });
-    expect(at("Due 2026-10-21 then", 2)).toBeNull();
+  it("is the date link the cursor is in or at the edge of, with its time and its own words", () => {
+    expect(at("Due [[2026-10-21 15:00]] then", 4)).toMatchObject({ day: "2026-10-21", time: "15:00", from: 4, to: 24, display: null });
+    expect(at("Due [[2026-10-21|the day]] then", 26)).toMatchObject({ day: "2026-10-21", time: null, display: "the day" });
+    expect(at("Due [[2026-10-21]] then", 2)).toBeNull();
   });
 
-  it("is none in a heading, an embed's braces or a link, where the date is left as written", () => {
-    expect([at("# 2026-10-21", 5), at("::event{abcdefabcdef 2026-10-21}", 25), at("[on 2026-10-21](x)", 8)]).toEqual([null, null, null]);
+  it("is none for a date written bare, or a link to anything else", () => {
+    expect([at("Due 2026-10-21 then", 6), at("See [[abcdefabcdef]]", 6), at("`[[2026-10-21]]`", 4)]).toEqual([null, null, null]);
   });
 });

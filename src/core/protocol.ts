@@ -434,6 +434,14 @@ export const Op = z.discriminatedUnion("type", [
   }),
   /** Names a revision, or takes its name away when `name` is null. */
   z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
+  /**
+   * Writes the dates a note wrote bare before dates were links, as links to their days, once: the
+   * dates the date chip drew then, `2026-10-21` in prose, and not one in a heading, code, a link, an
+   * address, an embed or `due:`. It is a change of the asker's, labeled "Dates written as links", so it
+   * can be put back. The app sends it when someone who may change a note opens it. A note it has run
+   * on, or made since, is left as it is.
+   */
+  z.object({ type: z.literal("note.linkDates"), id: Id }),
   /** Puts the note back to how it was at `revision`, as a new change. */
   z.object({ type: z.literal("note.revert"), id: Id, revision: Revision, resolve: Resolve.optional() }),
   /**
@@ -1752,6 +1760,8 @@ export interface Results {
   /** `indexing` is as for tag.list. */
   search: { results: SearchResult[]; next: string | null; indexing: boolean };
   "note.label": { id: string; revision: number; label: string | null };
+  /** `changed` when its dates were written as links, at `revision`. */
+  "note.linkDates": { id: string; revision: number; changed: boolean };
   "note.revert": Written;
   "note.revertChanges": Written;
   "note.previewRevert": RevertPreview;

@@ -1,5 +1,5 @@
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import { following, today, type CompletionItem, type InsertAt, type Plugin } from "../../plugin-api.ts";
+import { following, today, writtenDayLink, type CompletionItem, type InsertAt, type Plugin } from "../../plugin-api.ts";
 import { timeIn } from "../calendar/dates.ts";
 import { browserZone, toward } from "../daily/days.ts";
 import { openDay } from "../daily/opening.ts";
@@ -124,9 +124,32 @@ export const dates: Plugin = {
         ViewPlugin.define((view) => {
           const key = editorKey(editor);
           editors.set(key, view);
+          if (!editor.reading) linkDates(editor.noteId);
           return { destroy: () => void (editors.get(key) === view && editors.delete(key)) };
         }),
       ],
+    });
+
+    /**
+     * A note written before dates were links has its bare dates written as links the first time it
+     * is opened by a member who may change it, by the server, as a change of the member's labeled for
+     * what it did: asked once a page.
+     */
+    const asked = new Set<string>();
+    /** Opened before the notes were listed, so before it was known whether the member may change them. */
+    const waiting = new Set<string>();
+    const linkDates = (noteId: string) => {
+      if (asked.has(noteId)) return;
+      const notes = host.app().notes;
+      if (!notes) return void waiting.add(noteId);
+      waiting.delete(noteId);
+      asked.add(noteId);
+      // Only a member who may change the note converts it: a refusal would ask the app who the member is again.
+      if (host.workspace.role === "guest" || notes.find((n) => n.id === noteId)?.access !== "edit") return;
+      host.perform({ type: "note.linkDates", id: noteId }).catch(() => {});
+    };
+    host.onItems(() => {
+      for (const noteId of [...waiting]) linkDates(noteId);
     });
 
     // The cursor in a date shows it as written, so the picker a click on it opens is asked for from there.
@@ -156,8 +179,8 @@ export const dates: Plugin = {
             // Written where the date still is, as it was: typing elsewhere meanwhile moves it, and typing over it leaves it.
             if (!view.dom.isConnected) return;
             const now = dateAt(view.state, view.state.selection.main.head);
-            const at = now && now.day === date.day && now.time === date.time ? now : null;
-            if (at) view.dispatch({ changes: { from: at.from, to: at.to, insert: written(when) }, userEvent: "input.pick" });
+            const at = now && now.day === date.day && now.time === date.time && now.display === date.display ? now : null;
+            if (at) view.dispatch({ changes: { from: at.from, to: at.to, insert: writtenDayLink(when, at.display) }, userEvent: "input.pick" });
           },
           (hadFocus) => {
             anchor.remove();

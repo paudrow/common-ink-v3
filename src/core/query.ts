@@ -344,7 +344,7 @@ export const FILTERS = {
         { word: "todo", aliases: ["task"], scopes: NOTES, means: "Has a todo, in any state", sql: () => "EXISTS (SELECT 1 FROM todos d WHERE d.note_id = n.id)" },
         { word: "open-todo", aliases: ["open-task"], scopes: NOTES, means: "Has an open todo", sql: () => "n.open_todos > 0" },
         { word: "link", scopes: BOTH, means: "Links to another note", sql: () => "EXISTS (SELECT 1 FROM links l WHERE l.source_id = n.id)" },
-        { word: "backlink", scopes: BOTH, means: "Linked to from a note you can see", sql: (c) => `EXISTS (SELECT 1 FROM links l JOIN notes b ON b.id = l.source_id WHERE l.target_id = n.id AND ${c.seen("b")})` },
+        { word: "backlink", scopes: BOTH, means: "Linked to from a note you can see", sql: (c) => `EXISTS (SELECT 1 FROM links l JOIN notes b ON b.id = l.source_id WHERE (l.target_id = n.id OR l.target_id IN (SELECT 'day:' || d.day FROM daily_notes d WHERE d.note_id = n.id)) AND b.id <> n.id AND ${c.seen("b")})` },
         { word: "tag", scopes: BOTH, means: "Has any tag", sql: (c) => `EXISTS (SELECT 1 FROM ${TAGS_OF(c)})` },
         { word: "attachment", scopes: NOTES, means: "Shows an upload: a picture, a video, sound or a file", sql: () => "EXISTS (SELECT 1 FROM upload_refs r WHERE r.note_id = n.id)" },
         { word: "due", scopes: TODOS, means: "Has a due date", sql: () => "t.due IS NOT NULL" },
