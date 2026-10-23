@@ -78,6 +78,7 @@ export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, tit
         if (record) {
           const open = () => openPopover(made, title, (close) => details(record, { noteId, close }));
           made.role = "button";
+          made.dataset.follow = "";
           made.tabIndex = 0;
           made.addEventListener("click", open);
           made.addEventListener("keydown", (event) => {

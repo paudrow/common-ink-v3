@@ -114,6 +114,8 @@ export { useOpenNote, type OpenNote } from "./openNotes.ts";
 export { noteJump } from "./openNotes.ts";
 /** A CodeMirror annotation on the change an editor takes from the member's own undo or redo through the note's history, which comes back a moment after the key. */
 export { historyStepped } from "./openNotes.ts";
+/** A CodeMirror facet of what vim's `gd` follows at the cursor: an editor extension gives one that does what a click on its kind of thing does, and answers whether the cursor was on one. */
+export { following } from "./following.ts";
 
 /**
  * Dragging to the editor area. `draggableAs(what)` is the props that make an element drag a note, a

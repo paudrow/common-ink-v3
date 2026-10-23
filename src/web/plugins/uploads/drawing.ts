@@ -151,6 +151,7 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
   /** A file as a chip among words: its name and its size, which opens it. */
   const chip = (id: string, info: NonNullable<ReferredTo>) => {
     const link = opener(el("a", "file-chip"), id, info);
+    link.dataset.follow = "";
     link.append(paperclip(), el("span", "file-chip-name", info.name), el("span", "file-chip-size", formatBytes(info.size)));
     return link;
   };

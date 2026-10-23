@@ -193,7 +193,7 @@ The other slots are not places for widgets. `column`, `section`, `editor`, and `
 
 ## Embeds
 
-An embed is drawn where a note writes its name. An inline embed is written `::name{config}` on one line. A block embed, one registered with `block: true`, is written on lines of its own:
+An embed is drawn where a note writes its name. An inline embed is written `::name{config}` on one line. An element an inline embed draws with a `data-follow` attribute is what vim's `gd` clicks with the cursor on the embed, as a file's link and a reference's chip are: give it to whatever a click opens. A block embed, one registered with `block: true`, is written on lines of its own:
 
 ```
 :::kanban{}
@@ -549,7 +549,7 @@ A link's page (`SharedPage.tsx`) starts `uploadDrawing`, the four embeds alone. 
 
 The links plugin (`plugins/links/`) is the pattern for anything a note stores by id and shows by name. The note says `[[id]]` or `[[id|display text]]` (`docs/adr/0001-links-stored-by-id.md`); `linksOn` and `linksIn` from the plugin API read them, the same functions the core records backlinks with. The editor keeps `linksIn` of the whole text in a state field and draws exactly those, so what is drawn as a link is what the server records as one: text in a fence or in inline code is not, and an indented line is, since a bullet nested three deep is indented as far as a code block. The chip's `key` is the target's title and state from `host.app().notes` and `host.app().trashed`, and `host.onNotes` dispatches `redraw` to the open editors when any of them changed. A link to an archived note reads and opens as any link, and says "Archived" when hovered. A link to a note in Trash reads as its title followed by "(in Trash)", in the line's own size so the line is no taller, and still opens the note. A target that is in neither list is drawn as "Unavailable note" and goes nowhere: that is the one wording for a note removed from Trash, one that never was, and one the member can't see, and the app never has that note's title to leak. `plugins/links/words.ts` holds the wording. The `[[` list is a listing, so it leaves archived notes out. The `[[` list is a completion with `spaces` and `anywhere`; text after a `|` is taken as the link's display text while the list goes on narrowing by what came before it.
 
-Following a link is the command `links.follow`, which opens the note the cursor is on a link to, through `app.openNote` as any note is opened, or opens a web address in a new tab with `noopener` when it starts `http://`, `https://`, or `mailto:`. Vim's `gd` runs that command, and so can a keybinding. ⌘-click does the same for a link to a note, drawn or as written.
+Following a link is the command `links.follow`, which opens the note the cursor is on a link to, through `app.openNote` as any note is opened, or opens a web address in a new tab with `noopener` when it starts `http://`, `https://`, or `mailto:`. Vim's `gd` runs that command, and so can a keybinding. On a mention, a reference or a file, which a click opens, `gd` does what the click does: an editor extension gives `following` from the plugin API a function that does it where the cursor is on its kind of thing and answers whether it was, as mentions do, and an inline embed marks what to click with `data-follow`. Only where none answers yes does `gd` run `links.follow`. ⌘-click does the same for a link to a note, drawn or as written.
 
 ### Mentions
 

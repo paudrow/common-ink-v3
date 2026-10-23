@@ -111,7 +111,7 @@ Anything you can open drags the same way: a tab, a note's card, a folder in the 
 
 ## Vim mode
 
-Vim mode is off until you turn it on, on the **Plugins** page or with `"vim.enabled": true` in your settings. It gives every note's editor vim's modes, motions, and operators, and `gd` follows the link under the cursor.
+Vim mode is off until you turn it on, on the **Plugins** page or with `"vim.enabled": true` in your settings. It gives every note's editor vim's modes, motions, and operators, and `gd` follows the link under the cursor, or opens the mention, reference or file under it as a click does.
 
 Outside a note's text, wherever you are not typing, vim's keys move through the app:
 

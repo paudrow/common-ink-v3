@@ -1,7 +1,7 @@
 import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { EditorView, RectangleMarker, ViewPlugin, drawSelection, keymap, layer } from "@codemirror/view";
 import { Vim, getCM, vim, type MotionFn } from "@replit/codemirror-vim";
-import { dismissing, historyStepped, noteJump } from "../../plugin-api.ts";
+import { dismissing, following, historyStepped, noteJump } from "../../plugin-api.ts";
 
 let run: (commandId: string) => boolean = () => false;
 
@@ -41,7 +41,11 @@ Vim.defineAction("typeTab", (cm) => cm.replaceSelection("\t"));
 Vim.mapCommand("<C-i>", "action", "typeTab", {}, { context: "insert" });
 
 // A link is the nearest thing a note has to a definition, so gd follows the one under the cursor: to its note, or to its page in a new tab.
-Vim.defineAction("followLink", () => void run("links.follow"));
+// On anything else a click opens, such as a mention or a reference, it does what the click does.
+Vim.defineAction("followLink", (cm) => {
+  const view = cm.cm6 as EditorView;
+  if (!view.state.facet(following).some((follow) => follow(view))) run("links.follow");
+});
 Vim.mapCommand("gd", "action", "followLink", {}, { context: "normal" });
 
 // A note's tabs are vim's tab pages. In a note g begins many of vim's own keys, so these two are vim's to map and not the window's.
