@@ -173,8 +173,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       with --trash-emptied the notes that leaves empty go to Trash
   revert-author KIND:ID [--note ID,ID] --preview
                                       what that would do to each note the author changed, with nothing written
-  undo ID                             take back your latest change to a note
-  redo ID                             revert your latest undo, so what it undid stands again
+  undo ID [--revision N]              take back your latest change to a note, or the change that made revision N
+  redo ID [--revision N]              revert your latest undo, or the undo that made revision N, so what it undid stands again
   sources                             your member's data sources: their calendar, contacts and email, and whether each is connected
   events --from TIME --to TIME [--timezone ZONE]
                                       your member's calendar events in a span of time
@@ -996,7 +996,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "undo":
       case "redo":
         tool = command;
-        args = { noteId: needId() };
+        args = { noteId: needId(), ...given({ revision: ["revision", integer] }) };
         break;
       default:
         throw new UsageError(`No such command: ${command}`);

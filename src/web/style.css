@@ -9477,6 +9477,38 @@ button.todo-tag[aria-pressed="true"] {
   background-color: var(--accent-soft);
 }
 
+/* Rows picked to act on together, in a list that lets its rows be picked. Drawn over a row's tint under the pointer, and under the
+   mark of the row the keys are on, which stays. */
+[data-selectable] [data-selected],
+[data-selectable] [data-selected]:hover,
+:is([data-vim-at], .todo-list > .todo-row:focus-visible)[data-selected] {
+  background-color: var(--selection);
+}
+
+.selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.selection-bar .button {
+  gap: 6px;
+}
+
+.selection-bar .button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.selection-count {
+  margin-right: 4px;
+  color: var(--ink);
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
 .app[data-bar] {
   box-sizing: border-box;

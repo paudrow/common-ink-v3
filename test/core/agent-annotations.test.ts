@@ -29,8 +29,8 @@ describe("what tools/list tells a client of each tool", () => {
     expect(listed("pin_note").annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false });
   });
 
-  // 120,000 until Email's two tools, which take about 1,200 at their tersest.
+  // 120,000 until Email's two tools, which take about 1,200 at their tersest, and 121,000 until undo and redo took a revision, about 100.
   it("stays small enough to send an agent at the start of every session", () => {
-    expect(JSON.stringify({ tools: toolList() }).length, "tools/list is read by every agent's model before its first call: describe a tool in fewer words, or move what is long behind a tool such as query_syntax").toBeLessThan(121_000);
+    expect(JSON.stringify({ tools: toolList() }).length, "tools/list is read by every agent's model before its first call: describe a tool in fewer words, or move what is long behind a tool such as query_syntax").toBeLessThan(121_100);
   });
 });

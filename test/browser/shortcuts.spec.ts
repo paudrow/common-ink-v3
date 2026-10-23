@@ -24,7 +24,7 @@ test("? outside a text field opens every command with keys over the page, under 
   await question(page);
   await expect(sheet(page)).toBeVisible();
   expect(await sheet(page).evaluate((el) => el.matches(":modal"))).toBe(true);
-  await expect(sheet(page).getByRole("heading", { level: 3 })).toHaveText(["Navigation", "Sidebar", "Notes", "Editor", "Folding", "Todos", "Todos, with the pointer"]);
+  await expect(sheet(page).getByRole("heading", { level: 3 })).toHaveText(["Navigation", "Sidebar", "Notes", "Editor", "Folding", "Lists", "Todos", "Todos, with the pointer"]);
   await expect(keysOf(page, "Navigation", "Show all commands")).toHaveText([/^(⇧⌘P|Ctrl\+Shift\+P)$/]);
   await expect(keysOf(page, "Navigation", "Keyboard shortcuts")).toHaveText(["?"]);
   await expect(keysOf(page, "Notes", "Archive or unarchive note")).toHaveText([/^(⇧⌘E|Ctrl\+Shift\+E)$/]);
@@ -108,7 +108,7 @@ test("in vim's normal mode ? is vim's search backwards; the palette opens the ke
 
   await runCommand(page, "Keyboard shortcuts");
   await expect(sheet(page)).toBeVisible();
-  await expect(sheet(page).getByRole("heading", { level: 3 })).toHaveText(["Navigation", "Sidebar", "Notes", "Editor", "Vim", "Folding", "Todos", "Todos, with the pointer"]);
+  await expect(sheet(page).getByRole("heading", { level: 3 })).toHaveText(["Navigation", "Sidebar", "Notes", "Editor", "Vim", "Folding", "Lists", "Todos", "Todos, with the pointer"]);
   await expect(keysOf(page, "Vim", "Vim: first row of a list")).toHaveText(["G G"]);
   // / and Shift with / are both the key for the search box, and read as one.
   await expect(keysOf(page, "Vim", "Vim: go to the search box")).toHaveText(["/"]);

@@ -823,6 +823,56 @@ describe("undo and redo", () => {
   });
 });
 
+describe("undo and redo of one named change", () => {
+  it("take back exactly that change and that undo, and the next undo and redo follow on", async () => {
+    const ada = await newMember();
+    const note = await perform(env.DB, ada, { type: "note.create", text: "one" });
+    await write(ada, note.id, "one two");
+    await write(ada, note.id, "one two three");
+
+    const undone = await perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 2 });
+    expect(undone).toMatchObject({ revision: 4, text: "one three" });
+    await write(ada, note.id, "one three four");
+    expect(await perform(env.DB, ada, { type: "note.redo", id: note.id, revision: 4 })).toMatchObject({ revision: 6, text: "one two three four" });
+    expect((await perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 2 })).text).toBe("one three four");
+    expect((await perform(env.DB, ada, { type: "note.redo", id: note.id })).text).toBe("one two three four");
+
+    expect((await history(ada, note.id)).slice(3).map((c) => c.reverts)).toEqual([{ how: "undo", revisions: [2] }, null, { how: "redo", revisions: [4] }, { how: "undo", revisions: [2] }, { how: "redo", revisions: [7] }]);
+  });
+
+  it("refuse a change that isn't the asker's, one already undone, an undo to undo, and anything but an undo to redo", async () => {
+    const ada = await newMember();
+    const grace = await addMember(ada, "editor");
+    const note = await perform(env.DB, ada, { type: "note.create", text: "one" });
+    await write(ada, note.id, "one two");
+    await write(grace, note.id, "one two three");
+    await perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 2 });
+    const refused = (message: string) => ({ code: "invalid", message });
+
+    await expect(perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 3 })).rejects.toMatchObject(refused("Revision 3 isn't yours: you can only undo your own changes"));
+    await expect(perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 2 })).rejects.toMatchObject(refused("Revision 2 was already undone"));
+    await expect(perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 4 })).rejects.toMatchObject(refused("Revision 4 is an undo: redo takes it back"));
+    await expect(perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 1 })).rejects.toMatchObject(refused("Revision 1 is the note's first save, which undo leaves as it is"));
+    await expect(perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 9 })).rejects.toMatchObject({ code: "not_found", message: "The note has no revision 9" });
+    await expect(perform(env.DB, ada, { type: "note.redo", id: note.id, revision: 2 })).rejects.toMatchObject(refused("Revision 2 isn't an undo, so there's nothing to redo"));
+    await expect(perform(env.DB, grace, { type: "note.redo", id: note.id, revision: 4 })).rejects.toMatchObject(refused("Revision 4 isn't yours: you can only redo your own changes"));
+    await perform(env.DB, ada, { type: "note.redo", id: note.id, revision: 4 });
+    await expect(perform(env.DB, ada, { type: "note.redo", id: note.id, revision: 4 })).rejects.toMatchObject(refused("Revision 4 was already redone"));
+    await perform(env.DB, grace, { type: "note.revertChanges", id: note.id, revisions: [2] });
+    await expect(perform(env.DB, ada, { type: "note.undo", id: note.id, revision: 2 })).rejects.toMatchObject(refused("Revision 2 was already reverted"));
+
+    expect(await read(ada, note.id)).toBe("one three");
+  });
+
+  it("are reached through the MCP tools", async () => {
+    const { claude, id } = await sharedNote();
+
+    expect((await tool(claude.token, "undo", { noteId: id, revision: 3 })).json()).toMatchObject({ revision: 5, text: "# Plan\n\nAda's step\n\nAda's last word" });
+    expect((await tool(claude.token, "redo", { noteId: id, revision: 5 })).json()).toMatchObject({ revision: 6, text: "# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word" });
+    expect(await tool(claude.token, "undo", { noteId: id, revision: 2 })).toMatchObject({ isError: true });
+  });
+});
+
 describe("reverting an author", () => {
   const NOTHING = { reverted: [], emptied: [], failed: [], next: null };
   const revertAuthor = (actor: Actor, author: { kind: "member" | "agent"; id: string }, noteIds?: string[]) => perform(env.DB, actor, { type: "history.revertAuthor", author, noteIds });

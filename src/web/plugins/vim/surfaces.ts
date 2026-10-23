@@ -1,4 +1,5 @@
 import { EDITOR, FOCUSABLE, LIST, ROW, arrive, beside, focusOn, goes, listOf, listsIn, ownKeys, preview, regions, restOf, rowsOf, shown, typing } from "../lib/rows.ts";
+import { canSelect, visualHere } from "../lib/selecting.ts";
 import { land, toward, type Move, type Side } from "./moving.ts";
 
 /**
@@ -57,6 +58,10 @@ export interface Surfaces {
     deletable(): boolean;
     /** As `row`, on a row that is put in a state by keys of its own, as a todo's is. */
     puttable(): boolean;
+    /** As `row`, in a list whose rows can be selected. */
+    selectable(): boolean;
+    /** Where undo is of what was done to lists' rows, and not of the open note (`onList`). */
+    undoable(): boolean;
     /** Not typing, with a search box in reach. */
     search(): boolean;
     /** Typing in a field that isn't a note's, with a list in reach. */
@@ -77,6 +82,11 @@ export interface Surfaces {
   toggle(): void;
   /** Presses what deletes the selected row, as a todo's Abandon does. */
   remove(): void;
+  /** Begins visual line selection on the selected row, or ends it. */
+  visual(): void;
+  /** Undoes or redoes what was last done to a list's rows. */
+  undo(): void;
+  redo(): void;
   search(): void;
   /** An arrow key for the field, which a field with a list under it has its own answer to. One with none sends focus into the list. */
   arrow(key: "ArrowDown" | "ArrowUp"): void;
@@ -92,7 +102,7 @@ export interface Surfaces {
   dispose(): void;
 }
 
-export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing(): boolean }): Surfaces {
+export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing(): boolean; undoable(): boolean; run(command: string): void }): Surfaces {
   /** Where focus last was in each region, and the row it was last on in each list. The sidebar is both. */
   const lastIn = new WeakMap<Element, HTMLElement>();
   const lastRow = new WeakMap<Element, HTMLElement>();
@@ -202,6 +212,8 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       },
       deletable: () => !!deleterOf(selected()),
       puttable: () => !!selected()?.matches("[data-row-puts]"),
+      selectable: () => !!selected() && canSelect(),
+      undoable: given.undoable,
       search: () => !drawn() && !typing(active()) && !!searchBox(),
       field: () => inField() && !!listNear(),
       // Over the window only a search box or a field inside a list, as Settings has: a palette's own field keeps Escape for closing.
@@ -259,6 +271,10 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       if (row) toggleOf(row, "[data-row-toggle], button[aria-expanded]", (t) => listOf(t) === list)?.click();
     }),
     remove: keyed(() => deleterOf(selected())?.click()),
+    visual: visualHere,
+    // The app's own undo, which is of lists' rows wherever these are taken.
+    undo: () => given.run("history.undo"),
+    redo: () => given.run("history.redo"),
     search: () => searchBox()?.focus(),
     arrow: keyed((key: "ArrowDown" | "ArrowUp") => {
       const left = active().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
