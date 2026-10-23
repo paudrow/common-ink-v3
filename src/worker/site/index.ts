@@ -1,4 +1,5 @@
 import { devSignIn, sessionOf } from "../auth.ts";
+import { SITE_PAGE, written } from "../headers.ts";
 import { landing } from "./landing.ts";
 import { renderPage, type DocsNav, type SitePage } from "./layout.ts";
 import { DOCS, PROSE } from "./pages.gen.ts";
@@ -31,10 +32,10 @@ const SIGN_IN = "/auth/google?next=%2F";
 const sitemap = (origin: string) =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${[...new Set([...SITE.values()].map(({ page }) => page.path))].map((path) => `  <url><loc>${origin}${path}</loc></url>\n`).join("")}</urlset>\n`;
 
-/** A dev server and a Preview sign anyone in as the dev user, so search engines are kept off their copy of the site. */
+/** A dev server and a Preview sign anyone in as the dev user, so search engines are kept off their copy of the site. Each page carries the site's policy, not the app's. */
 const answer = (req: Request, env: Env, url: URL, body: string, type: string) =>
   new Response(req.method === "HEAD" ? null : body, {
-    headers: { "Content-Type": type, "Cache-Control": "no-store", Vary: "Cookie", ...(devSignIn(env, url) ? { "X-Robots-Tag": "noindex" } : {}) },
+    headers: { "Content-Type": type, "Cache-Control": "no-store", Vary: "Cookie", "Content-Security-Policy": written(SITE_PAGE), ...(devSignIn(env, url) ? { "X-Robots-Tag": "noindex" } : {}) },
   });
 
 /** The site's answer to `req`, or null when the address is the app's. */
@@ -45,5 +46,5 @@ export async function siteResponse(req: Request, env: Env, url: URL): Promise<Re
   if (!route) return null;
   const signedIn = (await sessionOf(req, env, url)) !== null;
   if (route.signedOutOnly && signedIn) return null;
-  return answer(req, env, url, renderPage(route.page, { signedIn, origin: url.origin, signIn: SIGN_IN }), "text/html; charset=utf-8");
+  return answer(req, env, url, renderPage(route.page, { signedIn, origin: url.origin, signIn: SIGN_IN }, env.WEB_ANALYTICS_TOKEN), "text/html; charset=utf-8");
 }

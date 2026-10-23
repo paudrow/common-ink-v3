@@ -1,4 +1,5 @@
 import { escape } from "../auth.ts";
+import { BEACON_SCRIPT } from "../headers.ts";
 
 /** Who is looking at a page of the site, which changes only its way in. */
 export interface Visit {
@@ -69,7 +70,11 @@ ${article(pager(page.nav, page.path))}
   }
 }
 
-export function renderPage(page: SitePage, visit: Visit): string {
+/** Cloudflare Web Analytics' beacon for the site token `token`: it counts the visit with no cookie, and nothing that follows anyone to other sites. */
+const beacon = (token: string) => `<script defer src="${BEACON_SCRIPT}" data-cf-beacon="${escape(JSON.stringify({ token }))}"></script>\n`;
+
+/** The page, with the beacon only where the Worker has a Web Analytics site token. */
+export function renderPage(page: SitePage, visit: Visit, analyticsToken = ""): string {
   const canonical = `${visit.origin}${page.path}`;
   const { title, main } = framed(page, visit);
   return `<!doctype html>
@@ -96,7 +101,7 @@ export function renderPage(page: SitePage, visit: Visit): string {
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 ${FONTS.map((font) => `<link rel="preload" href="/fonts/${font}.woff2" as="font" type="font/woff2" crossorigin>`).join("\n")}
 <link rel="stylesheet" href="/site.css">
-</head>
+${analyticsToken ? beacon(analyticsToken) : ""}</head>
 <body class="site-${page.kind}">
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-head">

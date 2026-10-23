@@ -26,7 +26,8 @@ test("a member deletes their account from Settings: they are signed out, the wor
   await deleteIt.click();
 
   await expect(signInLink(grace)).toBeVisible();
-  expect(await grace.evaluate(async () => (await fetch("/api/me")).status)).toBe(401);
+  // Asked with the browser's cookies, not from the page: the landing they are shown runs nothing of the app's, and may fetch nothing.
+  expect((await grace.request.get("/api/me")).status()).toBe(401);
   expect((await perform(page, { type: "note.history", id: note.id }, workspaceId)).map((c) => c.author.name)).toEqual(["A former member"]);
   expect((await perform(page, { type: "member.list" }, workspaceId)).map((m) => m.name)).toEqual(["Ada Lovelace"]);
 });
