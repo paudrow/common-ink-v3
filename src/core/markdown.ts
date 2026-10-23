@@ -6,7 +6,9 @@ const HEADING = /^ {0,3}#[ \t]+(.*)$/;
 /** A heading's closing `#`s and the spaces around them, cut by hand: as one pattern they tried again from every space. */
 const unclosed = (words: string) => {
   const trimmed = words.trimEnd();
-  const hashes = trimmed.replace(/#+$/, "");
+  let end = trimmed.length;
+  while (end > 0 && trimmed[end - 1] === "#") end--;
+  const hashes = trimmed.slice(0, end);
   return hashes !== trimmed && /[ \t]$/.test(hashes) ? hashes.trimEnd() : trimmed;
 };
 /** A list item's mark and a todo's box, before the words. */

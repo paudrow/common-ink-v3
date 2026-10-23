@@ -8,7 +8,7 @@ import { openPage } from "../lib/opening.ts";
 import { replacing } from "../lib/rewrite.ts";
 import { inlineMarkdown } from "./inline.ts";
 import { openMenu } from "./menu.ts";
-import { actOnCell, addColumn, addRow, CELL_ACTIONS, parseTable, pipedPart, serializeTable, setCell, type At, type CellAction, type Table } from "./table.ts";
+import { actOnCell, addColumn, addRow, CELL_ACTIONS, oneLine, parseTable, pipedPart, serializeTable, setCell, type At, type CellAction, type Table } from "./table.ts";
 
 interface Found {
   from: number;
@@ -193,7 +193,7 @@ class TableWidget extends WidgetType {
     /** Opens a cell's menu. A table that can only be read has none. */
     let menu: ((cell: HTMLElement, point: { x: number; y: number }) => void) | undefined;
     const atOf = (cell: HTMLElement) => cell.dataset.focus!.split(",").map(Number) as unknown as At;
-    const typedIn = (cell: HTMLElement) => (cell.textContent ?? "").replace(/\s*\n\s*/g, " ").trim();
+    const typedIn = (cell: HTMLElement) => oneLine(cell.textContent ?? "").trim();
     /** The table with what has been typed in `cell`. */
     const committed = (cell: HTMLElement) => setCell(drawn.get(el)!.table, atOf(cell), typedIn(cell));
 
@@ -239,7 +239,7 @@ class TableWidget extends WidgetType {
     });
     el.addEventListener("paste", (event) => {
       event.preventDefault();
-      document.execCommand("insertText", false, (event.clipboardData?.getData("text/plain") ?? "").replace(/\s*\n\s*/g, " "));
+      document.execCommand("insertText", false, oneLine(event.clipboardData?.getData("text/plain") ?? ""));
     });
     el.addEventListener("keydown", (event) => {
       const cell = (event.target as HTMLElement).closest<HTMLElement>("[data-focus]");
