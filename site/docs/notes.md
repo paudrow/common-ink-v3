@@ -61,7 +61,7 @@ Type `/` at the start of a line or after a space to open the insert menu. Each i
 | Upload a file | Any file you pick from your computer. A picture, a video or a recording shows in the note, and anything else as a card |
 | Insert an upload | A file already uploaded to the workspace |
 
-To reference an event or a contact, type `@` and its name. See [Calendar and contacts](/docs/calendar-contacts).
+To mention a contact or reference an event, type `@` and its name. See [Calendar and contacts](/docs/calendar-contacts).
 
 Typing `::` opens the same menu with the embeds alone, from the timer down, so `::kan` and Enter makes a kanban board.
 

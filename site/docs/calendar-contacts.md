@@ -42,7 +42,7 @@ A person page shows what your contacts hold about that person, which only you se
 
 Type `@` in a note to mention a contact. The note keeps only the name, as `[[person:Sam Okafor]]`, in gray, so anyone who reads the note sees the name and nothing else of your contact. A mention shares nothing. See [Writing notes](/docs/notes).
 
-## Point at an event or a contact from a note
+## Point at an event from a note
 
 A note can reference one of your events without copying it:
 
@@ -54,9 +54,7 @@ To write one, type `[[` in a note. After your notes, the list offers your events
 
 You see the event's title as it is now in Google. Anyone else, and anyone opening the note from a share link, sees "Event". To show words of your own instead, type `|` and the words, as `[[event:r8m2k4q9x1cd|Planning with Sam]]`. Everyone sees those words, so write only what others may read. Click the event to open its details.
 
-A reference to a contact is `/contact(…)`. The app has no way yet to copy one, so your agent writes it with `refer_record`.
-
-The words after a contact's reference are plain text in the note. Every reader of the note sees them, in gray. You see the contact as it is now in Google. Anyone else, and anyone opening the note from a share link, sees only those words. Edit them if they say more than others should read.
+To point at a contact, mention them with `@`. An agent that asks `refer_record` for one of your contacts is given the same mention to write, `[[person:Sam Okafor]]`.
 
 An event's details list **Notes about this event**, which are the notes you can see that reference it. **New note about this event** makes one.
 
@@ -66,7 +64,7 @@ A connected agent acts as you, so it reaches your calendar and contacts too. Any
 
 - Add an event to a calendar you can add to. With no calendar named, it goes in your default calendar.
 - Change your events, where Google lets you change them.
-- Write a reference to an event or a contact into a note.
+- Write a reference to an event, or a mention of a contact, into a note.
 
 An agent can't change or add contacts, and it can't connect or disconnect Google. An agent limited to some folders gets none of this, because your calendar and contacts are in no folder. See [Agents](/docs/agents).
 

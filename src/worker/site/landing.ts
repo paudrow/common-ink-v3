@@ -66,13 +66,14 @@ const extend = `
   ${heading("Your agent can build what's missing", "extend")}
   <p>Ask your agent for a plugin and it writes one. You approve its code, and it runs in a sandbox. Notes can render HTML too, so a chart or a small tool lives right in the note.</p>
   <figure class="specimen html-demo" role="img" aria-label="An HTML block in a note, and the bar chart the note draws from it">
-    <pre><code>:::html{}
+    <pre><code>/html()
+\`\`\`html
 &lt;p&gt;Sign-ups by week&lt;/p&gt;
 &lt;ol class="bars"&gt;
   &lt;li style="--h: 30%"&gt;&lt;/li&gt;
   …
 &lt;/ol&gt;
-:::</code></pre>
+\`\`\`</code></pre>
     <div class="bars"><p>Sign-ups by week</p><ol><li style="--h: 30%"></li><li style="--h: 45%"></li><li style="--h: 40%"></li><li style="--h: 70%"></li><li style="--h: 95%"></li></ol></div>
   </figure>
 </section>`;
