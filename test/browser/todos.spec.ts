@@ -70,7 +70,9 @@ test("a todo's priority and due date are drawn as chips, on the lines the server
   await expect(editor(page).getByRole("checkbox")).toHaveCount(4);
   await expect(editor(page).getByRole("button", { name: /^Priority: / })).toHaveCount(2);
   await expect(editor(page).getByRole("button", { name: /^Due date: / })).toHaveCount(1);
-  await expect(editor(page).locator(".md-chip-sized")).toHaveCount(4 + 2 + 1);
+  // The boxes are drawn over their tokens' own width; the other chips as wide as the Todos page draws them.
+  await expect(editor(page).locator(".md-chip-sized")).toHaveCount(4);
+  await expect(editor(page).locator(".md-todo-chip.todo-chip")).toHaveCount(2 + 1);
   await expectShown(line(page, "Call the bank"), "!! Call the bank Oct 14, 2031 +Home about the card");
   await expectShown(line(page, "in code"), "[ ] !!! in code due:2031-10-14 +Never");
   // Indented as far as a code block is, and a todo all the same: the editor draws what the server lists.
@@ -199,28 +201,35 @@ const LAYOUT = [
 ].join("\n");
 const MEASURED = ["Above words", "First todo", "#home", "trailing words", "Nested todo", "#trip", "nested tail", "Deeper todo", "A long todo", "#long-tag-name", "and then some more", "wrap again", "Numbered todo", "numbered tail", "Below words"];
 
-/** Every token of LAYOUT's todos that is drawn as a chip, in the order they are written: a box, importance, and the first due date. */
+/** Every token of LAYOUT's todos that is drawn as a chip, in the order they are written: a box, importance, the first due date, and a tag that ends a todo's words. */
 const TOKENS = todosIn(LAYOUT)
   .flatMap((todo) => [
     { kind: "task", ...todo.box },
     ...(todo.importanceAt ? [{ kind: "importance", ...todo.importanceAt }] : []),
     ...(todo.due ? [{ kind: "due", from: todo.due.from, to: todo.due.to }] : []),
   ])
+  // A tag at the end of a todo's words is a chip too.
+  .concat([{ kind: "tag", from: LAYOUT.indexOf("#second"), to: LAYOUT.indexOf("#second") + "#second".length }])
+  .sort((a, b) => a.from - b.from)
   .map((token) => ({ ...token, text: LAYOUT.slice(token.from, token.to) }));
 
 /** Each chip drawn in the note, in order: its kind, the token it stands for, and where it is. And each token shown as written and kept in one piece. */
 const drawnIn = (page: Page) =>
   page.evaluate(() => {
-    const boxed = (el: Element, text: string | null) => ({ text, x: el.getBoundingClientRect().x, width: el.getBoundingClientRect().width });
+    const boxed = (el: Element, text: string | null) => {
+      const at = el.getBoundingClientRect();
+      return { text, x: at.x, middle: (at.top + at.bottom) / 2, width: at.width };
+    };
     return {
-      chips: [...document.querySelectorAll<HTMLElement>(".cm-content .md-chip-sized")].map((el) => ({ kind: el.className.replace(/md-chip-sized|md-chip-|md-chip /g, "").trim(), ...boxed(el, el.firstElementChild!.textContent) })),
+      // A box holds its token; a chip that takes its own width names it.
+      chips: [...document.querySelectorAll<HTMLElement>(".cm-content .md-chip")].map((el) => ({ kind: /md-chip-(\w+)/.exec(el.className.replace("md-chip-sized", ""))![1]!, ...boxed(el, el.dataset.written ?? el.firstElementChild!.textContent) })),
       written: [...document.querySelectorAll<HTMLElement>(".cm-content .md-todo-token")].map((el) => boxed(el, el.textContent)),
     };
   });
 
 /** The column is 720px wide in the first and 314px in the second, where the long todo wraps over several rows. */
 for (const width of [1600, 1100]) {
-  test(`walking the cursor along every todo's line shows as written only the one token it is on, each chip is exactly where and as wide as its token, and nothing else moves (${width}px window)`, async ({ page }) => {
+  test(`walking the cursor along every todo's line shows as written only the one token it is on, where its chip was, the boxes never move, and on none of them nothing has moved (${width}px window)`, async ({ page }) => {
     test.setTimeout(180_000);
     await page.setViewportSize({ width, height: 2000 });
     await open(page, LAYOUT);
@@ -236,6 +245,8 @@ for (const width of [1600, 1100]) {
     await page.keyboard.press("Home");
     const [first, last] = [LAYOUT.indexOf("- [ ] !! First"), LAYOUT.indexOf("\n\nBelow words.")];
     const stops = new Set<string>();
+    /** The tokens shown as written on the row their chip was on, whose left edges were compared. */
+    let compared = 0;
     const near = (by: number) => by <= 1;
     for (let at = first; at <= last; at++) {
       if (at > first) await page.keyboard.press("ArrowRight");
@@ -247,30 +258,36 @@ for (const width of [1600, 1100]) {
       let now!: Awaited<ReturnType<typeof drawnIn>>;
       await expect.poll(async () => (now = await drawnIn(page)).chips.map((c) => [c.kind, c.text]), `the chips drawn ${when}`).toEqual(rest.map((t) => [t.kind, t.text]));
       const token = on.find((t) => t.kind !== "task");
-      expect(now.written.map((w) => w.text), `what is kept in one piece ${when}`).toEqual(token ? [token.text] : []);
+      // A tag is one word, and has nothing to keep together.
+      expect(now.written.map((w) => w.text), `what is kept in one piece ${when}`).toEqual(token && token.kind !== "tag" ? [token.text] : []);
 
-      // Every chip still drawn is where it was, the token shown as written is where its chip was and as wide as it was, and nothing else moves.
-      // They are listed for one expect a step: measured, each expect in a test took longer than the one before it, and an expect for each made the walk take minutes in CI.
+      // A box is drawn over its token's own width, so the boxes never move. The other chips are as wide as their words, and the words
+      // after one move over while its token is shown as written, which starts where the chip did unless it is wider than the room left on
+      // its row. With the cursor on no token, nothing has moved. They are listed for one expect a step: measured, each expect in a test took
+      // longer than the one before it, and an expect for each made the walk take minutes in CI.
       const placed = await places(page, MEASURED);
       const moved = [
         ...now.chips.flatMap((chip, n) => {
           const was = drawn.chips[TOKENS.indexOf(rest[n]!)]!;
-          return near(Math.abs(chip.x - was.x) + Math.abs(chip.width - was.width)) ? [] : [`the ${chip.kind} chip "${chip.text}": x ${was.x} -> ${chip.x}, width ${was.width} -> ${chip.width}`];
+          return chip.kind !== "task" && token ? [] : near(Math.abs(chip.x - was.x) + Math.abs(chip.width - was.width)) ? [] : [`the ${chip.kind} chip "${chip.text}": x ${was.x} -> ${chip.x}, width ${was.width} -> ${chip.width}`];
         }),
-        ...(token
-          ? (["x", "width"] as const).flatMap((side) => {
-              const was = drawn.chips[TOKENS.indexOf(token)]![side];
-              return near(Math.abs(now.written[0]![side] - was)) ? [] : [`${side} of "${token.text}" as written: ${was} -> ${now.written[0]![side]}`];
-            })
-          : []),
-        ...Object.entries(before).flatMap(([measured, was]) =>
-          (["x", "y", "top", "height"] as const).flatMap((side) => (near(Math.abs(placed[measured]![side] - was[side])) ? [] : [`${side} of "${measured}": ${was[side]} -> ${placed[measured]![side]}`])),
-        ),
+        ...(() => {
+          // Shown as written on the row its chip was on, the token starts where the chip did.
+          const chip = token && drawn.chips[TOKENS.indexOf(token)]!;
+          const written = token && now.written[0]!;
+          if (!chip || !written || Math.abs(written.middle - chip.middle) >= 6) return [];
+          compared++;
+          return near(Math.abs(written.x - chip.x)) ? [] : [`x of "${token.text}" as written: ${chip.x} -> ${written.x}`];
+        })(),
+        ...Object.entries(before)
+          .filter(([measured]) => !token || measured === "Above words")
+          .flatMap(([measured, was]) => (["x", "y", "top", "height"] as const).flatMap((side) => (near(Math.abs(placed[measured]![side] - was[side])) ? [] : [`${side} of "${measured}": ${was[side]} -> ${placed[measured]![side]}`]))),
       ];
       expect(moved, `what moved ${when}`).toEqual([]);
     }
     // The walk went over every token there is, and ended on the last todo's line.
     expect(stops.size).toBe(TOKENS.length);
+    expect(compared, "tokens shown as written where their chips were").toBeGreaterThan(0);
     await expect.poll(() => cursorLine(page)).toContain("numbered tail");
 
     await page.keyboard.press("ControlOrMeta+Home");
@@ -1930,7 +1947,7 @@ test("priority is said in words on the Todos page, High, Medium, Low and None, a
 
   // In the note the marks are written, and named in words.
   await page.goto(`/note/${home.id}`);
-  const chip = line(page, "Call the bank").locator(".md-chip-importance .md-todo-chip");
+  const chip = line(page, "Call the bank").locator(".md-chip-importance.md-todo-chip");
   await expect(chip).toHaveText("!!");
   await expect(chip).toHaveAccessibleName("Priority: Medium");
   await expect(chip).toHaveAttribute("title", "Priority: Medium");
@@ -2540,7 +2557,8 @@ test("in a note, a ticked box shows a card while it is pointed at or has the key
   await expect(card).toHaveCount(0);
 
   await line(page, "Book flights").getByRole("checkbox").hover();
-  await expect(card).toHaveText(new RegExp(`^Done ${monthDay(today)}, \\d{1,2}:\\d{2}\\s[AP]Mby Claude \\(agent\\)$`));
+  // Under who ticked it, what a press on it does with each key held.
+  await expect(card).toHaveText(new RegExp(`^Done ${monthDay(today)}, \\d{1,2}:\\d{2}\\s[AP]Mby Claude \\(agent\\)Click to open it again, (⇧|Shift)-click to abandon it, (⌥|Alt)-click to move it to the backlog$`));
   await expect(line(page, "Book flights").getByRole("checkbox")).toHaveAttribute("aria-describedby", (await card.getAttribute("id"))!);
   await page.mouse.move(0, 0);
   await expect(card).toHaveCount(0);
@@ -2550,7 +2568,7 @@ test("in a note, a ticked box shows a card while it is pointed at or has the key
   await expect(card).toHaveCount(0);
 
   await line(page, "Book flights").getByRole("checkbox").focus();
-  await expect(card).toHaveText(/^Done .+by Claude \(agent\)$/);
+  await expect(card).toHaveText(/^Done .+by Claude \(agent\)Click to open it again/);
   await editor(page).focus();
   await expect(card).toHaveCount(0);
 });

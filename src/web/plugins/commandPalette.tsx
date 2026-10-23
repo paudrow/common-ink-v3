@@ -1,4 +1,5 @@
 import { clipperTarget, getClipper } from "./lib/clipperLink.ts";
+import { ALT, SHIFT } from "./lib/opening.ts";
 import { HelpOverlay, type CommandInfo, type Plugin, type PluginHost } from "../plugin-api.ts";
 import { matching } from "./lib/match.ts";
 import { Palette, type PaletteItem } from "./lib/Palette.tsx";
@@ -52,6 +53,27 @@ function ShortcutSheet({ host, close }: { host: PluginHost; close: () => void })
           </table>
         </section>
       ))}
+      {commands.some((c) => c.group === "Todos") && (
+        <section className="shortcut-sheet-group">
+          <h3>Todos, with the pointer</h3>
+          <table aria-label="Todos, with the pointer">
+            <tbody>
+              <tr>
+                <th scope="row">Abandon a todo, or open it again</th>
+                <td>
+                  <kbd>{SHIFT}</kbd> click its box
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Move a todo to the backlog, or open it again</th>
+                <td>
+                  <kbd>{ALT}</kbd> click its box
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      )}
     </HelpOverlay>
   );
 }

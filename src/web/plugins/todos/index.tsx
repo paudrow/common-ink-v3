@@ -2,10 +2,11 @@ import { EditorView, ViewPlugin } from "@codemirror/view";
 import type { Plugin } from "../../plugin-api.ts";
 import { editorKey, redraw } from "../lib/live.ts";
 import { todoOpener } from "../lib/openTodo.ts";
+import { openOptionHere, todoAdds, todoAtCursor } from "./lineControls.ts";
 import { tickedIn, todoChips, untick } from "./chips.ts";
 import { CHANGED, putAway, refused, takeBack } from "./completed.ts";
 import { dueOffers, today } from "./dates.ts";
-import { PUTTING, type PutAway } from "./picking.ts";
+import { PUTTING, type PutAway, type RowChip } from "./picking.ts";
 import { everyOffers } from "./recurrence.ts";
 import { SORTS, TodosPage, putterHere } from "./Todos.tsx";
 
@@ -61,6 +62,16 @@ export const todos: Plugin = {
       host.commands.register({ id: command, title, keys, group: "Todos", when: () => putterHere() !== null, run: () => putterHere()?.(to) });
     }
 
+    // The keyboard's way to the controls beside a todo in a note, from the line the cursor is on.
+    for (const [chip, title] of [
+      ["due", "Set this todo's due date"],
+      ["every", "Set how this todo repeats"],
+      ["importance", "Set this todo's priority"],
+      ["tag", "Add a tag to this todo"],
+    ] as const satisfies readonly (readonly [RowChip, string])[]) {
+      host.commands.register({ id: `todos.set.${chip}`, title, group: "Todos", when: () => todoAtCursor() !== null, run: () => openOptionHere(chip) });
+    }
+
     /** Opens again the todo checked off in a note's editor: there as the member's edit, or through todo.set once that editor is gone. */
     const reopen = async (noteId: string, view: EditorView) => {
       if (alive.has(view)) return untick(view) ? undefined : CHANGED;
@@ -84,6 +95,7 @@ export const todos: Plugin = {
       id: "todos",
       extension: (editor) => [
         todoChips({ host, noteId: editor.noteId, onCompleted: (view) => putAway(host, "done", () => reopen(editor.noteId, view)), onRecurred: (revision) => putAway(host, "done", () => takeBack(host, editor.noteId, revision)) }),
+        todoAdds(host),
         ViewPlugin.define((view) => {
           const key = editorKey(editor);
           editors.set(key, view);

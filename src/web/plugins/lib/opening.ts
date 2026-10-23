@@ -6,3 +6,5 @@ export const openPage = (url: string) => void window.open(url, "_blank", "noopen
 
 /** The key that makes a click follow a link, as a person reads it. */
 export const MOD = /Mac/.test(navigator.platform) ? "⌘" : "Ctrl";
+export const SHIFT = /Mac/.test(navigator.platform) ? "⇧" : "Shift";
+export const ALT = /Mac/.test(navigator.platform) ? "⌥" : "Alt";

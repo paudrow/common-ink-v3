@@ -219,8 +219,8 @@ test("a tag in a note is drawn as a tag where its characters were: nothing moves
   await signInAsNewPerson(page, "Ada Lovelace");
   await openTagged(page);
   const tags = editor(page).locator(".md-tag");
-  // What the server takes for a tag and nothing else: not `#12`, code, a fence, or a link's address.
-  await expect(tags).toHaveText(["#alpha", "#beta-2", "#alpha"]);
+  // What the server takes for a tag and nothing else: not `#12`, code, a fence, or a link's address. A tag at the end of a todo's words is the todo's chip.
+  await expect(tags).toHaveText(["#alpha", "#beta-2"]);
   await expect.poll(() => perform(page, { type: "tag.list" })).toEqual({ tags: [{ name: "alpha", notes: 1 }, { name: "beta-2", notes: 1 }], next: null, indexing: false });
 
   const look = (el: Element) => {
@@ -235,40 +235,36 @@ test("a tag in a note is drawn as a tag where its characters were: nothing moves
   const off = { prose: await placeOf(line(page, PROSE)), todo: await placeOf(line(page, /Buy seeds/)), last: await placeOf(line(page, "Last line")) };
 
   await line(page, PROSE).click();
-  await expect(tags).toHaveText(["#alpha", "#beta-2", "#alpha"]);
+  await expect(tags).toHaveText(["#alpha", "#beta-2"]);
   expectUnmoved(await placeOf(line(page, PROSE)), off.prose, "with the cursor on the tag's line");
   expectUnmoved(await placeOf(line(page, "Last line")), off.last, "below, with the cursor on the tag's line");
   await page.keyboard.press("Home");
   expectUnmoved(await placeOf(line(page, PROSE)), off.prose, "with the cursor at the start of the tag's line");
 
-  // A todo's line draws its options as chips and its tag as a tag, once. With the cursor on one of them that token alone is as written, and the tag is where it was.
-  await expect(line(page, /Buy seeds/).locator(".md-tag")).toHaveText(["#alpha"]);
+  // A todo's line draws its options as chips and the tag that ends its words as a chip, as the Todos page does. With the cursor on one
+  // of them that token alone is as written, and the lines below stay where they were.
+  await expect(line(page, /Buy seeds/).locator(".md-chip-tag [data-tag]")).toHaveText(["#alpha"]);
   await expect(line(page, /Buy seeds/).locator(".md-todo-chip")).toHaveCount(2);
-  const tagOnTodo = () => line(page, /Buy seeds/).locator(".md-tag").evaluate((el) => el.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number });
-  const drawn = await tagOnTodo();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await expect(line(page, /Buy seeds/).locator(".md-todo-chip")).toHaveCount(2);
   await page.keyboard.press("End");
   await expect(line(page, /Buy seeds/).locator(".md-todo-chip")).toHaveCount(1);
   await expect(line(page, /Buy seeds/)).toContainText("due:2026-10-14");
-  await expect(line(page, /Buy seeds/).locator(".md-tag")).toHaveText(["#alpha"]);
-  const written = await tagOnTodo();
-  // A chip is as wide as its token to within a fraction of a pixel, which is all the tag after it can differ by.
-  for (const side of ["x", "y", "width", "height"] as const) expect(Math.abs(written[side] - drawn[side]), `${side} of the tag on the todo's line`).toBeLessThanOrEqual(0.5);
+  await expect(line(page, /Buy seeds/).locator(".md-chip-tag [data-tag]")).toHaveText(["#alpha"]);
   expectUnmoved(await placeOf(line(page, "Last line")), off.last, "below, with the cursor on the todo's line");
 
   // Typing makes and unmakes a tag where it stands.
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" #gamma");
-  await expect(tags).toHaveText(["#alpha", "#beta-2", "#alpha", "#gamma"]);
+  await expect(tags).toHaveText(["#alpha", "#beta-2", "#gamma"]);
   await page.keyboard.press("Backspace");
   await page.keyboard.press("Backspace");
   await page.keyboard.press("Backspace");
   await page.keyboard.press("Backspace");
   await page.keyboard.press("Backspace");
   await page.keyboard.type("12");
-  await expect(tags).toHaveText(["#alpha", "#beta-2", "#alpha"]);
+  await expect(tags).toHaveText(["#alpha", "#beta-2"]);
   for (let i = 0; i < 4; i++) await page.keyboard.press("Backspace");
   await page.keyboard.press("ControlOrMeta+Home");
   expectUnmoved(await placeOf(line(page, PROSE)), off.prose, "after typing elsewhere");
@@ -770,7 +766,7 @@ test("a tag opens its page from wherever it is drawn: a plain click on one in a 
   await page.goto("/");
   await page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "All notes", exact: true }).click();
   const errands = page.getByRole("navigation", { name: "Notes" }).getByRole("article", { name: "Errands", exact: true });
-  await errands.locator(".md-tag", { hasText: "#errand" }).click();
+  await errands.locator("[data-tag]", { hasText: "#errand" }).click();
   await expect(page).toHaveURL(/\/tags\/errand$/);
   await expect(notesOf(page, "errand")).toHaveText(["Errands"]);
 

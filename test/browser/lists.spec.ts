@@ -96,11 +96,10 @@ for (const width of [1280, 760]) {
       for (const [n, left] of item.rows.entries()) expect(Math.abs(left - item.first), `${says}: row ${n + 1} starts at ${left}, the first letter at ${item.first}`).toBeLessThanOrEqual(1);
       expect(item.first, `${says}: the words start after the mark`).toBeGreaterThan(drawn.Dash!.first - 1);
     }
-    // Deeper items start further in, and a longer mark puts its words further in.
+    // Deeper items start further in. At one depth, a bullet's, a star's, a number's and a task's words start together.
     expect(drawn.Nested!.first).toBeGreaterThan(drawn.Dash!.first + 4);
     expect(drawn.Deeper!.first).toBeGreaterThan(drawn.Nested!.first + 4);
-    expect(drawn.Tenth!.first).toBeGreaterThan(drawn.Single!.first + 4);
-    expect(drawn.Pending!.first).toBeGreaterThan(drawn.Dash!.first + 8);
+    for (const word of ["Star", "Single", "Tenth", "Pending", "Checked"]) expect(Math.abs(drawn[word]!.first - drawn.Dash!.first), `${word}'s words start with Dash's`).toBeLessThanOrEqual(0.5);
 
     // A line with a clock in it: the words before the clock are the item's first, and the rows after it come back under them.
     const timed = drawn.Clocked!;

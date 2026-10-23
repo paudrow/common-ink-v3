@@ -1,4 +1,5 @@
 import type { Plugin } from "../../plugin-api.ts";
+import { bulletDragging } from "./dragging.ts";
 import { bulletCommands, bulletEditing, type Kept } from "./outlining.ts";
 
 const isKept = (value: unknown): value is Record<string, Kept[]> =>
@@ -14,7 +15,7 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
  * bullets after it that the selection takes in. A numbered list is numbered in order again after
  * each, or keeps the one number every item has, as in 1., 1., 1. A bullet with something under it
  * folds. What is folded is how this browser shows the note, kept in the plugin's storage for each
- * note, and is never written into the note.
+ * note, and is never written into the note. A bullet is dragged by its mark to another place.
  */
 export const bullets: Plugin = {
   id: "bullets",
@@ -29,7 +30,7 @@ export const bullets: Plugin = {
       else delete folds[noteId];
       host.storage.set("folds", folds);
     };
-    host.editorExtensions.register({ id: "bullets", extension: ({ noteId }) => bulletEditing(folds[noteId] ?? [], keep(noteId)) });
+    host.editorExtensions.register({ id: "bullets", extension: ({ noteId }) => [bulletEditing(folds[noteId] ?? [], keep(noteId)), bulletDragging] });
 
     const commands = [
       ["indent", "Indent bullet", "tab"],

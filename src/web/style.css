@@ -7365,6 +7365,13 @@ button.diff-fold:hover {
   font-weight: 400;
 }
 
+/* What a press on the box does with each key held. */
+.md-ticked-hint {
+  margin-top: 2px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
 /* What is set on a todo, as pills, as v1 drew them: each opens a popover under itself, and a tag's narrows the list. */
 .todo-chip {
   display: inline-flex;

@@ -13,8 +13,8 @@ import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
 import { linksOut, type LinkOut } from "./linksOut.ts";
-import { openPage } from "../lib/opening.ts";
-import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, clicked, pickerLabel, picking, pressed, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
+import { ALT, SHIFT, openPage } from "../lib/opening.ts";
+import { CHIP_NAMES, PRIORITY, PUTTING, STATE_NAMES, boxHint, clicked, pickerLabel, picking, pressed, pressedWith, splitTags, tagged, type Opened, type PickingEvent, type PutAway, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { STATE_CHOICES, stateOf, withState, type StateChoice } from "./states.ts";
 import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
@@ -83,21 +83,6 @@ function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
 const comesAround = (todo: ListedTodo, on: string) => todo.state !== "done" && changeTodo(todo.text, { state: "done" }, on).filed !== null;
-
-/**
- * A todo's words, and the tags written at their end, which are drawn as chips after them. A tag inside the
- * sentence stays where it is written. Words that are nothing but tags keep them.
- */
-function splitTags(words: string): { lead: string; trailing: string[] } {
-  const tags = tagsOn(words);
-  let from = words.trimEnd().length;
-  const trailing: string[] = [];
-  for (let i = tags.length - 1; i >= 0 && !words.slice(tags[i]!.to, from).trim(); i--) {
-    trailing.unshift(tags[i]!.name);
-    from = tags[i]!.from;
-  }
-  return words.slice(0, from).trim() ? { lead: words.slice(0, from).trimEnd(), trailing } : { lead: words, trailing: [] };
-}
 
 /** A linked note's title; null when there is no such note the member can see; undefined while the notes are still being listed. */
 type TitleOf = (noteId: string) => string | null | undefined;
@@ -547,8 +532,10 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
         // Not disabled while its completion is on its way: that would take the keyboard off it.
         aria-disabled={completing || undefined}
         aria-label={STATE_NAMES[todo.state]}
-        // An open todo is checked off, and any other opened again.
-        onChange={() => !completing && onChange(todo, { state: clicked(todo.state) })}
+        title={readOnly ? undefined : boxHint(todo.state, SHIFT, ALT)}
+        // An open todo is checked off, and any other opened again. With ⇧ held it is abandoned and with ⌥ moved to the backlog, as the row's
+        // buttons do, or opened again from there. It is told of the click that changed it, which holds no keys when it came from the keyboard.
+        onChange={(e) => !completing && onChange(latest.current, { state: pressedWith(latest.current.state, e.nativeEvent as MouseEvent) })}
       />
       <i className="todo-box-mark" aria-hidden="true" />
       <span className="todo-text" style={editing === null ? undefined : { minHeight: editing }}>

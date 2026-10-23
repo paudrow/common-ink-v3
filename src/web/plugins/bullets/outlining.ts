@@ -65,6 +65,9 @@ function foldsOf(state: EditorState, marks: RangeSet<Folded>): Fold[] {
   return folds;
 }
 
+/** Whether the bullet whose line starts at `from` is folded in this editor. */
+export const isFolded = (state: EditorState, from: number) => state.field(folds).folds.some((f) => f.from === from);
+
 class Ellipsis extends WidgetType {
   override toDOM(view: EditorView) {
     const el = document.createElement("span");
@@ -141,12 +144,14 @@ const clickingFolded = EditorState.transactionFilter.of((tr) => {
 
 /** The mark stays in the line and a dot is painted over it, so a bullet's text is where it is when the mark is shown. */
 const dot = Decoration.mark({ class: "bullet-dot" });
+/** A numbered item's number is left as it is, and marked as what a bullet is dragged by. */
+const number = Decoration.mark({ class: "bullet-number" });
 /** A task's box is its mark enough: its bullet's mark keeps its room and is painted as nothing. Only where the box is drawn, which is at the start of a line. */
 const blank = Decoration.mark({ class: "bullet-blank" });
-/** A line that starts with a bullet and a task's box, whatever mark the box holds. */
-const TASK = new RegExp(`^\\s*[-*+]\\s+${BOX_PATTERN}(?=\\s|$)`);
+/** A line that starts with a bullet and a task's box, whatever mark the box holds, and the space after it: a box with none yet is drawn as written. */
+const TASK = new RegExp(`^\\s*[-*+]\\s+${BOX_PATTERN}[ \\t]`);
 
-/** A dot for each bullet's mark, or nothing on a task's, except the mark the cursor is on. */
+/** A dot for each bullet's mark, or nothing on a task's, and a numbered item's number marked as itself, except the mark the cursor is on. */
 const bullets = drawnInView((view) => {
   const { state } = view;
   const drawn: Range<Decoration>[] = [];
@@ -157,7 +162,9 @@ const bullets = drawnInView((view) => {
       enter(node) {
         if (node.name !== "ListMark") return;
         const line = state.doc.lineAt(node.from);
-        if (node.node.parent?.parent?.name === "BulletList" && !touched(state, node.from, node.to)) drawn.push((TASK.test(line.text) ? blank : dot).range(node.from, node.to));
+        if (touched(state, node.from, node.to)) return;
+        if (node.node.parent?.parent?.name === "BulletList") drawn.push((TASK.test(line.text) ? blank : dot).range(node.from, node.to));
+        else if (node.node.parent?.parent?.name === "OrderedList") drawn.push(number.range(node.from, node.to));
       },
     });
   }
@@ -198,11 +205,19 @@ function ready(make: Make) {
   return at && made ? { ...at, made } : null;
 }
 
-/** Makes an outline edit in the editor as the member's own: the lines change, the selection stays on the text it was on, and folded bullets stay folded where they land. */
+/** Makes the outline edit a bullet key would make now, if there is one. */
 function edit(make: Make) {
   const at = ready(make);
-  if (!at) return;
-  const { view, made } = at;
+  if (at) makeEdit(at.view, at.made);
+}
+
+/**
+ * Makes an outline edit in the editor as the member's own: the lines change, the selection stays on
+ * the text it was on, and folded bullets stay folded where they land. With `cursorAt`, the cursor
+ * goes to the end of that line instead, wherever it lands, and the note scrolls only as far as it
+ * takes to show it.
+ */
+export function makeEdit(view: EditorView, made: Edit, cursorAt?: number) {
   const { state } = view;
   const [from, to] = [state.doc.line(made.from + 1).from, state.doc.line(made.to).to];
   const insert = made.lines.join("\n");
@@ -221,7 +236,7 @@ function edit(make: Make) {
   const foldedLines = state.field(folds).folds.map((f) => state.doc.lineAt(f.from).number - 1);
   view.dispatch({
     changes: { from, to, insert },
-    selection: { anchor: place(anchor), head: place(head) },
+    selection: cursorAt === undefined ? { anchor: place(anchor), head: place(head) } : { anchor: landed(cursorAt).to },
     effects: foldsAre.of(foldedLines.map((n) => landed(n).from)),
     scrollIntoView: true,
     userEvent: "move.bullet",

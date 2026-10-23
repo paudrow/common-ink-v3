@@ -231,22 +231,36 @@ const startsOf = (page: Page, words: readonly string[]) =>
         range.setEnd(node!, start + 1);
         return range.getBoundingClientRect().left - zero;
       };
-      return { mark: at(text.search(/(?<=^[\s▾▸]*)[^\s▾▸]/)), words: at(text.indexOf(word)), height: line.getBoundingClientRect().height };
+      // Where a task's box is drawn, or a bullet's dot, whose box is as wide as a task's.
+      const box = line.querySelector("input[type=checkbox]");
+      const dot = line.querySelector(".bullet-dot");
+      const column = box ? box.getBoundingClientRect().left - zero : dot ? dot.getBoundingClientRect().left + parseFloat(getComputedStyle(dot, "::before").left) - zero : null;
+      return { mark: at(text.search(/(?<=^[\s▾▸]*)[^\s▾▸]/)), column, words: at(text.indexOf(word)), height: line.getBoundingClientRect().height };
     });
   }, words);
 
 test("each level of a list starts a step further in than the one above it, the same step for bullets, tasks, numbers and a mix of them, and a line written under an item's words starts under them", async ({ page }) => {
   await open(page, DEPTHS);
   const size = await editor(page).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  const step = 1.5 * size;
+  // A step is a task's box and the gap after it.
+  const step = (1.1 + 0.6) * size;
 
   for (const kind of ["Bullet", "Task", "Number", "Mixed"]) {
     const [one, two, three] = await startsOf(page, [`${kind} one`, `${kind} two`, `${kind} three`]);
     expect(Math.abs(one!.mark), `${kind} one's mark is at the edge of the text: ${one!.mark}`).toBeLessThanOrEqual(0.5);
     expect(Math.abs(two!.mark - step), `${kind} two's mark is one step in: ${two!.mark}, a step is ${step}`).toBeLessThanOrEqual(0.5);
     expect(Math.abs(three!.mark - 2 * step), `${kind} three's mark is two steps in: ${three!.mark}`).toBeLessThanOrEqual(0.5);
-    expect(two!.words, `${kind} two's words are right of ${kind} one's`).toBeGreaterThan(one!.words + step - 0.5);
+    // A level's dots and boxes stand in one column, and its words start where its children's dots and boxes do.
+    if (kind === "Bullet" || kind === "Task") {
+      expect(Math.abs(two!.column! - one!.words), `${kind} two's ${kind === "Task" ? "box" : "dot"} is at ${two!.column}, under one's words at ${one!.words}`).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(three!.column! - two!.words), `${kind} three's is under two's words`).toBeLessThanOrEqual(0.5);
+    }
   }
+  // A bullet's, a task's and a number's words start together at each level.
+  const ones = await startsOf(page, ["Bullet one", "Task one", "Number one"]);
+  const twos = await startsOf(page, ["Bullet two", "Task two", "Number two"]);
+  for (const level of [ones, twos]) for (const item of level) expect(Math.abs(item.words - level[0]!.words), `words at ${level.map((i) => i.words)}`).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(ones[0]!.column! - ones[1]!.column!), "a bullet's dot is in the column of a task's box").toBeLessThanOrEqual(0.5);
   const [item, under] = await startsOf(page, ["Mixed three", "written under mixed three"]);
   expect(Math.abs(under!.mark - item!.words), `a line under an item's words starts at ${under!.mark}, the words at ${item!.words}`).toBeLessThanOrEqual(0.5);
 
@@ -396,6 +410,58 @@ for (const face of ["the app's face", "a face with a wide X"] as const) {
     expect(Math.abs(ticked[0]!.boxLeft! - drawn[0]!.boxLeft!), "the box once it is ticked").toBeLessThanOrEqual(0.5);
   });
 }
+
+test("a task's words start one gap after its box however many spaces follow it, as a bullet's start after its dot, and its box written out shows the space after its ]", async ({ page }) => {
+  await open(page, "# Spaces\n\n- [ ] One space\n- [ ]   Three spaces\n- [x]\tA tab\n- Bullet words\n- [ ]\n- [ ]no space\n\nLast words.");
+  const size = await editor(page).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  /** The left edge of `word` on its line, and the right edge of the `]` before it. */
+  const edges = (word: string) =>
+    page.evaluate((word) => {
+      const line = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes(word))!;
+      const edge = (find: (text: string) => number, side: "left" | "right") => {
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const at = find(node.textContent!);
+          if (at < 0 || (node.parentElement && getComputedStyle(node.parentElement).opacity === "0")) continue;
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + 1);
+          return range.getBoundingClientRect()[side];
+        }
+        return null;
+      };
+      return { words: edge((text) => text.indexOf(word), "left")!, bracket: edge((text) => text.indexOf("]"), "right") };
+    }, word);
+
+  const one = await edges("One space");
+  for (const word of ["Three spaces", "A tab", "Bullet words"]) expect(Math.abs((await edges(word)).words - one.words), `${word} starts with One space`).toBeLessThanOrEqual(0.5);
+
+  // With the cursor on the box it is written out where it was drawn, `[ ]` and the space after it, and the words stay put.
+  const line = editor(page).locator(".cm-line").filter({ hasText: "One space" });
+  await line.getByText("One space").click();
+  await page.keyboard.press("Home");
+  for (let n = 0; n < 3; n++) await page.keyboard.press("ArrowRight");
+  await expect(line.getByRole("checkbox")).toHaveCount(0);
+  const written = await edges("One space");
+  expect(Math.abs(written.words - one.words), "the words with the box written out").toBeLessThanOrEqual(0.5);
+  expect(written.words - written.bracket!, `the ] ends at ${written.bracket}, the words start at ${written.words}`).toBeGreaterThanOrEqual(0.25 * size);
+
+  // A todo is `- [ ] words`: `- [ ]no space` is a bullet that says `[ ]`, and a box with nothing after it is drawn once its space is typed.
+  await expect(editor(page).locator(".cm-line").filter({ hasText: "no space" }).getByRole("checkbox")).toHaveCount(0);
+  await expect(editor(page).locator(".cm-line").filter({ hasText: "no space" })).toHaveText("- [ ]no space");
+  const empty = editor(page).locator(".cm-line").nth(6);
+  await expect(empty.getByRole("checkbox")).toHaveCount(0);
+  await expect(empty.locator(".bullet-dot")).toHaveCount(1);
+  await empty.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" ");
+  await page.keyboard.press("ArrowUp");
+  await expect(empty.getByRole("checkbox")).toHaveCount(1);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await page.keyboard.type("Typed words");
+  expect(Math.abs((await edges("Typed words")).words - one.words), "typed words start with the others").toBeLessThanOrEqual(0.5);
+});
 
 test("a formula in a line sits on the line's baseline where KaTeX itself puts it, and the line is no taller", async ({ page }) => {
   // A column wide enough for the line of formulas to be one row in a monospaced font too, so its baseline is the formulas'.

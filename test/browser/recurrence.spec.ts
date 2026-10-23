@@ -19,8 +19,8 @@ const cursorLine = (page: Page) =>
   page.evaluate(() => {
     const copy = getSelection()!.anchorNode?.parentElement?.closest(".cm-line")?.cloneNode(true) as HTMLElement | undefined;
     copy?.querySelectorAll(".md-chip-sized > :not(:first-child)").forEach((said) => said.remove());
-    // The recurrence chip takes its own width and holds no token: it names the one it stands for.
-    copy?.querySelectorAll<HTMLElement>(".md-chip-every").forEach((chip) => chip.replaceWith(chip.dataset.written!));
+    // A chip that takes its own width holds no token: it names the one it stands for.
+    copy?.querySelectorAll<HTMLElement>(".md-chip[data-written]").forEach((chip) => chip.replaceWith(chip.dataset.written!));
     return copy?.textContent;
   });
 const recurrence = (page: Page) => page.getByRole("dialog", { name: "Repeat" });
@@ -856,7 +856,7 @@ const MEASURED = ["Above words", "First todo", "trailing words", "Nested todo", 
 
 /** The column is 720px wide in the first and 314px in the second, where the long todo wraps over several rows. */
 for (const width of [1600, 1100]) {
-  test(`nothing moves when the cursor comes to a last-done chip, which alone is then shown as written, as wide as its token (${width}px window)`, async ({ page }) => {
+  test(`a last-done chip is as wide as its words, it alone is shown as written where it was with the cursor on it, and with the cursor on none nothing has moved (${width}px window)`, async ({ page }) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width, height: 2000 });
     await open(page, LAYOUT);
@@ -864,13 +864,13 @@ for (const width of [1600, 1100]) {
     await page.evaluate(() => document.fonts.ready);
     const before = await places(page, MEASURED);
 
-    const chipBoxes = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".cm-content .md-chip-sized")].map((el) => [el.className.replace(/md-chip-sized|md-chip /g, "").trim(), el.firstElementChild!.textContent, Math.round(el.getBoundingClientRect().x), Math.round(el.getBoundingClientRect().width)]));
+    const chipBoxes = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".cm-content .md-chip-done")].map((el) => ["md-chip-done", el.dataset.written!, Math.round(el.getBoundingClientRect().x), Math.round(el.getBoundingClientRect().width), Math.round((el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2)]));
     const drawn = await chipBoxes();
     // A todo's second every: is words, as its second due: is. The first is a chip in words.
     await expect(page.locator(".cm-content .md-chip-every")).toHaveText(["every 2 weeks", "every Mon, Thu", "3 days after done", "monthly on the last day"]);
     expect(drawn.filter((c) => c[0] === "md-chip-done").map((c) => c[1])).toEqual(["done:2026-10-10x12", "done:2026-01-02", "done:2025-12-31x104", "done:2026-09-30x2"]);
     // What a chip says is never wider than the chip, so nothing of it is cut off.
-    const cut = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".cm-content .md-chip-every > .md-todo-chip, .cm-content .md-chip-done > .md-todo-chip")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
+    const cut = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".cm-content .md-todo-chip")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
     expect(cut).toEqual([]);
 
     // Down to the first todo's first letter, then right one letter at a time to the last todo's end, looking around each token.
@@ -886,27 +886,26 @@ for (const width of [1600, 1100]) {
       const when = `with the cursor at "${LAYOUT.slice(Math.max(0, at - 4), at)}|${LAYOUT.slice(at, at + 4)}"`.replaceAll("\n", "\u23ce");
       expect(on.length, `the cursor is never on two tokens: ${when}`).toBeLessThanOrEqual(1);
       on.forEach((t) => stops.add(t.from));
-      // Only the token the cursor is on is shown as written: every other chip stays drawn, where it was and as wide.
+      // Only the token the cursor is on is shown as written: every other chip stays drawn.
       const rest = TOKENS.filter((t) => !on.includes(t)).map((t) => t.text);
-      await expect.poll(async () => (await chipBoxes()).filter((c) => c[0] === "md-chip-done").map((c) => c[1]), `the chips drawn ${when}`).toEqual(rest);
+      await expect.poll(async () => (await chipBoxes()).map((c) => c[1]), `the chips drawn ${when}`).toEqual(rest);
       await expect(page.locator(".cm-content .md-chip-every"), `the recurrence chips drawn ${when}`).toHaveCount(4);
-      for (const [kind, text, x, wide] of await chipBoxes()) {
-        const was = drawn.find((c) => c[0] === kind && c[1] === text && Math.abs((c[2] as number) - (x as number)) <= 1);
-        expect(was, `the chip "${text}" at ${x} ${when} is where it was: ${JSON.stringify(drawn.filter((c) => c[1] === text))}`).toBeDefined();
-        expect(Math.abs((was![3] as number) - (wide as number)), `the width of the chip "${text}" ${when}`).toBeLessThanOrEqual(1);
-      }
       const now = await places(page, MEASURED);
-      for (const [measured, was] of Object.entries(before)) {
-        for (const side of ["x", "y", "top", "height"] as const) expect(Math.abs(now[measured]![side] - was[side]), `${side} of "${measured}" ${when}: ${was[side]} -> ${now[measured]![side]}`).toBeLessThanOrEqual(1);
+      // A chip is as wide as its words, so the words after it move over while its token is shown as written. With the cursor on none, nothing has moved.
+      if (!on.length) {
+        expect(await chipBoxes(), `the chips ${when}`).toEqual(drawn);
+        for (const [measured, was] of Object.entries(before)) {
+          for (const side of ["x", "y", "top", "height"] as const) expect(Math.abs(now[measured]![side] - was[side]), `${side} of "${measured}" ${when}: ${was[side]} -> ${now[measured]![side]}`).toBeLessThanOrEqual(1);
+        }
       }
-      // The token written is where its chip was, as wide as it was.
-      const written = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".cm-content .md-todo-token")].map((t) => [t.textContent, Math.round(t.getBoundingClientRect().x), Math.round(t.getBoundingClientRect().width)]));
+      // The token written is kept in one piece, and starts where its chip did when there is room for it on that row.
+      const written = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".cm-content .md-todo-token")].map((t) => [t.textContent, Math.round(t.getBoundingClientRect().x), Math.round((t.getBoundingClientRect().top + t.getBoundingClientRect().bottom) / 2)]));
       expect(written.map(([text]) => text).filter((text) => /^(every|done):/.test(text as string)), `what is kept in one piece ${when}`).toEqual(on.map((t) => t.text));
-      for (const [text, x, wide] of written) {
-        const chip = drawn.find((c) => c[1] === text && Math.abs((c[2] as number) - (x as number)) <= 1);
-        expect(chip, `"${text}" at ${x} ${when} stands where a chip stood: ${JSON.stringify(drawn.filter((c) => c[1] === text))}`).toBeDefined();
-        expect(Math.abs((chip![3] as number) - (wide as number)), `the width of "${text}"`).toBeLessThanOrEqual(1);
+      for (const [text, x, middle] of written) {
+        const chip = drawn.find((c) => c[1] === text);
+        if (chip && Math.abs((chip[4] as number) - (middle as number)) < 6) expect(Math.abs((chip[2] as number) - (x as number)), `"${text}" ${when} starts where its chip did`).toBeLessThanOrEqual(1);
       }
+      expect(Math.abs(now["Above words"]!.y - before["Above words"]!.y), `the lines above ${when}`).toBeLessThanOrEqual(1);
     }
     // The walk went over every last-done token there is.
     expect(stops.size).toBe(TOKENS.length);
@@ -1051,7 +1050,7 @@ const WORDS = [
   "",
   "Above words.",
   "",
-  "- [ ] !! First todo due:2026-10-14 every:2w-mon,thu-times-5 first tail and far tail",
+  "- [ ] !! First todo every:2w-mon,thu-times-5 first tail and far tail",
   "  - [ ] Nested todo every:1m nested tail",
   "- [ ] A long todo that goes on for many words so that it wraps in a narrow column and its token falls in the middle of it every:1st-tue,3rd-tue and then some more words after the token so that the line wraps again",
   "1. [ ] Numbered todo every:mar-1 numbered tail",
