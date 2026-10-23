@@ -81,6 +81,7 @@ import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
 import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listMail, listSources, mailSenders, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
+import { holdsOldLinks, linksConverted } from "./oldLinks.ts";
 import { referencesIn } from "./references.ts";
 import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { linkHash } from "./linkSeal.ts";
@@ -527,6 +528,12 @@ const quoted = (title: string) => JSON.stringify(title);
 /** The label of the change that wrote a note's bare dates as links. */
 export const DATES_LINKED = "Dates written as links";
 
+/** The label of the change that wrote a note's mentions and references to events as links. */
+export const LINKS_CONVERTED = "Links converted";
+
+/** How many notes one `note.convertLinks` looks at. */
+const CONVERTED_AT_ONCE = 25;
+
 /**
  * The text with each link the write introduces stored by its note's id. A write introduces a link
  * when no link in `base`, the text it was based on, has the same target as written. So a link the
@@ -660,6 +667,42 @@ async function mentionedById(ctx: Context, text: string, base: string, how: "res
   });
   if (stored.length > MAX_NOTE_LENGTH) throw new OpError("invalid", `With its mentions stored by id, the note would be over ${MAX_NOTE_LENGTH} characters`);
   return stored;
+}
+
+/**
+ * Writes note `id`'s mentions and references to events as links, as `linksConverted` does with the
+ * members' names now, once, as a change of the asker's labeled {@link LINKS_CONVERTED}, and answers
+ * its new revision. Null where the asker may not change the note, which waits for someone who may,
+ * and where there was nothing to convert. One that fails is left for the next asking, unless the
+ * change can't be made to it at all, as one it would make too long, which is passed over.
+ */
+async function convertLinks(ctx: Context, id: string, memberName: (personId: string) => string | undefined): Promise<{ id: string; revision: number } | null> {
+  let row: NoteRow;
+  try {
+    row = await loadNote(ctx, id, "edit", "refused");
+  } catch (err) {
+    if (err instanceof OpError) return null;
+    throw err;
+  }
+  // Claimed before it is converted, so two members coming in at once convert it once.
+  const claimed = await ctx.db.prepare("UPDATE notes SET links_converted = 1 WHERE id = ? AND links_converted = 0").bind(id).run();
+  if (claimed.meta.changes !== 1) return null;
+  const text = linksConverted(row.text, memberName);
+  if (text === row.text) return null;
+  let written: Written;
+  try {
+    written = await commitNote(ctx, { id, baseRevision: row.revision, text, linkTitles: "keep", mentionNames: "keep" });
+  } catch (err) {
+    // Left for the next asking, unless the note can't take the change at all.
+    if (!(err instanceof OpError && err.code === "invalid")) await ctx.db.prepare("UPDATE notes SET links_converted = 0 WHERE id = ?").bind(id).run();
+    if (err instanceof OpError) return null;
+    throw err;
+  }
+  await ctx.db
+    .prepare(`INSERT INTO labels (note_id, revision, name, author_kind, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`)
+    .bind(id, written.revision, LINKS_CONVERTED, ctx.author.kind, authorId(ctx), ctx.now)
+    .run();
+  return { id, revision: written.revision };
 }
 
 /** Whether `column` is the tag `key` names or a tag inside it, as `key/sub` is: by `substr`, since `_` is a tag's letter and LIKE's wildcard. */
@@ -970,8 +1013,9 @@ function recording(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision:
     statements: [
       insertChange(ctx, row.id, revision, baseRevision, row.text, changes, recorded),
       ctx.db
-        .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, updated_by_owner = ?, indexed = ? WHERE id = ? AND revision = ?")
-        .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, next.updated_by_owner, MADE, row.id, row.revision),
+        // A text that holds what notes wrote before people and events were links, put back or written by an app or an agent from before, is converted again.
+        .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, updated_by_owner = ?, indexed = ?, links_converted = links_converted * ? WHERE id = ? AND revision = ?")
+        .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, next.updated_by_owner, MADE, holdsOldLinks(text) ? 0 : 1, row.id, row.revision),
       ...deriving(ctx, row.id, text, was),
     ],
   };
@@ -1115,10 +1159,10 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
       ...(folder.id ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, NULL, ?, ?)").bind(folderId, ctx.workspaceId, folder.name, folderKey(folder.name))]),
       ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, private_owner, indexed, dates_linked)
-           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, private_owner, indexed, dates_linked, links_converted)
+           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         )
-        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.private_owner, row.indexed),
+        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.private_owner, row.indexed, holdsOldLinks(row.text) ? 0 : 1),
       insertChange(ctx, id, 1, 0, "", changesBetween("", text)),
       ...(stale ? [ctx.db.prepare("DELETE FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ? AND note_id = ?").bind(ctx.workspaceId, ctx.personId, day, stale)] : []),
       ctx.db.prepare("INSERT INTO daily_notes (workspace_id, person_id, day, note_id) VALUES (?, ?, ?, ?)").bind(ctx.workspaceId, ctx.personId, day, id),
@@ -1975,10 +2019,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, indexed, dates_linked)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, updated_by_owner, created_by, created_by_kind, indexed, dates_linked, links_converted)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         )
-        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed);
+        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed, holdsOldLinks(row.text) ? 0 : 1);
       await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text), { writeId: op.writeId }), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
       await heldByAgent(ctx, id, text);
       return linked(toNote(ctx, row), unresolved);
@@ -2335,6 +2379,29 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .bind(row.id, written.revision, DATES_LINKED, ctx.author.kind, authorId(ctx), ctx.now)
         .run();
       return { id: row.id, revision: written.revision, changed: true };
+    },
+  },
+
+  "note.convertLinks": {
+    needs: "view",
+    // The app's, as a member comes in: an agent writes links itself, and a guest leaves the notes for a member's.
+    by: "member",
+    members: true,
+    changes: true,
+    async run(ctx, op) {
+      const { results } = await ctx.db
+        .prepare(`SELECT n.id FROM notes n WHERE n.workspace_id = ?1 AND n.links_converted = 0 AND n.id > ?3 AND ${SEEN("n", "?2", "any")} ORDER BY n.id LIMIT ?4`)
+        .bind(ctx.workspaceId, ctx.sight.bind, op.after ?? "", CONVERTED_AT_ONCE + 1)
+        .all<{ id: string }>();
+      const asked = results.slice(0, CONVERTED_AT_ONCE);
+      if (!asked.length) return { converted: [], next: null };
+      const names = new Map((await listMembers(ctx.db, ctx.workspaceId, { emails: false })).map((m) => [m.personId, m.name]));
+      const converted: { id: string; revision: number }[] = [];
+      for (const { id } of asked) {
+        const written = await convertLinks(ctx, id, (personId) => names.get(personId));
+        if (written) converted.push(written);
+      }
+      return { converted, next: results.length > CONVERTED_AT_ONCE ? asked.at(-1)!.id : null };
     },
   },
 

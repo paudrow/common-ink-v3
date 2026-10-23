@@ -563,6 +563,17 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     if (here !== me.timeZone) perform(workspaceId, { type: "timeZone.record", timeZone: here }).catch(() => {});
   }, [workspaceId, me.timeZone]);
 
+  // Notes written before people and events were links have them written as links by the server, as
+  // changes of the first member who may make them to come in, labeled for what they did.
+  useEffect(() => {
+    if (role === "guest") return;
+    const convert = async (after?: string): Promise<void> => {
+      const { next } = await performInSync(workspaceId, { type: "note.convertLinks", ...(after && { after }) });
+      if (next) return convert(next);
+    };
+    convert().catch(() => {});
+  }, [workspaceId, role]);
+
   const listedNotes = useRef(notes);
   listedNotes.current = notes;
   /** Notes loaded, saved, or created since the last listing was asked for, which its answer can't know. */

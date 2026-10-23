@@ -34,15 +34,15 @@ export const isPersonId = (target: string) => ID.test(target);
 export const readableName = (name: string) => name.replace(UNSEEN, "").trim();
 
 /** A name as a mention can hold it: without brackets, `|`, line breaks, or characters that don't show. */
-const writable = (name: string) => readableName(name.replace(UNWRITABLE, " "));
+export const writableName = (name: string) => readableName(name.replace(UNWRITABLE, " "));
 
 /**
  * How a mention is written: of a member by their id, or of anyone else by name, with `label` to show
  * in place of the name where it is given. Empty for a name with nothing to write.
  */
 export function writtenMention(person: { id?: string | null; name: string }, label?: string | null): string {
-  const target = person.id || writable(person.name);
-  return target ? writtenLink(`person:${target}`, label && writable(label)) : "";
+  const target = person.id || writableName(person.name);
+  return target ? writtenLink(`person:${target}`, label && writableName(label)) : "";
 }
 
 const PERSON = "[[person:";
