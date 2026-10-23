@@ -14,7 +14,7 @@ A todo is a checkbox line in a note. There is no other record of it: the note's 
 | Repeat | `every:2w` | One of the rules below. The first one that can be read counts. |
 | Last done | `done:2026-10-10x12` | The day a repeating todo was last checked off, and how many times it has been. With no `x12` it was once. Checking the todo off writes it. |
 | Assignee | `@[[k3j5h8d9f0a1\|Ada Lovelace]]`, `@[[Sam Okafor]]` | A mention of a person on the line: a member by their id and name, anyone else by name. A todo can have several. `docs/adr/0007-mentions-are-ids-for-members-and-names-for-everyone-else.md` has how a mention is written. |
-| Tag | `#money` | Letters, digits, `_`, `-` and `/`, with something besides digits, so `#12` is not a tag. It tags the whole note, on a todo's line as on any other. Matched ignoring case. |
+| Tag | `#money` | Letters, digits, `_`, `-` and `/`, with something besides digits, so `#12` is not a tag. It tags the todo and the whole note. Matched ignoring case. |
 
 A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `a#b` is not a tag. Text in inline code, in a link to a note (`[[…]]`), in a mention (`@[[…]]`), and in a link's address (`](…)`) is never a token. Nor is a tag in an embed's braces, as `::poll{question #garden}` has. A mention stands alone the same way at its start: its `@` doesn't follow a letter, a digit, `_` or `@`.
 
@@ -49,7 +49,7 @@ Markdown itself knows only `[ ]` and `[x]`. Another markdown app shows `[-]` and
 
 A todo is grouped two ways, both of them the note's own. There is nothing else to learn:
 
-- **Tags.** The `#tags` of todos are the `#tags` of notes. A todo counts as tagged with the tags written on its own line and with every tag of its note, wherever in the note that tag is written. So `#work` in a note's title tags each todo in the note, and a list narrowed to `#work` shows them all. The Todos page shows a tag on a todo's row only where the todo's own line writes it. A row's note is named by its title alone, without the tags the title ends in, whatever the list is narrowed to.
+- **Tags.** The `#tags` of todos are the `#tags` of notes, scoped to where they are written. A note has every tag written in it. A todo counts as tagged with the tags written on its own line and with the ones that cover it (`src/core/tagScope.ts`). A tag in a heading covers the lines under the heading, up to the next heading at the same or a higher level. A line of nothing but tags, outside a list, covers the lines after it to the end of its section: up to the next heading at the same or a higher level than the one it is under, or, before the first heading, up to that heading, or to the end of a note with none. A tag anywhere else in a line covers that line and the list items nested under it. Code is not read. So `#work` in a heading tags each todo under that heading, and a line of `#common-ink` under `## Building` tags the todos of Building and not those of `## Chores` after it. A todo has at most ten tags from other lines, the nearest, so a heading of many tags makes few rows. `todo.list` gives a todo's `tags` and, in `tagsElsewhere`, the line each of the others is written on, from the same rule the filter reads. The Todos page shows a tag on a todo's row only where the todo's own line writes it. A row's note is named by its title alone, without the tags the title ends in, whatever the list is narrowed to.
 - **Folders.** A todo is in the folder its note is in. `todo.list` takes `folderId` and lists the todos of that folder and of every folder under it.
 
 There are no projects. Todos once had a `+Name` token for one. It read like a tag, nothing said how it differed from one, and it was a third way to group beside the two a note already has, so it was taken out. A `+Home` already written on a todo stays in the note as it is, as words of the todo: nothing rewrites it, no chip is drawn for it, and nothing lists by it. To keep such a grouping, write it as a tag.
@@ -118,10 +118,11 @@ The one place the server does work out a day is a completion with no day given. 
 
 ## The index
 
-Three tables hold what the Todos page lists, so that no note's text is read to list todos:
+Four tables hold what the Todos page lists, so that no note's text is read to list todos:
 
 - `todos`: one row for each todo, with its note, its line counted from 0, whether it is done, its priority (`importance`), its due date, the line as written, whether it repeats, and the line's words alone in small letters without accents (`words`), which a word of a query is found in by its start, as the search index finds a note's.
 - `note_tags`: one row for each tag of each note, as a key in lower case and the name as first written. #21 lists notes by tag from here.
+- `todo_tags`: one row for each tag of each todo, its own and the ones that cover it, as a key in lower case and the name as written. `tag:` on todos and the Todo filters' tags read it.
 - `mentions`: one row for each person each line mentions, as the person's id, or the name in lower case for a mention by name, and the name as written. A row on a todo's line is an assignee of that todo.
 
 Migration `0034` drops the table `todo_projects`, which held the projects. The other two hold what they held, so nothing is made again for it.

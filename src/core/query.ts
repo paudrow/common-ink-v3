@@ -102,6 +102,9 @@ export const PRIORITIES = ["none", "low", "medium", "high"] as const;
 /** The row a condition is of: the upload `u`, or the note `n`, which a todo is in. */
 const item = (c: Compiling) => (c.scope === "uploads" ? "u" : "n");
 
+/** The tags `g` of what a condition is of, as a FROM and a WHERE to go on with: a note's, or a todo's own and those that cover it (`tagScope.ts`). */
+const TAGS_OF = (c: Compiling) => (c.scope === "todos" ? "todo_tags g WHERE g.note_id = t.note_id AND g.line = t.line" : "note_tags g WHERE g.note_id = n.id");
+
 const among = (c: Compiling, given: Given) => `(SELECT value FROM json_each(${c.bind(JSON.stringify(given.ids ?? []))}))`;
 
 /** A time compared with days: a day is all of it, from its first moment to the last. */
@@ -179,13 +182,13 @@ export const FILTERS = {
     aliases: [],
     value: { type: "tag" },
     compares: false,
-    means: "Tagged with it or a tag inside it, as #NAME/sub. #NAME is short for it. A todo has its note's tags",
+    means: "Tagged with it or a tag inside it, as #NAME/sub. #NAME is short for it. A note has every tag written in it. A todo has the ones on its line, a heading's over it, a line of tags' above it in its section, and a list item's it is nested in",
     example: "tag:money",
     shown: "NAME",
     // By `substr`, since `_` is a tag's letter and LIKE's wildcard.
     sql: (c, given) => {
       const key = nameKey(given.value);
-      return `EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND (g.tag = ${c.bind(key)} OR substr(g.tag, 1, length(${c.bind(key)}) + 1) = ${c.bind(`${key}/`)}))`;
+      return `EXISTS (SELECT 1 FROM ${TAGS_OF(c)} AND (g.tag = ${c.bind(key)} OR substr(g.tag, 1, length(${c.bind(key)}) + 1) = ${c.bind(`${key}/`)}))`;
     },
   },
   updated: {
@@ -342,7 +345,7 @@ export const FILTERS = {
         { word: "open-todo", aliases: ["open-task"], scopes: NOTES, means: "Has an open todo", sql: () => "n.open_todos > 0" },
         { word: "link", scopes: BOTH, means: "Links to another note", sql: () => "EXISTS (SELECT 1 FROM links l WHERE l.source_id = n.id)" },
         { word: "backlink", scopes: BOTH, means: "Linked to from a note you can see", sql: (c) => `EXISTS (SELECT 1 FROM links l JOIN notes b ON b.id = l.source_id WHERE l.target_id = n.id AND ${c.seen("b")})` },
-        { word: "tag", scopes: BOTH, means: "Has any tag", sql: () => "EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id)" },
+        { word: "tag", scopes: BOTH, means: "Has any tag", sql: (c) => `EXISTS (SELECT 1 FROM ${TAGS_OF(c)})` },
         { word: "attachment", scopes: NOTES, means: "Shows an upload: a picture, a video, sound or a file", sql: () => "EXISTS (SELECT 1 FROM upload_refs r WHERE r.note_id = n.id)" },
         { word: "due", scopes: TODOS, means: "Has a due date", sql: () => "t.due IS NOT NULL" },
         { word: "repeat", aliases: ["recurrence"], scopes: TODOS, means: "Repeats", sql: () => "t.recurs = 1" },
@@ -1002,7 +1005,7 @@ export const syntaxText = (scope: Scope) =>
 /** What a todo's line can hold, every rule of `every:` among it, for a model that is to write one unaided. */
 const TODO_TOKENS = `A todo is a checkbox line in a note: ${STATES_WRITTEN}. A query that names no state lists only open ones. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:
 ${RULE_GRAMMAR}
-done:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.`;
+done:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note. A todo counts as tagged with the tags on its own line and those that cover it: a heading's cover the lines under it up to the next heading at the same or a higher level; a line of nothing but tags covers the rest of its section, or before the first heading the lines up to it; a tag in a list item covers the items nested under it. Each listed todo's tags are the ones it has, and tagsElsewhere says the line each one it has from elsewhere is written on.`;
 
 /** Every form a query of `scope` can take, and for todos what a todo's line can hold: what query_syntax answers and `ink syntax` prints. */
 export const queryLanguage = (scope: Scope) =>

@@ -78,7 +78,7 @@ function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
   const known = [...todo.assignees, ...(change.assign ? [change.assign] : [])];
   const assignees = new Map(read.assignees.map((a) => [mentionKey(a), known.find((person) => sameWho(person, mentionKey(a))) ?? { id: isPersonId(a.target) ? a.target : null, name: mentionName(a), member: false }]));
-  return { ...todo, text, state: read.state, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.state === "done" ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text).map((tag) => tag.name)].some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
+  return { ...todo, text, state: read.state, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, completed: read.state === "done" ? todo.completed : null, tags: todo.tags.filter((name) => [...todo.tagsElsewhere, ...tagsOn(text)].map((tag) => tag.name).some((kept) => nameKey(kept) === nameKey(name))), assignees: [...assignees.values()], words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */

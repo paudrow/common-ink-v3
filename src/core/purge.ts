@@ -14,6 +14,7 @@ export const removalsOf = (notes: string): string[] => [
   `DELETE FROM note_search_rows WHERE note_id IN ${notes}`,
   `DELETE FROM todos WHERE note_id IN ${notes}`,
   `DELETE FROM note_tags WHERE note_id IN ${notes}`,
+  `DELETE FROM todo_tags WHERE note_id IN ${notes}`,
   `DELETE FROM mentions WHERE note_id IN ${notes}`,
   // What the note links to. What links to it stays: that is what another note's text says.
   `DELETE FROM links WHERE source_id IN ${notes}`,

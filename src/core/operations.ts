@@ -13,6 +13,7 @@ import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashe
 import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
+import { tagsCovering, todoTagIndex, type InheritedTag } from "./tagScope.ts";
 import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, mentionsOn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
 import { accountDeletion, deleteAccount, deleteWorkspace, remember, type Deletion } from "./erase.ts";
 import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, signOut, type Asking } from "./membership.ts";
@@ -85,7 +86,7 @@ import { linkHash } from "./linkSeal.ts";
 import { applyChanges, blank, changesBetween } from "./text.ts";
 import { HOLD_MS, discard, hold, neverWritten } from "./discard.ts";
 import { ruleLabel } from "./recurrence.ts";
-import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, deletedTags, nameKey, parseTodo, renamedTag, renamedTags, rolledForward, tagsAdded, tagsBesides, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
+import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, deletedTags, nameKey, parseTodo, renamedTag, renamedTags, rolledForward, tagsAdded, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
 
 /** The note an author already made with a write id, so a create sent again makes one note. Served by changes_by_author_write. */
 export const PRIOR_WRITE = `SELECT c.note_id AS id FROM changes c JOIN notes n ON n.id = c.note_id
@@ -292,7 +293,7 @@ export interface NoteRow extends SummaryRow {
 }
 
 /** What a note's `indexed` is once its title and snippet, its links, todos, tags, mentions, search text and the uploads it refers to have been made from its text as they are made now. */
-const MADE = 10;
+const MADE = 11;
 
 /** A note as it is made: live. */
 const NEW = { state: "live", state_at: null } as const;
@@ -732,9 +733,10 @@ const INDEXED = {
     "INSERT INTO todos (note_id, line, state, importance, due, text, words, recurs) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'), json_extract(value, '$[0]') IN (SELECT value FROM json_each(?4))",
   tags: "INSERT INTO note_tags (note_id, tag, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]')",
   mentions: "INSERT INTO mentions (note_id, line, who, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
+  todoTags: "INSERT INTO todo_tags (note_id, line, tag, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
 } as const;
-const INDEX_TABLE = { todos: "todos", tags: "note_tags", mentions: "mentions" } as const;
-const indexOf = (text: string) => ({ ...todoIndex(text), mentions: mentionIndex(text) });
+const INDEX_TABLE = { todos: "todos", tags: "note_tags", mentions: "mentions", todoTags: "todo_tags" } as const;
+const indexOf = (text: string) => ({ ...todoIndex(text), mentions: mentionIndex(text), todoTags: todoTagIndex(text) });
 
 /**
  * The statements that make the index of a note's todos, its tags, and its mentions what `text`
@@ -2008,7 +2010,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const pages = paging([asc(STATE_RANK), ...(sort ? TODO_ORDER[sort] : orderOf(query.sort!)), asc("t.note_id"), asc("t.line")], op.after, bind);
       const { results } = await prepare(
         `SELECT ${pages.keys}, t.note_id, t.line, t.state, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
-           (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
+           (SELECT json_group_array(name) FROM (SELECT g.name FROM todo_tags g WHERE g.note_id = t.note_id AND g.line = t.line ORDER BY g.rowid)) AS tags
          FROM todos t JOIN notes n ON n.id = t.note_id
          WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition} AND ${pages.where}
          ORDER BY ${pages.orderBy}
@@ -2022,6 +2024,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const texts = new Map(
         tagged.length === 0 ? [] : (await ctx.db.prepare("SELECT id, text FROM notes WHERE id IN (SELECT value FROM json_each(?1))").bind(JSON.stringify([...new Set(tagged)])).all<{ id: string; text: string }>()).results.map((n) => [n.id, n.text]),
       );
+      // Where the tags a todo has from other lines are written, read from its note's text as its index row was: once a note.
+      const covers = new Map<string, Map<number, InheritedTag[]>>();
+      const coverOf = (noteId: string) => covers.get(noteId) ?? covers.set(noteId, tagsCovering(texts.get(noteId) ?? "")).get(noteId)!;
       return {
         todos: page.map(({ r, todo }) => {
           return {
@@ -2038,7 +2043,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
             completed: r.state === "done" ? ticked(r.note_id, r.line) : null,
             tags: JSON.parse(r.tags) as string[],
-            tagsElsewhere: tagsBesides(texts.get(r.note_id) ?? "", r.line),
+            tagsElsewhere: coverOf(r.note_id).get(r.line) ?? [],
             assignees: mentionedIn(members, todo?.assignees ?? []),
             words: todo?.words ?? r.text,
             access: itemLevel(ctx.sight, { id: r.note_id, folder_id: r.folder_id, private_owner: r.private_owner }) === "edit" ? "edit" : "view",
@@ -2057,8 +2062,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const [tags, assigned] = await ctx.db.batch<{ name: string; who?: string }>([
         ctx.db
           .prepare(
-            `SELECT MIN(g.name) AS name FROM note_tags g JOIN notes n ON n.id = g.note_id
-             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND EXISTS (SELECT 1 FROM todos t WHERE t.note_id = g.note_id) GROUP BY g.tag ORDER BY g.tag`,
+            `SELECT MIN(g.name) AS name FROM todo_tags g JOIN notes n ON n.id = g.note_id
+             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} GROUP BY g.tag ORDER BY g.tag`,
           )
           .bind(ctx.workspaceId, ctx.sight.bind),
         ctx.db

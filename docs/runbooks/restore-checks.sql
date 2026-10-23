@@ -39,6 +39,7 @@ SELECT
   (SELECT count(*) FROM source_connections) AS source_connections,
   (SELECT count(*) FROM source_refs) AS source_refs,
   (SELECT count(*) FROM tag_descriptions) AS tag_descriptions,
+  (SELECT count(*) FROM todo_tags) AS todo_tags,
   (SELECT count(*) FROM todos) AS todos,
   (SELECT count(*) FROM upload_parts) AS upload_parts,
   (SELECT count(*) FROM upload_pass_uses) AS upload_pass_uses,

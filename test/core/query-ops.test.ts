@@ -42,9 +42,9 @@ async function made() {
   const plans = await folder("Plans", work);
   const home = await folder("Home");
   const note = (by: Actor, folderId: string | undefined, text: string, day: string, time?: string) => perform(env.DB, by, { type: "note.create", folderId, text }, at(day, time));
-  const budget = await note(ada, work, "# Budget\n\nThe second quarter #money\n\n- [ ] !! Call the bank due:2026-10-05 #urgent\n- [x] File taxes due:2026-09-01", "2026-10-01", "23:30");
+  const budget = await note(ada, work, "# Budget\n\nThe second quarter\n#money\n- [ ] !! Call the bank due:2026-10-05 #urgent\n- [x] File taxes due:2026-09-01", "2026-10-01", "23:30");
   const roadmap = await note(ada, plans, `# Roadmap\n\nSee [[${budget.id}]] for the budget plan.\n\n- [ ] !!! Ship the plan due:2026-10-20 every:1w\n- [ ] Tidy the roadmap`, "2026-10-02", "00:30");
-  const recipes = await note(grace, home, "# Recipes\n\nA quarter cup of milk #food\n\n- [x] Buy milk", "2026-10-03");
+  const recipes = await note(grace, home, "# Recipes\n\nA quarter cup of milk\n#food\n- [x] Buy milk", "2026-10-03");
   const diary = await note(asScribe, home, "# Diary\n\nNothing planned.", "2026-10-04");
   const old = await note(ada, undefined, "# Old budget\n\nLast year's second budget.\n\n- [ ] ! Shred it", "2026-10-05");
   const gone = await note(ada, undefined, "# Scrapped budget\n\nNever mind.", "2026-10-06");
@@ -383,7 +383,7 @@ describe("todo.list, by each filter", () => {
     // As the migration leaves a line it can't read the rule of: marked by the look of it, until the note is read in again.
     await env.DB.batch([env.DB.prepare("UPDATE todos SET recurs = text LIKE '% every:%' WHERE note_id = ?").bind(note.id), env.DB.prepare("UPDATE notes SET indexed = 3 WHERE id = ?").bind(note.id)]);
     expect(await todos(ada, "has:repeat")).toEqual(["Water plants"]);
-    expect((await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first<{ indexed: number }>())!.indexed).toBe(10);
+    expect((await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first<{ indexed: number }>())!.indexed).toBe(11);
     await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 4, text: "- [ ] Sweep", every: "1w" });
     expect((await todos(ada, "has:repeat")).sort()).toEqual(["Sweep", "Water plants"]);
 

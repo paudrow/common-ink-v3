@@ -553,7 +553,7 @@ test("what a browser kept of the Todos page's old filters opens as the query tha
   });
   await page.reload();
   await expect(bar(page)).toHaveValue("tag:outside (is:open OR is:done)");
-  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants", "Book flights"]);
+  await expect(words(page)).toHaveText(["Water plants"]);
   await expect(todosPage(page).getByRole("alert")).toHaveCount(0);
   // A link to the page can name its query, which is then what the page is left at.
   await page.goto("/todos?q=is%3Adone+-tag%3Aoffice");
@@ -571,7 +571,7 @@ test("what a browser kept of the Todos page's old filters opens as the query tha
   await expect(bar(page)).toHaveValue("bank");
 });
 
-test("a todo has the tags on its own line and its note's: its own are drawn as chips after its words, and its note's name is said alone, narrowed to a tag or not", async ({ page }) => {
+test("a todo has the tags on its own line and the ones over it: its own are drawn as chips after its words, and its note's name is said alone, narrowed to a tag or not", async ({ page }) => {
   await twoNotes(page);
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
   const names = () => rows(page).locator(".todo-note");
@@ -583,18 +583,17 @@ test("a todo has the tags on its own line and its note's: its own are drawn as c
   await expect(row(page, "Water plants").locator(".todo-chips .todo-tag")).toHaveText(["#outside"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
 
-  // Under the tag of one todo's line: both todos of the note are tagged with it, and only the one whose line writes it has its chip. The builder offers the tags todos have.
+  // Under the tag of one todo's line: that todo alone. The builder offers the tags todos have.
   await advanced(page).click();
   await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Tag" });
   await expect.poll(() => condition(page, 1).locator("datalist option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))).toEqual(["office", "outside"]);
   await condition(page, 1).getByRole("combobox", { name: "Value" }).fill("outside");
   await expect(bar(page)).toHaveValue("tag:outside");
-  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
+  await expect(words(page)).toHaveText(["Water plants"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
-  await expect(names()).toHaveText(["Home", "Home"]);
-  await expect(row(page, "Call the bank").locator(".todo-note")).toHaveAttribute("title", "Open Home");
+  await expect(names()).toHaveText(["Home"]);
 
-  // Under a tag only the note's title writes: every todo of the note, and still only the note's name.
+  // Under a tag only the note's title writes: every todo under it, and still only the note's name.
   await bar(page).fill("#office");
   await expect(condition(page, 1).getByRole("combobox", { name: "Value" })).toHaveValue("office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
@@ -1374,10 +1373,10 @@ test("a chip of what isn't set opens the same popover as a set one: Priority and
   await page.keyboard.press("Enter");
   await expect.poll(() => lineIn(3)).toBe("- [ ] !! Write notes #office #desk");
   await expect(notes.locator(".todo-chip")).toHaveText(["Medium", "#office", "#desk", "Add date", "Add tag", "Repeat"]);
-  // Each tag's chip still narrows the list, to the todos of the notes with that tag.
+  // Each tag's chip still narrows the list, to the todos with that tag.
   await notes.getByRole("button", { name: "#desk", exact: true }).click();
   await expect(bar(page)).toHaveValue("#desk");
-  await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
+  await expect(words(page)).toHaveText(["Write notes"]);
   await expect(notes.getByRole("button", { name: "#desk", exact: true })).toHaveAttribute("aria-pressed", "true");
   await notes.getByRole("button", { name: "#desk", exact: true }).click();
   await expect(bar(page)).toHaveValue("");

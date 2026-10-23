@@ -280,9 +280,9 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
   it("lists the todos and tags of its own notes only, learns nothing of a folder outside by asking for its todos, and sets no todo outside", async () => {
     const w = await world();
     const todo = "- [ ] buy-outside +proj-outside";
-    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Chores-outside\n\n${todo}\n\n#tag-outside` });
+    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Chores-outside\n\n#tag-outside\n\n${todo}` });
     const chores = (await perform(env.DB, w.ada, { type: "note.list", folderId: w.journal })).notes.find((n) => n.title === "Chores-outside")!;
-    await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: "# Sprint\n\n- [ ] ship-inside +proj-inside\n\n#tag-inside" });
+    await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: "# Sprint\n\n#tag-inside\n\n- [ ] ship-inside +proj-inside" });
     const claude = await asAgent(w.limited.token);
 
     const listed = await claude.json<{ todos: { text: string }[] }>("list_todos", { includeCompleted: true });
@@ -294,7 +294,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     expect(await claude.call("list_todos", { folderId: w.journal, includeCompleted: true, tag: "tag-outside" })).toEqual(await claude.call("list_todos", { folderId: MISSING, includeCompleted: true, tag: "tag-outside" }));
     expect((await claude.json<{ todos: unknown[] }>("list_todos", { tag: "tag-outside" })).todos).toEqual([]);
     expect(await claude.json("todo_filters")).toEqual({ tags: ["tag-inside"], assignees: [] });
-    const set = (id: string) => claude.call("set_todo", { id, revision: 1, line: 3, text: todo, done: true });
+    const set = (id: string) => claude.call("set_todo", { id, revision: 1, line: 4, text: todo, done: true });
     expect(await set(chores.id)).toEqual(NO_NOTE);
     expect(await set(MISSING)).toEqual(NO_NOTE);
     expect((await perform(env.DB, w.ada, { type: "note.read", id: chores.id })).text).toContain(todo);
@@ -363,10 +363,10 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const { ada } = w;
     const note = (folderId: string | undefined, text: string) => perform(env.DB, ada, { type: "note.create", folderId, text });
     // Inside and outside share a word, a tag and a todo's word, so a count that took in what is outside would be one too many.
-    const tagged = await note(w.projects, "# Budget\n\ncommonword #sharedtag #insidetag\n\n- [ ] file it sharedtodo");
+    const tagged = await note(w.projects, "# Budget\n\ncommonword\n#sharedtag #insidetag\n- [ ] file it sharedtodo");
     const filed = await note(w.plans, "# Old plan\n\ncommonword archived-inside");
     const binned = await note(w.plans, "# Scrapped plan\n\ncommonword trashed-inside");
-    const hush = await note(w.journal, "# Hush-outside\n\ncommonword #sharedtag #hushtag\n\n- [ ] hide it sharedtodo Hideout");
+    const hush = await note(w.journal, "# Hush-outside\n\ncommonword\n#sharedtag #hushtag\n- [ ] hide it sharedtodo Hideout");
     const shelved = await note(w.journal, "# Shelved-outside\n\ncommonword #sharedtag archived-words-outside");
     const dumped = await note(undefined, "# Dumped-outside\n\ncommonword #sharedtag trashed-words-outside");
     await perform(env.DB, ada, { type: "note.archive", id: filed.id, archived: true });
@@ -450,8 +450,8 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const { ada } = w;
     const note = (folderId: string | undefined, text: string) => perform(env.DB, ada, { type: "note.create", folderId, text });
     // Both sides have a todo with the same words, due the same day, and a note of each is shared and one outside is private.
-    const tagged = await note(w.projects, "# Budget\n\ncommonword #sharedtag\n\n- [ ] !! sharedtodo due:2026-10-01 every:1w");
-    const hush = await note(w.journal, "# Hush-outside\n\ncommonword #sharedtag #hushtag\n\n- [ ] !!! sharedtodo Hideout due:2026-10-01 every:1w");
+    const tagged = await note(w.projects, "# Budget\n\ncommonword\n#sharedtag\n- [ ] !! sharedtodo due:2026-10-01 every:1w");
+    const hush = await note(w.journal, "# Hush-outside\n\ncommonword\n#sharedtag #hushtag\n- [ ] !!! sharedtodo Hideout due:2026-10-01 every:1w");
     const sealed = await note(w.journal, "# Sealed-outside\n\ncommonword sealed-words-outside");
     await perform(env.DB, ada, { type: "note.setPrivate", id: sealed.id, private: true });
     await perform(env.DB, ada, { type: "grant.link", noteId: hush.id, link: "public" });

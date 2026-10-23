@@ -177,7 +177,7 @@ $$`,
     name: "todo",
     kind: "prose",
     called: "a todo",
-    about: `A todo is a checkbox line: ${STATES_WRITTEN}. !, !! or !!! right after the checkbox is its priority. due:YYYY-MM-DD is the day. every:RULE makes it repeat, and the rules are in list_todos. @[[Name]] on the line assigns it. #tag anywhere in the note tags it.`,
+    about: `A todo is a checkbox line: ${STATES_WRITTEN}. !, !! or !!! right after the checkbox is its priority. due:YYYY-MM-DD is the day. every:RULE makes it repeat, and the rules are in list_todos. @[[Name]] on the line assigns it. A #tag on the line tags it, and so do the tags over it: a heading's, a line of nothing but tags above it in its section, and a list item's it is nested in.`,
     example: "- [ ] !! Call the bank due:2026-10-14 every:1w",
   },
 ];
