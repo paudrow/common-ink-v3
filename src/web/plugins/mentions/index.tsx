@@ -262,6 +262,7 @@ export const mentions: Plugin = {
     host.commands.register({
       id: "mentions.edit",
       title: "Edit the mention at the cursor",
+      group: "Editor",
       keys: ["alt+enter"],
       when: () => {
         const view = focused();

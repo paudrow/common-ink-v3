@@ -423,6 +423,7 @@ test("the keyboard shortcuts list the sidebar's keys under a heading of their ow
   await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
   sheet = await sheetOf();
   const ctrlW = (key: string) => (MAC ? `⌃W ${key}` : `Ctrl+W ${key}`);
+  const ctrl = (key: string) => (MAC ? `⌃${key}` : `Ctrl+${key}`);
   expect(await rowsOf(sheet.getByRole("table", { name: "Sidebar" }))).toEqual([
     ["Next or previous row", "↓", "↑", "J", "K"],
     ["First or last row", "Home", "End", "G G", MAC ? "⇧G" : "Shift+G"],
@@ -431,12 +432,14 @@ test("the keyboard shortcuts list the sidebar's keys under a heading of their ow
     ["Open the row and stay in the sidebar", "Space"],
     ["Open the row to the side and go to it", "Shift+Enter"],
     ["Open the row to the side and stay in the sidebar", "Shift+Space"],
-    ["Go to the sidebar, on the row of what is open", ctrlW("H")],
+    ["Go to the sidebar, on the row of what is open", ctrlW("H"), ctrl("H")],
     ["Go back to the region you were in", ctrlW("P")],
   ]);
   const vim = sheet.getByRole("table", { name: "Vim" });
   await expect(vim.getByRole("row", { name: "Vim: go back to the region you were in" }).locator("kbd")).toHaveText([ctrlW("P")]);
   await expect(vim.getByRole("row", { name: "Vim: go to the next region, round to the first" }).locator("kbd")).toHaveText([ctrlW("W")]);
+  for (const [side, key] of [["on the left", "H"], ["below", "J"], ["above", "K"], ["on the right", "L"]])
+    await expect(vim.getByRole("row", { name: `Vim: go to the region ${side}` }).locator("kbd")).toHaveText([ctrlW(key!), ctrl(key!)]);
 });
 
 test.describe("opening goes to the pane you're in", () => {
@@ -538,4 +541,41 @@ test.describe("Shift+Space and Shift+Enter open to the side", () => {
     await expect(pane(page, 2).getByRole("textbox", { name: "Note text" })).toBeFocused();
     await expect(tabsIn(page, 1)).toHaveText(["All notes"]);
   });
+});
+
+test("in vim mode, Ctrl+h, j, k and l go between the sidebar and the panes with no Ctrl-w first, from a note in normal mode and from a list, and Ctrl+h in insert mode deletes a letter", async ({ page }) => {
+  const { work } = await setUp(page, true);
+  const note = await perform(page, { type: "note.create", text: "# Delta\n\nwords", folderId: work.id });
+  await page.goto(`/note/${note.id}`);
+  await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
+  const text = (n: number) => page.getByRole("region", { name: `Editor group ${n}` }).getByRole("textbox", { name: "Note text" });
+  await expect(text(1)).toContainText("words");
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Commands" }).fill("Split editor right");
+  await page.keyboard.press("Enter");
+  await expect(text(2)).toBeFocused();
+  await expect(page.locator(".cm-vim-panel").nth(1)).toHaveText("--NORMAL--");
+
+  await page.keyboard.press("Control+h");
+  await expect(text(1)).toBeFocused();
+  await page.keyboard.press("Control+h");
+  await expectMarked(folder(page, "Work"), "the note's folder in the sidebar");
+  // From a list, the sidebar's, the keys are the same.
+  await page.keyboard.press("Control+l");
+  await expect(text(1)).toBeFocused();
+  await page.keyboard.press("Control+l");
+  await expect(text(2)).toBeFocused();
+  // Nothing is right of the last pane, or above or below it: the keys stay where they are.
+  await keys(page, "Control+l", "Control+j", "Control+k");
+  await expect(text(2)).toBeFocused();
+
+  // In insert mode Control+h is the note's, which goes nowhere: on a Mac it deletes the letter before the cursor, and elsewhere it does nothing.
+  await keys(page, "Shift+G", "Shift+A");
+  await expect(page.locator(".cm-vim-panel").nth(1)).toHaveText("--INSERT--");
+  await page.keyboard.type("xy");
+  await page.keyboard.press("Control+h");
+  await expect(text(2)).toBeFocused();
+  await expect(page.locator(".cm-vim-panel").nth(1)).toHaveText("--INSERT--");
+  await page.keyboard.press("Escape");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(process.platform === "darwin" ? "# Delta\n\nwordsx" : "# Delta\n\nwordsxy");
 });

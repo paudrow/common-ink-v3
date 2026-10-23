@@ -22,7 +22,7 @@ import { MarkdownReader } from "./MarkdownReader.tsx";
 import { NoteReader } from "./NoteReader.tsx";
 import { cursorIn, onNoteMoves, putCursor } from "./openNotes.ts";
 import { stacked, type Told } from "./notices.ts";
-import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
+import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Command, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
@@ -535,7 +535,7 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
     return () => void delete document.documentElement.dataset.theme;
   }, [theme]);
   const shortcut = (commandId: string) => {
-    const chord = chordFor(commandId, contributed.keybindings);
+    const chord = chordFor(commandId, contributed.keybindings, contributed.shared);
     return chord && chordLabel(chord, MAC);
   };
 
@@ -998,22 +998,22 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       if (e.target instanceof Element && e.target.closest("[data-records-keys], [data-keeps-keys]")) return;
       // Escape and then Tab in a note leaves it for what comes next on the page, whatever Tab is bound to there.
       if (e.key === "Tab" && tabLeaves(e.target)) return;
-      const { keybindings, commands } = host.contributions();
+      const { keybindings, shared, commands } = host.contributions();
       const chord = chordOf(e, MAC);
       const begun = pending;
       giveUp();
       const press = pressing(chord);
       const pressesIt = press !== null && e.target instanceof Element && e.target.matches(TAKES[press]);
-      const commandFor = (keys: string) => commands.find((c) => c.id === keybindings[keys]);
-      const ready = Object.keys(keybindings).filter((keys) => {
-        if (keys !== chord && !keys.startsWith(`${chord} `) && !(begun && keys.startsWith(`${begun} `))) return false;
-        const command = commandFor(keys)!;
+      const runs = (keys: string, command: Command) => {
         // Keys that would type are left to what is being typed in, unless their command says for itself when it runs.
         if (!command.when && typed(keys) && (inField(e.target) || (e.target instanceof HTMLElement && e.target.isContentEditable))) return false;
         // Enter and Space are a button's, a link's or a checkbox's own while it has focus.
         if (!command.when && pressesIt && (keys === chord || keys.startsWith(`${chord} `))) return false;
         return !(inField(e.target) && command.leaveToFields) && command.when?.() !== false;
-      });
+      };
+      // Keys several commands share run the first that can run here.
+      const commandFor = (keys: string) => (shared[keys] ?? [keybindings[keys]!]).map((id) => commands.find((c) => c.id === id)!).find((c) => runs(keys, c));
+      const ready = Object.keys(keybindings).filter((keys) => (keys === chord || keys.startsWith(`${chord} `) || (begun && keys.startsWith(`${begun} `))) && !!commandFor(keys));
       const next = advance(begun, chord, ready);
       if (!next) return;
       if (next === "dropped") {

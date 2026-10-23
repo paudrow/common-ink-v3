@@ -65,6 +65,8 @@ export interface Contributions {
   commands: readonly Command[];
   /** Which command each chord runs: each command's own keys, with the member's keybindings over them. */
   keybindings: Readonly<Record<string, string>>;
+  /** The commands, in order, that share a chord they all have by default: it runs the first that can run where focus is. */
+  shared: Readonly<Record<string, readonly string[]>>;
   settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
   embeds: readonly (Embed | AddressEmbed)[];
@@ -475,9 +477,10 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
 
   /** The hint is the chord that runs the command now, which another command may have claimed first. */
   const infoOf = (c: Command): CommandInfo => {
-    const { keybindings } = contributions();
-    // Two chords can read the same, as / and Shift with / do.
-    const keys = [...new Set(Object.keys(keybindings).filter((chord) => keybindings[chord] === c.id).map((chord) => chordLabel(chord, mac)))];
+    const { keybindings, shared, settings } = contributions();
+    // In the order the command has them. Two chords can read the same, as / and Shift with / do.
+    const own = ((settings.values[KEYBINDING + c.id] as readonly string[] | undefined) ?? []).map((chord) => onPlatform(chord, mac));
+    const keys = [...new Set(own.filter((chord) => keybindings[chord] === c.id || shared[chord]?.includes(c.id)).map((chord) => chordLabel(chord, mac)))];
     return { id: c.id, title: c.title, shortcut: keys[0], keys, group: c.group, ...(c.aliases && { aliases: c.aliases }) };
   };
 
@@ -632,11 +635,12 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     const all = [...inOrder(commands.values()), ...toggles];
     const declared = declare(all);
     const { values, problems, chosen } = resolve(declared, document);
-    const { keybindings, conflicts } = bind(all.map((c) => ({ id: c.id, title: c.title, chords: [...new Set((values[KEYBINDING + c.id] as readonly string[]).map((chord) => onPlatform(chord, mac)))], chosen: chosen.has(KEYBINDING + c.id) })));
+    const { keybindings, shared, conflicts } = bind(all.map((c) => ({ id: c.id, title: c.title, chords: [...new Set((values[KEYBINDING + c.id] as readonly string[]).map((chord) => onPlatform(chord, mac)))], chosen: chosen.has(KEYBINDING + c.id), placed: !!c.when })));
     rememberFrameKeys({ chords: chordsForFrames(all, keybindings), commandId: (chord) => frameCommand(chord, all, keybindings) });
     return (snapshot = {
       commands: all,
       keybindings,
+      shared,
       settings: { declared, values, problems: [...problems, ...conflicts.map(({ commandId, reason }): Problem => ({ key: KEYBINDING + commandId, kind: "conflict", reason }))], document },
       views: Object.fromEntries(SLOTS.map((slot) => [slot, inOrder(views.get(slot)!.values())])) as unknown as Contributions["views"],
       embeds: inOrder(embeds.values()),

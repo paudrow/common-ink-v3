@@ -50,6 +50,7 @@ describe("keybindings", () => {
 
     expect(bind([first, tab, down, { id: "note.new", title: "New note", chords: ["g"], chosen: true }])).toEqual({
       keybindings: { g: "note.new", "g g": "vim.first", "g t": "vim.nextTab", j: "vim.down" },
+      shared: {},
       conflicts: [{ commandId: "note.new", reason: "g is the first key of g g, the keys for Vim: first row (vim.first), and of g t, the keys for Vim: next tab (vim.nextTab). Where both can run, g runs New note and the longer keys never run." }],
     });
     expect(bind([first, down, { id: "note.new", title: "New note", chords: ["j k"], chosen: true }]).conflicts).toEqual([
@@ -58,6 +59,17 @@ describe("keybindings", () => {
     // Defaults that overlap are the app's own to keep apart, and nobody's mistake to be told of.
     expect(bind([first, { id: "note.new", title: "New note", chords: ["g"], chosen: false }]).conflicts).toEqual([]);
     expect(bind([first, tab, down, { id: "note.new", title: "New note", chords: ["g n", "ctrl+w h"], chosen: true }]).conflicts).toEqual([]);
+  });
+
+  it("shares a key two commands have by default between them, and gives it to one alone where the member chose it", () => {
+    const fieldDown = { id: "vim.field.down", title: "Vim: next row, from a field", chords: ["ctrl+j", "ctrl+n"], chosen: false, placed: true };
+    const paneDown = { id: "vim.window.down", title: "Vim: go to the region below", chords: ["ctrl+w j", "ctrl+j"], chosen: false, placed: true };
+    expect(bind([fieldDown, paneDown])).toMatchObject({ keybindings: { "ctrl+j": "vim.field.down", "ctrl+n": "vim.field.down", "ctrl+w j": "vim.window.down" }, shared: { "ctrl+j": ["vim.field.down", "vim.window.down"] }, conflicts: [] });
+    const mine = { ...paneDown, chords: ["ctrl+j"], chosen: true };
+    expect(bind([fieldDown, mine])).toMatchObject({ keybindings: { "ctrl+j": "vim.window.down" }, shared: {} });
+    expect(bind([fieldDown, mine]).conflicts).toHaveLength(1);
+    // Two that run anywhere don't share: the first would always run.
+    expect(bind([{ ...fieldDown, placed: false }, { ...paneDown, placed: false }]).shared).toEqual({});
   });
 
   it("tells ⌘ from Control on a Mac, so ⌘O is not Control+O", () => {

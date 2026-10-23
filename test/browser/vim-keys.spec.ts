@@ -340,7 +340,7 @@ test("in Settings, Enter on a setting goes to its field and Escape comes back to
   await expect(shown("Vim: open the selected row")).toHaveText([/^Enter/, /^L/]);
   await expect(shown("Vim: expand or collapse the selected row")).toHaveText([/^Z A/]);
   await expect(shown("Vim: preview the selected row in the editor area, and stay on it")).toHaveText([/^Space/]);
-  await expect(shown("Vim: go to the region on the left")).toHaveText([MAC ? /^⌃W H/ : /^Ctrl\+W H/]);
+  await expect(shown("Vim: go to the region on the left")).toHaveText([MAC ? /^⌃W H/ : /^Ctrl\+W H/, MAC ? /^⌃H/ : /^Ctrl\+H/]);
   await expect(shown("Vim: go back to the region you were in")).toHaveText([MAC ? /^⌃W P/ : /^Ctrl\+W P/]);
   await expect(shown("Vim: go to the next region, round to the first")).toHaveText([MAC ? /^⌃W W/ : /^Ctrl\+W W/]);
   await expect(shown("Vim: next tab")).toHaveText([/^G T/]);

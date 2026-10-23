@@ -17,7 +17,9 @@ export interface VimKey {
 /**
  * Vim's keys outside a note's text: where each is taken, and the command it runs. Letters are only
  * on surfaces where nothing is typed. In a field the keys are held with Control, and there are two
- * of each because a browser keeps some for itself off a Mac.
+ * of each because a browser keeps some for itself off a Mac. Control with h, j, k or l goes to the
+ * region that way where nothing is typed and in a note in normal mode; in a field Control-j and
+ * Control-k are the field's rows still, and in a note in insert mode Control-h deletes a letter.
  */
 export const KEYS: readonly VimKey[] = [
   { id: "list.down", title: "Vim: next row of a list", surface: "list", keys: ["j"], run: (ui) => ui.move("down") },
@@ -36,10 +38,10 @@ export const KEYS: readonly VimKey[] = [
   { id: "field.down", title: "Vim: next row, from a field", surface: "field", keys: ["ctrl+j", "ctrl+n"], run: (ui) => ui.arrow("ArrowDown") },
   { id: "field.up", title: "Vim: previous row, from a field", surface: "field", keys: ["ctrl+k", "ctrl+p"], run: (ui) => ui.arrow("ArrowUp") },
   { id: "field.leave", title: "Vim: leave a field for its list", surface: "fieldOfList", keys: ["escape"], run: (ui) => ui.leaveField() },
-  { id: "window.left", title: "Vim: go to the region on the left", surface: "window", keys: ["ctrl+w h"], run: (ui) => ui.go("left") },
-  { id: "window.down", title: "Vim: go to the region below", surface: "window", keys: ["ctrl+w j"], run: (ui) => ui.go("down") },
-  { id: "window.up", title: "Vim: go to the region above", surface: "window", keys: ["ctrl+w k"], run: (ui) => ui.go("up") },
-  { id: "window.right", title: "Vim: go to the region on the right", surface: "window", keys: ["ctrl+w l"], run: (ui) => ui.go("right") },
+  { id: "window.left", title: "Vim: go to the region on the left", surface: "window", keys: ["ctrl+w h", "ctrl+h"], run: (ui) => ui.go("left") },
+  { id: "window.down", title: "Vim: go to the region below", surface: "window", keys: ["ctrl+w j", "ctrl+j"], run: (ui) => ui.go("down") },
+  { id: "window.up", title: "Vim: go to the region above", surface: "window", keys: ["ctrl+w k", "ctrl+k"], run: (ui) => ui.go("up") },
+  { id: "window.right", title: "Vim: go to the region on the right", surface: "window", keys: ["ctrl+w l", "ctrl+l"], run: (ui) => ui.go("right") },
   { id: "window.previous", title: "Vim: go back to the region you were in", surface: "window", keys: ["ctrl+w p"], run: (ui) => ui.back() },
   { id: "window.next", title: "Vim: go to the next region, round to the first", surface: "window", keys: ["ctrl+w w"], run: (ui) => ui.round() },
   { id: "tab.next", title: "Vim: next tab", surface: "tabs", keys: ["g t"], run: (ui) => ui.tab(1), arrives: true },
