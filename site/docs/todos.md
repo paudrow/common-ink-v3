@@ -80,7 +80,7 @@ Type `@` on the todo's line and pick a member or one of your contacts. Assigning
 
 ## The Todos page
 
-**Todos** in the sidebar lists the open todos in every note you can see, leaving out archived notes and notes in Trash. Each row shows the todo, its chips, and its note's name. Press the note's name to open the note at that line. Press the words to edit them in place. Right-click a row for **Open note**, **Open to the side**, **Complete**, **Abandon**, and **Move to backlog**.
+**Todos** in the sidebar lists the open todos in every note you can see, leaving out archived notes and notes in Trash. Each row shows the todo, its chips, and its note's name. Press the note's name to open the note at that line. A tag the todo has from another line, a heading or a list item over it, shows after its own tags, outlined: point at it to see where it is from, and press it to open that line. Press the words to edit them in place. Right-click a row for **Open note**, **Open to the side**, **Complete**, **Abandon**, and **Move to backlog**.
 
 A row's second line shows only what is set on the todo. Point at a row, or give it the keyboard, and the rest shows after it: **Abandon**, **Move to backlog**, and a button for each thing not set yet, with **Repeat** and **Priority** last. With the keyboard on a row, these keys do the same:
 

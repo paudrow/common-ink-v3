@@ -7813,6 +7813,14 @@ button.todo-chip:disabled {
   background: var(--danger);
 }
 
+/* A tag the todo has from another line of its note: outlined and quiet, as the done chip is, after the ones its own line writes. */
+.todo-chip.todo-tag-from {
+  max-width: min(14em, 100%);
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+}
+
 button.todo-tag[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
