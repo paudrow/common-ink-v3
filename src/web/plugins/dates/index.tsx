@@ -1,11 +1,24 @@
-import { today, type CompletionItem, type InsertAt, type Plugin } from "../../plugin-api.ts";
+import { EditorView, ViewPlugin } from "@codemirror/view";
+import { following, today, type CompletionItem, type InsertAt, type Plugin } from "../../plugin-api.ts";
 import { timeIn } from "../calendar/dates.ts";
 import { browserZone, toward } from "../daily/days.ts";
 import { openDay } from "../daily/opening.ts";
 import { DayField } from "../lib/DayField.tsx";
+import { editorKey } from "../lib/live.ts";
 import { openPopover } from "../lib/Popover.tsx";
-import { dateDrawing, type OpenDay } from "./drawing.ts";
+import { dateCards } from "./card.tsx";
+import { dateAt, dateDrawing, type DrawnDates, type OpenDay } from "./drawing.ts";
+import { openDayPicker } from "./picking.tsx";
 import { asksToPick, chipWords, fullWords, howFar, orderIn, saidFor, soon, timeWords, weekdayWords, written, type Said } from "./when.ts";
+
+/** An empty element at `pos` in `view` for a popover to hang from, which scrolls with the note's text. */
+function markAt(view: EditorView, pos: number): HTMLElement {
+  const box = view.scrollDOM.getBoundingClientRect();
+  const at = view.coordsAtPos(pos) ?? { left: box.left, top: box.top, bottom: box.top };
+  const mark = view.scrollDOM.appendChild(document.createElement("span"));
+  Object.assign(mark.style, { position: "absolute", width: "0", left: `${at.left - box.left + view.scrollDOM.scrollLeft}px`, top: `${at.top - box.top + view.scrollDOM.scrollTop}px`, height: `${at.bottom - at.top}px` });
+  return mark;
+}
 
 /** How many days `@` offers at most, before Pick a date…. */
 const MOST_OFFERED = 8;
@@ -63,12 +76,14 @@ const pick = (time: string | null): CompletionItem => ({ kind: "date", label: "P
  * Dates. `@` alone offers today and tomorrow, and for what is typed after it days (today, tomorrow,
  * Friday, next Friday, Oct 21, 3pm, tomorrow 3pm) and Pick a date…, and writes the one picked as an ISO date, with the time where
  * one was said: `2026-10-21 15:00`, a day and a clock's time where the member is. A date written that
- * way anywhere in a note is drawn as it reads, Wed, Oct 21, and a click on it opens that day's daily note.
+ * way anywhere in a note is drawn as it reads, Wed, Oct 21. A click on it, or Alt+Shift+D with the
+ * cursor in it, opens a picker that changes its day, ⌘-click opens that day's daily note, and resting on it
+ * shows a card that does either.
  */
 export const dates: Plugin = {
   id: "dates",
   name: "Dates",
-  description: "Writes a date or a time with @, such as @today, @next friday or @tomorrow 3pm, and draws every date in a note as it reads. A click on one opens that day's note.",
+  description: "Writes a date or a time with @, such as @today, @next friday or @tomorrow 3pm, and draws every date in a note as it reads. A click on one changes it, and ⌘-click opens that day's note.",
   icon: "calendar",
   activate(host) {
     const order = orderIn();
@@ -86,8 +101,72 @@ export const dates: Plugin = {
       },
     });
 
-    // A link's page has nowhere to go: there a click on a date is for the cursor.
-    const open = (): OpenDay => (typeof host.app().go === "function" ? (day) => void openDay(host, toward(day, 0, today())) : null);
-    host.editorExtensions.register({ id: "dates", extension: () => dateDrawing(open) });
+    // A link's page has nowhere to go: there a date opens no daily note.
+    const open = (): OpenDay => (typeof host.app().go === "function" ? (day, make) => void openDay(host, make ? { day, make } : toward(day, 0, today())) : null);
+    const drawn: DrawnDates = new WeakMap();
+    const cards = dateCards(host, open, drawn);
+    const editors = new Map<string, EditorView>();
+    const focused = () => [...editors.values()].find((view) => view.hasFocus);
+    host.editorExtensions.register({
+      id: "dates",
+      extension: (editor) => [
+        dateDrawing(open, cards, drawn),
+        // gd on a date opens its daily note, as on a link it opens the link's note.
+        following.of((view) => {
+          const { head } = view.state.selection.main;
+          // On the character after a date, as vim's cursor is on the space after one, the date isn't under it.
+          const date = dateAt(view.state, head);
+          const go = open();
+          if (!date || date.to === head || !go) return false;
+          go(date.day);
+          return true;
+        }),
+        ViewPlugin.define((view) => {
+          const key = editorKey(editor);
+          editors.set(key, view);
+          return { destroy: () => void (editors.get(key) === view && editors.delete(key)) };
+        }),
+      ],
+    });
+
+    // The cursor in a date shows it as written, so the picker a click on it opens is asked for from there.
+    const dateHere = () => {
+      const view = focused();
+      const date = view && !view.state.readOnly && view.state.selection.main.empty ? dateAt(view.state, view.state.selection.main.head) : null;
+      return view && date ? { view, date } : null;
+    };
+    host.commands.register({
+      id: "dates.pick",
+      title: "Change the date at the cursor",
+      group: "Editor",
+      // Not Alt+Enter, which edits the link at the cursor: a key runs one command, whatever is at the cursor.
+      keys: ["alt+shift+d"],
+      when: () => !!dateHere(),
+      run() {
+        const here = dateHere();
+        if (!here) return;
+        const { view, date } = here;
+        const anchor = markAt(view, date.from);
+        const go = open();
+        cards.hide("pointer");
+        openDayPicker(
+          anchor,
+          date,
+          (when) => {
+            // Written where the date still is, as it was: typing elsewhere meanwhile moves it, and typing over it leaves it.
+            if (!view.dom.isConnected) return;
+            const now = dateAt(view.state, view.state.selection.main.head);
+            const at = now && now.day === date.day && now.time === date.time ? now : null;
+            if (at) view.dispatch({ changes: { from: at.from, to: at.to, insert: written(when) }, userEvent: "input.pick" });
+          },
+          (hadFocus) => {
+            anchor.remove();
+            if (hadFocus) view.focus();
+          },
+          go && (() => go(date.day, true)),
+        );
+      },
+    });
+    return () => cards.dispose();
   },
 };

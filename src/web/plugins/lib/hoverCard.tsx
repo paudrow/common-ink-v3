@@ -23,11 +23,11 @@ export interface HoverCards {
  * The card anything marked `data-<kind>` shows while it is pointed at or has the keyboard, wherever
  * it is drawn: a tag's (`data-tag` with its name) or a folder's (`data-folder` with its id). One
  * marked `data-<kind>-card="beside"` too, a row of a list, has it beside it rather than under it.
- * `content` draws what the card says of that key, or null for a key it knows nothing of, which shows
- * no card. It is laid over the app at the end of the page,
+ * `content` draws what the card says of that key, told the anchor it is for, or null for a key it
+ * knows nothing of, which shows no card. It is laid over the app at the end of the page,
  * or of the dialog the anchor is in, so it moves nothing, and is a tooltip the anchor is described by.
  */
-export function hoverCards(kind: string, content: (key: string, close: () => void) => ReactNode): HoverCards {
+export function hoverCards(kind: string, content: (key: string, close: () => void, anchor: HTMLElement) => ReactNode): HoverCards {
   const beside = `${kind}Card`;
   const anchorOf = (target: EventTarget | null) => (target instanceof Element ? target.closest<HTMLElement>(`[data-${kind}]`) : null);
   let shown: { anchor: HTMLElement; key: string; how: Showing } | null = null;
@@ -63,7 +63,7 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
       return;
     }
     close();
-    const drawn = content(key, close);
+    const drawn = content(key, close, anchor);
     if (drawn === null) return;
     shown = { anchor, key, how };
     // Inside a modal dialog, such as Settings, only what is in the dialog is drawn over it.

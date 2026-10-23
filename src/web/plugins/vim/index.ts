@@ -66,6 +66,8 @@ export const vim: Plugin = {
         const when = () => !isField(document.activeElement) || editing.jumpsFrom(document.activeElement);
         host.commands.register({ id: "vim.back", title: "Go back with vim's keys", keys: ["ctrl+o"], group: "Vim", when, escapesFrames: true, run: () => void host.commands.run("nav.back") });
         host.commands.register({ id: "vim.forward", title: "Go forward with vim's keys", keys: ["ctrl+i"], group: "Vim", when, escapesFrames: true, run: () => void host.commands.run("nav.forward") });
+        // gd is vim's own key in a note's text, where it follows a link or a date. It is here so keyboard help names it, and never taken outside a note.
+        host.commands.register({ id: "vim.follow", title: "Vim: follow the link or date at the cursor to its note", keys: ["g d"], group: "Vim", when: () => false, run: () => void host.commands.run("links.follow") });
 
         const outside = (ui = surfaces({ normal: editing.jumpsFrom, dismissing }));
         calm = editing.toNormal;

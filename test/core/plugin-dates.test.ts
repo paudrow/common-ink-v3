@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { EditorState } from "@codemirror/state";
+import { dateAt } from "../../src/web/plugins/dates/drawing.ts";
 import { asksToPick, chipWords, fullWords, howFar, orderIn, saidFor, soon, written, writtenOn } from "../../src/web/plugins/dates/when.ts";
 
 /** Tuesday, October 20, 2026, at 9:41 in the morning where the member is. */
@@ -137,5 +139,19 @@ describe("how a day reads", () => {
 
   it("knows which of the month and the day a locale writes first", () => {
     expect([orderIn("en-US"), orderIn("en-GB"), orderIn("de-DE")]).toEqual(["month-day", "day-month", "day-month"]);
+  });
+});
+
+describe("the date at the cursor, which Alt+Enter changes", () => {
+  const at = (doc: string, pos: number) => dateAt(EditorState.create({ doc }), pos);
+
+  it("is the date the cursor is in or at the edge of, with its time", () => {
+    expect(at("Due 2026-10-21 15:00 then", 4)).toMatchObject({ day: "2026-10-21", time: "15:00", from: 4, to: 20 });
+    expect(at("Due 2026-10-21 then", 14)).toMatchObject({ day: "2026-10-21", time: null });
+    expect(at("Due 2026-10-21 then", 2)).toBeNull();
+  });
+
+  it("is none in a heading, an embed's braces or a link, where the date is left as written", () => {
+    expect([at("# 2026-10-21", 5), at("::event{abcdefabcdef 2026-10-21}", 25), at("[on 2026-10-21](x)", 8)]).toEqual([null, null, null]);
   });
 });

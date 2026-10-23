@@ -8034,6 +8034,38 @@ button.todo-tag[aria-pressed="true"] {
   font-size: calc(14px * var(--text-scale));
 }
 
+/* A date's picker: the due date's list, then its time, Add time or a field with Remove time beside it. */
+.date-picker {
+  display: flex;
+  flex-direction: column;
+  width: 246px;
+}
+
+.date-picker-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.date-picker-time input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+}
+
+.date-picker-time input + .chip-choice {
+  width: auto;
+  color: var(--muted);
+}
+
 /* `@`'s Pick a date…: the date field alone. */
 .date-pick .chip-day {
   margin: -6px;
@@ -8634,7 +8666,8 @@ button.todo-tag[aria-pressed="true"] {
 
 /* Shown by the pointer, all of it holds the pointer, so resting anywhere on it, its text or its padding, keeps it. */
 [data-showing="pointer"] > .hover-card,
-.hover-card a {
+.hover-card a,
+.hover-card button {
   pointer-events: auto;
 }
 
@@ -8674,6 +8707,29 @@ button.todo-tag[aria-pressed="true"] {
 
 .hover-card-manage {
   justify-self: start;
+  color: var(--accent);
+}
+
+/* A date's card: the whole date and how far off it is, then what can be done with it. */
+.hover-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.hover-card-actions button {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.hover-card-actions button:hover {
+  border-color: var(--accent);
   color: var(--accent);
 }
 

@@ -7,6 +7,7 @@ import type { App, Plugin } from "./plugin-api.ts";
 import { createPluginHost } from "./pluginHost.ts";
 import { bullets } from "./plugins/bullets/index.ts";
 import { codeBlocks } from "./plugins/code/index.ts";
+import { dates } from "./plugins/dates/index.tsx";
 import { gfm } from "./plugins/gfm/index.ts";
 import { html } from "./plugins/html/index.ts";
 import { kanban } from "./plugins/kanban/index.ts";
@@ -27,7 +28,7 @@ import { referredUploads } from "./referredUploads.ts";
  * to it: who is in the workspace, the one thing any asks for, is refused. So a mention is the name
  * the note writes and nothing more.
  */
-const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, uploadDrawing, html, gfm, todos, links, mentions, tables, math, codeBlocks, bullets, labelledReferences];
+const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, uploadDrawing, html, gfm, todos, links, mentions, dates, tables, math, codeBlocks, bullets, labelledReferences];
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const NOT_HERE = () => Promise.reject(new Error("Text drawn here asks nothing of a workspace"));

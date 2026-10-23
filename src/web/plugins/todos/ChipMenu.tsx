@@ -15,6 +15,10 @@ interface Props {
   onClose: () => void;
   /** Shows a repeat's token in its note, to be typed over. Without it the rule as written is a field in the popover. */
   onText?: () => void;
+  /** What the due date's field for any other day is called, for a date that isn't a due date. */
+  dayLabel?: string;
+  /** Whether the due date's list offers Clear, which a date in prose has no use for. */
+  clearable?: boolean;
 }
 
 const STEPS: Record<string, (at: number, count: number) => number> = {
@@ -47,13 +51,13 @@ function iconOf(chip: ChipKind, change: TodoChange): IconName {
  * list their choices, each saved the moment it is picked, and the due date's has a field for any other
  * day. Up and Down go from choice to choice. The repeat's is its own: see `RepeatMenu`.
  */
-export function ChipMenu({ chip, todo, now, onPick, onClose, onText }: Props) {
+export function ChipMenu({ chip, todo, now, onPick, onClose, onText, dayLabel = "Due on", clearable = true }: Props) {
   if (chip === "every") return <RepeatMenu todo={todo} now={now} onPick={onPick} onClose={onClose} onText={onText} />;
-  const choices = choicesFor(chip, todo, now);
+  const choices = choicesFor(chip, todo, now).filter((choice) => clearable || choice.change.due !== null);
   const first = Math.max(0, choices.findIndex((c) => c.current));
   return (
     <div className="chip-menu" onKeyDown={move}>
-      {chip === "due" && <DayField day={todo.due} label="Due on" onDay={(due) => onPick({ due })} />}
+      {chip === "due" && <DayField day={todo.due} label={dayLabel} onDay={(due) => onPick({ due })} />}
       {choices.map((choice: Choice, i) => (
         <button
           key={choice.label}
