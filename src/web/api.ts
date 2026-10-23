@@ -2,6 +2,7 @@ import { partSpan, partsLeft, planParts } from "../core/parts.ts";
 import { tellFault } from "./faults.ts";
 import { NO_SUCH_WORKSPACE, type Invitation, type Agent, type ClipperGrantView, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type SendingUpload, type Shared, type Upload } from "../core/protocol.ts";
 import { forgetAll } from "./stash.ts";
+import type { Period, UsageReport } from "../core/usage.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -264,6 +265,9 @@ export async function readUpload(address: string, upTo: number): Promise<Uint8Ar
 /** What a link opens, asked as whoever holds it. Neither asks who that is unless the link is for people signed in. */
 export const openShared = (token: string) => request<Shared>(`/api/shared/${token}`);
 export const readShared = (token: string, noteId: string) => request<Results["shared.read"]>(`/api/shared/${token}/notes/${noteId}`);
+
+/** The Usage page's counts, which only the admins of the operator's workspace are answered. */
+export const readUsage = (days: Period) => request<UsageReport>(`/api/usage?days=${days}`);
 
 export const listAgents = () => request<{ agents: Agent[] }>("/api/agents").then((r) => r.agents);
 

@@ -167,3 +167,38 @@ export function changeUsage(base: Omit<Usage, "event">, before: string, after: s
   }
   return counts;
 }
+
+// What the Usage page is drawn from (src/worker/usageReport.ts reads it, src/web/plugins/usage draws it).
+
+/** The periods the Usage page reads, in days. */
+export const PERIODS = [7, 30, 90] as const;
+export type Period = (typeof PERIODS)[number];
+
+/** How many members were active in a day or a week: by themselves, and through an agent. */
+export interface Active {
+  /** The day the day or week starts on, `YYYY-MM-DD`. */
+  from: string;
+  people: number;
+  agents: number;
+}
+
+/** How many of one thing were counted, by whom and of what. */
+export type Total = {
+  event: UsageEvent;
+  kind: UsageKind;
+  detail: string;
+  n: number;
+};
+
+export interface UsageReport {
+  days: Period;
+  /** Made up, where nothing is counted. */
+  sample: boolean;
+  /** When it was read, in ms. */
+  at: number;
+  /** Members active in the seven days before it was read. */
+  lastWeek: Omit<Active, "from">;
+  weekly: Active[];
+  daily: Active[];
+  totals: Total[];
+}

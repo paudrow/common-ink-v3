@@ -113,10 +113,11 @@ const embedSite = (): Record<string, string> => (process.argv.some((arg) => arg 
  * it (it needs `wrangler login`). Without it, transcribing a recording says how to turn it on. Usage is
  * never counted here.
  */
-const devConfig = (config: { ai?: unknown; analytics_engine_datasets?: unknown }) => {
+const devConfig = (config: { ai?: unknown; analytics_engine_datasets?: unknown; analytics?: unknown }) => {
   if (!process.env.INK_AI) delete config.ai;
   delete config.analytics_engine_datasets;
-  return { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId(), ...embedSite() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } };
+  delete config.analytics;
+  return { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId(), USAGE_WORKSPACE: "", ...embedSite() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } };
 };
 
 // Builds only the web app; wrangler bundles the Worker, so one wrangler.jsonc serves dev, deploys, and Previews.

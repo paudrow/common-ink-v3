@@ -48,6 +48,7 @@ import { Toasts } from "./Toasts.tsx";
 import { useDevice } from "./useDevice.ts";
 import { KeyRow, NewNoteButton, TopBar, upFrom } from "./Phone.tsx";
 import { keptTravels, samePlace, stepped, travelled, type Travel, type Travels } from "./travels.ts";
+import { Usage } from "./Usage.tsx";
 
 const FOCUS_KEY = "ink.focus";
 const SIDEBAR_KEY = "ink.sidebar";
@@ -365,6 +366,8 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
         // Its command is `settings.openJson`, so a key a member bound to that opens it.
         h.views.register("page", { id: "settings-json", path: SETTINGS_FILE, label: "Settings (JSON)", command: { id: "settings.openJson", title: "Go to settings (JSON)" }, component: () => <SettingsFile store={settings} host={created} /> });
         h.views.register("page", { id: "agents-file", path: AGENTS_FILE, label: "Agents file", command: { id: "go.agents-file", title: "Go to agents file" }, component: () => <AgentsFile store={agentsFile} host={created} canEdit={role === "admin" || role === "editor"} /> });
+        // Only for the admins of the operator's workspace, whom the server names: nobody else is offered a way there, and /api/usage answers nobody else.
+        if (me.setup.usage) h.views.register("page", { id: "usage", path: "/usage", label: "Usage", nav: "menu", component: () => <Usage /> });
         h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", description: "Turn plugins on and off, add your own, and see what each one adds.", nav: "more", component: PluginsPage });
       },
     };

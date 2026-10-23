@@ -89,11 +89,11 @@ db ??= createDatabase();
 const files = [{ ...config.r2_buckets[0], bucket_name: bucket }];
 // A Preview is a version, and a timer belongs to the deployed Worker, so the generated config carries none.
 // Nor Workers AI: a Preview signs anyone in and counts nobody's requests, and each minute Whisper hears is paid for.
-// Nor the usage dataset, which counts commonink.app alone.
-const { triggers: _, ai: __, analytics_engine_datasets: ___, ...untimed } = config;
+// Nor the usage dataset and its reader, which count commonink.app alone.
+const { triggers: _, ai: __, analytics_engine_datasets: ___, analytics: ____, ...untimed } = config;
 const writeConfig = (uuid: string) => {
   const binding = { ...config.d1_databases[0], database_name: database, database_id: uuid };
-  const previews = { d1_databases: [binding], r2_buckets: files, ratelimits: config.ratelimits, vars: { DEV_SIGN_IN: "1" } };
+  const previews = { d1_databases: [binding], r2_buckets: files, ratelimits: config.ratelimits, vars: { DEV_SIGN_IN: "1", USAGE_WORKSPACE: "" } };
   const previewConfig = { ...untimed, name: worker, workers_dev: false, preview_urls: true, d1_databases: [binding], r2_buckets: files, previews };
   writeFileSync(GENERATED, JSON.stringify(previewConfig, null, 2));
 };

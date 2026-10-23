@@ -24,7 +24,9 @@ import { unpackedExtensionId } from "./extension-id.ts";
 const { values } = parseArgs({ options: { port: { type: "string", default: "8787" }, state: { type: "string", default: ".wrangler/built" }, https: { type: "boolean", default: false } } });
 const state = values.state!;
 const CONFIG = "wrangler.built.json";
-const { ai: _, analytics_engine_datasets: __, ...config } = parse(readFileSync("wrangler.jsonc", "utf8"));
+const { ai: _, analytics_engine_datasets: __, analytics: ___, ...config } = parse(readFileSync("wrangler.jsonc", "utf8"));
+// Nobody here is the operator's workspace's admin: the Dev User stands for them, as on the dev server.
+config.vars = { ...config.vars, USAGE_WORKSPACE: "" };
 writeFileSync(CONFIG, JSON.stringify(config, null, 2));
 
 execFileSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state, "-c", CONFIG], { stdio: "inherit", env: { ...process.env, CI: "1" } });

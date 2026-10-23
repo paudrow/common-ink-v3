@@ -191,7 +191,7 @@ describe("what the app is told of where HTML embeds are served", () => {
       const signedIn = await at("/auth/dev?email=setup@example.com&name=Setup");
       const cookie = signedIn.headers.get("Set-Cookie")!.split(";")[0]!;
       const me = (await (await at("/api/me", { headers: { Cookie: cookie } })).json()) as { person: unknown; setup: unknown };
-      expect([me.person, me.setup]).toEqual([expect.objectContaining({ email: "setup@example.com" }), { embedSite, fileSite: false }]);
+      expect([me.person, me.setup]).toEqual([expect.objectContaining({ email: "setup@example.com" }), { embedSite, fileSite: false, usage: false }]);
     }
   });
 });

@@ -23,7 +23,7 @@ const STATE_SECONDS = 600;
 export const devSignIn = (env: Env, url: URL) =>
   env.DEV_SIGN_IN === "1" && (THIS_MACHINE.test(url.hostname) || (PREVIEW_HOSTS.test(url.hostname) && !env.GOOGLE_CLIENT_ID && !env.ALLOWED_EMAILS));
 
-const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
+export const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
 
 /**
  * Who a request is from. On this machine and on Previews, nobody signed in is the dev user. A session

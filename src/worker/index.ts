@@ -29,6 +29,7 @@ import { siteResponse } from "./site/index.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 import { usageCounter } from "./usage.ts";
+import { handleUsageApi, mayReadUsage } from "./usageReport.ts";
 import { vault } from "./vault.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
@@ -80,8 +81,10 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
     // Opening the app is arriving: a workspace of their own if they are in none, and the invites made before they had an account.
     await arrive(env.DB, personId);
     await count({ event: "app_open", workspaceId: null, personId, kind: "person" });
-    return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
+    return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null, usage: await mayReadUsage(env, url, personId) } } satisfies MeHere);
   }
+
+  if (url.pathname === "/api/usage") return handleUsageApi(req, env, url, personId);
 
   // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
   const lookup = /^\/api\/(notes|uploads|invites)\/([a-z0-9]{12})$/.exec(url.pathname);
