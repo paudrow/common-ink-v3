@@ -38,7 +38,7 @@ async function team(role: Role) {
 }
 
 /** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, a plugin's frame, turning full trust on, renaming a tag, writing the agents file and deleting an account or a workspace are kept from agents, which test/core/tag-rename.test.ts, test/core/agents-file.test.ts, test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts, test/core/third-party.test.ts and test/core/erase.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts and test/core/upload-parts.test.ts check, as an export's do, which test/core/export.test.ts checks, and a workspace's storage is for its members. */
-type ToolOp = Exclude<OpType, "note.purge" | "note.discard" | `settings.${string}` | "timeZone.record" | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "export.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "plugin.frame" | "plugin.trust" | "plugin.decide" | `account.${string}` | "workspace.delete" | "tag.rename" | "agentsFile.write">;
+type ToolOp = Exclude<OpType, "note.purge" | "note.discard" | `settings.${string}` | "timeZone.record" | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "export.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "email.senders" | "email.addSender" | "email.removeSender" | "plugin.frame" | "plugin.trust" | "plugin.decide" | `account.${string}` | "workspace.delete" | "tag.rename" | "agentsFile.write">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -97,6 +97,8 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "event.update": { sourceId: "google-calendar", id: "none", etag: "none", title: "No" },
   "event.create": { sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } },
   "contact.list": {},
+  "email.list": {},
+  "email.thread": { sourceId: "email", id: "none" },
   "person.read": { who: "Sam Okafor" },
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },

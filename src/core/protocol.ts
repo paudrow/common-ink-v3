@@ -874,6 +874,23 @@ export const Op = z.discriminatedUnion("type", [
   /** Adds a contact to the asker's own contacts where they are kept: a name, and whatever else is known of them. */
   z.object({ type: z.literal("contact.create"), sourceId: SourceId, ...z.object(ContactFields).partial().shape, name: ContactFields.name }),
   /**
+   * The asker's email threads, the latest first: what they sent, copied or forwarded to the address
+   * `address` names. `query` keeps those with every word of it in a message's subject, sender,
+   * recipients or text. `before` is the `lastAt` of the last thread of the page before.
+   */
+  z.object({ type: z.literal("email.list"), query: z.string().max(200).optional(), before: Time.optional(), limit: Limit(50, 100) }),
+  /** One of the asker's email threads with every message in it, oldest first. `id` is a thread's or one of its messages'. */
+  z.object({ type: z.literal("email.thread"), sourceId: SourceId, id: RecordId }),
+  /** The addresses the asker's mail is recognized by: their sign-in email, and those they added, each verified or waiting for its code. */
+  z.object({ type: z.literal("email.senders") }),
+  /**
+   * Adds an address the asker sends mail from, or gives one waiting a new code. It is trusted only
+   * once mail from it, carrying the code, reaches `address`: that proves the asker can send as it.
+   */
+  z.object({ type: z.literal("email.addSender"), address: z.string().trim().toLowerCase().max(254).pipe(z.email()) }),
+  /** Stops recognizing an address the asker added. Mail already kept from it stays. */
+  z.object({ type: z.literal("email.removeSender"), address: z.string().trim().toLowerCase().max(254) }),
+  /**
    * A person, as a mention names them, as the asker may be told of them: what their page shows. `who`
    * is a member's id, or a name. A name one member has is that member, for an asker told who the
    * members are. The member they are, only for such an asker. The asker's own contacts that are them,
@@ -1757,6 +1774,13 @@ export interface Results {
   "contact.update": ContactCard;
   "contact.photo": ContactCard;
   "contact.create": ContactCard;
+  /** `address` is where mail is sent to be kept; `more` when there are threads after the last. */
+  "email.list": { threads: MailThread[]; sources: Source[]; more: boolean; address: string | null };
+  "email.thread": MailThreadRead;
+  "email.senders": MailSenders;
+  /** `code` is what mail from the address carries to verify it: once, and never again. */
+  "email.addSender": MailSenders & { code: string };
+  "email.removeSender": MailSenders;
   "person.read": PersonPage;
   "record.refer": Reference;
   "record.read": SourceRecord;
@@ -1802,7 +1826,7 @@ export interface PluginProposal {
   message: string;
 }
 
-export type SourceKind = "calendar" | "contacts";
+export type SourceKind = "calendar" | "contacts" | "email";
 /** `needs_reconnect` when it was connected and where it comes from stopped answering for the member. */
 export type SourceState = "connected" | "needs_reconnect" | "not_connected";
 
@@ -1939,7 +1963,84 @@ export interface PersonPage {
   todoQuery: string;
 }
 
-export type SourceRecord = { kind: "event"; ref: string; event: CalendarEvent } | { kind: "contact"; ref: string; contact: Contact };
+/** One mailbox in a message's header: the name it was given, which may be empty, and its address. */
+export interface MailAddress {
+  name: string;
+  address: string;
+}
+
+/** What was attached to a message. The bytes aren't kept. */
+export interface MailAttachment {
+  name: string;
+  type: string;
+  size: number;
+}
+
+/** One kept message, as its owner alone is shown it. */
+export interface MailMessage {
+  sourceId: string;
+  id: string;
+  threadId: string;
+  /** Its Message-ID, without the angle brackets; one made from what it says when it had none. */
+  messageId: string;
+  inReplyTo: string | null;
+  references: string[];
+  from: MailAddress;
+  to: MailAddress[];
+  cc: MailAddress[];
+  subject: string;
+  /** Its Date, or when it arrived when it said none. */
+  sentAt: number;
+  receivedAt: number;
+  text: string;
+  /** Its HTML with everything that runs, loads or tracks taken out, or null when it had none. */
+  html: string | null;
+  attachments: MailAttachment[];
+  /** `sent`: the member's own, sent or copied to the address. `forwarded`: someone else's, which the member forwarded. */
+  via: "sent" | "forwarded";
+  /** What the member wrote above a message they forwarded. */
+  comment: string | null;
+}
+
+/** A conversation: messages that name one another, as a list shows it. */
+export interface MailThread {
+  sourceId: string;
+  id: string;
+  subject: string;
+  /** Everyone who sent a message in it, in the order they first did. */
+  from: MailAddress[];
+  firstAt: number;
+  lastAt: number;
+  count: number;
+  /** The start of the latest message's text. */
+  snippet: string;
+}
+
+export interface MailThreadRead extends MailThread {
+  messages: MailMessage[];
+}
+
+/** An address the member's mail is recognized by. */
+export interface MailSender {
+  address: string;
+  /** Their sign-in email, which is recognized without verifying and can't be removed. */
+  account: boolean;
+  verified: boolean;
+  /** For one waiting: when its code lapses. */
+  expiresAt: number | null;
+}
+
+export interface MailSenders {
+  /** Where mail is sent to be kept, such as notes@in.commonink.app; null where nothing receives it. */
+  address: string | null;
+  senders: MailSender[];
+}
+
+export type SourceRecord =
+  | { kind: "event"; ref: string; event: CalendarEvent }
+  | { kind: "contact"; ref: string; contact: Contact }
+  /** A thread, or one message in it: `messageId` is the message's `id` for a reference to that one, null for the whole thread. */
+  | { kind: "email"; ref: string; thread: MailThreadRead; messageId: string | null };
 
 /**
  * Who sees a note: `private`, a private note nobody else is let in to; `shared`, a private note its

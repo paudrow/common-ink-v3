@@ -65,6 +65,11 @@ export const PERSON_COLUMNS: readonly PersonColumn[] = [
   { at: "source_connections.person_id", fate: "delete" },
   { at: "source_refs.person_id", fate: "delete" },
   { at: "sample_records.person_id", fate: "delete" },
+  // Their mail, kept for them alone, and the addresses it knew them by. Ids before messages, messages before their threads.
+  { at: "mail_ids.person_id", fate: "delete" },
+  { at: "mail_messages.person_id", fate: "delete" },
+  { at: "mail_threads.person_id", fate: "delete" },
+  { at: "mail_senders.person_id", fate: "delete" },
   { at: "clipper_grants.person_id", fate: "delete" },
   { at: "oauth_requests.person_id", fate: "delete" },
   { at: "notes.created_by", fate: "former" },

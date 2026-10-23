@@ -4,7 +4,7 @@ import { signIn, whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { inOrder, within } from "../../src/core/events.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
-import { OpError, type Calendar, type CalendarEvent, type ContactCard, type OpInput } from "../../src/core/protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type ContactCard, type OpInput, type Source } from "../../src/core/protocol.ts";
 import { namedReferences } from "../../src/core/references.ts";
 import { SourceError, contactMatches, writtenReference, type CalendarSource, type ContactsSource, type DataSource, type Sources } from "../../src/core/sources.ts";
 import worker from "../../src/worker/index.ts";
@@ -692,12 +692,14 @@ describe("a record named where a reference would be", () => {
 describe("the sample data", () => {
   const offered = (vars: Partial<Env>, host: string) => sourcesFor({ ...env, ...vars } as Env, new URL(`https://${host}/`), fetch, () => T0);
 
+  // Email is offered everywhere: it needs nothing outside Common Ink.
   it("is offered where dev sign-in is on and nowhere else, whatever is set", async () => {
     const ada = await newMember();
-    expect((await offered({ DEV_SIGN_IN: "1" }, "localhost").of(ada.personId)).map((s) => s.info.id)).toEqual(["sample-calendar", "sample-contacts"]);
-    expect((await offered({ DEV_SIGN_IN: "1" }, "pr-48-common-ink-v3-previews.draftox.workers.dev").of(ada.personId)).map((s) => s.info.id)).toEqual(["sample-calendar", "sample-contacts"]);
-    expect(await offered({ DEV_SIGN_IN: "1" }, "commonink.app").of(ada.personId)).toEqual([]);
-    expect(await offered({}, "localhost").of(ada.personId)).toEqual([]);
+    const ids = async (vars: Partial<Env>, host: string) => (await offered(vars, host).of(ada.personId)).map((s) => s.info.id);
+    expect(await ids({ DEV_SIGN_IN: "1" }, "localhost")).toEqual(["sample-calendar", "sample-contacts", "email"]);
+    expect(await ids({ DEV_SIGN_IN: "1" }, "pr-48-common-ink-v3-previews.draftox.workers.dev")).toEqual(["sample-calendar", "sample-contacts", "email"]);
+    expect(await ids({ DEV_SIGN_IN: "1" }, "commonink.app")).toEqual(["email"]);
+    expect(await ids({}, "localhost")).toEqual(["email"]);
     // Connecting it where it isn't offered connects nothing.
     const production = offered({ DEV_SIGN_IN: "1" }, "commonink.app");
     expect(await refusal(perform(env.DB, ada, { type: "source.connect", id: "sample-calendar" }, T0, production))).toBe("not_found: No such data source");
@@ -742,7 +744,7 @@ describe("the sample data", () => {
     expect((await ask(eve, { type: "event.list", ...WEEK })).events.map((e) => e.title)).toContain("Lunch with Sam");
     expect((await ask(eve, { type: "contact.list", query: "zoe" })).contacts.map((c) => c.name)).toEqual(["Zoë Álvarez"]);
 
-    expect((await ask(ada, { type: "source.disconnect", id: "sample-calendar" })).sources.map((s) => s.state)).toEqual(["not_connected", "not_connected"]);
+    expect((await ask(ada, { type: "source.disconnect", id: "sample-calendar" })).sources.map((s) => `${s.id} ${s.state}`)).toEqual(["sample-calendar not_connected", "sample-contacts not_connected", "email not_connected"]);
     await ask(ada, { type: "source.connect", id: "sample-calendar" });
     expect((await ask(ada, { type: "event.list", ...WEEK })).events.map((e) => e.title)).not.toContain("Lunch with Sam and Lin");
   });
@@ -864,7 +866,7 @@ describe("through the Worker", () => {
       const res = await worker.fetch(new Request(`https://${host}/api/workspaces/${ada.workspaceId}/ops`, { method: "POST", headers: { Cookie: cookie, Origin: `https://${host}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }) as never, settings);
       return { status: res.status, body: (await res.json()) as Record<string, unknown> };
     };
-    expect((await op("commonink.app", { type: "source.list" })).body).toEqual({ sources: [] });
+    expect(((await op("commonink.app", { type: "source.list" })).body.sources as Source[]).map((s) => s.id)).toEqual(["email"]);
     expect((await op("commonink.app", { type: "source.connect", id: "sample-calendar" })).status).toBe(404);
     expect((await op("localhost", { type: "source.connect", id: "sample-calendar" })).body).toMatchObject({ redirect: null });
     const listed = await op("localhost", { type: "event.list", ...WEEK });

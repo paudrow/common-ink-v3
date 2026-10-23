@@ -204,11 +204,11 @@ test("turning History off takes its page, its link, and its inspector panel away
   await run(page, "Disable plugin: History");
   await expect.poll(panelIcons(page)).toEqual(["Backlinks", "Info", "Sample calendar"]);
   await page.getByRole("button", { name: "More" }).click();
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Today", "Todos", "Calendar", "Contacts", "Uploads", "Trash", "Dice", "Plugins"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Today", "Todos", "Calendar", "Contacts", "Email", "Uploads", "Trash", "Dice", "Plugins"]);
 
   await run(page, "Enable plugin: History");
   await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Today", "Todos", "Calendar", "Contacts", "Uploads", "History", "Trash", "Dice", "Plugins"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Today", "Todos", "Calendar", "Contacts", "Email", "Uploads", "History", "Trash", "Dice", "Plugins"]);
 });
 
 test("Dice is a page under More, and a coin in the bottom bar flips", async ({ page }) => {
@@ -253,7 +253,7 @@ test("in production the demo plugins are off, and one a member turns on in Plugi
   await expect(page.locator('[data-bar-item="word-count"]')).toBeVisible();
   await expect(page.locator('[data-bar-item="coin"]')).toHaveCount(0);
   await modes.getByRole("button", { name: "More" }).click();
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Today", "Todos", "Calendar", "Contacts", "Uploads", "History", "Trash", "Plugins"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Today", "Todos", "Calendar", "Contacts", "Email", "Uploads", "History", "Trash", "Plugins"]);
 
   await page.goto("/plugins");
   const dice = page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Dice" });

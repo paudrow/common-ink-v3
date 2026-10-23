@@ -106,7 +106,7 @@ A list item inside a kanban block in a note. Moving it on the board moves its li
 _Avoid_: Todo
 
 **Data source**:
-External structured data a person connects, such as their calendar events or contacts. It is that person's and in no workspace: no other member sees that it exists or any of its records, whatever their role, and their own agents read it as them. Records are not notes and are not kept in Common Ink: each is read where it lives when it is shown. A read-write data source writes edits back to the external system. A read-only data source refuses edits. It is connected, not connected, or needs reconnecting, which is when it was connected and the external system stopped answering for the person. See `docs/adr/0006-data-sources-are-one-persons.md`.
+External structured data a person connects, such as their calendar events, contacts or email. It is that person's and in no workspace: no other member sees that it exists or any of its records, whatever their role, and their own agents read it as them. Records are not notes and, but for Email's, are not kept in Common Ink: each is read where it lives when it is shown. A read-write data source writes edits back to the external system. A read-only data source refuses edits. It is connected, not connected, or needs reconnecting, which is when it was connected and the external system stopped answering for the person. See `docs/adr/0006-data-sources-are-one-persons.md`.
 _Avoid_: Integration, connector
 
 **Connect**:
@@ -114,7 +114,19 @@ What a person does to let Common Ink into a data source: agreeing to it at the e
 _Avoid_: Link, sync, authorize
 
 **Record**:
-One thing in a data source: an event or a contact.
+One thing in a data source: an event, a contact, or an email thread.
+
+**Email**:
+A data source of the mail a member sends, copies (BCC) or forwards to notes@in.commonink.app, kept for them as threads. Unlike a calendar or contacts it is kept in Common Ink, since there is nowhere else to read it from, and it is read-only. A message is kept only when it comes from one of the member's sending addresses and its domain vouches for it (DMARC, or DKIM aligned with its From). Anything else is dropped, and its sender is told nothing. Connecting it is saying so on the Email page, and disconnecting it deletes every message kept. A forwarded message is kept as its sender wrote it. See `docs/email.md` and `docs/adr/0018-email-is-kept-because-it-has-nowhere-else-to-be.md`.
+_Avoid_: Inbox, mailbox (nothing is fetched from one)
+
+**Thread**:
+Messages in a member's Email that name one another by Message-ID, In-Reply-To or References, in the order they were sent. A message that names two threads makes them one. A message with no ids whose subject answers another's joins that thread when they share a person.
+_Avoid_: Conversation (in code), chain
+
+**Sending address**:
+An address a member's mail is recognized by: the email they sign in with, and each they added and verified. One is verified by sending mail from it to notes@ with the code shown when it was added, so Common Ink sends no mail. A verified address is one member's. Only the member adds or removes one, never an agent.
+_Avoid_: Alias, sender (that is who sent one message)
 
 **Event**:
 A calendar entry from a member's data source. It may repeat, and each occurrence is then an event of its own. It is either between two instants, shown in the viewing member's timezone, or all-day: on calendar dates, with no time and no zone, the same dates wherever it is read. An event can be changed when its data source is read-write and its calendar lets the member change it.
@@ -126,7 +138,7 @@ One of the calendars in a calendar data source, such as a member's work calendar
 The calendar a member's new events go in when none is named, by them or their agent. It is a remembered setting (`calendar.default`). With none usable, the Calendar uses the one last added to in that browser, and an agent's event goes in the first calendar the member can add to and hasn't hidden. With no calendar connected, the Calendar page asks the member to connect one before anything else.
 
 **Record reference**:
-What a note writes to point at an event or a contact without copying it: an embed, `::event{ref label}` or `::contact{ref label}`. The ref says nothing of the record and leads to it only for the member who made the reference, who is shown the record as it is now. The label is plain text in the note that every reader sees, in gray. Anyone else sees the label and nothing more.
+What a note writes to point at an event, a contact or an email thread (or one message in it) without copying it: an embed, `::event{ref label}`, `::contact{ref label}` or `::email{ref label}`. The ref says nothing of the record and leads to it only for the member who made the reference, who is shown the record as it is now. The label is plain text in the note that every reader sees, in gray. Anyone else sees the label and nothing more.
 The notes about a record are the notes that hold the member's own reference to it and that they can see, each said to be Private, Shared or Workspace by who sees it.
 A member writes a reference to an event as they link a note: `[[` and `@` offer their events, nearest first, and picking one writes its reference.
 _Avoid_: Link (that is to a note), mention (that is `@`)

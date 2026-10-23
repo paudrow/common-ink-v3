@@ -76,7 +76,7 @@ import { paging } from "./paging.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listSources, photoContact, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listMail, listSources, mailSenders, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
 import { referencesIn } from "./references.ts";
 import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { linkHash } from "./linkSeal.ts";
@@ -3302,6 +3302,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "contact.update": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateContact(asker(ctx), sourceId, id, etag, change) },
   "contact.photo": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => photoContact(asker(ctx), op.sourceId, op.id, op.photo) },
   "contact.create": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, type: _, ...fields }) => createContact(asker(ctx), sourceId, fields) },
+  // A person's mail is theirs as their calendar is, and read-only: nothing changes a message.
+  "email.list": { needs: "view", own: true, run: (ctx, op) => listMail(asker(ctx), op) },
+  "email.thread": { needs: "view", own: true, run: (ctx, op) => readMail(asker(ctx), op.sourceId, op.id) },
+  // Which addresses are the member's decides whose mail is kept as theirs, so only the member reads, adds or removes them. See NOT_FOR_AGENTS.
+  "email.senders": { needs: "view", by: "member", own: true, run: (ctx) => mailSenders(asker(ctx)) },
+  "email.addSender": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => addMailSender(asker(ctx), op.address) },
+  "email.removeSender": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => removeMailSender(asker(ctx), op.address) },
   "person.read": { needs: "view", run: readPerson },
   "record.refer": { needs: "view", own: true, changes: true, run: (ctx, op) => refer(asker(ctx), op.sourceId, op.id) },
   "record.read": { needs: "view", own: true, run: (ctx, op) => readRecord(asker(ctx), op.ref) },

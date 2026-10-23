@@ -1,7 +1,7 @@
 import { linesOutsideCode } from "./lines.ts";
 import type { SourceRecord } from "./protocol.ts";
 
-const WRITTEN = /::(event|contact)\{([^{}\n]*)\}/g;
+const WRITTEN = /::(event|contact|email)\{([^{}\n]*)\}/g;
 const REFERRED = /^[a-z0-9]{12}(?: .*)?$/;
 
 /** The references a text holds outside code and inline code, by the ref each is written with, as `::event{k3j5h8d9f0a1 Lunch}` holds `k3j5h8d9f0a1`. */

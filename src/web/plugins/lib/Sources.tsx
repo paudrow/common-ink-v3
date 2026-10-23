@@ -2,8 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { App, PluginHost, Source, SourceKind } from "../../plugin-api.ts";
 import { forgetReferences } from "./references.tsx";
 
-const NOUN = { calendar: "calendar", contacts: "contacts" } as const satisfies Record<SourceKind, string>;
-const RECORDS = { calendar: "events", contacts: "contacts" } as const satisfies Record<SourceKind, string>;
+const NOUN = { calendar: "calendar", contacts: "contacts", email: "email" } as const satisfies Record<SourceKind, string>;
+const RECORDS = { calendar: "events", contacts: "contacts", email: "email" } as const satisfies Record<SourceKind, string>;
 
 /** The member's data sources of every kind, as `source.list` answers them, and a way to say they changed. */
 export function useSources(host: PluginHost) {
@@ -76,7 +76,7 @@ export function Sources({ host, app, kind, sources, onChange, below, heading = t
     <section className="sources" aria-label="Data sources">
       {heading && <h2>Data sources</h2>}
       {!sources.length && <p className="sources-none">Data sources are not set up on this Common Ink, so there is no {NOUN[kind]} to connect.</p>}
-      {sources.length > 0 && !sources.some((s) => s.provider === "Google") && (
+      {kind !== "email" && sources.length > 0 && !sources.some((s) => s.provider === "Google") && (
         <p className="sources-none">
           This sign-in has no Google account behind it, so there is no Google {kind === "calendar" ? "Calendar" : "Contacts"} to connect.
         </p>
@@ -98,7 +98,9 @@ export function Sources({ host, app, kind, sources, onChange, below, heading = t
                   {asking === source.id ? (
                     <div className="confirm" role="group" aria-label={`Disconnect ${source.provider}`}>
                       <span>
-                        Disconnecting {source.provider} disconnects {together.map((s) => s.name).join(" and ")} together: they were connected as one account. References to their records stop showing details.
+                        {kind === "email"
+                          ? "Disconnecting Email deletes every message kept here and every address you added, and drops mail sent here after. References to threads stop showing details. It can't be undone."
+                          : `Disconnecting ${source.provider} disconnects ${together.map((s) => s.name).join(" and ")} together: they were connected as one account. References to their records stop showing details.`}
                       </span>
                       <button type="button" className="button small danger" autoFocus disabled={busy} onClick={() => void act(() => host.perform({ type: "source.disconnect", id: source.id }))}>
                         Disconnect {source.provider}
