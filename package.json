@@ -11,7 +11,7 @@
     "typecheck": "npm run site && wrangler types --check && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p extension/tsconfig.json",
     "types": "wrangler types",
     "test": "vitest run && npm run test:rest",
-    "test:rest": "vitest run -c vitest.extension.config.ts && node --test test/zones/recurrence-zones.test.ts test/node/zip.test.ts test/node/restore-drill.test.ts test/node/scripts-load.test.ts test/node/this-machine.test.ts test/node/markdown-spaces.test.ts test/node/backtracking.test.ts test/site/generator.test.ts test/cli/ink.test.ts",
+    "test:rest": "vitest run -c vitest.extension.config.ts && node --test test/zones/recurrence-zones.test.ts test/node/zip.test.ts test/node/restore-drill.test.ts test/node/scripts-load.test.ts test/node/this-machine.test.ts test/node/deploy-settings.test.ts test/node/markdown-spaces.test.ts test/node/backtracking.test.ts test/site/generator.test.ts test/cli/ink.test.ts",
     "test:browser": "playwright test --project=chromium",
     "test:browser:others": "npm run build && node scripts/smoke-browsers.ts",
     "check": "npm run typecheck && npm test && npm run build",

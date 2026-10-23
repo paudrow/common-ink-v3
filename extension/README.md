@@ -40,6 +40,8 @@ The toolbar icon clips the current page. The context menu clips the page, the se
 2. Choose Sign in. Common Ink asks you to allow the clipper. Allow sends a token back to this browser. It is not listed with your agents.
 3. Allowing again replaces that token, so an older sign-in on another browser stops working.
 
+When sign-in fails, the clipper says why: you closed the window, the host didn't answer, or the host doesn't allow this clipper's ID, which the message names. Chrome shows no window in the last two cases.
+
 The clipper's token reaches only what the clipper does: it lists workspaces and folders, creates notes, and uploads files. It can't read, change or delete anything. It lasts 90 days. Sign out in the extension ends it on the server and drops it from this browser. Settings, under Account, lists it with a Revoke button. Signing out everywhere ends it too, whether you do it or an admin of a workspace you are in does, with or without agents.
 
 A pasted token still works, under Paste a token. A read-only token can sign in, and Save stays off. Sign out in the extension drops a pasted token from this browser and leaves it connected in Common Ink.
@@ -48,7 +50,7 @@ A pasted token still works, under Paste a token. A read-only token can sign in, 
 
 Common Ink lets only the extension IDs in its `CLIPPER_EXTENSION_IDS` setting sign in, so another extension can't ask for a token. The sign-in page shows the ID it is for.
 
-The `key` in `manifest.json` fixes the ID of an unpacked build at `nloccbnkboaohceggkmbmkppnjjkkdkh`, wherever it is loaded from. `scripts/extension-id.ts` works the ID out from the key. The dev server and the tests allow that ID. A Preview or production allows the IDs its own setting names.
+The `key` in `manifest.json` fixes the ID of an unpacked build at `nloccbnkboaohceggkmbmkppnjjkkdkh`, wherever it is loaded from. `scripts/extension-id.ts` works the ID out from the key. The dev server and the tests allow that ID. A Preview or production allows the IDs its own setting names. Production's deploy takes them from the repository's Actions variable `CLIPPER_EXTENSION_IDS`, since a deploy replaces any setting made on the Worker itself, and warns when it is empty: then no clipper can sign in.
 
 The key is a public key. Anyone can copy it into an unpacked extension, so production should allow only the Chrome Web Store ID. Once the clipper is in the store, put the store's public key here as `key`, so a local build has the store's ID.
 
