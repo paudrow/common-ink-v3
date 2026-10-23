@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { contextMenus } from "./Menu.tsx";
 
-/** How long the pointer rests on an anchor before its card shows, so passing over one shows nothing. */
+/** How long the pointer rests on an anchor, or the keyboard, before its card shows, so passing over one or through a list shows nothing. */
 const SHOW_MS = 350;
 /** How long the card stays once the pointer leaves its anchor and the card, and again each time it moves nearer the card on its way there. */
 const HIDE_MS = 300;
@@ -132,7 +132,9 @@ export function hoverCards(kind: string, content: (key: string, close: () => voi
   const focused = (e: FocusEvent) => {
     const anchor = e.target instanceof HTMLElement && e.target.dataset[kind] !== undefined && e.target.matches(":focus-visible") ? e.target : null;
     const key = anchor?.dataset[kind];
-    if (anchor && key) open(anchor, key, "focus");
+    if (!anchor || !key) return;
+    clearTimeout(showing);
+    showing = setTimeout(() => document.activeElement === anchor && open(anchor, key, "focus"), SHOW_MS);
   };
   const blurred = (e: FocusEvent) => {
     if (shown?.how === "focus" && e.target === shown.anchor && !(e.relatedTarget instanceof Node && holder?.contains(e.relatedTarget))) close();

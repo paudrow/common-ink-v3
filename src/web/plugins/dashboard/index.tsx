@@ -48,7 +48,7 @@ export const dashboard: Plugin = {
   activate(host) {
     const pins = pinsOf(host);
     const openTodo = todoOpener(host);
-    host.views.register("page", { id: "dashboard", path: "/dashboard", home: true, label: "Dashboard", icon: "dashboard", nav: "primary", order: 10, component: ({ app }) => <Dashboard host={host} app={app} pins={pins} onOpenTodo={openTodo} /> });
+    host.views.register("page", { id: "dashboard", path: "/dashboard", home: true, label: "Dashboard", description: "Your home page: what is due, your pinned notes, and what changed since you last looked.", icon: "dashboard", nav: "primary", order: 10, component: ({ app }) => <Dashboard host={host} app={app} pins={pins} onOpenTodo={openTodo} /> });
     host.views.register("tool", { id: "pin", order: -1, component: ({ note }) => <PinMark pins={pins} note={note} /> });
 
     // A pin is listed while its note is in sight and out of Trash, so the pins are read again when a note comes or goes, and for no edit.

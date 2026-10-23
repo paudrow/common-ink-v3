@@ -564,8 +564,10 @@ export interface Slots {
    * its path are tabs of their own, one for each `key` that `tabAt` gives an address (its path, without
    * the query), called its `title`. Each tag's page is "#name" beside the others and the page of every
    * tag, its key the tag's name in lower case, so `/tags/Garden` and `/tags/garden` are one tab.
+   * `description` says what the page is for, in a sentence, on the card its link shows; one left
+   * out is its plugin's description.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: true | (() => Promise<Opened>); home?: boolean; tabAt?: (path: string) => { key: string; title: string }; command?: { id: string; title: string }; component: View };
+  page: { id: string; path: `/${string}`; label: string; description?: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: true | (() => Promise<Opened>); home?: boolean; tabAt?: (path: string) => { key: string; title: string }; command?: { id: string; title: string }; component: View };
   /**
    * A panel on the Dashboard. It is listed in Add panel and drawn in a card once the member adds it.
    * The member's arrangement still decides whether it is shown, as it does for the Dashboard's own panels.
@@ -1069,7 +1071,7 @@ export interface OpenTab {
   pane: number;
 }
 
-export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav" | "home" | "transient" | "tabAt">;
+export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "description" | "icon" | "nav" | "home" | "transient" | "tabAt">;
 
 /** The app at one moment: what is open, and what can be done about it. */
 export interface App {

@@ -91,7 +91,7 @@ export const daily: Plugin = {
     },
   },
   activate(host) {
-    host.views.register("page", { id: "today", path: PATH, label: "Today", icon: "today", nav: "primary", order: 25, transient: () => todaysPage(host), component: ({ app }) => <Today host={host} app={app} /> });
+    host.views.register("page", { id: "today", path: PATH, label: "Today", description: "Today's daily note, made the first time you open it.", icon: "today", nav: "primary", order: 25, transient: () => todaysPage(host), component: ({ app }) => <Today host={host} app={app} /> });
     host.commands.register({ id: "daily.today", title: "Open today's daily note", group: "Navigation", run: () => host.app().go(PATH) });
     const step = (from: string, by: number) => void openDay(host, toward(from, by, todayHere()));
     host.commands.register({ id: "daily.yesterday", title: "Yesterday's note", group: "Navigation", run: () => step(todayHere(), -1) });

@@ -13,6 +13,6 @@ export const search: Plugin = {
   description: "Finds notes by their words, phrases and tags, on the Search page and in every folder's list.",
   icon: "search",
   activate(host) {
-    host.views.register("page", { id: "search", path: SEARCH_PATH, label: "Search", icon: "search", nav: "primary", order: 20, component: ({ app }) => <SearchPage host={host} app={app} /> });
+    host.views.register("page", { id: "search", path: SEARCH_PATH, label: "Search", description: "Find notes by their words, phrases and tags, across the workspace.", icon: "search", nav: "primary", order: 20, component: ({ app }) => <SearchPage host={host} app={app} /> });
   },
 };

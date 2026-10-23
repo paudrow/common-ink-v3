@@ -368,7 +368,9 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         in(slot) {
           return contributions().views[slot];
         },
-        register(slot, view) {
+        register(slot, given) {
+          // A page that doesn't say what it is for is what its plugin is for.
+          const view = slot === "page" && !(given as Slots["page"]).description && plugin.description ? { ...given, description: plugin.description } : given;
           const table = views.get(slot) as Map<string, Owned<typeof view>>;
           if (slot === "page" && (view as Slots["page"]).home && !trusted.includes(plugin)) throw new Error(`Only Common Ink's own plugins add the page shown at /, and ${plugin.name} asked to with ${(view as Slots["page"]).path}`);
           if (slot === "page" && (view as Slots["page"]).command && !required.includes(plugin.id)) throw new Error(`Only the app names a page's command, and ${plugin.name} named ${(view as Slots["page"]).command!.id}`);

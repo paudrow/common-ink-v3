@@ -100,6 +100,6 @@ export const trash: Plugin = {
     host.views.register("tool", { id: "archive", component: (props) => <ArchiveButton host={host} {...props} /> });
     host.views.register("notice", { id: "trashed", component: (props) => <TrashBanner host={host} {...props} /> });
     // Under More, and with no order so that it comes after the modes there: it is where notes go, not a way to work.
-    host.views.register("page", { id: "trash", path: "/trash", label: "Trash", icon: "trash", nav: "more", component: (props) => <TrashPage host={host} {...props} /> });
+    host.views.register("page", { id: "trash", path: "/trash", label: "Trash", description: "Notes deleted in the last 30 days, to put back or delete for good.", icon: "trash", nav: "more", component: (props) => <TrashPage host={host} {...props} /> });
   },
 };

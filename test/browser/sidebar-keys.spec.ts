@@ -579,3 +579,48 @@ test("in vim mode, Ctrl+h, j, k and l go between the sidebar and the panes with 
   await page.keyboard.press("Escape");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(process.platform === "darwin" ? "# Delta\n\nwordsx" : "# Delta\n\nwordsxy");
 });
+
+test.describe("the sidebar's pages say what they are for", () => {
+  const card = (page: Page) => page.getByRole("tooltip");
+
+  test("resting the pointer on a page's link, on More or on a plugin's page shows a card with what it is for, from the page or its plugin", async ({ page }) => {
+    await setUp(page, false);
+    await expect(tag(page, "idea")).toBeVisible();
+    const link = (name: string) => sidebar(page).getByRole("link", { name, exact: true });
+    for (const [name, says] of [
+      ["Dashboard", "Your home page: what is due, your pinned notes, and what changed since you last looked."],
+      ["Search", "Find notes by their words, phrases and tags, across the workspace."],
+      ["Today", "Today's daily note, made the first time you open it."],
+      ["Todos", "Every todo in the workspace, with its due date, priority and note."],
+      ["Calendar", "The events of the calendars you connect, which only you see."],
+    ]) {
+      await link(name!).hover();
+      await expect(card(page)).toHaveText(`${name}${says}`);
+      await expect(link(name!)).toHaveAccessibleDescription(`${name} ${says}`);
+      await page.mouse.move(600, 400);
+      await expect(card(page)).toHaveCount(0);
+    }
+    const more = sidebar(page).locator(".more-toggle");
+    await more.hover();
+    await expect(card(page)).toContainText("More");
+    await expect(card(page)).toContainText("The pages used less often: Contacts, Email, Uploads, History, Trash, Dice, Plugins.");
+    await more.click();
+    await page.mouse.move(600, 400);
+    // Dice is a plugin's page, which says nothing of its own: its card is the plugin's description.
+    await link("Dice").hover();
+    await expect(card(page)).toHaveText("DiceA die you roll, on its own page under More.");
+  });
+
+  test("the keyboard on a page's link shows its card after a moment, and going on through the list shows none on the way", async ({ page }) => {
+    await setUp(page, false);
+    await expect(tag(page, "idea")).toBeVisible();
+    await sidebar(page).getByRole("link", { name: "Dashboard" }).focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(sidebar(page).getByRole("link", { name: "Search" })).toBeFocused();
+    await expect(card(page)).toHaveCount(0);
+    await expect(card(page)).toHaveText("SearchFind notes by their words, phrases and tags, across the workspace.");
+    await keys(page, "ArrowDown", "ArrowDown", "ArrowDown");
+    await expect(sidebar(page).getByRole("link", { name: "Calendar" })).toBeFocused();
+    await expect(card(page)).toHaveText(/^Calendar/);
+  });
+});

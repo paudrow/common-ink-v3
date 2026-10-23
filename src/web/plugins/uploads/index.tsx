@@ -99,7 +99,7 @@ export const uploads: Plugin = {
     host.completions.register({ id: "uploads.at", trigger: "@", spaces: true, items: uploadsAt(host) });
     host.views.register("bar", { id: "uploads", live: true, component: () => <SendingStatus sender={sending} /> });
     host.views.register("bar", { id: "upload-recording", live: true, component: () => <RecordingStatus recorder={recording} /> });
-    host.views.register("page", { id: "uploads", path: UPLOADS_PATH, label: "Uploads", icon: "uploads", nav: "more", component: (props) => <UploadsPage host={host} sender={sending} {...props} /> });
+    host.views.register("page", { id: "uploads", path: UPLOADS_PATH, label: "Uploads", description: "Every file uploaded to the workspace: pictures, recordings, documents and the rest.", icon: "uploads", nav: "more", component: (props) => <UploadsPage host={host} sender={sending} {...props} /> });
     host.views.register("page", { id: "file", path: FILE_PATH, label: "File", icon: "text", component: (props) => <FilePage key={props.app.path} host={host} {...props} /> });
     // The vocabulary is the workspace's, which a guest sees none of.
     if (host.workspace.role !== "guest") host.views.register("settings", { id: "voice", label: "Voice", component: () => <VocabularySettings host={host} /> });

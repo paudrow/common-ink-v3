@@ -144,7 +144,7 @@ export const history: Plugin = {
     host.views.register("page", {
       id: "history",
       path: PATH,
-      label: "History",
+      label: "History", description: "Every change to every note, who made it, and a way to take it back.",
       icon: "history",
       nav: "more",
       component: ({ app }) => <Page host={host} app={app} places={places} />,
