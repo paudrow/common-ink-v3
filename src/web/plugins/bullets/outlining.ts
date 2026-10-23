@@ -4,7 +4,7 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemir
 import { BOX_PATTERN, isReading } from "../../plugin-api.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
 import { mathBlocksIn, type Formula } from "../math/syntax.ts";
-import { indent, itemAt, leading, move, outdent, textStart, type Edit, type Item, type Lines } from "./outline.ts";
+import { hasUnder, indent, itemAt, leading, move, outdent, parentOf, textStart, type Edit, type Item, type Lines } from "./outline.ts";
 
 export const linesIn = (doc: Text): Lines => ({ count: doc.lines, at: (n) => doc.line(n + 1).text });
 
@@ -89,6 +89,51 @@ class Ellipsis extends WidgetType {
 }
 const ellipsis = Decoration.replace({ widget: new Ellipsis() });
 
+/**
+ * Folds the bullets whose lines start at `froms`, beside what is already folded. A cursor in what
+ * they hide goes to the end of the bullet's line, as a fold opens for a cursor inside it.
+ */
+function fold(view: EditorView, froms: readonly number[], only = false) {
+  const { state } = view;
+  const kept = only ? [] : state.field(folds).folds.map((f) => f.from);
+  const hiding = froms.map((from) => state.doc.lineAt(from)).find((line) => {
+    const item = bulletAt(state, line.number - 1);
+    return item && state.selection.ranges.some((r) => r.to > line.to && r.from <= state.doc.line(item.end).to);
+  });
+  view.dispatch({ effects: foldsAre.of([...new Set([...kept, ...froms])]), selection: hiding && { anchor: hiding.to } });
+}
+
+/** What is drawn beside a bullet that has something under it, to fold or unfold it with a click. Its arrow is drawn by its look, so it is no letter of the line. */
+class Disclosure extends WidgetType {
+  constructor(readonly open: boolean) {
+    super();
+  }
+
+  override eq(other: Disclosure) {
+    return other.open === this.open;
+  }
+
+  override toDOM(view: EditorView) {
+    const el = document.createElement("span");
+    el.className = "bullet-disclosure";
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-label", this.open ? "Fold" : "Unfold");
+    el.setAttribute("aria-expanded", String(this.open));
+    el.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      const from = view.state.doc.lineAt(view.posAtDOM(el)).from;
+      if (this.open) fold(view, [from]);
+      else view.dispatch({ effects: toggleFold.of(from) });
+    });
+    return el;
+  }
+
+  override ignoreEvent() {
+    return true;
+  }
+}
+const disclosures = [new Disclosure(true), new Disclosure(false)].map((widget) => Decoration.widget({ widget, side: -1 }));
+
 interface Folds {
   marks: RangeSet<Folded>;
   folds: readonly Fold[];
@@ -151,43 +196,82 @@ const blank = Decoration.mark({ class: "bullet-blank" });
 /** A line that starts with a bullet and a task's box, whatever mark the box holds, and the space after it: a box with none yet is drawn as written. */
 const TASK = new RegExp(`^\\s*[-*+]\\s+${BOX_PATTERN}[ \\t]`);
 
-/** A dot for each bullet's mark, or nothing on a task's, and a numbered item's number marked as itself, except the mark the cursor is on. */
-const bullets = drawnInView((view) => {
-  const { state } = view;
-  const drawn: Range<Decoration>[] = [];
-  for (const { from, to } of view.visibleRanges) {
-    syntaxTree(state).iterate({
-      from,
-      to,
-      enter(node) {
-        if (node.name !== "ListMark") return;
-        const line = state.doc.lineAt(node.from);
-        if (touched(state, node.from, node.to)) return;
-        if (node.node.parent?.parent?.name === "BulletList") drawn.push((TASK.test(line.text) ? blank : dot).range(node.from, node.to));
-        else if (node.node.parent?.parent?.name === "OrderedList") drawn.push(number.range(node.from, node.to));
-      },
-    });
-  }
-  return drawn;
-});
+/** A dot for each bullet's mark, or nothing on a task's, and a numbered item's number marked as itself, except the mark the cursor is on, and a disclosure before each mark with something under it. */
+const bullets = drawnInView(
+  (view) => {
+    const { state } = view;
+    const drawn: Range<Decoration>[] = [];
+    const lines = linesIn(state.doc);
+    const folded = new Set(state.field(folds).folds.map((f) => f.from));
+    for (const { from, to } of view.visibleRanges) {
+      syntaxTree(state).iterate({
+        from,
+        to,
+        enter(node) {
+          if (node.name !== "ListMark") return;
+          const line = state.doc.lineAt(node.from);
+          // One disclosure to a line, before its first mark, as in `- - x`.
+          const first = node.from === line.from + leading(line.text).length;
+          if (first && !isReading(state) && hasUnder(lines, line.number - 1)) drawn.push(disclosures[folded.has(line.from) ? 1 : 0]!.range(node.from));
+          if (touched(state, node.from, node.to)) return;
+          if (node.node.parent?.parent?.name === "BulletList") drawn.push((TASK.test(line.text) ? blank : dot).range(node.from, node.to));
+          else if (node.node.parent?.parent?.name === "OrderedList") drawn.push(number.range(node.from, node.to));
+        },
+      });
+    }
+    return drawn;
+  },
+  (update) => update.startState.field(folds).folds !== update.state.field(folds).folds,
+);
 
 const look = EditorView.baseTheme({
   // The mark's own letter is there and not painted, as a ghost is, and the dot is painted over it.
   ".bullet-dot, .bullet-blank": { position: "relative", WebkitTextFillColor: "transparent" },
   ".bullet-dot::before": { content: '"•"', position: "absolute", left: "0", right: "0", textAlign: "center", WebkitTextFillColor: "var(--muted)" },
+  // Out in the margin before the mark, so the line's text is where it is with or without it. Shown where the pointer is, and on a folded bullet.
+  // Just before the mark and pulled out to its left by as much as it is wide, so it stays beside the mark however the line is indented and the text doesn't move.
+  ".bullet-disclosure": { display: "inline-block", width: "1em", marginLeft: "-1.3em", marginRight: "0.3em", textAlign: "center", cursor: "pointer", opacity: "0", userSelect: "none" },
+  ".bullet-disclosure::before": { content: '"▾"', color: "var(--muted)" },
+  // Where the lists draw a bullet's dot further into its mark, in the column a task's box stands in, the disclosure goes along.
+  ".cm-line.md-item-dotted .bullet-disclosure": { position: "relative", left: "var(--md-dot-at, 0)", zIndex: "1" },
+  // A task's mark and the space after it are painted as nothing, so the disclosure goes past them, beside the box.
+  ".cm-line:has(.bullet-blank) .bullet-disclosure": { position: "relative", left: "2ch", zIndex: "1" },
+  ".bullet-disclosure[aria-expanded=false]::before": { content: '"▸"' },
+  ".cm-line:hover .bullet-disclosure, .bullet-disclosure[aria-expanded=false]": { opacity: "1" },
+  "@media (hover: none)": { ".bullet-disclosure": { opacity: "0.6" } },
   ".bullet-folded": { marginLeft: "0.4em", padding: "0 0.4em", borderRadius: "4px", backgroundColor: "var(--accent-soft)", color: "var(--accent)", cursor: "pointer" },
 });
 
 /** A member who can only read the note folds its bullets by their key too, so its text takes the keyboard. A reading, as a folder's card is, is no place for keys. */
 const reachable = EditorView.contentAttributes.of((view) => (view.state.facet(EditorView.editable) || isReading(view.state) ? null : { tabindex: "0" }));
 
+/** The note editor with bullets that last had the keyboard. */
+let last: EditorView | null = null;
+// Kept as it gives the keyboard up, to the palette say: an editor given the keyboard as it opens, as after a reload, has no update that says it took it.
+const remembered = EditorView.domEventHandlers({
+  blur(_, view) {
+    last = view;
+    return false;
+  },
+});
+
+/**
+ * The note editor that has the keyboard, if it has bullets. `orLast` takes the one that had it last
+ * as well, for a command run from the palette, which has the keyboard until it has run it.
+ */
+function focused(orLast = false): EditorView | null {
+  const view = document.activeElement instanceof HTMLElement ? EditorView.findFromDOM(document.activeElement) : null;
+  if (view && view.contentDOM === document.activeElement && view.state.field(folds, false)) return view;
+  return orLast && last?.dom.isConnected ? last : null;
+}
+
 /**
  * The note editor that has the keyboard, if its selection starts on a bullet, and the lines of that
  * selection: from the line it starts on to the last line it takes anything of.
  */
-function onBullet(): { view: EditorView; line: number; last: number } | null {
-  const view = document.activeElement instanceof HTMLElement ? EditorView.findFromDOM(document.activeElement) : null;
-  if (!view || view.contentDOM !== document.activeElement || !view.state.field(folds, false)) return null;
+function onBullet(orLast = false): { view: EditorView; line: number; last: number } | null {
+  const view = focused(orLast);
+  if (!view) return null;
   const { doc, selection } = view.state;
   const { from, to, empty } = selection.main;
   const line = doc.lineAt(from).number - 1;
@@ -199,15 +283,15 @@ function onBullet(): { view: EditorView; line: number; last: number } | null {
 type Make = (lines: Lines, line: number, last: number) => Edit | null;
 
 /** The edit a bullet key would make now, and where: nothing when the selection doesn't start on a bullet, the note can't be changed, or the bullet has nowhere to go. */
-function ready(make: Make) {
-  const at = onBullet();
+function ready(make: Make, orLast = false) {
+  const at = onBullet(orLast);
   const made = at && writable(at.view.state) ? make(linesIn(at.view.state.doc), at.line, at.last) : null;
   return at && made ? { ...at, made } : null;
 }
 
 /** Makes the outline edit a bullet key would make now, if there is one. */
 function edit(make: Make) {
-  const at = ready(make);
+  const at = ready(make, true);
   if (at) makeEdit(at.view, at.made);
 }
 
@@ -266,6 +350,21 @@ const KEPT: readonly string[] = ["moveUp", "moveDown", "moveRight", "moveLeft"];
  */
 export const bulletCommands = {
   ...(Object.fromEntries(Object.entries(MAKES).map(([name, make]) => [name, { when: () => (KEPT.includes(name) ? onBullet() !== null : ready(make) !== null), run: () => edit(make) }])) as Record<keyof typeof MAKES, { when: () => boolean; run: () => void }>),
+  select: {
+    when: () => onBullet() !== null,
+    /** The bullet and everything under it, from the start of its line to the end of its last. Again, the bullet it is under, and so on out. */
+    run() {
+      const at = onBullet(true);
+      if (!at) return;
+      const { state } = at.view;
+      const span = (item: Item) => ({ anchor: state.doc.line(item.line + 1).from, head: state.doc.line(item.end).to });
+      const { from, to } = state.selection.main;
+      const covered = (item: Item) => from <= span(item).anchor && to >= span(item).head;
+      let item = bulletAt(state, at.line)!;
+      for (let up = parentOf(linesIn(state.doc), item); up && covered(item); up = parentOf(linesIn(state.doc), up)) item = up;
+      at.view.dispatch({ selection: span(item), scrollIntoView: true, userEvent: "select" });
+    },
+  },
   toggleFold: {
     /** A bullet folds when it has something under it. */
     when() {
@@ -274,9 +373,30 @@ export const bulletCommands = {
       return !!item && item.end - item.line > 1;
     },
     run() {
-      const at = onBullet();
+      const at = onBullet(true);
       if (at) at.view.dispatch({ effects: toggleFold.of(at.view.state.doc.line(at.line + 1).from) });
     },
+  },
+  foldAll: {
+    when: () => focused() !== null,
+    /** Every bullet with something under it that isn't itself under a bullet folded with it. */
+    run() {
+      const view = focused(true);
+      if (!view) return;
+      const { state } = view;
+      const froms: number[] = [];
+      for (let n = 0; n < state.doc.lines; n++) {
+        const item = hasUnder(linesIn(state.doc), n) && bulletAt(state, n);
+        if (!item) continue;
+        froms.push(state.doc.line(n + 1).from);
+        n = item.end - 1;
+      }
+      fold(view, froms, true);
+    },
+  },
+  unfoldAll: {
+    when: () => focused() !== null,
+    run: () => focused(true)?.dispatch({ effects: foldsAre.of([]) }),
   },
 };
 
@@ -299,5 +419,5 @@ export function bulletEditing(kept: readonly Kept[], keep: (folded: Kept[]) => v
     if (was.folds === now.folds || (!was.folds.length && !now.folds.length)) return;
     keep(now.folds.map((f) => ({ line: update.state.doc.lineAt(f.from).number - 1, text: update.state.doc.lineAt(f.from).text })));
   });
-  return [restored, clickingFolded, bullets, keeping, reachable, look];
+  return [restored, clickingFolded, bullets, keeping, remembered, reachable, look];
 }
