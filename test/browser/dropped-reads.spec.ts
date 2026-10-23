@@ -12,11 +12,15 @@ test.beforeEach(({ page }) => {
 });
 test.afterEach(() => expect(errors).toEqual([]));
 
+/** Leaves the app signing in opened, which may still be reading what it reads as it starts, so the read dropped next is the next page's. */
+const leaveApp = (page: Page) => page.goto("about:blank");
+
 test("a note's pin, unread once, is read when the next note opens", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const plan = await perform(page, { type: "note.create", text: "# Plan" });
   const other = await perform(page, { type: "note.create", text: "# Other" });
   await perform(page, { type: "pin.set", id: plan.id, pinned: true });
+  await leaveApp(page);
   const pins = await dropFirst(page, "pin.list");
 
   await page.goto(`/note/${other.id}`);
@@ -35,6 +39,7 @@ test("the Dashboard's pins, unread once, are read when a note comes", async ({ p
   await signInAsNewPerson(page, "Ada Lovelace");
   const plan = await perform(page, { type: "note.create", text: "# Plan" });
   await perform(page, { type: "pin.set", id: plan.id, pinned: true });
+  await leaveApp(page);
   const pins = await dropFirst(page, "pin.list");
 
   await page.goto("/dashboard");
@@ -71,6 +76,7 @@ test("who a todo can be assigned to, unread once as Todos opens, is read again",
   await signInAsNewPerson(page, "Ada Lovelace");
   await join(await anotherPerson(page, "Grace Hopper"), page, "editor");
   await perform(page, { type: "note.create", text: "# Chores\n\n- [ ] Wash" });
+  await leaveApp(page);
   // Mentions reads the members as the app starts, and Todos reads them as it opens and again once the notes are read.
   const members = await dropFirst(page, "member.list", 3);
 
@@ -112,6 +118,7 @@ test("whether someone else changed the open note, unread once, is read at the me
   const note = await perform(page, { type: "note.create", text: "# Plan" });
   await claude.tool("write_note", { id: note.id, baseRevision: 1, text: "# Plan\n\nClaude's step" });
   await perform(page, { type: "note.write", id: note.id, baseRevision: 2, text: "# Plan\n\nClaude's step\n\nAda's word" });
+  await leaveApp(page);
   const checks = await dropFirst(page, "history.list");
 
   await page.goto(`/note/${note.id}`);
@@ -209,9 +216,6 @@ const goInApp = (page: Page, path: string) =>
     history.pushState(null, "", path);
     dispatchEvent(new PopStateEvent("popstate"));
   }, path);
-
-/** Leaves the app signing in opened, which may still be reading the tags, so the read dropped next is the next page's. */
-const leaveApp = (page: Page) => page.goto("about:blank");
 
 test("the tags, unread once, are read when the window comes back to the front", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
