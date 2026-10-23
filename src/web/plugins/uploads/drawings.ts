@@ -20,7 +20,10 @@ export async function sceneOf(host: PluginHost, id: string): Promise<Scene> {
   return scene;
 }
 
-/** A picture of a scene, as a `data:` address: the one saved with it, or else one Excalidraw draws of it now. */
-export async function imageOf(scene: Scene): Promise<string> {
-  return previewIn(scene) ?? (await (await excalidraw()).pictured(scene)).image;
+/** A picture of a scene, as a `data:` address: the one saved with it, or else one Excalidraw draws of it now. One `dark` is always drawn now, since the one saved is light. */
+export async function imageOf(scene: Scene, dark = false): Promise<string> {
+  return (!dark && previewIn(scene)) || (await (await excalidraw()).pictured(scene, dark)).image;
 }
+
+/** Whether a scene holds a picture: a photo or a screenshot put in the drawing, which Excalidraw's dark theme keeps the right way round. */
+export const holdsPictures = (scene: Scene) => scene.elements.some((e) => (e as { type?: unknown }).type === "image" && !(e as { isDeleted?: unknown }).isDeleted);

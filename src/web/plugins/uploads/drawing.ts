@@ -1,9 +1,9 @@
-import { cropIn, sizeIn, themeNow, uploadIn, withCrop, withUpload, type BelowDrawn, type BelowEmbedded, type Dispose, type Embed, type PluginHost, type ReferredTo, type Upload, type UploadEmbed } from "../../plugin-api.ts";
+import { cropIn, onTheme, sizeIn, themeNow, uploadIn, withCrop, withUpload, type BelowDrawn, type BelowEmbedded, type Dispose, type Embed, type PluginHost, type ReferredTo, type Upload, type UploadEmbed } from "../../plugin-api.ts";
 import { cropPicture } from "./cropper.ts";
 import { placed } from "./cropping.ts";
 import { reasonOf } from "../lib/FoundNote.tsx";
 import { sketch } from "../lib/sketch.ts";
-import { excalidraw, imageOf, sceneOf } from "./drawings.ts";
+import { excalidraw, holdsPictures, imageOf, sceneOf } from "./drawings.ts";
 import { sizeHandle } from "./handle.ts";
 import { filePath, openingOf, openUpload, previewUpload } from "./opening.ts";
 import { previewOf } from "./previewing.ts";
@@ -151,6 +151,7 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
   /** A file as a chip among words: its name and its size, which opens it. */
   const chip = (id: string, info: NonNullable<ReferredTo>) => {
     const link = opener(el("a", "file-chip"), id, info);
+    link.dataset.follow = "";
     link.append(paperclip(), el("span", "file-chip-name", info.name), el("span", "file-chip-size", formatBytes(info.size)));
     return link;
   };
@@ -342,15 +343,29 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: 
   const drawScene = (scene: Promise<Scene>, picture: HTMLElement): Dispose => {
     const img = picture.querySelector("img")!;
     let stopped = false;
-    scene.then(imageOf).then(
-      (image) => {
-        if (stopped) return;
+    let drawn = 0;
+    let unwatch = () => {};
+    const unreadable = () => void (stopped || picture.parentElement?.replaceChildren(missing(UNREADABLE)));
+    const draw = (read: Scene, dark: boolean) => {
+      const asked = ++drawn;
+      imageOf(read, dark).then((image) => {
+        if (stopped || asked !== drawn) return;
         img.alt = TITLE.drawing;
         img.src = image;
-      },
-      () => void (stopped || picture.parentElement?.replaceChildren(missing(UNREADABLE))),
-    );
-    return () => void (stopped = true);
+      }, unreadable);
+    };
+    scene.then((read) => {
+      if (stopped) return;
+      if (!holdsPictures(read)) return draw(read, false);
+      // The dark theme's filter over a whole drawing would turn a photo in it to its negative, which Excalidraw's own dark picture keeps the right way round.
+      img.classList.add("upload-drawing-drawn-dark");
+      draw(read, themeNow() === "dark");
+      unwatch = onTheme((theme) => draw(read, theme === "dark"));
+    }, unreadable);
+    return () => {
+      stopped = true;
+      unwatch();
+    };
   };
 
   /**

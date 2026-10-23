@@ -21,15 +21,15 @@ type Files = Parameters<typeof exportToBlob>[0]["files"];
 const MOST_PIXELS = 4096;
 
 /**
- * A picture of `elements` on the scene's own background, the same wherever it is shown. It is a PNG
- * and not SVG, since an SVG carries its fonts only by Excalidraw cutting them down, which runs code the
- * page's policy refuses.
+ * A picture of `elements` on the scene's own background, the same wherever it is shown, or as
+ * Excalidraw's dark theme shows it for `dark`. It is a PNG and not SVG, since an SVG carries its fonts
+ * only by Excalidraw cutting them down, which runs code the page's policy refuses.
  */
-async function pictureOf(elements: Elements, appState: Record<string, unknown>, files: Files): Promise<Pictured> {
+async function pictureOf(elements: Elements, appState: Record<string, unknown>, files: Files, dark = false): Promise<Pictured> {
   let size = { width: 0, height: 0 };
   const blob = await exportToBlob({
     elements,
-    appState: { ...appState, exportBackground: true, exportWithDarkMode: false },
+    appState: { ...appState, exportBackground: true, exportWithDarkMode: dark },
     files,
     exportPadding: 16,
     mimeType: "image/png",
@@ -48,10 +48,10 @@ async function pictureOf(elements: Elements, appState: Record<string, unknown>, 
   return { image, ...size };
 }
 
-/** A picture of a scene, for one saved with none or with one of other elements, as an agent writes it. */
-export function pictured(scene: Scene): Promise<Pictured> {
+/** A picture of a scene, for one saved with none or with one of other elements, as an agent writes it, or one drawn `dark`. */
+export function pictured(scene: Scene, dark = false): Promise<Pictured> {
   const elements = restoreElements(scene.elements as Elements, null).filter((e) => !e.isDeleted);
-  return pictureOf(elements, scene.appState ?? {}, (scene.files ?? {}) as Files);
+  return pictureOf(elements, scene.appState ?? {}, (scene.files ?? {}) as Files, dark);
 }
 
 export interface Editing {

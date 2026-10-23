@@ -4,6 +4,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type Decoration
 import { aloneIn, aloneOn, boxOf, keptBelow } from "./below.ts";
 import { closeOptions, declared, refreshOptions, toggleOptions, type Options } from "./embedOptions.ts";
 import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "./embedSyntax.ts";
+import { following } from "./following.ts";
 import type { AddressEmbed, Drawn, Embed, EmbedOptions, Embedded } from "./plugin-api.ts";
 import { isReading } from "./readOnly.ts";
 
@@ -459,11 +460,26 @@ const arrowsIn = Prec.high(
 /** The note an editor holds, which each embed drawn in it is told. */
 const noteOf = Facet.define<string, string>({ combine: (values) => values[0] ?? "" });
 
+/** Vim's gd on an embed in a line clicks what the embed marked `data-follow`: a file's link, a reference's chip. */
+const pressedAt = following.of((view) => {
+  const { head } = view.state.selection.main;
+  for (const frame of view.contentDOM.querySelectorAll<HTMLElement>(".embed-frame.embed-card")) {
+    // A frame of an editor inside an embed is that editor's.
+    if (frame.closest(".cm-editor") !== view.dom) continue;
+    const written = writtenAt(view, frame, false);
+    if (!written || head < written.from || head >= written.to) continue;
+    const follows = drawingIn(frame).querySelector<HTMLElement>("[data-follow]");
+    follows?.click();
+    return !!follows;
+  }
+  return false;
+});
+
 /**
  * Draws each `::name{config}` and each `:::name{config}` block in note `noteId` with the embed registered
  * under that name, and keeps what an embed draws below its line. A name nobody registered stays as
  * text. Which embeds there are is said with `embedsAre`.
  */
-export const embedding = (noteId: string): Extension => [noteOf.of(noteId), used, blocks, steppingIn, arrowsIn, Prec.lowest(inline), keptBelow((state) => ({ noteId: state.facet(noteOf), embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
+export const embedding = (noteId: string): Extension => [noteOf.of(noteId), used, blocks, steppingIn, arrowsIn, pressedAt, Prec.lowest(inline), keptBelow((state) => ({ noteId: state.facet(noteOf), embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
 
 export const embedsAre = (embeds: readonly (Embed | AddressEmbed)[]): Extension => [registered.of(embeds.filter((e): e is Embed => !("claims" in e))), addressed.of(embeds.filter((e): e is AddressEmbed => "claims" in e))];

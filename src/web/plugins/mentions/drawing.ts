@@ -1,6 +1,6 @@
 import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
-import { mentionsIn, mentionsOn, parseTodo, type WrittenMention } from "../../plugin-api.ts";
+import { following, mentionsIn, mentionsOn, parseTodo, type WrittenMention } from "../../plugin-api.ts";
 import { chips, editWithin, unitAtCursor, type Chip } from "../lib/chips.ts";
 import { drawnInView, within } from "../lib/live.ts";
 import { shown, type People } from "./people.ts";
@@ -95,8 +95,19 @@ const look = EditorView.baseTheme({
   ".md-mention-assignee.md-mention-member": { background: "var(--accent-soft)" },
 });
 
+/** Vim's gd on a mention, drawn or as written, opens the person's page as a click does. */
+const followed = (open: () => OpenPerson) =>
+  following.of((view) => {
+    const { head } = view.state.selection.main;
+    const mention = [...view.state.field(noteMentions).values()].find((m) => m.from <= head && head < m.to);
+    const to = open();
+    if (!mention || !to) return false;
+    to(mention.target);
+    return true;
+  });
+
 /** The editor extension that draws mentions, a way to put the cursor inside the one it is at, and whether it is at one. */
 export function mentionDrawing(people: () => People, open: () => OpenPerson): { extension: Extension; edit: (view: EditorView) => void; canEdit: (view: EditorView) => boolean } {
   const chip = mentionChip(people, open);
-  return { extension: [noteMentions, chips(chip), asWritten(people), look], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
+  return { extension: [noteMentions, chips(chip), asWritten(people), look, followed(open)], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
 }
