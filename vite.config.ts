@@ -110,10 +110,12 @@ const embedSite = (): Record<string, string> => (process.argv.some((arg) => arg 
 /**
  * The Worker as this machine runs it: dev sign-in on, HTML embeds on a site of their own, and without
  * Workers AI, which always runs on Cloudflare and is paid for, unless `npm run dev -- --ai` asked for
- * it (it needs `wrangler login`). Without it, transcribing a recording says how to turn it on.
+ * it (it needs `wrangler login`). Without it, transcribing a recording says how to turn it on. Usage is
+ * never counted here.
  */
-const devConfig = (config: { ai?: unknown }) => {
+const devConfig = (config: { ai?: unknown; analytics_engine_datasets?: unknown }) => {
   if (!process.env.INK_AI) delete config.ai;
+  delete config.analytics_engine_datasets;
   return { vars: { DEV_SIGN_IN: "1", DEV_SERVER: "1", CLIPPER_EXTENSION_IDS: unpackedExtensionId(), ...embedSite() }, secrets: { required: ["SESSION_SECRET", ...inDevVars()] } };
 };
 

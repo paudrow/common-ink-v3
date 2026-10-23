@@ -13,6 +13,7 @@
 import { ACCESS_PREFIX, SIGNED_OUT_MEANWHILE, b64url, hashToken, prepareAgent } from "./agents.ts";
 import { newId } from "./ids.ts";
 import { MAX_AGENT_NAME, OpError, type ConnectOptions } from "./protocol.ts";
+import { count } from "./usage.ts";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -371,6 +372,7 @@ export async function consent(db: D1Database, personId: string, choices: Consent
     db.prepare("UPDATE oauth_clients SET last_used_at = ? WHERE id = ?").bind(now, request.client_id),
   ]);
   if (!made!.meta.changes) throw new OpError("conflict", SIGNED_OUT_MEANWHILE);
+  await count({ event: "feature", detail: "agent.connect", workspaceId: options.workspaceId ?? null, personId, kind: "person" });
   return { agentId, code, redirectUri: request.redirect_uri, state: request.state };
 }
 

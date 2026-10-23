@@ -87,6 +87,7 @@ import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as Ac
 import { linkHash } from "./linkSeal.ts";
 import { applyChanges, blank, changesBetween } from "./text.ts";
 import { HOLD_MS, discard, hold, neverWritten } from "./discard.ts";
+import { changeUsage, count, featureOf, type Usage } from "./usage.ts";
 import { ruleLabel } from "./recurrence.ts";
 import { BOX_PATTERN, TODO_STATES, changeTodo, checkedOff, completeTodo, deletedTags, nameKey, parseTodo, renamedTag, renamedTags, rolledForward, tagsAdded, todoIndex, todosIn, type Completed, type TodoChange, type TodoState } from "./todos.ts";
 
@@ -163,7 +164,18 @@ export interface Context {
   files: Files;
   /** The access this operation takes away, kept in the bucket once it is done so that a restore of the database can't give it back. */
   revoked: Deletion[];
+  /** What this operation counts once it is done (usage.ts). */
+  usage: Usage[];
 }
+
+/** Who a count of this operation is of: the person, or the person an agent or plugin acts for. */
+const usedBy = (ctx: Context): Omit<Usage, "event"> => ({ workspaceId: ctx.workspaceId, personId: ctx.personId, kind: ctx.author.kind === "member" ? "person" : ctx.author.kind });
+
+/** What each statement that records a change counts, kept with the statement so it counts only if its own batch lands. Notes written side by side, or a write tried again, never count another's. */
+const changeCounts = new WeakMap<D1PreparedStatement, Usage[]>();
+
+/** The batch of `statements` landed: what its changes count is kept for the end of the operation. */
+const landedCounts = (ctx: Context, statements: readonly D1PreparedStatement[]) => ctx.usage.push(...statements.flatMap((statement) => changeCounts.get(statement) ?? []));
 
 type Access = "view" | "edit" | "manage";
 const ALLOWS: Record<ActorStanding["most"], ReadonlySet<Access>> = {
@@ -233,9 +245,13 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   const shutOff = plugin !== null && "allowed" in plugin && plugin.allowed !== "all";
   // A guest, and whoever opens a link, is told no member's name; a shut-off plugin only with members.read.
   const namesMembers = standing.role !== null && (!shutOff || (plugin as { allowed: ReadonlySet<string> }).allowed.has("member.list"));
-  const ctx: Context = { db, actor, author, shutOff, namesMembers, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files, revoked: [] };
+  const ctx: Context = { db, actor, author, shutOff, namesMembers, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files, revoked: [], usage: [] };
   const result = (await handler.run(ctx, op as never)) as Results[T["type"]];
   await remember(files.bucket ?? null, ctx.revoked);
+  const feature = featureOf(op.type, result);
+  if (feature) ctx.usage.push({ ...usedBy(ctx), event: "feature", detail: feature });
+  if (actor.kind === "agent") ctx.usage.push({ ...usedBy(ctx), event: "agent_call", detail: op.type });
+  await count(...ctx.usage);
   return result;
 }
 
@@ -947,12 +963,14 @@ interface Recording {
   writeId?: string;
   reverts?: Reverts;
   resolution?: Resolution | null;
+  /** Set for the change that makes the note, which counts as made, not edited. */
+  made?: true;
 }
 
 /** Records `changes` to a note whose text was `before`, with the lines it added and removed counted. */
-function insertChange(ctx: Context, noteId: string, revision: number, baseRevision: number, before: string, changes: ChangeSet, { writeId, reverts, resolution }: Recording = {}) {
+function insertChange(ctx: Context, noteId: string, revision: number, baseRevision: number, before: string, changes: ChangeSet, { writeId, reverts, resolution, made }: Recording = {}) {
   const { added, removed } = lineDiff(before, changes);
-  return ctx.db
+  const statement = ctx.db
     .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, author_owner, diff, created_at, write_id, reverts, resolution, added, removed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(
       noteId,
@@ -969,6 +987,8 @@ function insertChange(ctx: Context, noteId: string, revision: number, baseRevisi
       added,
       removed,
     );
+  changeCounts.set(statement, changeUsage(usedBy(ctx), before, applyChanges(changes, before), made ?? false));
+  return statement;
 }
 
 /**
@@ -1025,6 +1045,7 @@ function recording(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision:
 async function landed(ctx: Context, statements: D1PreparedStatement[]): Promise<boolean> {
   try {
     await ctx.db.batch(statements);
+    landedCounts(ctx, statements);
     return true;
   } catch (err) {
     if (isTaken(err)) return false;
@@ -1163,7 +1184,7 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
            VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         )
         .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.private_owner, row.indexed, holdsOldLinks(row.text) ? 0 : 1),
-      insertChange(ctx, id, 1, 0, "", changesBetween("", text)),
+      insertChange(ctx, id, 1, 0, "", changesBetween("", text), { made: true }),
       ...(stale ? [ctx.db.prepare("DELETE FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ? AND note_id = ?").bind(ctx.workspaceId, ctx.personId, day, stale)] : []),
       ctx.db.prepare("INSERT INTO daily_notes (workspace_id, person_id, day, note_id) VALUES (?, ?, ?, ?)").bind(ctx.workspaceId, ctx.personId, day, id),
       ...deriving(ctx, id, text, { was: "" }),
@@ -2023,7 +2044,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         )
         .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.updated_by_owner, row.created_by, ctx.author.kind, row.indexed, holdsOldLinks(row.text) ? 0 : 1);
-      await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text), { writeId: op.writeId }), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
+      const statements = text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text), { writeId: op.writeId, made: true }), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)];
+      await intoFolder(ctx.db.batch(statements));
+      ctx.usage.push({ ...usedBy(ctx), event: "note_created" });
+      landedCounts(ctx, statements);
       await heldByAgent(ctx, id, text);
       return linked(toNote(ctx, row), unresolved);
     },

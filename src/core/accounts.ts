@@ -3,6 +3,7 @@ import { newId } from "./ids.ts";
 import type { Invitation, Me, Standing } from "./protocol.ts";
 import { MAKER_SHARES } from "./sharing.ts";
 import { standingIn } from "./standing.ts";
+import { count } from "./usage.ts";
 
 export interface SignInIdentity {
   email: string;
@@ -18,7 +19,7 @@ export class NotThatPerson extends Error {}
 export async function signIn(db: D1Database, identity: SignInIdentity, now = Date.now()): Promise<{ personId: string; sessionsEnded: number }> {
   const email = identity.email.trim().toLowerCase();
   const name = identity.name.trim() || email;
-  await db
+  const made = await db
     .prepare("INSERT INTO people (id, email, name, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (email) DO NOTHING")
     .bind(newId(), email, name, now)
     .run();
@@ -34,6 +35,7 @@ export async function signIn(db: D1Database, identity: SignInIdentity, now = Dat
   const person = await db.prepare("SELECT id, sessions_ended, google_sub FROM people WHERE email = ? AND former = 0").bind(email).first<{ id: string; sessions_ended: number; google_sub: string | null }>();
   if (!person) throw new Error("no person for that email after sign-in");
   if (identity.sub && person.google_sub !== identity.sub) throw new NotThatPerson("This email belongs to another Google account here");
+  if (made.meta.changes) await count({ event: "sign_up", workspaceId: null, personId: person.id, kind: "person" });
   await arrive(db, person.id, now);
   return { personId: person.id, sessionsEnded: person.sessions_ended };
 }
@@ -98,7 +100,8 @@ export async function arrive(db: D1Database, personId: string, now = Date.now())
   if (person.granted) await takeUpGrants(db, personId, person.email);
   if (!person.invited) return;
   // `takeUp` binds the invite `acceptInvite` names as ?3, which is null here: every invite of theirs from before their account.
-  await db.batch(takeUp(db, personId, `${UNASKED} AND ?3 IS NULL`, null, now));
+  const [joined] = await db.batch(takeUp(db, personId, `${UNASKED} AND ?3 IS NULL`, null, now));
+  if (joined!.meta.changes) await count({ event: "member_joined", workspaceId: null, personId, kind: "person", count: joined!.meta.changes });
 }
 
 /** What an invite that waits for this person to accept it says, or null when it is no such invite of theirs. */
@@ -115,8 +118,10 @@ export async function invitation(db: D1Database, personId: string, inviteId: str
 
 /** The person accepts the invite at its link: they are a member of its workspace from now, which is answered. Null when it is no invite waiting for them. */
 export async function acceptInvite(db: D1Database, personId: string, inviteId: string, now = Date.now()): Promise<string | null> {
-  await db.batch(takeUp(db, personId, "i.id = ?3", inviteId, now));
-  return workspaceOfInvite(db, personId, inviteId);
+  const [joined] = await db.batch(takeUp(db, personId, "i.id = ?3", inviteId, now));
+  const workspaceId = await workspaceOfInvite(db, personId, inviteId);
+  if (joined!.meta.changes) await count({ event: "member_joined", workspaceId, personId, kind: "person" });
+  return workspaceId;
 }
 
 /**
@@ -135,13 +140,14 @@ const takeUpGrants = (db: D1Database, personId: string, email: string) =>
 async function createFirstWorkspace(db: D1Database, adminId: string, name: string, now: number): Promise<void> {
   const workspaceId = newId();
   const unsortedId = newId();
-  await db.batch([
+  const [made] = await db.batch([
     db
       .prepare("INSERT INTO workspaces (id, name, unsorted_folder_id, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM members WHERE person_id = ?)")
       .bind(workspaceId, name, unsortedId, now, adminId),
     db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) SELECT ?, id, NULL, 'Unsorted', 'unsorted' FROM workspaces WHERE id = ?").bind(unsortedId, workspaceId),
     db.prepare("INSERT INTO members (workspace_id, person_id, role, joined_at) SELECT id, ?, 'admin', ? FROM workspaces WHERE id = ?").bind(adminId, now, workspaceId),
   ]);
+  if (made!.meta.changes) await count({ event: "workspace_created", workspaceId, personId: adminId, kind: "person" });
 }
 
 /** `dev` is the Worker's to say: whether this is a place where dev sign-in is on. */
