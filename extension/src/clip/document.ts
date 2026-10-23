@@ -30,7 +30,9 @@ export function isDocument(url: string, mime: string, name: string): boolean {
 export async function fetchDocument(url: string, fetchImpl: typeof fetch = fetch): Promise<DownloadedFile | "too-big" | null> {
   let response: Response;
   try {
-    response = await fetchImpl(url, { credentials: "include", signal: AbortSignal.timeout(20_000) });
+    // The member's cookies go with this fetch, for a document behind their own sign-in, so a redirect is not
+    // followed: the page could point them at another site or an intranet host, and the clip would upload what that answers.
+    response = await fetchImpl(url, { credentials: "include", redirect: "manual", signal: AbortSignal.timeout(20_000) });
   } catch {
     return null;
   }

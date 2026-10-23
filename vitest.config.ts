@@ -30,6 +30,9 @@ export default defineConfig(async () => ({
     include: ["test/core/**/*.test.ts"],
     setupFiles: ["test/core/setup.ts"],
     sequence: { sequencer: Dealt },
+    // A CI runner can stall for seconds at a time, and tests that take one to five seconds there have timed out at
+    // vitest's five (agent-access, erase, third-party). A hung test still fails, a few seconds later.
+    testTimeout: 15_000,
     // The stylesheet is read as text by a test, which an empty stand-in would pass.
     css: { include: [/style\.css/] },
   },
