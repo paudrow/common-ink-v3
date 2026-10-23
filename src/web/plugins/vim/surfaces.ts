@@ -1,4 +1,4 @@
-import { EDITOR, FOCUSABLE, ROW, arrive, beside, focusOn, goes, listOf, listsIn, ownKeys, preview, regions, restOf, rowsOf, shown, typing } from "../lib/rows.ts";
+import { EDITOR, FOCUSABLE, LIST, ROW, arrive, beside, focusOn, goes, listOf, listsIn, ownKeys, preview, regions, restOf, rowsOf, shown, typing } from "../lib/rows.ts";
 import { land, toward, type Move, type Side } from "./moving.ts";
 
 /**
@@ -80,6 +80,10 @@ export interface Surfaces {
   arrow(key: "ArrowDown" | "ArrowUp"): void;
   leaveField(): void;
   go(side: Side): void;
+  /** Goes back to the region focus was in before this one. */
+  back(): void;
+  /** Goes to the next region in the order the page has them, the sidebar first, and from the last to the first. */
+  round(): void;
   tab(by: 1 | -1): void;
   /** Puts focus where a key put something in front: in the region the keys are in, where it last was there, or its note's text, or its list; or, from the sidebar, on what was opened beside it. */
   settle(): void;
@@ -90,6 +94,9 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
   /** Where focus last was in each region, and the row it was last on in each list. The sidebar is both. */
   const lastIn = new WeakMap<Element, HTMLElement>();
   const lastRow = new WeakMap<Element, HTMLElement>();
+  /** The region focus is in, and the one it was in before. */
+  let now: HTMLElement | undefined;
+  let before: HTMLElement | undefined;
   /** The row marked as the one the keys are on. A browser shows where focus is only after some keys, and not after one held with Control. */
   let marked: HTMLElement | undefined;
   let byKey = false;
@@ -110,6 +117,7 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
     const el = active();
     const region = regions().find((r) => r.contains(el));
     if (region) lastIn.set(region, el);
+    if (region && region !== now) [before, now] = [now, region];
     const list = listOf(el);
     const row = list ? rowsOf(list).find((r) => r.contains(el)) : undefined;
     if (row) lastRow.set(list!, row);
@@ -161,8 +169,17 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
     return row && restOf(row) === active() ? row : undefined;
   };
 
-  const enter = (region: HTMLElement | undefined) => {
+  /** The row of what is open now: the page or tag, or else the folder in front. */
+  const current = (rows: readonly HTMLElement[]) => rows.find((r) => r.matches('[aria-current]:not([aria-current="false"])') || r.querySelector('[aria-current]:not([aria-current="false"])')) ?? rows.find((r) => r.matches('[aria-selected="true"]'));
+
+  /**
+   * A region that is one list, as the sidebar is, is entered on the row of what is open. Any other,
+   * or any going `back` to it, where focus last was there.
+   */
+  const enter = (region: HTMLElement | undefined, back = false) => {
     if (!region) return;
+    const rows = region.matches(LIST) && !back ? rowsOf(region) : [];
+    if (rows.length) return select(current(rows) ?? rows[resting(region, rows)]);
     const was = lastIn.get(region);
     if (was?.isConnected && shown(was)) return was.focus();
     const editor = region.querySelector<HTMLElement>(EDITOR);
@@ -255,6 +272,13 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       const all = regions();
       const from = all.indexOf(here()!);
       if (from >= 0) enter(all[toward(all.map((r) => r.getBoundingClientRect()), from, side)]);
+    }),
+    back: keyed(() => {
+      if (before && regions().includes(before)) enter(before, true);
+    }),
+    round: keyed(() => {
+      const all = regions();
+      if (all.length > 1) enter(all[(all.indexOf(here()!) + 1) % all.length]);
     }),
     tab(by) {
       const tabs = [...(tablist()?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])];

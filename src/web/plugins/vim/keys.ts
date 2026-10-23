@@ -40,6 +40,8 @@ export const KEYS: readonly VimKey[] = [
   { id: "window.down", title: "Vim: go to the region below", surface: "window", keys: ["ctrl+w j"], run: (ui) => ui.go("down") },
   { id: "window.up", title: "Vim: go to the region above", surface: "window", keys: ["ctrl+w k"], run: (ui) => ui.go("up") },
   { id: "window.right", title: "Vim: go to the region on the right", surface: "window", keys: ["ctrl+w l"], run: (ui) => ui.go("right") },
+  { id: "window.previous", title: "Vim: go back to the region you were in", surface: "window", keys: ["ctrl+w p"], run: (ui) => ui.back() },
+  { id: "window.next", title: "Vim: go to the next region, round to the first", surface: "window", keys: ["ctrl+w w"], run: (ui) => ui.round() },
   { id: "tab.next", title: "Vim: next tab", surface: "tabs", keys: ["g t"], run: (ui) => ui.tab(1), arrives: true },
   { id: "tab.previous", title: "Vim: previous tab", surface: "tabs", keys: ["g shift+t"], run: (ui) => ui.tab(-1), arrives: true },
 ];

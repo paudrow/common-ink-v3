@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson, test } from "./helpers.ts";
+import { perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -328,4 +328,64 @@ test.describe("Space opens a row and stays on it", () => {
     await page.keyboard.press("Enter");
     await expectAt(cards(page).nth(0), "Work's first note, after Enter");
   });
+});
+
+test("Ctrl-w h lands on the row of what is open, Ctrl-w l puts the note's cursor back where it was, Ctrl-w p goes back to the last region, and Ctrl-w w goes round them", async ({ page }) => {
+  const { work } = await setUp(page, true);
+  const note = await perform(page, { type: "note.create", text: "# Delta\n\nfirst line\nlast line", folderId: work.id });
+  await page.goto(`/note/${note.id}`);
+  const text = page.getByRole("textbox", { name: "Note text" });
+  await expect(text).toContainText("last line");
+  await text.click();
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+  await keys(page, "Shift+G", "w");
+
+  // The sidebar is entered on the note's folder, whichever row it was left on.
+  await keys(page, "Control+w", "h");
+  await expectMarked(folder(page, "Work"), "the note's folder");
+  await keys(page, "g", "g");
+  await expectMarked(sidebar(page).getByRole("link", { name: "Dashboard" }), "Dashboard");
+  await keys(page, "Control+w", "l");
+  await expect(text).toBeFocused();
+  await keys(page, "Control+w", "h");
+  await expectMarked(folder(page, "Work"), "the note's folder again");
+
+  // Back in the note, the cursor is where it was: on the last line's second word, even after the page's selection was elsewhere.
+  await sidebar(page).evaluate((el) => getSelection()!.selectAllChildren(el.querySelector(".section-head")!));
+  await keys(page, "Control+w", "l");
+  await expect(text).toBeFocused();
+  await page.keyboard.press("i");
+  await page.keyboard.type("Z");
+  await page.keyboard.press("Escape");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Delta\n\nfirst line\nlast Zline");
+
+  // p goes back to the row that was left, and not to what is open.
+  await keys(page, "Control+w", "h", "k");
+  const left = await here(page);
+  expect(left).not.toBe("Work");
+  await keys(page, "Control+w", "l");
+  await expect(text).toBeFocused();
+  await keys(page, "Control+w", "p");
+  await expect.poll(() => here(page)).toBe(left);
+  await keys(page, "Control+w", "p");
+  await expect(text).toBeFocused();
+
+  // w goes round the regions in the page's order and back to the first: the sidebar, the note, the inspector.
+  await pinPanel(page, "Info");
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await expect(inspector).toBeVisible();
+  await text.click();
+  await keys(page, "Escape", "Control+w", "w");
+  await focusIn(inspector);
+  await keys(page, "Control+w", "w");
+  await expectMarked(folder(page, "Work"), "round to the sidebar");
+  await keys(page, "Control+w", "w");
+  await expect(text).toBeFocused();
+
+  // On a page, the sidebar is entered on its link.
+  await page.goto("/todos");
+  await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
+  await page.getByRole("main").click({ position: { x: 600, y: 300 } });
+  await keys(page, "Control+w", "h");
+  await expectMarked(sidebar(page).getByRole("link", { name: "Todos" }), "Todos, the page open");
 });
