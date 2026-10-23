@@ -10530,6 +10530,18 @@ button.todo-tag[aria-pressed="true"] {
   object-fit: fill;
 }
 
+/* A drawing's picture is kept light, as Excalidraw keeps the drawing. In the dark it is shown through the filter Excalidraw's dark theme puts on its canvas, so it looks as it does while it is edited. One with a photo in it is drawn dark by Excalidraw instead. */
+:root[data-theme="dark"] img.upload-drawing:not(.upload-drawing-drawn-dark),
+:root[data-night-shift] img.upload-drawing:not(.upload-drawing-drawn-dark) {
+  filter: invert(93%) hue-rotate(180deg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) img.upload-drawing:not(.upload-drawing-drawn-dark) {
+    filter: invert(93%) hue-rotate(180deg);
+  }
+}
+
 .upload-audio {
   display: block;
   width: 100%;
@@ -13238,6 +13250,11 @@ button.crumb[aria-expanded="true"] {
 /* Pictures, videos and embeds, when the member has asked for them to be tinted. A picture and a video are changed by a filter, which keeps their brightness and has them in red and nothing else. */
 :root[data-night-tint] :is(img, video, canvas) {
   filter: url(#night-shift-tint);
+}
+
+/* A drawing is dark in Night shift, as its editor is, and then tinted. */
+:root[data-night-tint] img.upload-drawing:not(.upload-drawing-drawn-dark) {
+  filter: invert(93%) hue-rotate(180deg) url(#night-shift-tint);
 }
 
 /* A frame from another site is sandboxed, and can't be restyled inside. It is covered instead: first made gray, then multiplied by the tint. The cover lets every press through to the frame. */

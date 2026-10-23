@@ -158,6 +158,94 @@ test("a drawing saved in a private note in a folder is kept in that folder and p
   await expect(drawingBelow(page).getByRole("button", { name: "Edit drawing" })).toHaveCount(0);
 });
 
+/** The red, green and blue of the drawing's picture as it is drawn on screen, at a point given as fractions of its width and height. */
+async function drawnAt(page: Page, x: number, y: number) {
+  const shot = (await picture(page).screenshot()).toString("base64");
+  return page.evaluate(
+    async ({ shot, x, y }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${shot}`;
+      await img.decode();
+      const pen = Object.assign(document.createElement("canvas"), { width: img.width, height: img.height }).getContext("2d")!;
+      pen.drawImage(img, 0, 0);
+      return [...pen.getImageData(Math.floor(img.width * x), Math.floor(img.height * y), 1, 1).data].slice(0, 3);
+    },
+    { shot, x, y },
+  );
+}
+
+test("a drawing is shown in the app's theme as Excalidraw shows it while it is edited, light, dark and in Night shift, and the drawing kept is the same in each", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const drawn = await send(page, "Drawing.excalidraw", AGENT_SCENE);
+  const written = `# Themed\n\n::drawing{${drawn.id} 232x197}\n`;
+  const note = await perform(page, { type: "note.create", text: written });
+  /** The paper between the box and the word, and the picture's address, with these settings. */
+  const look = async (settings: Record<string, unknown>) => {
+    await perform(page, { type: "settings.write", text: JSON.stringify(settings), baseRevision: (await perform(page, { type: "settings.read" })).revision });
+    await page.goto(`/note/${note.id}`);
+    await expect.poll(() => shown(page)).toMatch(PNG);
+    await settled(page);
+    return { paper: await drawnAt(page, 0.5, 0.66), image: await shown(page) };
+  };
+
+  const light = await look({ "core.theme": "light" });
+  expect(light.paper).toEqual([255, 255, 255]);
+  // Excalidraw's dark theme turns white to its #121212.
+  const dark = await look({ "core.theme": "dark" });
+  expect(dark.paper).toEqual([18, 18, 18]);
+  expect(dark.image, "the same picture, drawn another way").toBe(light.image);
+  await page.emulateMedia({ colorScheme: "dark" });
+  expect((await look({})).paper, "the device's dark, with the theme left to it").toEqual([18, 18, 18]);
+  expect((await look({ "core.theme": "light" })).paper, "the light theme, set over the device's dark").toEqual([255, 255, 255]);
+  const night = await look({ "core.theme": "light", "night-shift.enabled": true });
+  expect(night.paper).toEqual([18, 18, 18]);
+  expect(night.image).toBe(light.image);
+  const tinted = await look({ "core.theme": "light", "night-shift.enabled": true, "night-shift.tint": true });
+  expect(tinted.paper, "dark, and tinted as every picture is").not.toEqual(night.paper);
+  expect(tinted.paper[2], "with no blue, as the tint leaves none").toBe(0);
+  expect(tinted.image).toBe(light.image);
+
+  expect(await noteText(page, note.id)).toBe(written);
+  expect((await perform(page, { type: "upload.read", id: drawn.id })).size).toBe(drawn.size);
+});
+
+test("a photo in a drawing stays the right way round in the dark, as Excalidraw's dark theme keeps it, and the drawing turns dark as the device does", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const white = await page.evaluate(() => {
+    const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 64 });
+    const pen = canvas.getContext("2d")!;
+    pen.fillStyle = "#ffffff";
+    pen.fillRect(0, 0, 64, 64);
+    return canvas.toDataURL("image/png");
+  });
+  const scene = JSON.stringify({
+    type: "excalidraw",
+    version: 2,
+    elements: [
+      { id: "photo", type: "image", x: 0, y: 0, width: 100, height: 100, fileId: "white", status: "saved", scale: [1, 1], strokeColor: "transparent", version: 1, seed: 3 },
+      { id: "box", type: "rectangle", x: 140, y: 0, width: 100, height: 100, strokeColor: "#1e1e1e", backgroundColor: "transparent", strokeWidth: 2, roughness: 0, version: 1, seed: 4 },
+    ],
+    appState: { viewBackgroundColor: "#ffffff" },
+    files: { white: { id: "white", mimeType: "image/png", dataURL: white, created: 1 } },
+  });
+  const drawn = await send(page, "Photo.excalidraw", scene);
+  const note = await perform(page, { type: "note.create", text: `# Photo\n\n::drawing{${drawn.id} 272x132}\n` });
+  await page.goto(`/note/${note.id}`);
+  await expect.poll(() => shown(page)).toMatch(PNG);
+  await settled(page);
+  /** The middle of the photo, and the paper between it and the box. */
+  const seen = async () => ({ photo: await drawnAt(page, 0.24, 0.5), paper: await drawnAt(page, 0.5, 0.5) });
+  expect(await seen()).toEqual({ photo: [255, 255, 255], paper: [255, 255, 255] });
+
+  const light = await shown(page);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(() => shown(page), "drawn again, dark").not.toBe(light);
+  await settled(page);
+  const dark = await seen();
+  expect(Math.max(...dark.paper), "dark paper").toBeLessThan(40);
+  expect(Math.min(...dark.photo), "a white photo, still light").toBeGreaterThan(200);
+});
+
 test("Cancel leaves a drawing as it was, and a drawing is sized with its handle as a picture is", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const drawn = await send(page, "Drawing.excalidraw", AGENT_SCENE);
