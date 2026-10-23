@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Icon, draggableAs, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
-import { arrive, goes, listOf, step } from "./lib/rows.ts";
+import { arrive, goes, listOf, preview, step } from "./lib/rows.ts";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
@@ -34,13 +34,22 @@ function Sidebar({ app }: ViewProps) {
     </>
   );
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
-    const target = e.target as HTMLElement;
-    if (!e.defaultPrevented && listOf(target) === e.currentTarget && step(e, e.currentTarget)) e.preventDefault();
+    const row = e.target instanceof HTMLElement && listOf(e.target) === e.currentTarget && !(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) ? e.target : null;
+    if (!row) return;
+    // A folder's row has opened itself by now.
+    if (e.key === "Enter") return void (goes(row) && arrive());
+    if (e.defaultPrevented) return;
+    if (step(e, e.currentTarget)) e.preventDefault();
     // Right opens More out and Left shuts it, as they do a folder.
-    else if (target.matches("[data-row-toggle]") && target.ariaExpanded === { ArrowRight: "false", ArrowLeft: "true" }[e.key]) {
+    else if (row.matches("[data-row-toggle]") && row.ariaExpanded === { ArrowRight: "false", ArrowLeft: "true" }[e.key]) {
       e.preventDefault();
-      target.click();
-    } else if (e.key === "Enter" && !(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) && e.target instanceof Element && goes(e.target)) arrive();
+      row.click();
+    }
+    // Space opens a link and stays on it, as it opens a folder, so the member can look through them and go to one with Enter.
+    else if (e.key === " " && row.matches("a[href]")) {
+      e.preventDefault();
+      preview(row);
+    }
   };
   // Closed, it is a narrow bar with an icon for each thing the open sidebar lists, in the same order.
   if (!open)
@@ -69,7 +78,7 @@ function Sidebar({ app }: ViewProps) {
     );
   return (
     // One list from the pages through the folders to the tags, whose rows the arrow keys go through. Enter on a link or a folder
-    // opens it and goes there with the keyboard.
+    // opens it and goes there with the keyboard, and Space opens it and stays.
     <aside className="sidebar" aria-label="Sidebar" data-list data-beside onKeyDown={onKey}>
       <WorkspaceMenu app={app} />
       <NewNote app={app} />

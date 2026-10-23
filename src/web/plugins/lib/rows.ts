@@ -127,6 +127,21 @@ function eachFrame(ms: number, look: (last: boolean) => boolean) {
   return stop;
 }
 
+const HOLDING_MS = 500;
+
+/**
+ * Opens what a row's `rest` goes to and keeps focus on it, even from a page that takes focus as it
+ * is drawn, as Search does, until the member presses a key or the pointer.
+ */
+export function preview(rest: HTMLElement, onto: (el: HTMLElement) => void = focusOn) {
+  rest.click();
+  eachFrame(HOLDING_MS, () => {
+    if (!rest.isConnected) return true;
+    if (document.activeElement !== rest) onto(rest);
+    return false;
+  });
+}
+
 const ARRIVING_MS = 2000;
 let arriving: (() => void) | undefined;
 

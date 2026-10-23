@@ -1,4 +1,4 @@
-import { EDITOR, FOCUSABLE, ROW, arrive, beside, focusOn, goes, listOf, listsIn, ownKeys, regions, restOf, rowsOf, shown, typing } from "../lib/rows.ts";
+import { EDITOR, FOCUSABLE, ROW, arrive, beside, focusOn, goes, listOf, listsIn, ownKeys, preview, regions, restOf, rowsOf, shown, typing } from "../lib/rows.ts";
 import { land, toward, type Move, type Side } from "./moving.ts";
 
 /**
@@ -51,6 +51,8 @@ export interface Surfaces {
     anyList(): boolean;
     /** On the selected row of a list, and not on another button of that row. */
     row(): boolean;
+    /** As `row`, on a row of the sidebar's that opens something beside it. */
+    beside(): boolean;
     /** As `row`, on a row with something to delete it by. */
     deletable(): boolean;
     /** Not typing, with a search box in reach. */
@@ -66,6 +68,8 @@ export interface Surfaces {
   };
   move(move: Move): void;
   open(): void;
+  /** Opens the selected row, which is beside the editor area, and stays on it. */
+  preview(): void;
   out(): void;
   /** Expands the selected row, or collapses it, where it has something that does. */
   toggle(): void;
@@ -173,6 +177,10 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       list: () => !drawn() && !typing(active()) && !ownKeys(listOf(active())) && !!listNear(),
       anyList: () => !drawn() && !typing(active()) && !!listNear(),
       row: () => !!selected(),
+      beside: () => {
+        const row = selected();
+        return !!row && beside(row) && goes(row);
+      },
       deletable: () => !!deleterOf(selected()),
       search: () => !drawn() && !typing(active()) && !!searchBox(),
       field: () => inField() && !!listNear(),
@@ -206,6 +214,10 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       target.click();
       // What a row beside the editor area opens is shown in it, and the keys go there, whether or not it was open already.
       if (beside(row) && goes(row)) arrive(keyed(focusOn));
+    }),
+    preview: keyed(() => {
+      const row = selected();
+      if (row) preview(restOf(row), keyed(focusOn));
     }),
     out: keyed(() => {
       const list = listOf(active());

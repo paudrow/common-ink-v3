@@ -261,3 +261,71 @@ test.describe("the whole sidebar is one list", () => {
     await expect(sidebar(page).getByRole("list", { name: "Tags" }).getByRole("listitem")).toHaveCount(1);
   });
 });
+
+test.describe("Space opens a row and stays on it", () => {
+  test("in vim mode, Space opens a page, a folder or a tag in the editor area and the keys stay on its row, even on Search, which takes focus; Enter then goes there", async ({ page }) => {
+    const { work } = await setUp(page, true);
+    await expect(tag(page, "idea")).toBeVisible();
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await keys(page, "Control+w", "h", "g", "g", "j");
+    const search = sidebar(page).getByRole("link", { name: "Search" });
+    await expectMarked(search, "Search");
+    await page.keyboard.press(" ");
+    await expect(page).toHaveURL(/\/search/);
+    await expect(page.getByRole("main").getByRole("searchbox")).toBeVisible();
+    await expectMarked(search, "Search, opened");
+
+    await page.keyboard.press("Shift+G");
+    const idea = sidebar(page).getByRole("list", { name: "Tags" }).getByRole("listitem");
+    await expectMarked(idea, "the tag");
+    await page.keyboard.press(" ");
+    await expect(page).toHaveURL(/\/tags\/idea/);
+    await expect(cards(page)).toHaveCount(2);
+    await expectMarked(idea, "the tag, opened");
+
+    await page.keyboard.press("k");
+    await expectMarked(folder(page, "Work"), "Work");
+    await page.keyboard.press(" ");
+    await expect(page).toHaveURL(new RegExp(`/folder/.*${work.id}`));
+    await expect(cards(page)).toHaveCount(3);
+    await expectMarked(folder(page, "Work"), "Work, opened");
+
+    // Space on More opens it out and leaves it to Enter, which goes nowhere.
+    await keys(page, "g", "g");
+    for (let i = 0; i < PAGES.indexOf("More"); i++) await page.keyboard.press("j");
+    await page.keyboard.press(" ");
+    await expect(sidebar(page).getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
+    await expect(page).toHaveURL(new RegExp(`/folder/.*${work.id}`));
+
+    // Work was opened out as it opened, so Plans is between it and the tag.
+    await keys(page, "Shift+G", "k", "k");
+    await expectMarked(folder(page, "Work"), "Work, from the end");
+    await page.keyboard.press("Enter");
+    await expectMarked(cards(page).nth(0), "Work's first note, after Enter");
+  });
+
+  test("without vim mode, Space opens a page, a folder or a tag in the editor area and the keyboard stays on its row, even on Search; Enter then goes there", async ({ page }) => {
+    const { work } = await setUp(page, false);
+    await expect(tag(page, "idea")).toBeVisible();
+    const search = sidebar(page).getByRole("link", { name: "Search" });
+    await search.focus();
+    await page.keyboard.press(" ");
+    await expect(page).toHaveURL(/\/search/);
+    await expect(page.getByRole("main").getByRole("searchbox")).toBeVisible();
+    await expectAt(search, "Search, opened");
+
+    await page.keyboard.press("End");
+    await page.keyboard.press(" ");
+    await expect(page).toHaveURL(/\/tags\/idea/);
+    await expect(cards(page)).toHaveCount(2);
+    await expectAt(tag(page, "idea"), "the tag, opened");
+
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press(" ");
+    await expect(page).toHaveURL(new RegExp(`/folder/.*${work.id}`));
+    await expect(cards(page)).toHaveCount(3);
+    await expectAt(folder(page, "Work"), "Work, opened");
+    await page.keyboard.press("Enter");
+    await expectAt(cards(page).nth(0), "Work's first note, after Enter");
+  });
+});

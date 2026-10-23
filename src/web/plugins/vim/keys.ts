@@ -27,6 +27,7 @@ export const KEYS: readonly VimKey[] = [
   { id: "list.halfDown", title: "Vim: half a page down a list", surface: "anyList", keys: ["ctrl+d"], run: (ui) => ui.move("halfDown") },
   { id: "list.halfUp", title: "Vim: half a page up a list", surface: "anyList", keys: ["ctrl+u"], run: (ui) => ui.move("halfUp") },
   { id: "list.open", title: "Vim: open the selected row", surface: "row", keys: ["enter", "l"], run: (ui) => ui.open(), arrives: true },
+  { id: "list.preview", title: "Vim: preview the selected row in the editor area, and stay on it", surface: "beside", keys: ["space"], run: (ui) => ui.preview() },
   { id: "list.out", title: "Vim: collapse the selected row, or go to its parent", surface: "row", keys: ["h"], run: (ui) => ui.out() },
   { id: "list.toggle", title: "Vim: expand or collapse the selected row", surface: "row", keys: ["z a"], run: (ui) => ui.toggle() },
   { id: "list.delete", title: "Vim: delete the selected row, or abandon the selected todo", surface: "deletable", keys: ["d d"], run: (ui) => ui.remove() },

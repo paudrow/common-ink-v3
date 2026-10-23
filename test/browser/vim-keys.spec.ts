@@ -339,11 +339,12 @@ test("in Settings, Enter on a setting goes to its field and Escape comes back to
   await expect(shown("Vim: half a page down a list")).toHaveText([MAC ? /^⌃D/ : /^Ctrl\+D/]);
   await expect(shown("Vim: open the selected row")).toHaveText([/^Enter/, /^L/]);
   await expect(shown("Vim: expand or collapse the selected row")).toHaveText([/^Z A/]);
+  await expect(shown("Vim: preview the selected row in the editor area, and stay on it")).toHaveText([/^Space/]);
   await expect(shown("Vim: go to the region on the left")).toHaveText([MAC ? /^⌃W H/ : /^Ctrl\+W H/]);
   await expect(shown("Vim: next tab")).toHaveText([/^G T/]);
   await expect(shown("Vim: next row, from a field")).toHaveText(MAC ? [/^⌃J/, /^⌃N/] : [/^Ctrl\+J/, /^Ctrl\+N/]);
-  await expect(all).toHaveCount(20);
-  await expect(shortcuts.locator("tbody tr")).toHaveCount(20);
+  await expect(all).toHaveCount(21);
+  await expect(shortcuts.locator("tbody tr")).toHaveCount(21);
 
   // Escape leaves the search box for the list, on its first row, and the keys go on through the shortcuts.
   await page.keyboard.press("Escape");
