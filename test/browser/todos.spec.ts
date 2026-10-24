@@ -923,7 +923,7 @@ test("a menu opens at the pointer when there is room, and is moved wholly inside
   expect(row.y + row.height / 2 + moved.height, "it would have run off the foot").toBeGreaterThan(short.height);
 });
 
-test("checking a todo off on the Todos page says so in a toast, and Undo opens it again as a change of its own; opening one says nothing", async ({ page }) => {
+test("checking a todo off on the Todos page says so in a toast, and Undo opens it again as a change of its own, said with a Redo; opening one says nothing", async ({ page }) => {
   // It waits ten seconds at its end for the toast to go by itself, which leaves little of 30 s on a slow server.
   test.setTimeout(60_000);
   const { home } = await twoNotes(page);
@@ -949,6 +949,8 @@ test("checking a todo off on the Todos page says so in a toast, and Undo opens i
 
   await toast(page).getByRole("button", { name: "Undo" }).click();
   await expect.poll(lineIn).toBe("- [ ] !! Call the bank due:2026-10-14 +Home");
+  await expect(toast(page)).toHaveText("Undone: Task completedRedo");
+  await toast(page).locator(".toast-text").click();
   await expect(toast(page)).toHaveCount(0);
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes", "Book flights"]);
   // The tick and its undo are two changes in History, the member's like any other.
@@ -1068,6 +1070,8 @@ test("Undo opens a todo again after more was changed on it from the page, and af
   await expect.poll(async () => (await read(page, home.id)).split("\n")[2]).toBe("- [x] ! Call the bank due:2026-10-14 +Home");
   await toast(page).getByRole("button", { name: "Undo" }).click();
   await expect.poll(async () => (await read(page, home.id)).split("\n")[2]).toBe("- [ ] ! Call the bank due:2026-10-14 +Home");
+  await expect(toast(page)).toHaveText("Undone: Task completedRedo");
+  await toast(page).locator(".toast-text").click();
   await expect(toast(page)).toHaveCount(0);
 
   // Checked off in the note, the note left, and a line written above the todo by someone else before Undo.

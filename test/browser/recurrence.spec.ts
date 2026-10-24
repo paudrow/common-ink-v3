@@ -932,7 +932,7 @@ const completionOf = async (page: Page, noteId: string, day: string) => {
   return { text: note.text, filed: await filedOn(page, day), completions: listed.length };
 };
 
-test("checking off a recurring todo on the Todos page says so in the toast, and Undo takes back its due date, its count, the line it filed and its completion as one revert", async ({ page }) => {
+test("checking off a recurring todo on the Todos page says so in the toast, and Undo takes back its due date, its count, the line it filed and its completion as one undo", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const today = await localDay(page);
   const text = `# Home\n\n- [ ] Take out the bins due:${today} every:2w-times-3 done:2026-01-05x4\n- [ ] Plain one\n`;
@@ -953,15 +953,16 @@ test("checking off a recurring todo on the Todos page says so in the toast, and 
   await expect(bins.locator(".todo-every")).toHaveText("every 2 weeks · 2 left");
 
   await toast(page).getByRole("button", { name: "Undo" }).click();
-  await expect(toast(page)).toHaveCount(0);
+  await expect(toast(page)).toHaveText("Undone: Task completedRedo");
+  await toast(page).locator(".toast-text").click();
   await expect.poll(() => completionOf(page, note.id, today)).toEqual(before);
   await expect(bins.locator(".todo-due")).toHaveText("Today");
   await expect(bins.locator(".todo-every")).toHaveText("every 2 weeks · 3 left");
   await expect(bins.locator(".todo-done")).toHaveText("✓ Jan 5 ×4");
   await expect(bins.getByRole("checkbox")).not.toBeChecked();
-  // It is in History as a revert of the completion, like any other.
+  // It is in History as an undo of the completion, like any other.
   const history = await perform(page, { type: "note.history", id: note.id });
-  expect(history.map((c) => [c.revision, c.reverts?.how ?? null, c.reverts?.revisions ?? null, c.revertedBy])).toEqual([[1, null, null, null], [2, null, null, 3], [3, "revert", [2], null]]);
+  expect(history.map((c) => [c.revision, c.reverts?.how ?? null, c.reverts?.revisions ?? null, c.revertedBy])).toEqual([[1, null, null, null], [2, null, null, 3], [3, "undo", [2], null]]);
 
   // The last time checks it off for good, and Undo takes that back the same way.
   await perform(page, { type: "note.write", id: note.id, baseRevision: 3, text: text.replace("times-3", "times-1") });
@@ -973,6 +974,27 @@ test("checking off a recurring todo on the Todos page says so in the toast, and 
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(`- [x] Take out the bins due:${today} every:2w-times-1 done:2026-01-05x4`);
   await toast(page).getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => completionOf(page, note.id, today)).toEqual({ text: text.replace("times-3", "times-1"), filed: [], completions: 0 });
+});
+
+test("Undo of a recurring todo checked off on the Todos page says so when the line it filed was changed since, and leaves that line", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const today = await localDay(page);
+  const text = `# Home\n\n- [ ] Take out the bins due:${today} every:2w\n`;
+  const note = await perform(page, { type: "note.create", text });
+  await page.goto("/todos");
+  await row(page, "Take out the bins").getByRole("checkbox").click();
+  await expect(toast(page)).toHaveText("Task completedUndo");
+  await toast(page).hover();
+  const filed = `- [x] Take out the bins due:${today} [[${note.id}]]`;
+  await expect.poll(() => filedOn(page, today)).toEqual([filed]);
+  // The filed line is written another way on the daily note before Undo is pressed.
+  const { note: daily } = await dailyNote(page, today);
+  await perform(page, { type: "note.write", id: daily.id, baseRevision: daily.revision, text: daily.text.replace(filed, `${filed} in the rain`) });
+
+  await toast(page).getByRole("button", { name: "Undo" }).click();
+  await expect(toast(page)).toHaveText("It is open again. The line filed on the daily note was changed since, so it was left there.Redo");
+  await expect.poll(() => read(page, note.id)).toBe(text);
+  expect(await filedOn(page, today)).toEqual([`${filed} in the rain`]);
 });
 
 test("checking off a recurring todo in a note says so in the toast, and Undo takes all of it back as one revert, which the open editor takes", async ({ page }) => {
@@ -1041,7 +1063,7 @@ test("Undo of a recurring todo's completion changes nothing when its line was wr
   const revision = (await perform(page, { type: "note.read", id: note.id })).revision;
   await perform(page, { type: "note.write", id: note.id, baseRevision: revision, text: `${await read(page, note.id)}Below\n` });
   await toast(page).getByRole("button", { name: "Undo" }).click();
-  await expect(toast(page)).toHaveCount(0);
+  await expect(toast(page)).toHaveText("Undone: Task completedRedo");
   await expect.poll(() => completionOf(page, note.id, today)).toEqual({ text: `${after.text}Below\n`, filed: after.filed, completions: 1 });
 });
 

@@ -7490,6 +7490,12 @@ button.diff-fold:hover {
   top: -2rem;
 }
 
+/* The todos selected, kept at the top with the order bar while the list is scrolled, over the rows under it. */
+.todo-order-slot > .selection-bar {
+  margin-bottom: 6px;
+  background: var(--bg-elev);
+}
+
 /* It opens to its own height, which the rows move down by as it does, and by nothing more. */
 .todo-order {
   display: flex;
@@ -7587,8 +7593,8 @@ button.diff-fold:hover {
   background: var(--hover);
 }
 
-/* A row the keys select is scrolled to below the order bar, which is over the top of the list. */
-.todo-card:has(.todo-order) .todo-row {
+/* A row the keys select is scrolled to below the order bar or the selection's, which are over the top of the list. */
+.todo-card:has(.todo-order, .selection-bar) .todo-row {
   scroll-margin-top: 3em;
 }
 
