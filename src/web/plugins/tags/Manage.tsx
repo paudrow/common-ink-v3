@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { MAX_TAG_DESCRIPTION, isTagName, nameKey, type App, type PluginHost } from "../../plugin-api.ts";
 import { ManageTable, type Done, type ManageActions, type ManageItem } from "../lib/ManageTable.tsx";
 import { DeleteTagDialog } from "./Deleting.tsx";
@@ -26,6 +26,7 @@ export function ManageTags({ host, app, store }: { host: PluginHost; app: App; s
   const [asked] = useState(() => store.take());
   /** The tag Delete is asking about, and what to tell the table once it is answered. */
   const [deleting, setDeleting] = useState<{ name: string; answer: (gone: boolean) => void } | null>(null);
+  useEffect(() => store.wanted(), [store]);
   if (!tags) return null;
 
   const nodes = new Map<string, TagNode>();

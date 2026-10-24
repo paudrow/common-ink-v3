@@ -1,4 +1,4 @@
-import { useId, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { useEffect, useId, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { ALL_NOTES, draggableAs, isTagName, nameKey, type App, type ListedTag, type Opened, type PluginHost } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { NoteFinder, type keeping } from "../noteList.tsx";
@@ -16,6 +16,10 @@ export interface TagStore {
   more(): (() => void) | null;
   /** Whether the server said it hasn't read every note yet, so tags and their notes may be missing. They are read again until it has. */
   indexing(): boolean;
+  /** Why the last read of the tags failed, until one is read. */
+  unread(): string | null;
+  /** Reads the tags again if the last read failed. */
+  wanted(): void;
   version(): number;
   /** Reads the tags again, as after a description was said or a tag renamed, done once they are read. */
   reload(): Promise<void>;
@@ -148,6 +152,16 @@ export function TagSection({ host, app, store }: { host: PluginHost; app: App; s
   const ids = useId();
   const every = useSyncExternalStore(store.subscribe, store.tags);
   const more = useSyncExternalStore(store.subscribe, store.more);
+  // Coming back to the window asks again for tags that couldn't be read.
+  useEffect(() => {
+    const cameBack = () => document.visibilityState === "visible" && store.wanted();
+    addEventListener("focus", cameBack);
+    document.addEventListener("visibilitychange", cameBack);
+    return () => {
+      removeEventListener("focus", cameBack);
+      document.removeEventListener("visibilitychange", cameBack);
+    };
+  }, [store]);
   if (!every) return null;
   const tags = every.filter((tag) => tag.notes > 0);
   return (
@@ -207,6 +221,7 @@ function AllTags({ host, app, store }: { host: PluginHost; app: App; store: TagS
   const ids = useId();
   const tags = useSyncExternalStore(store.subscribe, store.tags);
   const more = useSyncExternalStore(store.subscribe, store.more);
+  const unread = useSyncExternalStore(store.subscribe, store.unread);
   return (
     <section className="search-page" aria-labelledby={`${ids}-heading`}>
       <div className="tags-head">
@@ -216,6 +231,14 @@ function AllTags({ host, app, store }: { host: PluginHost; app: App; store: TagS
         </a>
       </div>
       <StillIndexing store={store} />
+      {unread && (
+        <p className="search-status" role="alert">
+          {unread}{" "}
+          <button type="button" className="found-more" onClick={store.wanted}>
+            Try again
+          </button>
+        </p>
+      )}
       {tags && !tags.length && <p className="search-status">No tags yet. Write #tag anywhere in a note to tag it.</p>}
       {tags && tags.length > 0 && <TagLinks host={host} app={app} store={store} tags={tags} labelledBy={`${ids}-heading`} described />}
       {more && (
@@ -231,6 +254,7 @@ function AllTags({ host, app, store }: { host: PluginHost; app: App; store: TagS
 
 export function TagsPage({ host, app, store, lists }: { host: PluginHost; app: App; store: TagStore; lists: TagLists }) {
   const tag = tagOfPath(app.path);
+  useEffect(() => store.wanted(), [store, tag]);
   // A page of its own for each tag, so one tag's notes are never shown under another's name.
   return tag === null ? <AllTags host={host} app={app} store={store} /> : <TagNotes key={tag} host={host} app={app} store={store} lists={lists} tag={tag} />;
 }

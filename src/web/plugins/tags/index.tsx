@@ -1,4 +1,5 @@
 import { nameKey, type ListedTag, type Plugin } from "../../plugin-api.ts";
+import { reasonOf } from "../lib/FoundNote.tsx";
 import { keeping } from "../noteList.tsx";
 import { tagCards } from "./card.tsx";
 import { tagAt, tagItems } from "./completing.ts";
@@ -30,7 +31,11 @@ export const tags: Plugin = {
     let listed: readonly ListedTag[] | null = null;
     /** Reads the tags after the ones listed, while there are more. */
     let more: (() => void) | null = null;
+    /** The read of the tags whose Show more is on its way, so it isn't offered again meanwhile. */
+    let readingMore: number | null = null;
     let indexing = false;
+    /** Why the last read of the tags failed, until one is read. */
+    let unread: string | null = null;
     let version = 0;
     let again: ReturnType<typeof setTimeout> | undefined;
     let request: TagRequest | null = null;
@@ -42,17 +47,22 @@ export const tags: Plugin = {
       if (mine !== version) return;
       listed = [...after, ...answer.tags];
       indexing = answer.indexing;
+      readingMore = null;
       const next = answer.next;
       more =
         next === null
           ? null
           : () => {
-              more = null;
+              readingMore = version;
               tell();
               const reading = version;
               host.perform({ type: "tag.list", limit: PAGE, after: next }).then(
                 (page) => take(reading, page, listed ?? []),
-                () => {},
+                () => {
+                  if (reading !== version) return;
+                  readingMore = null;
+                  tell();
+                },
               );
             };
       if (indexing) again = setTimeout(read, INDEXING_PAUSE_MS);
@@ -62,12 +72,21 @@ export const tags: Plugin = {
     const read = () => {
       const mine = ++version;
       clearTimeout(again);
+      unread = null;
       tell();
       // Read again, as many tags are read as were listed, so the ones Show more brought stay.
       return host.perform({ type: "tag.list", limit: Math.min(MOST, Math.max(PAGE, listed?.length ?? 0)) }).then(
         (answer) => take(mine, answer, []),
-        () => {},
+        (err: unknown) => {
+          if (mine !== version) return;
+          unread = reasonOf(err);
+          tell();
+        },
       );
+    };
+    // A read that failed is asked again when the tags are next wanted, not on a timer, which would ask all the while the server is down.
+    const wanted = () => {
+      if (unread !== null) read();
     };
 
     const store: TagStore = {
@@ -76,8 +95,10 @@ export const tags: Plugin = {
         return () => void listeners.delete(listener);
       },
       tags: () => listed,
-      more: () => more,
+      more: () => (readingMore === version ? null : more),
       indexing: () => indexing,
+      unread: () => unread,
+      wanted,
       version: () => version,
       reload: read,
       ask(asked) {
