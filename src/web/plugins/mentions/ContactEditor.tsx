@@ -136,12 +136,17 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 interface FormProps {
   host: PluginHost;
   card: ContactCard;
+  /** Whether `card` is a contact still to be made, which Save creates in its data source. */
+  creating?: boolean;
   onSaved: (card: ContactCard, change: ContactChange) => void;
   onCancel: () => void;
 }
 
-/** A contact as a form, the way a contacts app edits one: every field, Save sending what changed, and a picture put on or taken off at once. */
-function ContactForm({ host, card, onSaved, onCancel }: FormProps) {
+/**
+ * A contact as a form, the way a contacts app edits one: every field, Save sending what changed, and a
+ * picture put on or taken off at once. One being created is saved whole, and has no picture until it is made.
+ */
+function ContactForm({ host, card, creating = false, onSaved, onCancel }: FormProps) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(card));
   const [photo, setPhoto] = useState(card.photo);
   // A picture put on or taken off moves the contact's etag on, and a Save after it is made to the contact as it is then.
@@ -170,16 +175,21 @@ function ContactForm({ host, card, onSaved, onCancel }: FormProps) {
   const save = () =>
     !busy &&
     run(async () => {
-      const made = changeOf(card, draft);
+      // A contact being made is all that the form holds, what was filled in for it too.
+      const made = changeOf(creating ? { ...card, name: "", emails: [] } : card, draft);
       if ("problem" in made) throw new Error(made.problem);
-      const saved = Object.keys(made.change).length ? await host.perform({ type: "contact.update", sourceId: card.sourceId, id: card.id, etag, ...made.change }) : { ...card, photo, etag };
+      const saved = creating
+        ? await host.perform({ type: "contact.create", sourceId: card.sourceId, ...made.change, name: draft.name.trim() })
+        : Object.keys(made.change).length
+          ? await host.perform({ type: "contact.update", sourceId: card.sourceId, id: card.id, etag, ...made.change })
+          : { ...card, photo, etag };
       onSaved(saved, made.change);
     });
 
   return (
     <form
       className="contact-form"
-      aria-label={`Edit ${card.name}`}
+      aria-label={creating ? "New contact" : `Edit ${card.name}`}
       onSubmit={(e) => {
         e.preventDefault();
         void save();
@@ -189,18 +199,20 @@ function ContactForm({ host, card, onSaved, onCancel }: FormProps) {
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
       }}
     >
-      <div className="contact-form-photo">
-        {photo ? <img className="person-photo" src={photo} alt={`Picture of ${card.name}`} referrerPolicy="no-referrer" /> : <span className="person-photo" aria-hidden="true" />}
-        <input ref={file} type="file" accept="image/*" hidden aria-label="Picture file" onChange={(e) => void picture(e.target.files?.[0] ?? null).finally(() => (e.target.value = ""))} />
-        <button type="button" className="button small" aria-disabled={busy || undefined} onClick={() => !busy && file.current?.click()}>
-          {photo ? "Change photo" : "Add photo"}
-        </button>
-        {photo && (
-          <button type="button" className="button small" aria-disabled={busy || undefined} onClick={() => !busy && void picture(null)}>
-            Remove photo
+      {!creating && (
+        <div className="contact-form-photo">
+          {photo ? <img className="person-photo" src={photo} alt={`Picture of ${card.name}`} referrerPolicy="no-referrer" /> : <span className="person-photo" aria-hidden="true" />}
+          <input ref={file} type="file" accept="image/*" hidden aria-label="Picture file" onChange={(e) => void picture(e.target.files?.[0] ?? null).finally(() => (e.target.value = ""))} />
+          <button type="button" className="button small" aria-disabled={busy || undefined} onClick={() => !busy && file.current?.click()}>
+            {photo ? "Change photo" : "Add photo"}
           </button>
-        )}
-      </div>
+          {photo && (
+            <button type="button" className="button small" aria-disabled={busy || undefined} onClick={() => !busy && void picture(null)}>
+              Remove photo
+            </button>
+          )}
+        </div>
+      )}
       <Row label="Name">
         <input value={draft.name} autoFocus onChange={(e) => set("name", e.target.value)} />
       </Row>
@@ -316,4 +328,13 @@ export function ContactSection({ host, card, source, onSaved, onConnect }: Props
       )}
     </section>
   );
+}
+
+/**
+ * A contact to make in the member's contacts data source `sourceId`, in the form that edits one, with
+ * what is known of them filled in: a name and an email, such as a message's sender's.
+ */
+export function NewContact({ host, sourceId, name, email, onSaved, onCancel }: { host: PluginHost; sourceId: string; name: string; email: string; onSaved: (card: ContactCard) => void; onCancel: () => void }) {
+  const [card] = useState<ContactCard>(() => ({ sourceId, id: "", name, emails: [{ value: email, type: null }], phones: [], organization: null, url: null, title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], etag: "" }));
+  return <ContactForm host={host} card={card} creating onSaved={(saved) => onSaved(saved)} onCancel={onCancel} />;
 }

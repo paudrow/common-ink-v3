@@ -13,6 +13,7 @@ SELECT
   (SELECT count(*) FROM links) AS links,
   (SELECT count(*) FROM mail_ids) AS mail_ids,
   (SELECT count(*) FROM mail_messages) AS mail_messages,
+  (SELECT count(*) FROM mail_rules) AS mail_rules,
   (SELECT count(*) FROM mail_senders) AS mail_senders,
   (SELECT count(*) FROM mail_threads) AS mail_threads,
   (SELECT count(*) FROM members) AS members,

@@ -70,6 +70,7 @@ export const PERSON_COLUMNS: readonly PersonColumn[] = [
   { at: "mail_messages.person_id", fate: "delete" },
   { at: "mail_threads.person_id", fate: "delete" },
   { at: "mail_senders.person_id", fate: "delete" },
+  { at: "mail_rules.person_id", fate: "delete" },
   { at: "clipper_grants.person_id", fate: "delete" },
   { at: "oauth_requests.person_id", fate: "delete" },
   { at: "notes.created_by", fate: "former" },

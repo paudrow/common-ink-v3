@@ -9,16 +9,20 @@ Mail a person sends, copies (BCC) or forwards to **notes@in.commonink.app** is k
 3. Send, BCC or forward mail to notes@in.commonink.app from your addresses:
    - **BCC on mail you send** keeps your own message. Your replies join the thread they answer.
    - **Forwarding** keeps the message you forwarded, from its sender, and what you wrote above it. Forwarding as an attachment keeps the original's ids, so it threads exactly. A forward written into the text, as Gmail, Apple Mail and Outlook write one, threads by its subject and the people in it.
-4. A thread opens at `/email/<id>`. **Copy reference** on a thread, or on one message, copies `::email{ref subject}` to paste into a note. You see it as the thread as it is now. Everyone else who reads the note sees the subject and nothing more.
+4. The Email page lists your threads beside the one you read, as a mail app does: who wrote, the subject, how the latest message begins, and when. Search by words, `from:`, `subject:` and `has:attachment`, or press **Has attachments** or **From contacts**. j, k and the arrow keys move through the list, and Enter opens a thread. Its earlier messages are folded to a line each, and so is what a reply quotes. A message's formatting is drawn in a frame of its own origin that runs nothing and loads nothing from anywhere; **Show text** shows its text instead. Attachments are listed by name, type and size. **Make a note from this** makes a note with a link to the thread and its messages quoted. **Add sender to contacts**, on a thread holding a message you forwarded, opens the contact editor with its sender's name and address filled in, and saves to your contacts (Google); it is offered only when no contact of yours has that address and your contacts can be added to.
+5. A thread opens at `/email/<id>`. To link to it from a note, type `@` and words of its subject or sender, or press **Copy link** on the thread or on one message. The note holds `[[email:ref]]` and nothing of the mail. You see the link as the thread's subject; a click or vim's `gd` opens it, and resting on it shows who sent it, when, and how it begins. Everyone else who reads the note, members, guests and anyone with a share link, sees "Email" and nothing more. `[[email:ref|words]]` shows the words instead, to everyone. Notes written before links held `::email{ref subject}`, which is converted to `[[email:ref]]` once.
+
+6. **Skip rules**, under Email in Settings, say what mail not to keep, as a mail app's filters do: from an address or a domain, to one, words in the subject, words or "phrases" it has, words it doesn't have, the mailing list it came through (its List-Id), and whether it has attachments, any of them in one rule. A forwarded message is read as its sender wrote it, never as you who forwarded it. While you write a rule it says how many threads you have kept it matches, and saving one that matches some asks whether to remove them too. **Skip mail like this**, on a thread, opens Settings with a rule started from its list or its sender. Only you see or change your rules; an agent can't.
 
 Mail is dropped, and its sender told nothing, when any of these is true:
 
 - it comes from an address that isn't yours;
 - its domain didn't vouch for it (DMARC, or DKIM aligned with the From address);
+- one of your skip rules matches it;
 - it is over 10 MB;
 - one address sent more than 60 messages in an hour, or a person more than 500 in a day.
 
-Disconnecting Email deletes every message kept and every address you added.
+Disconnecting Email deletes every message kept, every address you added and every skip rule.
 
 ## How it is built
 
@@ -26,13 +30,15 @@ Disconnecting Email deletes every message kept and every address you added.
 |---|---|
 | Inbound: the Worker's `email()` handler, the recipient check, `/dev/email` | `src/worker/mail.ts`, `src/worker/index.ts` |
 | Reading a message: MIME (postal-mime), forwards, Authentication-Results, HTML sanitizing | `src/core/mail.ts` |
-| Keeping it: senders and codes, threads, dedupe, limits, `receive` | `src/core/mailbox.ts` |
+| The frame a message's HTML is drawn in: its document and policy, whose only script is its own, by hash | `src/worker/frames.ts` (`/embed-frame/mail`), `src/web/htmlFrame.ts` |
+| Keeping it: senders and codes, threads, dedupe, limits, skip rules kept and applied, `receive` | `src/core/mailbox.ts` |
+| What a skip rule matches | `src/core/mailRules.ts` |
 | The data source (`MailSource`, a third `DataSource` kind) and its operations | `src/core/sources.ts`, `src/worker/sources/mail.ts` |
-| Operations: `email.list`, `email.thread`, `email.senders`, `email.addSender`, `email.removeSender`, and `record.refer` / `record.read` for `::email{}` | `src/core/protocol.ts`, `src/core/operations.ts` |
+| Operations: `email.list`, `email.thread`, `email.senders`, `email.addSender`, `email.removeSender`, `email.rules`, `email.matchRule`, `email.saveRule`, `email.removeRule`, and `record.refer` / `record.read` for `[[email:ref]]` | `src/core/protocol.ts`, `src/core/operations.ts` |
 | Agents: `list_email`, `read_email_thread` (read-only), and `ink email`, `ink thread` | `src/worker/mcp/tools.ts`, `scripts/ink-cli.ts` |
-| The Email plugin: the page, the `email` reference embed, the Settings section | `src/web/plugins/email/` |
-| Tables | `migrations/0064_email.sql` |
-| Tests | `test/core/mail.test.ts`, `test/core/plugin-email.test.ts` |
+| The Email plugin: the page, `@` and links to threads, the Settings section | `src/web/plugins/email/` |
+| Tables | `migrations/0064_email.sql`, `migrations/0069_mail_rules.sql` |
+| Tests | `test/core/mail.test.ts`, `test/core/mail-rules.test.ts`, `test/core/plugin-email.test.ts`, `test/browser/email*.spec.ts` |
 
 Email extends the plugin system in no new way. It is a built-in plugin that registers a `page`, a `settings` view and an embed (`referenceEmbed`, as Contacts does), and reads through `host.perform`. Like `source.*`, `event.*` and `contact.*`, `email.*` is refused to every plugin that isn't Common Ink's own (`OwnOnly`). The extension point it needed was on the server: a third member of `DataSource`, which ADR 0006 named as the way to add a kind of data source.
 
@@ -59,6 +65,8 @@ MAIL
 ```
 
 It answers what became of the message, such as `{"kept":"…","personId":"…"}` or `{"dropped":"not_connected"}`.
+
+`node scripts/sample-mail.ts --url http://localhost:5173` keeps a few sample threads for the dev user this way: a conversation, an HTML receipt with a file, forwards from a sample contact and from someone who isn't one, and two from a mailing list.
 
 ## Setting it up in Cloudflare (by hand)
 
@@ -115,10 +123,13 @@ What a message is trusted by is the topmost `Authentication-Results` header, whi
 
 ## Open questions
 
+- **Rules and mail kept before List-Id was.** A message keeps its List-Id from when skip rules came in; one kept before has none, so a mailing-list rule never matches it.
+- **Matching a rule against everything kept** reads every message of the person's, a page at a time. That is fine at a person's size; a bigger mailbox would want the cheap parts of a rule asked of D1 first.
+
 - **Attachments.** Only names, types and sizes are kept. Keeping the bytes means R2 objects of the person's own, outside any workspace, deleted with the account and on disconnect. Another way is saving one as an upload into a workspace the member picks.
 - **Retention.** Mail is kept until the member disconnects or deletes their account. A limit, such as a year, or a cap per person, isn't set.
-- **Search.** It is a `LIKE` over each message, fine for a person's mail at this size. The notes' full-text index (`note_search`) is per workspace and isn't used.
+- **Search.** It is a `LIKE` over each message, fine for a person's mail at this size. **From contacts** reads the member's contacts from Google at each listing, up to 2,000 addresses. The notes' full-text index (`note_search`) is per workspace and isn't used.
 - **Paging.** The next page of threads is asked for by the last one's time alone, so a thread whose latest message arrived in the same millisecond as the last one listed can be skipped. A cursor of time and id would fix it, at the cost of one more argument for every agent.
 - **Threads merged by an old id.** Any id in References joins threads. Two threads of a mailing list that share one ancestor become one, and stay one.
 - **A domain that lets anyone send as anyone.** Trust is the domain's: where one user can send as another's address, they can verify it as theirs. The code's prompt warns against sending a code someone else gave you.
-- **`@` and `[[`.** A thread is referenced by Copy reference on the Email page, by `refer_record`, and by hand. `@` and `[[` offer events and contacts, and don't offer threads yet.
+- **`[[`.** `@` offers threads; `[[` offers notes and events, and not threads.

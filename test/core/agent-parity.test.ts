@@ -110,7 +110,7 @@ const COMMANDS: Record<string, string[][]> = {
     ["event-new", "google-calendar", "ada@example.com", "--title", "Lunch", "--start", "2026-10-14T17:00:00Z", "--end", "2026-10-14T18:00:00Z"],
   ],
   list_contacts: [["contacts", "sam"]],
-  list_email: [["email", "invoice", "--before", "2026-10-11", "--limit", "5"]],
+  list_email: [["email", "invoice", "--from-contacts", "true", "--before", "2026-10-11", "--limit", "5"]],
   read_email_thread: [["thread", "k3j5h8d9f0a1"]],
   read_person: [["person", "Sam Okafor", "--limit", "5"]],
   refer_record: [["refer", "google-contacts", "people/c1"]],

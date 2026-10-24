@@ -1,8 +1,8 @@
 import { inOrder, widened, within, type Span } from "./events.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
-import { writtenEventLink } from "./links.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { writtenEmailLink, writtenEventLink } from "./links.ts";
+import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type MailRule, type MailRuleFields, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -71,7 +71,8 @@ export interface MailSource {
   info: Described;
   /** Where mail is sent to be kept, such as notes@in.commonink.app. */
   address: string;
-  list(ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; more: boolean }>;
+  /** `senders` keeps the threads with a message from one of those addresses. */
+  list(ask: { query?: string | undefined; before?: number | undefined; limit: number; senders?: readonly string[] | undefined }): Promise<{ threads: MailThread[]; more: boolean }>;
   /** The thread an id names: a thread's, or one of its messages'. */
   thread(id: string): Promise<MailThreadRead | null>;
   /** Whether an id is one message's, which a reference then points at within its thread. */
@@ -81,6 +82,17 @@ export interface MailSource {
     /** Answers the code mail from the address carries to verify it. */
     add(address: string): Promise<string>;
     remove(address: string): Promise<void>;
+  };
+  /** What the person asks of mail for it not to be kept, which are theirs whether or not it is connected. */
+  rules: {
+    list(): Promise<MailRule[]>;
+    /** Adds a rule, or changes the one `id` names. */
+    save(id: string | undefined, rule: MailRuleFields): Promise<void>;
+    remove(id: string): Promise<void>;
+    /** How many kept threads and messages a rule matches, and the latest `shown` of those threads. */
+    matches(rule: MailRuleFields, shown: number): Promise<{ count: number; messages: number; threads: MailThread[] }>;
+    /** Deletes the kept messages a rule matches, and answers how many. */
+    removeMatching(rule: MailRuleFields): Promise<number>;
   };
 }
 
@@ -390,8 +402,13 @@ export async function contactCards(asker: Asker, is: (contact: Contact) => boole
  */
 const labelled = (label: string) => label.replace(/[{}[\]`\s]+/g, " ").replace(/ +/g, " ").trim().slice(0, 200);
 
-/** A reference as a note writes it: a link to an event, which shows the event as it is, or an embed whose config is the reference, then the label. */
-export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) => (kind === "event" ? writtenEventLink(ref) : `::${kind}{${[ref, labelled(label)].filter(Boolean).join(" ")}}`);
+/**
+ * A reference as a note writes it: a link to an event or an email, which shows the record as it is to
+ * the member whose it is, or a contact's embed whose config is the reference, then the label. A link
+ * holds nothing of its record, so a mail's subject is never in a note that anyone else reads.
+ */
+export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) =>
+  kind === "event" ? writtenEventLink(ref) : kind === "email" ? writtenEmailLink(ref) : `::${kind}{${[ref, labelled(label)].filter(Boolean).join(" ")}}`;
 
 async function recordOf(source: DataSource, ref: string, id: string): Promise<SourceRecord | null> {
   if (source.kind === "email") {
@@ -491,11 +508,31 @@ async function mailOf(asker: Asker): Promise<MailSource> {
   return source;
 }
 
-/** A page of the asker's email threads, latest first. With email not connected there are none, and `sources` says so. */
-export async function listMail(asker: Asker, ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; sources: Source[]; more: boolean; address: string | null }> {
-  const { sources, read } = await readEach<MailSource, { threads: MailThread[]; more: boolean; address: string }>(asker, "email", async (source) => ({ ...(await source.list(ask)), address: source.address }));
+/** The most contacts' addresses the threads from contacts are looked for by. */
+const MOST_SENDERS = 2000;
+
+/**
+ * A page of the asker's email threads, latest first. With email not connected there are none, and
+ * `sources` says so. `fromContacts` keeps those from an address one of the asker's contacts has,
+ * as their contacts are read now; contacts that can't be read leave none.
+ */
+export async function listMail(
+  asker: Asker,
+  ask: { query?: string | undefined; fromContacts?: boolean | undefined; before?: number | undefined; limit: number },
+): Promise<{ threads: MailThread[]; sources: Source[]; more: boolean; address: string | null }> {
+  const senders = ask.fromContacts ? await contactAddresses(asker) : undefined;
+  const { sources, read } = await readEach<MailSource, { threads: MailThread[]; more: boolean; address: string }>(asker, "email", async (source) => ({
+    ...(await source.list({ query: ask.query, before: ask.before, limit: ask.limit, senders })),
+    address: source.address,
+  }));
   const address = read[0]?.address ?? (await mailOf(asker).then((s) => s.address, () => null));
   return { threads: read.flatMap((r) => r.threads), sources, more: read.some((r) => r.more), address };
+}
+
+/** Every address the asker's contacts have, in lower case, as their connected contacts say now. */
+async function contactAddresses(asker: Asker): Promise<string[]> {
+  const { read } = await readEach<ContactsSource, Contact[]>(asker, "contacts", async (source) => (await source.list()).contacts).catch(() => ({ read: [] as Contact[][] }));
+  return [...new Set(read.flat().flatMap((c) => c.emails.map((e) => e.value.trim().toLowerCase())))].slice(0, MOST_SENDERS);
 }
 
 export async function readMail(asker: Asker, sourceId: string, id: string): Promise<MailThreadRead> {
@@ -518,4 +555,25 @@ export async function addMailSender(asker: Asker, address: string): Promise<{ ad
 export async function removeMailSender(asker: Asker, address: string): Promise<{ address: string | null; senders: MailSender[] }> {
   await (await mailOf(asker)).senders.remove(address);
   return mailSenders(asker);
+}
+
+/** How many threads a rule's preview shows. */
+const RULE_SHOWN = 5;
+
+export const mailRules = async (asker: Asker): Promise<{ rules: MailRule[] }> => ({ rules: await (await mailOf(asker)).rules.list() });
+
+export const matchMailRule = async (asker: Asker, rule: MailRuleFields) => (await mailOf(asker)).rules.matches(rule, RULE_SHOWN);
+
+/** Saves a skip rule, and, where the member said so, deletes the kept messages it matches. */
+export async function saveMailRule(asker: Asker, id: string | undefined, rule: MailRuleFields, removeKept: boolean): Promise<{ rules: MailRule[]; removed: number }> {
+  const source = await mailOf(asker);
+  await source.rules.save(id, rule);
+  const removed = removeKept ? await source.rules.removeMatching(rule) : 0;
+  return { rules: await source.rules.list(), removed };
+}
+
+export async function removeMailRule(asker: Asker, id: string): Promise<{ rules: MailRule[] }> {
+  const source = await mailOf(asker);
+  await source.rules.remove(id);
+  return { rules: await source.rules.list() };
 }

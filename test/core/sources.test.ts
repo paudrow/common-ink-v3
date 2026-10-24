@@ -410,15 +410,16 @@ describe("a reference to a record", () => {
     expect(await refusal(w.ask(ada, { type: "record.read", ref }))).toBe("not_found: No such record");
   });
 
-  it("is a link to an event, which writes nothing of the event into the note", () => {
+  it("is a link to an event or an email, which writes nothing of the record into the note", () => {
     // The title of an event someone else sent writes no link or code into the note of whoever references it.
     expect(writtenReference("event", "aaaaaaaaaaaa", "Lunch [[Board minutes]] `x` [[y|z]]\n::html{x}")).toBe("[[event:aaaaaaaaaaaa]]");
+    // A mail's subject is the member's alone, and every reader of the note would read it.
+    expect(writtenReference("email", "aaaaaaaaaaaa", "Salary review")).toBe("[[email:aaaaaaaaaaaa]]");
   });
 
   it("is written so a label can't end the embed or start another", () => {
     expect(writtenReference("contact", "aaaaaaaaaaaa", "Plan {Q4}\n::html{x}")).toBe("::contact{aaaaaaaaaaaa Plan Q4 ::html x}");
     expect(writtenReference("contact", "aaaaaaaaaaaa", "  ")).toBe("::contact{aaaaaaaaaaaa}");
-    expect(writtenReference("email", "aaaaaaaaaaaa", "Lunch [[Board minutes]] `x` [[y|z]]")).toBe("::email{aaaaaaaaaaaa Lunch Board minutes x y|z}");
   });
 
   it("stays the person's own in a note other members read: the note holds the reference alone, and they can follow nothing", async () => {
@@ -690,6 +691,16 @@ describe("a record named where a reference would be", () => {
     const named = namedReferences(text);
     expect(named.map(({ kind, name, display }) => [kind, name, display])).toEqual([["event", "Lunch with Sam", "lunch"], ["contact", "Sam Okafor", null]]);
     expect(named.map(({ from, to }) => text.slice(from, to))).toEqual(["[[event:Lunch with Sam|lunch]]", "::contact{ Sam Okafor }"]);
+  });
+});
+
+describe("a thread named by its subject", () => {
+  it("is found as a link to name, with its own words, and a link by reference is not", () => {
+    const text = "Read [[email:Engine plans|the plans]] and [[email:Budget]], not [[email:abcdefghij12]] or `[[email:Nor this]]`.";
+    expect(namedReferences(text).map(({ kind, name, display, from, to }) => [kind, name, display, text.slice(from, to)])).toEqual([
+      ["email", "Engine plans", "the plans", "[[email:Engine plans|the plans]]"],
+      ["email", "Budget", null, "[[email:Budget]]"],
+    ]);
   });
 });
 

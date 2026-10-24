@@ -1,20 +1,21 @@
 import { linesOutsideCode } from "./lines.ts";
-import { linkedEvent, linksIn } from "./links.ts";
+import { linkedEmail, linkedEvent, linksIn } from "./links.ts";
 import type { SourceRecord } from "./protocol.ts";
 
 const WRITTEN = /::(contact|email)\{([^{}\n]*)\}/g;
 const REFERRED = /^[a-z0-9]{12}(?: .*)?$/;
-/** An event named by what it is called rather than by a reference, as `[[event:Lunch with Sam]]` names one. */
-const NAMED_EVENT = /^event:(.+)$/;
+/** An event or a thread named by what it is called rather than by a reference, as `[[event:Lunch with Sam]]` names one. */
+const NAMED_LINK = /^(event|email):(.+)$/;
 
 /**
  * The references a text holds outside code and inline code, by the ref each is written with: a link
- * to an event, `[[event:k3j5h8d9f0a1]]`, and a contact's or an email's embed, `::contact{k3j5h8d9f0a1 Ada}`.
+ * to an event or an email, `[[event:k3j5h8d9f0a1]]`, and a contact's embed, `::contact{k3j5h8d9f0a1 Ada}`.
  */
 export function referencesIn(text: string): { kind: SourceRecord["kind"]; ref: string }[] {
-  const found: { kind: SourceRecord["kind"]; ref: string }[] = linksIn(text).flatMap((link) => {
-    const ref = linkedEvent(link.target);
-    return ref ? [{ kind: "event" as const, ref }] : [];
+  const found = linksIn(text).flatMap((link): { kind: SourceRecord["kind"]; ref: string }[] => {
+    const event = linkedEvent(link.target);
+    const email = linkedEmail(link.target);
+    return event ? [{ kind: "event", ref: event }] : email ? [{ kind: "email", ref: email }] : [];
   });
   for (const { line } of linesOutsideCode(text)) {
     if (!line.includes("::")) continue;
@@ -29,13 +30,14 @@ export function referencesIn(text: string): { kind: SourceRecord["kind"]; ref: s
 
 /**
  * Where a text names a record by what it is called and holds no reference to it, as
- * `[[event:Lunch with Sam]]` and `::contact{Sam Okafor}` do, outside code, with a link's own words.
+ * `[[event:Lunch with Sam]]`, `[[email:Engine plans]]` and `::contact{Sam Okafor}` do, outside code,
+ * with a link's own words.
  * scripts/try-note.ts writes each as the reference of the sample record of that name.
  */
 export function namedReferences(text: string): { kind: SourceRecord["kind"]; name: string; display: string | null; from: number; to: number }[] {
-  const named: { kind: SourceRecord["kind"]; name: string; display: string | null; from: number; to: number }[] = linksIn(text).flatMap(({ target, display, from, to }) => {
-    const name = linkedEvent(target) === null ? NAMED_EVENT.exec(target)?.[1]?.trim() : undefined;
-    return name ? [{ kind: "event" as const, name, display, from, to }] : [];
+  const named = linksIn(text).flatMap(({ target, display, from, to }): { kind: SourceRecord["kind"]; name: string; display: string | null; from: number; to: number }[] => {
+    const [, kind, name] = linkedEvent(target) === null && linkedEmail(target) === null ? (NAMED_LINK.exec(target) ?? []) : [];
+    return kind && name?.trim() ? [{ kind: kind as "event" | "email", name: name.trim(), display, from, to }] : [];
   });
   for (const { line, from } of linesOutsideCode(text)) {
     for (const found of line.matchAll(WRITTEN)) {

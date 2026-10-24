@@ -31,13 +31,22 @@ describe("converting what notes wrote before everything they open was a link", (
     );
   });
 
-  it("leaves code, a link's address, an @ that starts no mention, and a contact's or an email's embed as written", () => {
+  it("writes an email's reference as a link to it, dropping the subject every reader of the note saw", () => {
+    const once = converted(`Re ::email{${REF} Salary review} and ::email{${REF}}, not ::email{Salary review}.`);
+    expect(once).toBe(`Re [[email:${REF}]] and [[email:${REF}]], not ::email{Salary review}.`);
+    expect(referencesIn(once)).toEqual([
+      { kind: "email", ref: REF },
+      { kind: "email", ref: REF },
+    ]);
+  });
+
+  it("leaves code, a link's address, an @ that starts no mention, and a contact's embed as written", () => {
     const text = [
       `Inline \`@[[Sam]] ::event{${REF} x}\` stays.`,
       "```",
       `@[[Sam]] ::event{${REF} x}`,
       "```",
-      `[site](https://example.com/@[[Sam]]) mail@[[${ADA}]] a_@[[Plan]] @@[[Plan]] ::contact{${REF} Sam} ::email{${REF} Hi}`,
+      `[site](https://example.com/@[[Sam]]) mail@[[${ADA}]] a_@[[Plan]] @@[[Plan]] ::contact{${REF} Sam}`,
     ].join("\n");
     expect(converted(text)).toBe(text);
   });

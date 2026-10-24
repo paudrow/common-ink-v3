@@ -80,7 +80,7 @@ import { paging } from "./paging.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listMail, listSources, mailSenders, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listMail, listSources, mailRules, mailSenders, matchMailRule, removeMailRule, saveMailRule, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
 import { holdsOldLinks, linksConverted } from "./oldLinks.ts";
 import { referencesIn } from "./references.ts";
 import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
@@ -3565,6 +3565,11 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "email.senders": { needs: "view", by: "member", own: true, run: (ctx) => mailSenders(asker(ctx)) },
   "email.addSender": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => addMailSender(asker(ctx), op.address) },
   "email.removeSender": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => removeMailSender(asker(ctx), op.address) },
+  // What mail is kept is the member's to say, as whose addresses are: an agent neither reads nor changes the rules. See NOT_FOR_AGENTS.
+  "email.rules": { needs: "view", by: "member", own: true, run: (ctx) => mailRules(asker(ctx)) },
+  "email.matchRule": { needs: "view", by: "member", own: true, run: (ctx, op) => matchMailRule(asker(ctx), op.rule) },
+  "email.saveRule": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => saveMailRule(asker(ctx), op.id, op.rule, op.removeKept ?? false) },
+  "email.removeRule": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => removeMailRule(asker(ctx), op.id) },
   "person.read": { needs: "view", run: readPerson },
   "record.refer": { needs: "view", own: true, changes: true, run: (ctx, op) => refer(asker(ctx), op.sourceId, op.id) },
   "record.read": { needs: "view", own: true, run: (ctx, op) => readRecord(asker(ctx), op.ref) },

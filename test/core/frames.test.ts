@@ -170,13 +170,38 @@ describe("the embed's document under a frame's token", () => {
   });
 });
 
+describe("the document a message's HTML is drawn in", () => {
+  it("runs no script but its own, by its hash, and loads nothing, so nothing in a message runs whatever the sanitizing missed", async () => {
+    const res = await get("https://commonink.app/embed-frame/mail");
+    expect(res.status).toBe(200);
+    const policy = directives(res.headers.get("Content-Security-Policy")!);
+    expect(policy).toEqual({
+      sandbox: "allow-scripts allow-popups allow-popups-to-escape-sandbox",
+      "default-src": "'none'",
+      "script-src": expect.stringMatching(/^'sha256-[A-Za-z0-9+/]{43}='$/),
+      "style-src": "'unsafe-inline'",
+      "img-src": "data:",
+      "frame-src": "'none'",
+      "form-action": "'none'",
+      "base-uri": "'none'",
+      "frame-ancestors": "'self'",
+    });
+    const html = await res.text();
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+    expect(scripts).toHaveLength(1);
+    const hash = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(scripts[0])))));
+    expect(policy["script-src"]).toBe(`'sha256-${hash}'`);
+    expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
+  });
+});
+
 describe("what the app's page may frame", () => {
   it("is the embed's document and the sites built-in embeds frame, and nothing else, in the page's one policy", async () => {
-    for (const path of ["/", "/note/plan-3k2j5h8d9f0a", "/settings"]) expect(framedAt(`https://commonink.app${path}`), path).toBe(`https://commonink.app/embed-frame https://commonink.app/embed-frame/g/ ${FRAME_ORIGINS.join(" ")}`);
+    for (const path of ["/", "/note/plan-3k2j5h8d9f0a", "/settings"]) expect(framedAt(`https://commonink.app${path}`), path).toBe(`https://commonink.app/embed-frame https://commonink.app/embed-frame/mail https://commonink.app/embed-frame/g/ ${FRAME_ORIGINS.join(" ")}`);
     expect(framedAt("http://localhost:5173/")).toMatch(/^http:\/\/localhost:5173\/embed-frame /);
     expect(FRAME_ORIGINS.every((origin) => new URL(origin).origin === origin && origin.startsWith("https://"))).toBe(true);
     const sent = await get("https://commonink.app/note/plan-3k2j5h8d9f0a");
-    expect(directives(sent.headers.get("Content-Security-Policy")!)["frame-src"]).toBe(`https://commonink.app/embed-frame https://commonink.app/embed-frame/g/ ${FRAME_ORIGINS.join(" ")}`);
+    expect(directives(sent.headers.get("Content-Security-Policy")!)["frame-src"]).toBe(`https://commonink.app/embed-frame https://commonink.app/embed-frame/mail https://commonink.app/embed-frame/g/ ${FRAME_ORIGINS.join(" ")}`);
   });
 
   it("is nothing for what isn't a page", async () => {
@@ -209,7 +234,7 @@ describe("a host given to HTML embeds alone", () => {
   it("is where the app's own host sends the frame, and what the app's page may frame", async () => {
     const sent = await withEmbedHost("https://commonink.app/embed-frame");
     expect([sent.status, sent.headers.get("Location")]).toEqual([302, "https://embed.commonink.app/embed-frame"]);
-    expect(framedAt("https://commonink.app/", { EMBED_ORIGIN: "https://embed.commonink.app" })).toBe(`https://commonink.app/embed-frame https://commonink.app/embed-frame/g/ https://embed.commonink.app/embed-frame https://embed.commonink.app/embed-frame/g/ ${FRAME_ORIGINS.join(" ")}`);
+    expect(framedAt("https://commonink.app/", { EMBED_ORIGIN: "https://embed.commonink.app" })).toBe(`https://commonink.app/embed-frame https://commonink.app/embed-frame/mail https://commonink.app/embed-frame/g/ https://embed.commonink.app/embed-frame https://embed.commonink.app/embed-frame/mail https://embed.commonink.app/embed-frame/g/ ${FRAME_ORIGINS.join(" ")}`);
   });
 
   it("is production's workers.dev address, which answers nothing of the app's even where a deploy didn't name it, while a Preview's still does", async () => {

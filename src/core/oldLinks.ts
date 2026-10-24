@@ -1,12 +1,12 @@
 import { linesOutsideCode } from "./lines.ts";
-import { writtenEventLink } from "./links.ts";
+import { writtenEmailLink, writtenEventLink } from "./links.ts";
 import { isPersonId, readableName, writableName, writtenMention } from "./mentions.ts";
 import { addressSpans, blanked, codeSpans } from "./spans.ts";
 
 /** A mention as notes wrote one before it was a link: `@[[target]]` or `@[[target|name]]`, where the `@` doesn't follow a letter, a digit, `_` or another `@`. */
 const MENTION = /(?<![\p{L}\p{N}_@])@\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/gu;
-/** A reference to an event as notes wrote one before it was a link: `::event{ref label}`. */
-const EVENT = /::event\{([a-z0-9]{12})(?: [^{}\n]*)?\}/g;
+/** A reference to an event or an email as notes wrote one before it was a link: `::event{ref label}`. */
+const EMBEDDED = /::(event|email)\{([a-z0-9]{12})(?: [^{}\n]*)?\}/g;
 const LINK = /\[\[[^[\]\n]*\]\]/g;
 
 /**
@@ -19,11 +19,13 @@ const LINK = /\[\[[^[\]\n]*\]\]/g;
  * - `@[[id]]` is `[[person:id]]`, and `@[[Name]]` is `[[person:Name]]`.
  * - `::event{ref label}` is `[[event:ref]]`. The label was the event's title when it was referenced,
  *   which the link now shows as it is. One that names an event without a reference is left.
+ * - `::email{ref label}` is `[[email:ref]]`. The label was the mail's subject, which every reader of
+ *   the note saw, and the link shows it to the member whose mail it is alone.
  *
  * Run on text already converted, it changes nothing.
  */
 export function linksConverted(text: string, memberName: (id: string) => string | undefined): string {
-  if (!text.includes("@[[") && !text.includes("::event{")) return text;
+  if (!text.includes("@[[") && !text.includes("::event{") && !text.includes("::email{")) return text;
   let out = "";
   let at = 0;
   for (const { line, from } of linesOutsideCode(text)) {
@@ -40,7 +42,8 @@ export function linksConverted(text: string, memberName: (id: string) => string 
       found.push({ from: match.index, to: match.index + match[0].length, written: writtenMention({ id, name: target }, kept) });
     }
     // An event written inside a link, as in a mention's name, is the link's words.
-    for (const match of blanked(code, [...code.matchAll(LINK)].map((link) => [link.index, link.index + link[0].length] as const), "\0").matchAll(EVENT)) found.push({ from: match.index, to: match.index + match[0].length, written: writtenEventLink(match[1]!) });
+    for (const match of blanked(code, [...code.matchAll(LINK)].map((link) => [link.index, link.index + link[0].length] as const), "\0").matchAll(EMBEDDED))
+      found.push({ from: match.index, to: match.index + match[0].length, written: (match[1] === "event" ? writtenEventLink : writtenEmailLink)(match[2]!) });
     for (const change of found.sort((a, b) => a.from - b.from)) {
       // One written inside another, as a mention in an event's label, is the other's.
       if (from + change.from < at) continue;
@@ -51,5 +54,5 @@ export function linksConverted(text: string, memberName: (id: string) => string 
   return out + text.slice(at);
 }
 
-/** Whether a text holds a mention or a reference to an event as notes wrote them before they were links, outside code. */
+/** Whether a text holds a mention or a reference to an event or an email as notes wrote them before they were links, outside code. */
 export const holdsOldLinks = (text: string) => linksConverted(text, () => undefined) !== text;

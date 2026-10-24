@@ -1,4 +1,4 @@
-import { EMBED_FRAME_PATH } from "../core/frames.ts";
+import { EMBED_FRAME_PATH, MAIL_FRAME_PATH } from "../core/frames.ts";
 import { themeNow } from "./theme.ts";
 
 /** How long a frame's document is given to answer, in milliseconds. It is the app's own and holds nothing, but a server just woken can be slow. */
@@ -8,6 +8,8 @@ const SHOWN_ANYWAY = 3000;
 
 const COLOUR = /^[\w\s(),.%#/-]+$/;
 
+const start = (scheme: string, colours: string) => `<!doctype html><meta name="color-scheme" content="${scheme}"><style>:root{${colours}font:16px/1.5 system-ui,sans-serif}</style>`;
+
 /**
  * What a frame's document starts with, so that a few words of HTML are read as the note around them
  * is: the app's background, ink and face, in the theme the app is in now. The HTML that follows can
@@ -15,9 +17,11 @@ const COLOUR = /^[\w\s(),.%#/-]+$/;
  */
 function opening(): string {
   const { backgroundColor, color } = getComputedStyle(document.documentElement);
-  const colours = COLOUR.test(backgroundColor) && COLOUR.test(color) ? `background:${backgroundColor};color:${color};` : "";
-  return `<!doctype html><meta name="color-scheme" content="${themeNow()}"><style>:root{${colours}font:16px/1.5 system-ui,sans-serif}</style>`;
+  return start(themeNow(), COLOUR.test(backgroundColor) && COLOUR.test(color) ? `background:${backgroundColor};color:${color};` : "");
 }
+
+/** What a message's HTML starts with: a light page whatever the app's theme, as mail is written to be read on one. */
+const PAPER = start("light", "background:#fff;color:#1d1d1f;");
 
 /**
  * A frame that runs `html` shut off from the app. The app never reads `html` as markup: it is handed
@@ -40,32 +44,44 @@ function opening(): string {
  * `plugin.frame`, good once, for a document whose policy lets it reach the sites an admin allowed.
  * `name` names the frame, which is how the frames of the app's own plugins are told from a workspace's.
  *
+ * `mail` draws a message's HTML in the document the Worker serves for it, on a light page, where
+ * nothing of it runs and its links open a tab of their own. `tall` is told how tall it is, as it is
+ * drawn and each time that changes, until `stop`.
+ *
  * `drawn` is called once the document has put `html` on its page, or a few seconds after `html` was
  * handed over if the page never says so (HTML that stops its own loading).
  */
-export function sandboxed(html: string, { title, port, scheme, grant, refused, drawn, name }: { title: string; refused?: () => void; drawn?: () => void; port?: MessagePort; scheme?: "light" | "dark"; grant?: string | null; name?: string }): { frame: HTMLIFrameElement; stop: () => void } {
+export function sandboxed(
+  html: string,
+  { title, port, scheme, grant, refused, drawn, name, mail, tall }: { title: string; refused?: () => void; drawn?: () => void; port?: MessagePort; scheme?: "light" | "dark"; grant?: string | null; name?: string; mail?: boolean; tall?: (px: number) => void },
+): { frame: HTMLIFrameElement; stop: () => void } {
   const frame = document.createElement("iframe");
   frame.title = title;
   if (name) frame.name = name;
   frame.referrerPolicy = "no-referrer";
   frame.setAttribute("allow", "");
   let handed = false;
+  let shown = false;
+  const show = () => {
+    if (shown) return;
+    shown = true;
+    clearTimeout(waited);
+    // A frame that says how tall it is goes on saying so.
+    if (!tall) stop();
+    drawn?.();
+  };
   const heard = (event: MessageEvent) => {
     if (event.source !== frame.contentWindow || event.origin !== "null") return;
-    const said = (event.data as { embedFrame?: unknown } | null)?.embedFrame;
+    const data = event.data as { embedFrame?: unknown; height?: unknown } | null;
+    const said = data?.embedFrame;
     if (said === "ready" && !handed) {
       handed = true;
       clearTimeout(waited);
       // The document's origin is its own, which has no name to address it by. Only this frame's window is sent to.
-      frame.contentWindow!.postMessage({ html: opening() + html, ...(scheme && { scheme }) }, "*", port ? [port] : []);
-      waited = setTimeout(() => {
-        stop();
-        drawn?.();
-      }, SHOWN_ANYWAY);
-    } else if (said === "drawn" && handed) {
-      stop();
-      drawn?.();
-    }
+      frame.contentWindow!.postMessage({ html: (mail ? PAPER : opening()) + html, ...(scheme && { scheme }) }, "*", port ? [port] : []);
+      waited = setTimeout(show, SHOWN_ANYWAY);
+    } else if (said === "drawn" && handed) show();
+    else if (said === "height" && handed && typeof data?.height === "number" && Number.isFinite(data.height)) tall?.(data.height);
   };
   let waited = setTimeout(() => {
     stop();
@@ -76,6 +92,6 @@ export function sandboxed(html: string, { title, port, scheme, grant, refused, d
     clearTimeout(waited);
   };
   addEventListener("message", heard);
-  frame.src = grant ? `${EMBED_FRAME_PATH}/g/${encodeURIComponent(grant)}` : EMBED_FRAME_PATH;
+  frame.src = mail ? MAIL_FRAME_PATH : grant ? `${EMBED_FRAME_PATH}/g/${encodeURIComponent(grant)}` : EMBED_FRAME_PATH;
   return { frame, stop };
 }

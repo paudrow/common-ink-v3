@@ -424,6 +424,10 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "email.senders": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "email.addSender": { on: "workspace", who: EVERYONE, args: () => ({ address: "matrix@example.com" }) },
   "email.removeSender": { on: "workspace", who: EVERYONE, args: () => ({ address: "matrix@example.com" }) },
+  "email.rules": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  "email.matchRule": { on: "workspace", who: EVERYONE, args: () => ({ rule: { from: "matrix.example" } }) },
+  "email.saveRule": { on: "workspace", who: EVERYONE, args: () => ({ rule: { from: "matrix.example" } }) },
+  "email.removeRule": { on: "workspace", who: EVERYONE, args: () => ({ id: "aaaaaaaaaaaa" }) },
   // Asked in capitals, so the answer's echo of who it is about is no mark of the note: only a line of it would be.
   "person.read": { on: "workspace", who: EVERYONE, args: () => ({ who: "WHO-TEAM" }) },
   "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
@@ -496,11 +500,11 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "tag.describe", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "email.addSender", "email.removeSender", "record.refer", "pin.set", "plugin.install", "plugin.uninstall", "plugin.permit", "plugin.request", "plugin.decide", "draft.save", "draft.discard"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "tag.describe", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "email.addSender", "email.removeSender", "email.saveRule", "email.removeRule", "record.refer", "pin.set", "plugin.install", "plugin.uninstall", "plugin.permit", "plugin.request", "plugin.decide", "draft.save", "draft.discard"];
 /** What is the member's, and their agent's in their role, over the workspace's plugins: never a plugin's, whatever it is permitted, and nothing an agent limited to folders sees. */
 const PLUGIN_WORK = (type: OpType) => (type.startsWith("plugin.") && type !== "plugin.list") || type.startsWith("draft.");
 /** What answers from what is the asker's own and in no folder: their data sources, and how far they have read. */
-const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "email.list", "email.thread", "email.senders", "email.addSender", "email.removeSender", "record.refer", "record.read", "record.notes", "visit.read"];
+const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "email.list", "email.thread", "email.senders", "email.addSender", "email.removeSender", "email.rules", "email.matchRule", "email.saveRule", "email.removeRule", "record.refer", "record.read", "record.notes", "visit.read"];
 const AGENTS = [
   "their agent",
   "their read-only agent",

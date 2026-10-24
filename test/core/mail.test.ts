@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { connectAgent } from "../../src/core/agents.ts";
 import { aligned, authResults, bareSubject, headerBlock, htmlText, idsIn, inlineForward, readMessage, sanitizeHtml, vouched } from "../../src/core/mail.ts";
-import { PER_SENDER_HOUR, personOf, receive } from "../../src/core/mailbox.ts";
+import { PER_SENDER_HOUR, personOf, readQuery, receive } from "../../src/core/mailbox.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type OpInput } from "../../src/core/protocol.ts";
 import worker from "../../src/worker/index.ts";
@@ -387,6 +387,117 @@ describe("threads", () => {
   });
 });
 
+describe("searching the threads", () => {
+  it("reads from:, subject:, has:attachment and quoted phrases as a mail app's search box does", () => {
+    expect(readQuery('from:grace subject:"engine plans" has:attachment budget "see you" to:me')).toEqual({ words: ["budget", "see you", "to:me"], from: ["grace"], subject: ["engine plans"], attachment: true });
+    expect(readQuery(undefined)).toEqual({ words: [], from: [], subject: [], attachment: false });
+    expect(readQuery("has:pictures")).toEqual({ words: ["has:pictures"], from: [], subject: [], attachment: false });
+  });
+
+  it("finds threads by sender, subject, files, words and contacts, each in one message, and says which have files", async () => {
+    const { actor, email } = await connected();
+    const pdf = ["--m", 'Content-Type: application/pdf; name="r.pdf"', 'Content-Disposition: attachment; filename="r.pdf"', "Content-Transfer-Encoding: base64", "", "JVBERi0xLjQK", "--m--", ""];
+    const withFile = mail({ from: email, subject: "Receipt", body: "Total 42.", date: new Date(T0 - 3 * HOUR).toUTCString() }).replace("Content-Type: text/plain; charset=utf-8\r\n\r\nTotal 42.", ["Content-Type: multipart/mixed; boundary=\"m\"", "", "--m", "Content-Type: text/plain; charset=utf-8", "", "Total 42.", ...pdf].join("\r\n"));
+    await receive(env.DB, withFile, { authserv: AUTHSERV, now: T0 });
+    await got({ from: email, subject: "Fwd: Compiler", attached: mail({ from: "Grace Hopper <grace@example.com>", subject: "Compiler", body: "It compiles.", date: new Date(T0 - 2 * HOUR).toUTCString() }), body: "" });
+    await got({ from: email, subject: "Engine plans", body: "See you at ten.\n\n> Earlier words", date: new Date(T0 - HOUR).toUTCString() });
+    const subjects = async (query?: string, fromContacts?: boolean) => (await as(actor, { type: "email.list", ...(query && { query }), ...(fromContacts && { fromContacts }) })).threads.map((t) => t.subject).sort();
+
+    expect(await subjects("from:grace")).toEqual(["Compiler"]);
+    expect(await subjects('from:"grace hopper"')).toEqual(["Compiler"]);
+    expect(await subjects("subject:engine")).toEqual(["Engine plans"]);
+    expect(await subjects("subject:compiles")).toEqual([]);
+    expect(await subjects("has:attachment")).toEqual(["Receipt"]);
+    expect(await subjects('"see you at ten"')).toEqual(["Engine plans"]);
+    expect(await subjects("from:grace has:attachment")).toEqual([]);
+    const listed = (await as(actor, { type: "email.list" })).threads;
+    expect(listed.map((t) => [t.subject, t.attachments, t.snippet])).toEqual([
+      ["Engine plans", false, "See you at ten."],
+      ["Compiler", false, "It compiles."],
+      ["Receipt", true, "Total 42."],
+    ]);
+
+    // From contacts keeps Grace's: the sample contacts, where dev sign-in is on, have her address.
+    const dev = sourcesFor({ ...env, DEV_SIGN_IN: "1" } as Env, new URL("http://localhost/api/ops"));
+    await perform(env.DB, actor, { type: "source.connect", id: "sample-contacts" }, T0, dev);
+    expect((await perform(env.DB, actor, { type: "email.list", fromContacts: true }, T0, dev)).threads.map((t) => t.subject)).toEqual(["Compiler"]);
+    // With no contacts connected, no thread is from one.
+    expect(await subjects(undefined, true)).toEqual([]);
+  });
+});
+
+describe("skip rules", () => {
+  const listed = (subject: string, list: string) => mail({ from: "Shop <deals@news.shop.example>", subject, body: "Half price.", sent: [`List-Id: Shop News <${list}>`] });
+
+  it("are the member's own: kept per person, changed and removed by them, and neither read nor changed by an agent or another member", async () => {
+    const { actor } = await connected();
+    const grace = await addMember(actor, "editor");
+    const { rules } = await as(actor, { type: "email.saveRule", rule: { from: "shop.example", hasWords: '"half price"' } });
+    expect(rules).toEqual([{ id: expect.stringMatching(/^[a-z0-9]{12}$/), createdAt: expect.any(Number), from: "shop.example", to: "", subject: "", hasWords: '"half price"', doesntHave: "", list: "", hasAttachment: false }]);
+    expect((await as(grace, { type: "email.rules" })).rules).toEqual([]);
+    await expect(as(grace, { type: "email.removeRule", id: rules[0]!.id })).rejects.toThrow("No such rule");
+    await expect(as(grace, { type: "email.saveRule", id: rules[0]!.id, rule: { from: "x.example" } })).rejects.toThrow("No such rule");
+
+    const changed = await as(actor, { type: "email.saveRule", id: rules[0]!.id, rule: { list: "news.shop.example", hasAttachment: true } });
+    expect(changed.rules.map((r) => [r.id, r.from, r.list, r.hasAttachment])).toEqual([[rules[0]!.id, "", "news.shop.example", true]]);
+    await expect(as(actor, { type: "email.saveRule", rule: { from: " " } })).rejects.toThrow(OpError);
+
+    const { agent } = await connectAgent(env.DB, actor.personId, "Claude");
+    const agentActor: Actor = { kind: "agent", agentId: agent.id, personId: actor.personId, workspaceId: actor.workspaceId };
+    for (const op of [{ type: "email.rules" }, { type: "email.matchRule", rule: { from: "x.example" } }, { type: "email.saveRule", rule: { from: "x.example" } }, { type: "email.removeRule", id: rules[0]!.id }] as const) {
+      await expect(as(agentActor, op)).rejects.toThrow(OpError);
+    }
+    expect((await as(actor, { type: "email.removeRule", id: rules[0]!.id })).rules).toEqual([]);
+  });
+
+  it("drop new mail they match as it arrives, read against a forward's original sender and not the member who forwarded it", async () => {
+    const { actor, email } = await connected();
+    await as(actor, { type: "email.saveRule", rule: { list: "news.shop.example" } });
+    await as(actor, { type: "email.saveRule", rule: { from: "boss@corp.example" } });
+    expect(await got({ from: email, subject: "Fwd: Sale", attached: listed("Sale", "news.shop.example"), body: "" })).toEqual({ dropped: "skipped" });
+    expect(await got({ from: email, subject: "Fwd: Raise", attached: mail({ from: "Boss <boss@corp.example>", subject: "Raise", body: "No." }), body: "Look" })).toEqual({ dropped: "skipped" });
+    // The member's own mail is read as itself, and a rule naming the forwarder never matches a forward.
+    expect(await got({ from: email, subject: "Fwd: Hello", attached: mail({ from: "Grace <grace@example.org>", subject: "Hello" }), body: "" })).toHaveProperty("kept");
+    expect(await got({ from: email, subject: "Notes", sent: ["List-Id: <other.example>"] })).toHaveProperty("kept");
+    expect((await threads(actor)).map((t) => t.subject).sort()).toEqual(["Hello", "Notes"]);
+  });
+
+  it("say how many kept threads they match, and remove those messages only when the member asks", async () => {
+    const { actor, email } = await connected();
+    await got({ from: email, subject: "Fwd: Sale one", attached: listed("Sale one", "news.shop.example"), body: "" });
+    await got({ from: email, subject: "Fwd: Sale two", attached: listed("Sale two", "news.shop.example"), body: "" }, T0 + HOUR);
+    await got({ from: email, subject: "Plans", id: "p1@x", body: "Shall we?" });
+    await got({ from: email, subject: "Re: Plans", id: "p2@x", inReplyTo: "p1@x", body: "Half price tickets!" });
+    const before = await threads(actor);
+
+    const sale = { list: "news.shop.example" };
+    const matched = await as(actor, { type: "email.matchRule", rule: sale });
+    expect([matched.count, matched.messages, matched.threads.map((t) => t.subject).sort()]).toEqual([2, 2, ["Sale one", "Sale two"]]);
+    expect(await as(actor, { type: "email.matchRule", rule: { hasWords: '"half price"' } })).toMatchObject({ count: 3, messages: 3 });
+
+    // Saved without asking, nothing kept goes.
+    expect(await as(actor, { type: "email.saveRule", rule: sale })).toMatchObject({ removed: 0 });
+    expect(await threads(actor)).toHaveLength(before.length);
+
+    // Asked, the messages it matches go, and a thread left with none goes with them; one with others left stays.
+    const words = await as(actor, { type: "email.saveRule", rule: { hasWords: "tickets" }, removeKept: true });
+    expect(words.removed).toBe(1);
+    const plans = (await threads(actor)).find((t) => t.subject === "Plans")!;
+    expect([plans.count, plans.snippet]).toEqual([1, "Shall we?"]);
+    expect((await as(actor, { type: "email.saveRule", id: words.rules[0]!.id, rule: sale, removeKept: true })).removed).toBe(2);
+    expect((await threads(actor)).map((t) => t.subject)).toEqual(["Plans"]);
+    const left = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM mail_threads WHERE person_id = ?1) AS threads, (SELECT COUNT(*) FROM mail_messages WHERE person_id = ?1) AS messages").bind(actor.personId).first();
+    expect(left).toEqual({ threads: 1, messages: 1 });
+  });
+
+  it("go when Email is disconnected, with everything else kept", async () => {
+    const { actor } = await connected();
+    await as(actor, { type: "email.saveRule", rule: { from: "shop.example" } });
+    await as(actor, { type: "source.disconnect", id: "email" });
+    expect((await as(actor, { type: "email.rules" })).rules).toEqual([]);
+  });
+});
+
 describe("the email data source", () => {
   it("is one person's: another member reads none of it, and a reference to it leads nowhere for them", async () => {
     const { actor: ada, email } = await connected();
@@ -398,7 +509,7 @@ describe("the email data source", () => {
     await expect(as(grace, { type: "email.thread", sourceId: "email", id: thread!.id })).rejects.toThrow("No such thread");
 
     const reference = await as(ada, { type: "record.refer", sourceId: "email", id: thread!.id });
-    expect(reference.text).toBe(`::email{${reference.ref} Private plans}`);
+    expect(reference.text).toBe(`[[email:${reference.ref}]]`);
     expect(await as(ada, { type: "record.read", ref: reference.ref })).toMatchObject({ kind: "email", messageId: null, thread: { id: thread!.id } });
     await expect(as(grace, { type: "record.read", ref: reference.ref })).rejects.toThrow("No such record");
   });
@@ -410,7 +521,7 @@ describe("the email data source", () => {
     const [thread] = await threads(actor);
     const second = (await as(actor, { type: "email.thread", sourceId: "email", id: thread!.id })).messages[1]!;
     const reference = await as(actor, { type: "record.refer", sourceId: "email", id: second.id });
-    expect(reference.text).toBe(`::email{${reference.ref} Re: Thread, the second}`);
+    expect(reference.text).toBe(`[[email:${reference.ref}]]`);
     expect(await as(actor, { type: "record.read", ref: reference.ref })).toMatchObject({ kind: "email", messageId: second.id });
   });
 

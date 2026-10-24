@@ -54,15 +54,15 @@ test("mail sent to notes@ is kept as a thread for its sender alone, drawn safely
   await threads.getByRole("link", { name: /Engine plans/ }).click();
   await expect(page).toHaveURL(/\/email\/[a-z0-9]{12}$/);
   await expect(page.getByRole("heading", { name: "Engine plans" })).toBeVisible();
-  await expect(page.locator(".email-text")).toHaveText("The plans are attached in spirit.");
-  await page.getByRole("button", { name: "Show formatted" }).click();
+  // Drawn formatted, in the mail frame, with what runs or loads taken out; email-client.spec.ts has the frame's walls.
   const frame = page.locator("iframe.email-html");
-  await expect(frame).toHaveAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
-  const html = await frame.getAttribute("srcdoc");
+  await expect(frame).toHaveAttribute("src", "/embed-frame/mail");
+  const html = await frame.contentFrame().locator("body").evaluate((el) => el.innerHTML);
   expect(html).toContain("<b>plans</b>");
-  expect(html).toContain("default-src 'none'; img-src data:");
   expect(html).not.toMatch(/<script|onclick|track\.example/);
   expect(await page.evaluate(() => (window as unknown as { stolen?: number }).stolen)).toBeUndefined();
+  await page.getByRole("button", { name: "Show text" }).click();
+  await expect(page.locator(".email-text")).toHaveText("The plans are attached in spirit.");
 
   // A reference in a note draws the thread for Ada.
   const [thread] = (await perform(page, { type: "email.list" })).threads;
