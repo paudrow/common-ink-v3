@@ -16,7 +16,8 @@
 // (or [[event:Lunch with Sam|words]], whose words are kept) or ::contact{Sam Okafor}, and is stored
 // as the reference of the sample record of that name, which is made for the dev user as the Calendar
 // page makes one. The sample calendar and contacts are connected for that first. Only the sample data
-// is read: no calendar or contacts that anyone connected is.
+// is read: no calendar or contacts that anyone connected is. A thread of the dev user's own mail is
+// written by its subject, [[email:Engine plans]], as scripts/sample-mail.ts keeps some.
 //
 // An upload is written by a sample file's name, ::image{sample.png}, ::audio{sample.wav},
 // ::video{sample.webm}, or ::file{sample.pdf} (and sample.csv, sample.txt, sample.md), and is
@@ -25,7 +26,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { isNoteId, linksIn, namesKind, retargeted, writtenEventLink } from "../src/core/links.ts";
+import { isNoteId, linksIn, namesKind, retargeted, writtenEmailLink, writtenEventLink } from "../src/core/links.ts";
 import { linkedDay } from "../src/core/dateLinks.ts";
 import { allPages } from "../src/core/allPages.ts";
 import type { CalendarEvent, Contact, MailThread, Reference, Source, Upload } from "../src/core/protocol.ts";
@@ -98,7 +99,7 @@ async function referring(written: string): Promise<string> {
     const record = records[kind].find((r) => r.name.toLowerCase() === name.toLowerCase());
     if (!record) continue;
     const reference = await op<Reference>({ type: "record.refer", sourceId: record.sourceId, id: record.id });
-    out += written.slice(at, start) + (kind === "event" ? writtenEventLink(reference.ref, display) : reference.text);
+    out += written.slice(at, start) + (kind === "event" ? writtenEventLink(reference.ref, display) : kind === "email" ? writtenEmailLink(reference.ref, display) : reference.text);
     at = to;
   }
   return out + written.slice(at);

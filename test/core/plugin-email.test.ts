@@ -28,13 +28,14 @@ describe("the Email plugin", () => {
     expect(ids.indexOf("email")).toBe(ids.indexOf("contacts") + 1);
   });
 
-  it("adds the Email page, its section of Settings, and the reference a note writes, and nothing else", () => {
+  it("adds the Email page, its section of Settings, @ for threads and the links a note writes to them, and nothing else", () => {
     const { host } = started();
     const added = host.contributions();
     expect(added.views.page.map((p) => [p.id, p.path, p.label])).toEqual([["email", "/email", "Email"]]);
     expect(added.views.settings.map((s) => [s.id, s.label])).toEqual([["email", "Email"]]);
-    const embed = added.embeds.find((e) => e.name === "email");
-    expect(embed).toMatchObject({ title: "Email", menu: false });
+    expect(added.completions.map((c) => [c.id, c.trigger])).toEqual([["email.at", "@"]]);
+    expect(added.editorExtensions.map((e) => e.id)).toEqual(["email.links"]);
+    expect(added.embeds).toEqual([]);
     expect(added.commands.map((c) => c.id)).toEqual(["go.email", "plugins.toggle.email"]);
     expect(added.plugins.find((p) => p.id === "email")).toMatchObject({ name: "Email", enabled: true });
     host.dispose();
@@ -47,13 +48,15 @@ describe("the Email plugin", () => {
     expect(added.plugins.find((p) => p.id === "email")).toMatchObject({ enabled: false });
     expect(added.views.page).toEqual([]);
     expect(added.views.settings).toEqual([]);
-    expect(added.embeds.filter((e) => e.name === "email")).toEqual([]);
+    expect(added.completions).toEqual([]);
+    expect(added.editorExtensions).toEqual([]);
     host.dispose();
   });
 
-  it("draws a reference on a link's page as its label, asking nothing", () => {
+  it("draws a link to an email on a link's page as Email, asking nothing", () => {
     const { host, asked } = started([labelledReferences]);
-    expect(host.contributions().embeds.map((e) => e.name)).toEqual(["contact", "email"]);
+    expect(host.contributions().embeds.map((e) => e.name)).toEqual(["contact"]);
+    expect(host.contributions().editorExtensions.map((e) => e.id)).toEqual(["references.events", "references.emails"]);
     expect(asked).toEqual([]);
     host.dispose();
   });

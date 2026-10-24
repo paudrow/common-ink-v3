@@ -68,7 +68,7 @@ export { allPages } from "../core/allPages.ts";
 export { reline } from "../core/blame.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
-export { isNoteId, linkedEvent, linkedFolder, linksIn, linksOn, writtenFolderLink, writtenLink, type WrittenLink } from "../core/links.ts";
+export { isNoteId, linkedEmail, linkedEvent, linkedFolder, linksIn, linksOn, writtenFolderLink, writtenLink, type WrittenLink } from "../core/links.ts";
 export { dayLinksOn, linkedDay, writtenDayLink, type DayLink, type LinkedDay } from "../core/dateLinks.ts";
 
 /** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
@@ -931,6 +931,7 @@ export const COMPLETION_KINDS = [
   { kind: "folder", heading: "Folders" },
   { kind: "upload", heading: "Uploads" },
   { kind: "event", heading: "Events" },
+  { kind: "email", heading: "Email" },
   { kind: "block", heading: "Blocks" },
   { kind: "embed", heading: "Embeds" },
   { kind: "new", heading: "New", waits: true },

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { MailAddress, MailMessage, MailThread, MailThreadRead, PluginHost, ViewProps } from "../../plugin-api.ts";
 import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
+import { EMAIL_PATH } from "./linking.tsx";
 import { Senders } from "./Senders.tsx";
-
-export const EMAIL_PATH = "/email";
 
 type Listing = { status: "reading" } | { status: "listed"; threads: readonly MailThread[]; more: boolean } | { status: "failed"; message: string };
 type Reading = { status: "reading" } | { status: "read"; thread: MailThreadRead } | { status: "failed"; message: string };
@@ -15,17 +14,17 @@ const when = (time: number) => new Date(time).toLocaleString(undefined, { dateSt
 const who = (a: MailAddress) => a.name || a.address;
 const whoAll = (list: readonly MailAddress[]) => list.map((a) => (a.name ? `${a.name} <${a.address}>` : a.address)).join(", ");
 
-/** Copies what a note writes to reference a thread, or one message in it, and says so. */
+/** Copies what a note writes to link to a thread, or one message in it, and says so. */
 export async function copyReference(host: PluginHost, id: string, what: string): Promise<void> {
   const app = host.app();
   try {
     const { text } = await host.perform({ type: "record.refer", sourceId: "email", id });
     try {
       await navigator.clipboard.writeText(text);
-      app.notify({ message: `Copied the reference to ${what}. Paste it into a note.`, icon: "mail" });
+      app.notify({ message: `Copied the link to ${what}. Paste it into a note.`, icon: "mail" });
     } catch {
-      // A page served over plain http has no clipboard to write to, so the reference is said, to copy by hand.
-      app.notify({ message: `The reference to ${what}, to copy into a note: ${text}`, icon: "mail" });
+      // A page served over plain http has no clipboard to write to, so the link is said, to copy by hand.
+      app.notify({ message: `The link to ${what}, to copy into a note: ${text}`, icon: "mail" });
     }
   } catch (err) {
     app.notify({ message: (err as Error).message, icon: "mail" });
@@ -190,7 +189,7 @@ function ThreadView({ host, id, back }: { host: PluginHost; id: string; back: ()
           <header className="email-thread-head">
             <h1>{reading.thread.subject}</h1>
             <button type="button" className="button small" onClick={() => void copyReference(host, reading.thread.id, `the thread ${reading.thread.subject}`)}>
-              Copy reference
+              Copy link
             </button>
           </header>
           <ol className="email-messages">
@@ -251,7 +250,7 @@ function Message({ host, message, focused }: { host: PluginHost; message: MailMe
           </button>
         )}
         <button type="button" className="link" onClick={() => void copyReference(host, message.id, `the message from ${who(message.from)}`)}>
-          Copy reference to this message
+          Copy link to this message
         </button>
       </footer>
     </li>

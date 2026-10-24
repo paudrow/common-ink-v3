@@ -1073,14 +1073,14 @@ export const TOOLS: Tool[] = [
   {
     name: "refer_record",
     description:
-      `What a note writes to reference one of your member's events, contacts or emails without copying it: ref, and text to put in the note, [[event:ref]] or an embed such as ::contact{ref Sam Okafor}. Only your member is shown the record as it is now. The words after a contact's or an email's ref are plain text every reader sees, so change or drop them if they shouldn't be shared. ${SOURCES}`,
+      `What a note writes to reference one of your member's events, contacts or emails without copying it: ref, and text to put in the note, [[event:ref]], [[email:ref]] or an embed such as ::contact{ref Sam Okafor}. Only your member is shown the record as it is now. The words after a contact's ref are plain text every reader sees, so change or drop them if they shouldn't be shared. ${SOURCES}`,
     inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
     op: "record.refer",
     example: { sourceId: "google", id: "evt123" },
   },
   {
     name: "read_record",
-    description: `The event, contact or email a reference in a note stands for, as it is now. ref is in [[event:ref]], or first inside ::contact{...} or ::email{...}. A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
+    description: `The event, contact or email a reference in a note stands for, as it is now. ref is in [[event:ref]] or [[email:ref]], or first inside ::contact{...}. A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
     inputSchema: object({ ref: { type: "string", description: "The reference, from the note" } }, ["ref"]),
     op: "record.read",
     example: { ref: "r8m2k4q9x1cd" },

@@ -9,7 +9,7 @@ Mail a person sends, copies (BCC) or forwards to **notes@in.commonink.app** is k
 3. Send, BCC or forward mail to notes@in.commonink.app from your addresses:
    - **BCC on mail you send** keeps your own message. Your replies join the thread they answer.
    - **Forwarding** keeps the message you forwarded, from its sender, and what you wrote above it. Forwarding as an attachment keeps the original's ids, so it threads exactly. A forward written into the text, as Gmail, Apple Mail and Outlook write one, threads by its subject and the people in it.
-4. A thread opens at `/email/<id>`. **Copy reference** on a thread, or on one message, copies `::email{ref subject}` to paste into a note. You see it as the thread as it is now. Everyone else who reads the note sees the subject and nothing more.
+4. A thread opens at `/email/<id>`. To link to it from a note, type `@` and words of its subject or sender, or press **Copy link** on the thread or on one message. The note holds `[[email:ref]]` and nothing of the mail. You see the link as the thread's subject; a click or vim's `gd` opens it, and resting on it shows who sent it, when, and how it begins. Everyone else who reads the note, members, guests and anyone with a share link, sees "Email" and nothing more. `[[email:ref|words]]` shows the words instead, to everyone. Notes written before links held `::email{ref subject}`, which is converted to `[[email:ref]]` once.
 
 Mail is dropped, and its sender told nothing, when any of these is true:
 
@@ -28,9 +28,9 @@ Disconnecting Email deletes every message kept and every address you added.
 | Reading a message: MIME (postal-mime), forwards, Authentication-Results, HTML sanitizing | `src/core/mail.ts` |
 | Keeping it: senders and codes, threads, dedupe, limits, `receive` | `src/core/mailbox.ts` |
 | The data source (`MailSource`, a third `DataSource` kind) and its operations | `src/core/sources.ts`, `src/worker/sources/mail.ts` |
-| Operations: `email.list`, `email.thread`, `email.senders`, `email.addSender`, `email.removeSender`, and `record.refer` / `record.read` for `::email{}` | `src/core/protocol.ts`, `src/core/operations.ts` |
+| Operations: `email.list`, `email.thread`, `email.senders`, `email.addSender`, `email.removeSender`, and `record.refer` / `record.read` for `[[email:ref]]` | `src/core/protocol.ts`, `src/core/operations.ts` |
 | Agents: `list_email`, `read_email_thread` (read-only), and `ink email`, `ink thread` | `src/worker/mcp/tools.ts`, `scripts/ink-cli.ts` |
-| The Email plugin: the page, the `email` reference embed, the Settings section | `src/web/plugins/email/` |
+| The Email plugin: the page, `@` and links to threads, the Settings section | `src/web/plugins/email/` |
 | Tables | `migrations/0064_email.sql` |
 | Tests | `test/core/mail.test.ts`, `test/core/plugin-email.test.ts` |
 
@@ -121,4 +121,4 @@ What a message is trusted by is the topmost `Authentication-Results` header, whi
 - **Paging.** The next page of threads is asked for by the last one's time alone, so a thread whose latest message arrived in the same millisecond as the last one listed can be skipped. A cursor of time and id would fix it, at the cost of one more argument for every agent.
 - **Threads merged by an old id.** Any id in References joins threads. Two threads of a mailing list that share one ancestor become one, and stay one.
 - **A domain that lets anyone send as anyone.** Trust is the domain's: where one user can send as another's address, they can verify it as theirs. The code's prompt warns against sending a code someone else gave you.
-- **`@` and `[[`.** A thread is referenced by Copy reference on the Email page, by `refer_record`, and by hand. `@` and `[[` offer events and contacts, and don't offer threads yet.
+- **`[[`.** `@` offers threads; `[[` offers notes and events, and not threads.

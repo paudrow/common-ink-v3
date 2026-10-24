@@ -2,9 +2,9 @@ import type { CompletionKind } from "../../plugin-api.ts";
 
 /**
  * How many of each kind of thing `@` lists alone, before anything is typed after it: the people, the
- * member first, the notes edited last, the latest uploads and the next events. Typing narrows each.
+ * member first, the notes edited last, the latest uploads, the next events and the latest email threads. Typing narrows each.
  */
-export const AT_ALONE = { person: 3, note: 3, upload: 2, event: 2 } as const satisfies Partial<Record<CompletionKind, number>>;
+export const AT_ALONE = { person: 3, note: 3, upload: 2, event: 2, email: 2 } as const satisfies Partial<Record<CompletionKind, number>>;
 
 /** A name is a few words. More than this after an `@` is prose that happens to follow one. */
 const MOST_WORDS = 4;

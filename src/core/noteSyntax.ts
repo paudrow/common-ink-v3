@@ -93,10 +93,10 @@ export const NOTE_SYNTAX: readonly NoteSyntax[] = [
   },
   {
     name: "email",
-    kind: "embed",
+    kind: "prose",
     called: "an email thread",
-    about: "An email thread, or one message in it, is the id refer_record answered, then a space, then a label. Anyone but the member whose email it is sees only the label. Write a subject, never what the mail says.",
-    example: "::email{aaaaaaaaaaaa Invoice for October}",
+    about: "A link to an email thread, or one message in it, is [[email:ref]], with the ref refer_record answered. It shows the subject to the member whose email it is, and Email to anyone else. Write no subject or words of the mail in the link.",
+    example: "Reply to [[email:aaaaaaaaaaaa]].",
   },
   {
     name: "image",

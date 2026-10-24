@@ -1,7 +1,8 @@
 import type { CalendarEvent, CompletionItem, Plugin } from "../../plugin-api.ts";
 import { AT_ALONE, namable } from "../lib/pointing.ts";
 import { reask } from "../lib/reasking.ts";
-import { eventLinks } from "../lib/references.tsx";
+import { openPopover } from "../lib/Popover.tsx";
+import { recordLinks } from "../lib/references.tsx";
 import { CalendarPage } from "./Calendar.tsx";
 import { whenLabel } from "./dates.ts";
 import { EventLink } from "./EventLink.tsx";
@@ -87,11 +88,13 @@ export const calendar: Plugin = {
     host.completions.register({ id: "events.at", trigger: "@", spaces: true, items: (typed) => (namable(typed) ? events(typed, "@") : []) });
     host.commands.register({ id: "calendar.copyReference", title: "Copy event reference", group: "Calendar", run: () => void copyEventReference(host) });
     host.views.register("page", { id: "calendar", path: "/calendar", label: "Calendar", description: "The events of the calendars you connect, which only you see.", icon: "calendar", nav: "primary", order: 40, component: (props) => <CalendarPage host={host} {...props} /> });
-    const linked = eventLinks({
+    const linked = recordLinks({
       host,
+      kind: "event",
+      title: "Event",
       // The title alone: adding the time as the details arrive would widen the chip, and a line that just fit would gain a row.
       shown: ({ event }) => ({ text: event.title || "Untitled", title: `${whenLabel(event.when, zone())} · ${event.calendar}${event.location ? ` · ${event.location}` : ""}` }),
-      details: ({ event }, { noteId, close }) => <EventLink host={host} event={event} noteId={noteId} close={close} />,
+      open: ({ event }, { el, noteId }) => openPopover(el, "Event", (close) => <EventLink host={host} event={event} noteId={noteId} close={close} />),
     });
     host.editorExtensions.register({ id: "calendar.events", extension: (editor) => linked(editor.noteId) });
   },

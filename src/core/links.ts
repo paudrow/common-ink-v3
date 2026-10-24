@@ -5,7 +5,7 @@ import { blanked, codeSpans } from "./spans.ts";
  * A link as a note writes it: `[[target]]` or `[[target|display text]]`, for anything a note opens.
  * A note stores the target as the linked note's id, which never changes, so a link follows its note
  * through every rename. A day is `[[2026-10-23]]` (dateLinks.ts), and everything else is named by
- * its kind: `[[folder:id]]`, `[[event:ref]]`, and `[[person:id]]` for a member or `[[person:Name]]`
+ * its kind: `[[folder:id]]`, `[[event:ref]]`, `[[email:ref]]`, and `[[person:id]]` for a member or `[[person:Name]]`
  * for anyone else (mentions.ts). Without display text a link shows what it is to as it is called
  * now. A target that is none of these is a title somebody wrote by hand, and links nothing until it
  * is resolved. docs/adr/0019-everything-a-note-opens-is-a-link.md has why.
@@ -23,8 +23,8 @@ const ID = /^[a-z0-9]{12}$/;
 
 export const isNoteId = (target: string) => ID.test(target);
 
-/** What may follow each kind's prefix: a folder's or an event reference's id, and a person's id or name. */
-const KINDS = { folder: ID, event: ID, person: /\S/ } as const;
+/** What may follow each kind's prefix: a folder's, an event reference's or an email reference's id, and a person's id or name. */
+const KINDS = { folder: ID, event: ID, email: ID, person: /\S/ } as const;
 
 type Kind = keyof typeof KINDS;
 
@@ -50,6 +50,9 @@ export const linkedFolder = linked("folder");
 /** The event reference a link's target is to, as `[[event:ref]]` writes it, or null where it is to no event. */
 export const linkedEvent = linked("event");
 
+/** The email reference a link's target is to, as `[[email:ref]]` writes it, or null where it is to no thread. */
+export const linkedEmail = linked("email");
+
 /** Who a link's target is to, a person's id or a name, as `[[person:…]]` writes it, or null where it is to nobody. */
 export const linkedPerson = linked("person");
 
@@ -58,6 +61,9 @@ export const writtenFolderLink = (folderId: string) => `[[folder:${folderId}]]`;
 
 /** How a link to an event is written: by the reference record.refer made, with words of its own to show where it has them. */
 export const writtenEventLink = (ref: string, display?: string | null) => writtenLink(`event:${ref}`, display);
+
+/** How a link to an email thread, or one message in it, is written: by its reference alone, so the note says nothing of the mail. */
+export const writtenEmailLink = (ref: string, display?: string | null) => writtenLink(`email:${ref}`, display);
 
 /** How a link is written. */
 export const writtenLink = (target: string, display?: string | null) => (display ? `[[${target}|${display}]]` : `[[${target}]]`);
