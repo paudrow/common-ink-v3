@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { crc32, inflateSync } from "node:zlib";
 import path from "node:path";
 import { expect, test } from "vitest";
 import { unpackedExtensionId } from "../../scripts/extension-id.ts";
@@ -25,6 +26,46 @@ test("the clipper's zip unzips to the extension Chrome loads, under the pinned i
   expect(readFileSync(path.join(dir, "out/manifest.json"), "utf8")).toBe(readFileSync("extension/manifest.json", "utf8"));
   expect(unpackedExtensionId(path.join(dir, "out/manifest.json"))).toBe("nloccbnkboaohceggkmbmkppnjjkkdkh");
 });
+
+test("the icons are 8-bit RGBA, non-interlaced, and sRGB", async () => {
+  const files = await clipperFiles();
+  for (const size of [16, 48, 128]) {
+    const chunks = pngChunks(Buffer.from(files.get(`icon-${size}.png`)!));
+    expect(chunks.map((chunk) => chunk.type)).toEqual(["IHDR", "gAMA", "sRGB", "IDAT", "IEND"]);
+    const ihdr = chunks[0]!.data;
+    expect(ihdr.readUInt32BE(0)).toBe(size);
+    expect(ihdr.readUInt32BE(4)).toBe(size);
+    expect([...ihdr.subarray(8)]).toEqual([8, 6, 0, 0, 0]);
+    expect(chunks[1]!.data.readUInt32BE(0)).toBe(45455);
+    expect([...chunks[2]!.data]).toEqual([0]);
+    const raw = inflateSync(chunks[3]!.data);
+    expect([...pixel(raw, size, 0, 0)]).toEqual([251, 250, 248, 255]);
+    expect([...pixel(raw, size, size / 2, size / 2)]).toEqual([91, 91, 214, 255]);
+  }
+});
+
+function pngChunks(png: Buffer): { type: string; data: Buffer }[] {
+  expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  const chunks: { type: string; data: Buffer }[] = [];
+  let at = 8;
+  while (at < png.length) {
+    const length = png.readUInt32BE(at);
+    const type = png.subarray(at + 4, at + 8);
+    const data = png.subarray(at + 8, at + 8 + length);
+    const sum = png.readUInt32BE(at + 8 + length);
+    expect(sum).toBe(crc32(Buffer.concat([type, data])));
+    chunks.push({ type: type.toString("latin1"), data });
+    at += 12 + length;
+    if (type.toString("latin1") === "IEND") break;
+  }
+  expect(at).toBe(png.length);
+  return chunks;
+}
+
+function pixel(raw: Buffer, size: number, x: number, y: number): Buffer {
+  const stride = size * 4 + 1;
+  return raw.subarray(y * stride + 1 + x * 4, y * stride + 1 + x * 4 + 4);
+}
 
 test("a zip keeps each file's bytes", () => {
   const files = new Map([
