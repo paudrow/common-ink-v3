@@ -1,5 +1,5 @@
 import { clipperTarget, getClipper } from "./lib/clipperLink.ts";
-import { ALT, SHIFT } from "./lib/opening.ts";
+import { ALT, MOD, SHIFT } from "./lib/opening.ts";
 import { HelpOverlay, type CommandInfo, type Plugin, type PluginHost } from "../plugin-api.ts";
 import { matching } from "./lib/match.ts";
 import { Palette, type PaletteItem } from "./lib/Palette.tsx";
@@ -34,7 +34,7 @@ function ShortcutSheet({ host, close }: { host: PluginHost; close: () => void })
           Change the keys in Settings
         </a>
       </p>
-      {shortcutGroups(commands).map(({ name, commands }) => (
+      {shortcutGroups(commands, { shift: SHIFT, mod: MOD }).map(({ name, commands }) => (
         <section key={name} className="shortcut-sheet-group">
           <h3>{name}</h3>
           <table aria-label={name}>
@@ -46,6 +46,7 @@ function ShortcutSheet({ host, close }: { host: PluginHost; close: () => void })
                     {c.keys.map((keys) => (
                       <kbd key={keys}>{keys}</kbd>
                     ))}
+                    {c.then && (c.keys.length ? ` ${c.then}` : c.then)}
                   </td>
                 </tr>
               ))}

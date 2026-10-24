@@ -24,6 +24,7 @@ describe("the keyboard shortcuts sheet", () => {
       ["Editor", ["bullets.indent", "undo"]],
       ["Vim", ["vim.down"]],
       ["Kanban", ["kanban.move"]],
+      ["Lists", ["lists.1", "lists.2", "lists.4"]],
       ["Other", ["timer"]],
     ]);
   });
@@ -62,5 +63,34 @@ describe("the keyboard shortcuts sheet", () => {
       ["Go to the sidebar, on the row of what is open", ["⌃W H"]],
       ["Go back to the region you were in", ["⌃W P"]],
     ]);
+  });
+
+  it("lists selecting a list's rows and undoing what was done to them under Lists, each command once, with vim's keys and the pointer's", () => {
+    const groups = shortcutGroups(
+      [
+        command("list.selectDown", ["⇧↓"], "Lists"),
+        command("list.selectUp", ["⇧↑"], "Lists"),
+        command("list.clearSelection", ["Esc"], "Lists"),
+        command("list.sort", ["S"], "Lists"),
+        command("history.undo", ["⌘Z"], "Editor"),
+        command("history.redo", ["⇧⌘Z", "⌘Y"], "Editor"),
+        command("vim.list.visual", ["⇧V"], "Vim"),
+        command("vim.list.undo", ["U"], "Vim"),
+        command("vim.list.redo", ["⌃R"], "Vim"),
+      ],
+      { shift: "⇧", mod: "⌘" },
+    );
+    expect(groups.find((g) => g.name === "Lists")!.commands.map((c) => [c.title, c.keys, c.then])).toEqual([
+      ["Select the next or previous row too", ["⇧↓", "⇧↑", "⇧V"], undefined],
+      ["Select the rows from the last one selected", ["⇧"], "click a row"],
+      ["Select a row, or unselect it", ["⌘"], "click it"],
+      ["Clear the selection", ["Esc"], undefined],
+      ["Act on every selected row", [], "The row's own keys, buttons and menu"],
+      ["Undo what was done to a list's rows", ["⌘Z", "U"], undefined],
+      ["Redo it", ["⇧⌘Z", "⌘Y", "⌃R"], undefined],
+      ["list.sort", ["S"], undefined],
+    ]);
+    // The note's undo is the Editor's still.
+    expect(groups.find((g) => g.name === "Editor")!.commands.map((c) => c.id)).toEqual(["history.undo", "history.redo"]);
   });
 });

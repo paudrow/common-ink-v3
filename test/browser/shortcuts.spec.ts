@@ -29,6 +29,13 @@ test("? outside a text field opens every command with keys over the page, under 
   await expect(keysOf(page, "Navigation", "Keyboard shortcuts")).toHaveText(["?"]);
   await expect(keysOf(page, "Notes", "Archive or unarchive note")).toHaveText([/^(⇧⌘E|Ctrl\+Shift\+E)$/]);
   await expect(keysOf(page, "Editor", "Redo")).toHaveText([/^(⇧⌘Z|Ctrl\+Shift\+Z)$/, /^(⌘Y|Ctrl\+Y)$/]);
+  // Lists: selecting rows by the keys and the pointer, acting on them, and undoing it, each once.
+  const lists = sheet(page).getByRole("table", { name: "Lists" });
+  await expect(lists.getByRole("rowheader")).toHaveText(["Select the next or previous row too", "Select the rows from the last one selected", "Select a row, or unselect it", "Clear the selection", "Act on every selected row", "Undo what was done to a list's rows", "Redo it"]);
+  await expect(keysOf(page, "Lists", "Select the next or previous row too")).toHaveText([/^(⇧↓|Shift\+↓)$/, /^(⇧↑|Shift\+↑)$/]);
+  await expect(lists.getByRole("row").filter({ hasText: "Select a row, or unselect it" }).getByRole("cell")).toHaveText(/^(⌘|Ctrl) click it$/);
+  await expect(lists.getByRole("row").filter({ hasText: "Act on every selected row" }).getByRole("cell")).toHaveText("The row's own keys, buttons and menu");
+  await expect(keysOf(page, "Lists", "Undo what was done to a list's rows")).toHaveText([/^(⌘Z|Ctrl\+Z)$/]);
   // A command with no keys is no shortcut.
   await expect(shortcut(page, "New note")).toHaveCount(0);
   await expect(shortcut(page, "Show all commands")).toHaveCount(1);
@@ -110,6 +117,10 @@ test("in vim's normal mode ? is vim's search backwards; the palette opens the ke
   await expect(sheet(page)).toBeVisible();
   await expect(sheet(page).getByRole("heading", { level: 3 })).toHaveText(["Navigation", "Sidebar", "Notes", "Editor", "Vim", "Folding", "Lists", "Todos", "Todos, with the pointer"]);
   await expect(keysOf(page, "Vim", "Vim: first row of a list")).toHaveText(["G G"]);
+  // Vim's keys for a list's rows are listed under Lists too.
+  await expect(keysOf(page, "Lists", "Select the next or previous row too")).toHaveText([/^(⇧↓|Shift\+↓)$/, /^(⇧↑|Shift\+↑)$/, /^(⇧V|Shift\+V)$/]);
+  await expect(keysOf(page, "Lists", "Undo what was done to a list's rows")).toHaveText([/^(⌘Z|Ctrl\+Z)$/, "U"]);
+  await expect(keysOf(page, "Lists", "Redo it")).toHaveText([/^(⇧⌘Z|Ctrl\+Shift\+Z)$/, /^(⌘Y|Ctrl\+Y)$/, /^(⌃R|Ctrl\+R)$/]);
   // / and Shift with / are both the key for the search box, and read as one.
   await expect(keysOf(page, "Vim", "Vim: go to the search box")).toHaveText(["/"]);
   await page.keyboard.press("Escape");
