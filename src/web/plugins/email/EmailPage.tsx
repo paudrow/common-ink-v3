@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Icon, ruleLike, sandboxed, type App, type MailAddress, type MailMessage, type MailThread, type MailThreadRead, type PluginHost, type ViewProps } from "../../plugin-api.ts";
+import { Icon, ruleLike, sandboxed, type App, type Contact, type MailAddress, type MailMessage, type MailThread, type MailThreadRead, type PluginHost, type Source, type ViewProps } from "../../plugin-api.ts";
 import { step } from "../lib/rows.ts";
 import { Segmented } from "../lib/Segmented.tsx";
+import { NewContact } from "../mentions/ContactEditor.tsx";
+import { addingTo } from "../mentions/people.ts";
 import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
 import { EMAIL_PATH, linkTo, threadPath, when } from "./linking.tsx";
 import { noteOf, quoted } from "./quoting.ts";
@@ -75,6 +77,8 @@ async function noteFrom(host: PluginHost, thread: MailThreadRead): Promise<void>
 export function EmailPage({ host, app }: ViewProps & { host: PluginHost }) {
   const { sources, setSources, problem } = useSources(host);
   const [asked, setAsked] = useState(0);
+  // Read once for the page, as each thread opened asks whether its sender is one of them.
+  const contacts = useContacts(host);
   const learn = useCallback((fresher: Parameters<typeof withFresher>[1]) => setSources((known) => withFresher(known, fresher)), [setSources]);
   const openId = app.path.startsWith(`${EMAIL_PATH}/`) ? decodeURIComponent(app.path.slice(EMAIL_PATH.length + 1)) : null;
   const connected = (sources ?? []).some((s) => s.kind === "email" && s.state === "connected");
@@ -94,7 +98,7 @@ export function EmailPage({ host, app }: ViewProps & { host: PluginHost }) {
           </p>
         )}
         {connected && openId ? (
-          <Conversation key={openId} host={host} app={app} id={openId} />
+          <Conversation key={openId} host={host} app={app} id={openId} contacts={contacts} />
         ) : (
           <div className="email-empty">
             {!connected && <h1>Email</h1>}
@@ -260,8 +264,31 @@ function ThreadList({ host, asked, openId, open, onSources }: { host: PluginHost
   );
 }
 
-function Conversation({ host, app, id }: { host: PluginHost; app: App; id: string }) {
+/**
+ * The member's contacts and the data source a new one would go in, as `contact.list` says them, or
+ * null until they are read or where they can't be. A contact the member makes here joins them.
+ */
+function useContacts(host: PluginHost) {
+  const [read, setRead] = useState<{ contacts: readonly Contact[]; sources: readonly Source[] } | null>(null);
+  useEffect(() => {
+    let live = true;
+    host.perform({ type: "contact.list" }).then(
+      ({ contacts, sources }) => live && setRead({ contacts, sources }),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [host]);
+  const added = (contact: Contact) => setRead((was) => was && { ...was, contacts: [...was.contacts, contact] });
+  return { read, added };
+}
+
+type Contacts = ReturnType<typeof useContacts>;
+
+function Conversation({ host, app, id, contacts }: { host: PluginHost; app: App; id: string; contacts: Contacts }) {
   const [reading, setReading] = useState<Reading>({ status: "reading" });
+  const [adding, setAdding] = useState(false);
   useEffect(() => {
     let live = true;
     host.perform({ type: "email.thread", sourceId: "email", id }).then(
@@ -284,7 +311,12 @@ function Conversation({ host, app, id }: { host: PluginHost; app: App; id: strin
   const last = thread.messages[thread.messages.length - 1];
   // Mail like this is what someone else sent, the latest the member forwarded, or what came through a list. The member's own is never
   // offered: a rule from their own address would drop all they send.
-  const theirs = thread.messages.findLast((m) => m.via === "forwarded") ?? thread.messages.findLast((m) => m.listId !== null);
+  const forwarded = thread.messages.findLast((m) => m.via === "forwarded");
+  const theirs = forwarded ?? thread.messages.findLast((m) => m.listId !== null);
+  // A sender is offered to the contacts only where they are someone else, aren't a contact yet, and there is somewhere to add them.
+  const addTo = contacts.read && addingTo(contacts.read.sources);
+  const known = forwarded && contacts.read?.contacts.some((c) => c.emails.some((e) => e.value.trim().toLowerCase() === forwarded.from.address));
+  const sender = !known && addTo ? forwarded : undefined;
   return (
     <article className="email-conversation" aria-label={thread.subject}>
       <header className="email-thread-head">
@@ -304,8 +336,32 @@ function Conversation({ host, app, id }: { host: PluginHost; app: App; id: strin
               Skip mail like this
             </button>
           )}
+          {sender && (
+            <button type="button" className="button small" aria-expanded={adding} onClick={() => setAdding(true)}>
+              Add sender to contacts
+            </button>
+          )}
         </div>
       </header>
+      {adding && sender && addTo && (
+        <section className="person-contact email-new-contact" aria-label="Add sender to contacts">
+          <p className="person-whose">
+            Adds {who(sender.from)} to {addTo.name}.
+          </p>
+          <NewContact
+            host={host}
+            sourceId={addTo.id}
+            name={sender.from.name}
+            email={sender.from.address}
+            onCancel={() => setAdding(false)}
+            onSaved={(card) => {
+              setAdding(false);
+              contacts.added(card);
+              host.app().notify({ message: `Added ${card.name} to your contacts.`, icon: "contacts" });
+            }}
+          />
+        </section>
+      )}
       <ol className="email-messages">
         {thread.messages.map((message) => (
           <Message key={message.id} host={host} message={message} focused={message.id === id} opened={message === last || message.id === id} />
