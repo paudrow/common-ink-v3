@@ -767,6 +767,30 @@ describe("the sample data", () => {
     expect((await ask({ type: "person.read", who: "Sam Okafor" })).contacts[0]).toMatchObject({ phones: [{ value: "+1 555 0142", type: null }], urls: [{ value: "https://old.example", type: null }], addresses: [{ value: "12 Water Lane, Springfield", type: null }] });
   });
 
+  it("merges and restores the sample contacts as Google's are: one of the week's or one added is deleted, and comes back restored", async () => {
+    const sources = offered({ DEV_SIGN_IN: "1" }, "localhost");
+    const ada = await newMember("Ada");
+    const ask = <T extends OpInput>(op: T) => perform(env.DB, ada, op, T0, sources);
+    await ask({ type: "source.connect", id: "sample-contacts", edit: true });
+    const king = await ask({ type: "contact.create", sourceId: "sample-contacts", name: "Ada King", emails: [{ value: "ada@example.com", type: "home" }], phones: [{ value: "+44 20 7946 0000", type: "home" }] });
+    const names = async () => (await ask({ type: "contact.list" })).contacts.map((c) => c.name);
+    expect((await ask({ type: "contact.duplicates" })).pairs.map((p) => p.contacts.map((c) => c.id))).toEqual([[king.id, "ada"]]);
+
+    const into = await ask({ type: "contact.merge", sourceId: "sample-contacts", mainId: "ada", mainEtag: "0", otherId: king.id, otherEtag: king.etag });
+    expect(into.contact).toMatchObject({ id: "ada", emails: [{ value: "ada@example.com", type: "work" }], phones: [{ value: "+1 555 0100", type: "mobile" }, { value: "+44 20 7946 0000", type: "home" }] });
+    expect(await names()).toEqual(["Ada Lovelace", "Grace Hopper", "Lin Wei", "Sam Okafor", "Zoë Álvarez"]);
+    await ask({ type: "contact.restore", id: into.merge.id });
+    expect(await names()).toEqual(["Ada King", "Ada Lovelace", "Grace Hopper", "Lin Wei", "Sam Okafor", "Zoë Álvarez"]);
+
+    // One of the week's merged into one added.
+    const added = (await ask({ type: "contact.list", query: "king" })).contacts[0]!;
+    const { main, other } = await ask({ type: "contact.combine", sourceId: "sample-contacts", mainId: added.id, otherId: "ada" });
+    const back = await ask({ type: "contact.merge", sourceId: "sample-contacts", mainId: main.id, mainEtag: main.etag, otherId: other.id, otherEtag: other.etag });
+    expect(await names()).toEqual(["Ada King", "Grace Hopper", "Lin Wei", "Sam Okafor", "Zoë Álvarez"]);
+    await ask({ type: "contact.restore", id: back.merge.id });
+    expect(await names()).toEqual(["Ada King", "Ada Lovelace", "Grace Hopper", "Lin Wei", "Sam Okafor", "Zoë Álvarez"]);
+  });
+
   it("has contacts read-only until connected again to edit them; then a change, a picture and a new contact are the person's alone, an agent changes none, and disconnecting forgets them", async () => {
     const sources = offered({ DEV_SIGN_IN: "1" }, "localhost");
     const ada = await newMember("Ada");

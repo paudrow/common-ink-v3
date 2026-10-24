@@ -931,6 +931,24 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("contact.photo"), sourceId: SourceId, id: RecordId, photo: Photo.nullable() }),
   /** Adds a contact to the asker's own contacts where they are kept: a name, and whatever else is known of them. */
   z.object({ type: z.literal("contact.create"), sourceId: SourceId, ...z.object(ContactFields).partial().shape, name: ContactFields.name }),
+  /** The pairs of the asker's contacts that look like the same person, but those they said are not. */
+  z.object({ type: z.literal("contact.duplicates") }),
+  /** Says two of the asker's contacts are not the same person, so they aren't listed as a pair again. */
+  z.object({ type: z.literal("contact.dismiss"), sourceId: SourceId, ids: z.tuple([RecordId, RecordId]) }),
+  /** Two of the asker's contacts as they are now, and what merging the other into the main one would make of them, before anything is changed. */
+  z.object({ type: z.literal("contact.combine"), sourceId: SourceId, mainId: RecordId, otherId: RecordId }),
+  /**
+   * Merges one of the asker's contacts into another where they are kept: the main one becomes what
+   * contact.combine answered, and the other is deleted, its copy kept here to restore for 30 days.
+   * Each etag is the contact's as combined: either changed since refuses it, and nothing changes.
+   */
+  z.object({ type: z.literal("contact.merge"), sourceId: SourceId, mainId: RecordId, mainEtag: z.string().min(1).max(200), otherId: RecordId, otherEtag: z.string().min(1).max(200) }),
+  /** The contacts the asker merged into others in the last 30 days, latest first, each still to restore. */
+  z.object({ type: z.literal("contact.merges") }),
+  /** Makes a contact the asker merged into another a contact of its own again, from the copy kept of it. */
+  z.object({ type: z.literal("contact.restore"), id: Id }),
+  /** Adds an email address to one of the asker's contacts where it is kept, after the ones it has. One it has already changes nothing. */
+  z.object({ type: z.literal("contact.addEmail"), sourceId: SourceId, id: RecordId, email: Labelled(ContactFields.emails.element.shape.value) }),
   /**
    * The asker's email threads, the latest first: what they sent, copied or forwarded to the address
    * `address` names. `query` keeps those with every word of it in a message's subject, sender,
@@ -1864,6 +1882,14 @@ export interface Results {
   "contact.update": ContactCard;
   "contact.photo": ContactCard;
   "contact.create": ContactCard;
+  "contact.duplicates": { pairs: DuplicatePair[]; sources: Source[] };
+  "contact.dismiss": { dismissed: true };
+  /** `combined` is the main contact as merging would make it. */
+  "contact.combine": { main: ContactCard; other: ContactCard; combined: ContactCard };
+  "contact.merge": { contact: ContactCard; merge: ContactMerge };
+  "contact.merges": { merges: ContactMerge[] };
+  "contact.restore": ContactCard;
+  "contact.addEmail": ContactCard;
   /** `address` is where mail is sent to be kept; `more` when there are threads after the last. */
   "email.list": { threads: MailThread[]; sources: Source[]; more: boolean; address: string | null };
   "email.thread": MailThreadRead;
@@ -2022,6 +2048,28 @@ export interface ContactCard extends Contact {
   urls: ContactLine[];
   /** Sent back with a change, which is refused when the contact has changed since. */
   etag: string;
+}
+
+/** What makes two contacts look like the same person: an email address, a phone number, or their name. */
+export type SameBy = "email" | "phone" | "name";
+
+/** Two contacts in one data source that look like the same person, and each way they do. */
+export interface DuplicatePair {
+  sourceId: string;
+  contacts: [Contact, Contact];
+  sameBy: SameBy[];
+}
+
+/** A contact merged into another, whose copy is kept to restore it until `until`. */
+export interface ContactMerge {
+  id: string;
+  sourceId: string;
+  /** The merged contact's name. */
+  name: string;
+  /** The name of the contact it was merged into, as it was then. */
+  into: string;
+  mergedAt: number;
+  until: number;
 }
 
 /** A change to a contact: each field given is the whole of it, and null takes it away. */

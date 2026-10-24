@@ -1,4 +1,5 @@
 import { shiftDay } from "../../core/events.ts";
+import { contactFields, mergeChange } from "../../core/duplicates.ts";
 import { newId } from "../../core/ids.ts";
 import { CONTACT_LABELS, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactLine, type EventWhen, type LabelledField } from "../../core/protocol.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type Described } from "../../core/sources.ts";
@@ -199,6 +200,8 @@ function calendar(db: D1Database, personId: string, info: Described): CalendarSo
 
 /** What a contact's row in `sample_records` is kept as: its id there starts with this, so it is never taken for an event. */
 const CONTACT = "contact:";
+/** What a deleted contact's row holds. */
+const DELETED = "deleted";
 /** What agreeing to change the sample contacts, beyond reading them, is kept as on the connection. */
 export const EDIT_CONTACTS = "contacts.edit";
 
@@ -213,8 +216,8 @@ function contacts(db: D1Database, personId: string, info: Described, writable: b
       (await db.prepare("SELECT record_id, revision, data FROM sample_records WHERE person_id = ? AND record_id LIKE 'contact:%'").bind(personId).all<Changed & { record_id: string }>()).results.map((row) => [row.record_id.slice(CONTACT.length), row]),
     );
     const kept = (card: ContactCard, row: Changed | undefined): ContactCard => (row ? { ...card, ...keptAs(row.data), etag: String(row.revision) } : card);
-    const added = [...rows].filter(([id]) => id.startsWith(ADDED)).map(([id, row]) => kept({ ...made[0]!, ...NOTHING_MORE, id, name: "", emails: [], phones: [], organization: null }, row));
-    return [...made.map((card) => kept(card, rows.get(card.id))), ...added];
+    const added = [...rows].filter(([id, row]) => id.startsWith(ADDED) && row.data !== DELETED).map(([id, row]) => kept({ ...made[0]!, ...NOTHING_MORE, id, name: "", emails: [], phones: [], organization: null }, row));
+    return [...made.filter((card) => rows.get(card.id)?.data !== DELETED).map((card) => kept(card, rows.get(card.id))), ...added];
   };
   const get = async (id: string) => (await all()).find((c) => c.id === id) ?? null;
   /** Keeps a contact as it now is. One statement either way, so of two changes made from the same reading exactly one is taken; with no reading named, it is taken as it comes. */
@@ -252,6 +255,24 @@ function contacts(db: D1Database, personId: string, info: Described, writable: b
         },
         async create(fields) {
           return keep(changed({ ...made[0]!, ...NOTHING_MORE, id: `${ADDED}${newId()}`, emails: [], phones: [], organization: null }, fields as ContactChange), "0");
+        },
+        async copy(id) {
+          const card = await get(id);
+          return card && JSON.stringify(card);
+        },
+        async remake(copy) {
+          return keep(changed({ ...made[0]!, ...NOTHING_MORE, id: `${ADDED}${newId()}`, emails: [], phones: [], organization: null }, contactFields(JSON.parse(copy) as ContactCard)), "0");
+        },
+        async absorb(id, etag, copy) {
+          const card = await get(id);
+          if (!card) throw new SourceError("refused", "No such contact");
+          if (card.etag !== etag) throw new SourceError("stale", "It was changed since you opened it. Open it again, then make your change.");
+          const change = mergeChange(card, JSON.parse(copy) as ContactCard);
+          return Object.keys(change).length ? keep(changed(card, change), etag) : card;
+        },
+        async delete(id) {
+          // One of the week's is kept as deleted, since it is made again from the list above on every read.
+          await db.prepare("INSERT INTO sample_records (person_id, record_id, revision, data) VALUES (?1, ?2, 1, ?3) ON CONFLICT (person_id, record_id) DO UPDATE SET revision = revision + 1, data = ?3").bind(personId, `${CONTACT}${id}`, DELETED).run();
         },
       },
     }),

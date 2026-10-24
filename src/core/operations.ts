@@ -80,7 +80,7 @@ import { paging } from "./paging.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listMail, listSources, mailSenders, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, addContactEmail, addMailSender, calendarFor, calendarSettings, combineContacts, contactCards, createContact, createEvent, dismissDuplicate, listContacts, listDuplicates, listEvents, listMail, listMerges, listSources, mailSenders, mergeContacts, mergedInto, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, restoreContact, updateContact, updateEvent, type Sources } from "./sources.ts";
 import { holdsOldLinks, linksConverted } from "./oldLinks.ts";
 import { referencesIn } from "./references.ts";
 import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
@@ -1917,7 +1917,9 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
   const emails = new Set(toldEmail ? [toldEmail.toLowerCase()] : []);
   // An id that is nobody's the asker is told of has no name to match a contact by.
   const named = member || !isPersonId(op.who) ? name : null;
-  const contacts = theirs ? await contactCards(asker(ctx), (c) => (named !== null && folded(c.name) === folded(named)) || c.emails.some((e) => emails.has(e.value.toLowerCase()))) : [];
+  // A contact of their name merged into another is that other now, so a mention of the name still finds it.
+  const merged = theirs && named !== null ? await mergedInto(asker(ctx), (name) => folded(name) === folded(named)) : new Set<string>();
+  const contacts = theirs ? await contactCards(asker(ctx), (c) => (named !== null && folded(c.name) === folded(named)) || c.emails.some((e) => emails.has(e.value.toLowerCase())) || merged.has(`${c.sourceId} ${c.id}`)) : [];
 
   const query = `mentions:${writtenValue(searchedAs)}`;
   const todoQuery = `assignee:${writtenValue(searchedAs)}`;
@@ -3558,6 +3560,15 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "contact.update": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateContact(asker(ctx), sourceId, id, etag, change) },
   "contact.photo": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => photoContact(asker(ctx), op.sourceId, op.id, op.photo) },
   "contact.create": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, type: _, ...fields }) => createContact(asker(ctx), sourceId, fields) },
+  // Which of the member's contacts are one person is theirs to say, and leads to merging them, which is theirs alone too. See NOT_FOR_AGENTS.
+  "contact.duplicates": { needs: "view", by: "member", own: true, run: (ctx) => listDuplicates(asker(ctx)) },
+  "contact.dismiss": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => dismissDuplicate(asker(ctx), op.sourceId, op.ids) },
+  // Merging deletes a contact where it is kept, and restoring makes one: the member's alone, as any change to a contact is.
+  "contact.combine": { needs: "view", by: "member", own: true, run: (ctx, op) => combineContacts(asker(ctx), op.sourceId, op.mainId, op.otherId) },
+  "contact.merge": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { type: _, ...merging }) => mergeContacts(asker(ctx), merging) },
+  "contact.merges": { needs: "view", by: "member", own: true, run: (ctx) => listMerges(asker(ctx)) },
+  "contact.restore": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => restoreContact(asker(ctx), op.id) },
+  "contact.addEmail": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => addContactEmail(asker(ctx), op.sourceId, op.id, op.email) },
   // A person's mail is theirs as their calendar is, and read-only: nothing changes a message.
   "email.list": { needs: "view", own: true, run: (ctx, op) => listMail(asker(ctx), op) },
   "email.thread": { needs: "view", own: true, run: (ctx, op) => readMail(asker(ctx), op.sourceId, op.id) },
