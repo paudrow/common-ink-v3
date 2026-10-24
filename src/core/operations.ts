@@ -8,7 +8,7 @@ import { lineDiff, textDiff } from "./diff.ts";
 import { spliceLines } from "./text.ts";
 import { atPath, nameKey as folderKey, pathsOf } from "./folder-names.ts";
 import { following as lineFollowing } from "./follow.ts";
-import { dayIn, dayStartIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
+import { dayIn, dayStartIn, isFirstSave, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
 import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, namesKind, retargeted } from "./links.ts";
@@ -1582,6 +1582,37 @@ function choicesFor({ conflicts }: Reverting, resolve?: Resolve): Choice[] {
   return choices;
 }
 
+/** The change at `revision`, refused unless it is the asker's. */
+function yours(ctx: Context, history: readonly Recorded[], revision: number, what: string): Recorded {
+  const change = history.find((c) => c.revision === revision);
+  if (!change) throw new OpError("not_found", `The note has no revision ${revision}`);
+  if (!isBy(ctx, change.author)) throw new OpError("invalid", `Revision ${revision} isn't yours: you can only ${what} your own changes`);
+  return change;
+}
+
+/** Refuses a change that a later one already took back, saying how. */
+function standing(history: readonly Recorded[], reverted: ReadonlyMap<number, number>, revision: number): number {
+  const by = reverted.get(revision);
+  if (by === undefined) return revision;
+  const how = history.find((c) => c.revision === by)?.reverts?.how;
+  throw new OpError("invalid", `Revision ${revision} was already ${how === "undo" ? "undone" : how === "redo" ? "redone" : "reverted"}`);
+}
+
+/** The change that undo with a revision takes back: that one of the asker's, which still stands and isn't an undo. */
+function undoing(ctx: Context, history: readonly Recorded[], mine: readonly Recorded[], reverted: ReadonlyMap<number, number>, revision: number): number {
+  const change = yours(ctx, history, revision, "undo");
+  if (change.reverts?.how === "undo") throw new OpError("invalid", `Revision ${revision} is an undo: redo takes it back`);
+  if (isFirstSave(mine, change)) throw new OpError("invalid", `Revision ${revision} is the note's first save, which undo leaves as it is`);
+  return standing(history, reverted, revision);
+}
+
+/** The undo that redo with a revision takes back: that one of the asker's, which still stands. */
+function redoing(ctx: Context, history: readonly Recorded[], reverted: ReadonlyMap<number, number>, revision: number): number {
+  const change = yours(ctx, history, revision, "redo");
+  if (change.reverts?.how !== "undo") throw new OpError("invalid", `Revision ${revision} isn't an undo, so there's nothing to redo`);
+  return standing(history, reverted, revision);
+}
+
 /** Records one change that takes other changes back out of a note, and what that does to the daily notes its completions were filed on. */
 function takeBack(ctx: Context, id: string, choose: Choose, resolve?: Resolve): Promise<Written> {
   return settle(async (): Promise<Written | null> => {
@@ -2479,7 +2510,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "edit",
     run: (ctx, op) =>
       takeBack(ctx, op.id, (history, reverted) => {
-        const target = undoTarget(history.filter((c) => isBy(ctx, c.author)), reverted);
+        const mine = history.filter((c) => isBy(ctx, c.author));
+        if (op.revision !== undefined) return { how: "undo", revisions: [undoing(ctx, history, mine, reverted, op.revision)] };
+        const target = undoTarget(mine, reverted);
         if (target === null) throw new OpError("invalid", "There's nothing of yours to undo in this note");
         return { how: "undo", revisions: [target] };
       }),
@@ -2489,6 +2522,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "edit",
     run: (ctx, op) =>
       takeBack(ctx, op.id, (history, reverted) => {
+        if (op.revision !== undefined) return { how: "redo", revisions: [redoing(ctx, history, reverted, op.revision)] };
         const target = redoTarget(history.filter((c) => isBy(ctx, c.author)), reverted);
         if (target === null) throw new OpError("invalid", "There's nothing of yours to redo in this note");
         return { how: "redo", revisions: [target] };

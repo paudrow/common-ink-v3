@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent } from "react";
 import { Icon, ago, useNow, type App, type Folders, type PluginHost, type Results, type Upload, type ViewProps } from "../../plugin-api.ts";
 import { opening, reasonOf } from "../lib/FoundNote.tsx";
-import { restoredMessage } from "../lib/lifecycle.ts";
+import { onUploadMoved, uploadLifecycle } from "../lib/lifecycle.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { ShowMore, usePaged } from "../lib/paged.tsx";
 import { QueryBar } from "../lib/QueryBar.tsx";
+import { SelectionBar, type SelectionAction } from "../lib/SelectionBar.tsx";
+import * as selecting from "../lib/selecting.ts";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "../sharing/Summary.tsx";
 import { toldOf } from "./drawing.ts";
 import { onlyMine, reachWords, selectedIn, uploaderWords, uploadPath, UPLOADS_PATH, withMine } from "./finding.ts";
@@ -47,7 +49,8 @@ interface Props extends ViewProps {
  * Every upload in the workspace that the member can see, found by the query language. Uploads are
  * listed here and nowhere else: the note list and the folders' counts are of notes. A file sent from
  * here is the member's alone until it is put in a note. One is picked to see what it is, which notes
- * use it, and what can be done with it.
+ * use it, and what can be done with it, and several are selected to archive or trash together, as a
+ * step that undo takes back.
  */
 export function UploadsPage({ host, app, sender }: Props) {
   const now = useNow();
@@ -58,6 +61,10 @@ export function UploadsPage({ host, app, sender }: Props) {
   const [over, setOver] = useState(false);
   const reload = useCallback(() => setAsked((n) => n + 1), []);
   const run = (text: string) => setQuery(text.trim());
+  const list = useRef<HTMLUListElement>(null);
+  // A file archived, trashed, restored or moved, here or anywhere else, or undone, is told to the app, and the list and the file picked are read again.
+  useEffect(() => host.uploads.onReferred(reload), [host, reload]);
+  useEffect(() => onUploadMoved(reload), [reload]);
 
   const wanted = typed.trim();
   useEffect(() => {
@@ -72,6 +79,18 @@ export function UploadsPage({ host, app, sender }: Props) {
     { of: query, again: asked, page: PAGE, most: MOST },
   );
   const { rows: listed, problem } = paged;
+  /** The uploads of rows, in the list's order, and of those the ones the member can change. */
+  const pickedOf = (rows: readonly HTMLElement[]) => (listed ?? []).filter((u) => rows.some((row) => row.dataset.row === u.id));
+  const uploadsOf = (rows: readonly HTMLElement[]) => pickedOf(rows).filter((u) => u.access === "edit");
+  /** Whether every upload selected is archived, when the selection bar's Archive is Unarchive. */
+  const allArchived = useSyncExternalStore(selecting.subscribe, () => !!list.current && pickedOf(selecting.selectedIn(list.current)).every((u) => u.state === "archived"));
+  const life = uploadLifecycle(host);
+  const batch: SelectionAction[] = [
+    allArchived
+      ? { label: "Unarchive", icon: "unarchive", run: (rows) => void life.setArchived(uploadsOf(rows), false) }
+      : { label: "Archive", icon: "archive", run: (rows) => void life.setArchived(uploadsOf(rows).filter((u) => u.state !== "archived"), true) },
+    { label: "Move to Trash", icon: "trash", run: (rows) => void life.trash(uploadsOf(rows)) },
+  ];
 
   const mine = onlyMine(typed);
   const choose = (wantMine: boolean) => {
@@ -147,10 +166,11 @@ export function UploadsPage({ host, app, sender }: Props) {
           />
         </div>
         {listed && !listed.length && <p className="uploads-none">{query ? "No uploads match." : "There are no uploads yet. Paste or drop a file into a note, or upload one here."}</p>}
+        <SelectionBar list={list} actions={batch} />
         {listed && listed.length > 0 && (
-          <ul className="uploads-list" aria-label="Uploads">
+          <ul ref={list} className="uploads-list" aria-label="Uploads" data-selectable>
             {listed.map((u) => (
-              <li key={u.id}>
+              <li key={u.id} data-row={u.id}>
                 <a
                   href={uploadPath(u.id)}
                   className="upload-row"
@@ -269,20 +289,10 @@ function Detail({ host, app, id, listed, onChanged }: DetailProps) {
   const folder = folderOf(app, read);
   const uses = read.usedIn.length;
   const canShare = host.commands.list().some((c) => c.id === SHARE_COMMAND);
-  const restore = () =>
-    act(
-      () => host.perform({ type: "upload.restore", id }),
-      ({ folderGone }) => app.notify({ message: `${read.name}: ${restoredMessage(folderGone)}` }),
-    );
-  const trash = () =>
-    act(
-      () => host.perform({ type: "upload.trash", id }),
-      ({ usedIn }) =>
-        app.notify({
-          message: usedIn > 0 ? `Moved to Trash. ${usedIn === 1 ? "1 note uses it and now says" : `${usedIn} notes use it and now say`} it is in Trash.` : "Moved to Trash",
-          action: { label: "Undo", run: () => void restore() },
-        }),
-    );
+  // Each a step that undo takes back from the list.
+  const life = uploadLifecycle(host);
+  const restore = () => act(() => life.restore([read]));
+  const trash = () => act(() => life.trash([read]));
   const copyEmbed = async () => {
     const written = await writtenNow(host, read);
     try {
@@ -321,10 +331,10 @@ function Detail({ host, app, id, listed, onChanged }: DetailProps) {
           },
         ]
       : []),
-    { label: read.state === "archived" ? "Unarchive" : "Archive", icon: read.state === "archived" ? ("unarchive" as const) : ("archive" as const), disabled: locked, action: () => void act(() => host.perform({ type: "upload.archive", id, archived: read.state !== "archived" })) },
+    { label: read.state === "archived" ? "Unarchive" : "Archive", icon: read.state === "archived" ? ("unarchive" as const) : ("archive" as const), disabled: locked, action: () => void act(() => life.setArchived([read], read.state !== "archived")) },
     { label: "Move to Trash", icon: "trash" as const, disabled: locked, action: () => (uses > 0 ? setAsking(true) : void trash()) },
   ];
-  const folders = foldersIn(app.folders).map((f) => ({ label: f.id === read.folderId ? `${f.name} (here)` : f.name, disabled: f.id === read.folderId, action: () => void act(() => host.perform({ type: "upload.move", id, folderId: f.id })) }));
+  const folders = foldersIn(app.folders).map((f) => ({ label: f.id === read.folderId ? `${f.name} (here)` : f.name, disabled: f.id === read.folderId, action: () => void act(() => life.move([read], f.id)) }));
 
   return (
     <aside

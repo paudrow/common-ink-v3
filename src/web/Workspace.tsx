@@ -25,6 +25,8 @@ import { stacked, type Told } from "./notices.ts";
 import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Command, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
+import { lists, onList, redoLatest, undoLatest } from "./plugins/lib/listHistory.ts";
+import { selecting } from "./plugins/lib/selecting.ts";
 import { Plugins } from "./Plugins.tsx";
 import { createInstaller, loadAgain } from "./pluginRuntime.ts";
 import { referredUploads } from "./referredUploads.ts";
@@ -344,9 +346,15 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
         h.commands.register({ id: "notes.all", title: "Open All notes", group: "Navigation", run: () => h.app().openFolder(ALL_NOTES) });
         if (canEdit) {
           h.commands.register({ id: "note.new", title: "New note", group: "Notes", run: () => void h.app().createNote().catch(() => {}) });
-          h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], group: "Editor", leaveToFields: true, run: () => inner.current.step("note.undo") });
+          // Undo and redo are of what was done to lists' rows where a list has focus, and of the open note elsewhere.
+          const stepping = (type: "note.undo" | "note.redo") => () => {
+            if (!onList(h)) return inner.current.step(type);
+            if (type === "note.undo") undoLatest(h);
+            else redoLatest(h);
+          };
+          h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], group: "Editor", leaveToFields: true, run: stepping("note.undo") });
           h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], group: "Notes", run: () => inner.current.save() });
-          h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], group: "Editor", leaveToFields: true, run: () => inner.current.step("note.redo") });
+          h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], group: "Editor", leaveToFields: true, run: stepping("note.redo") });
         }
         // A browser's own keys for Back and Forward. On a Mac they take ⌘[ and ⌘] from a note, where they would indent, as Tab and Shift+Tab do;
         // elsewhere Ctrl+[ is vim's Escape, so they are Alt and the arrows there.
@@ -1055,6 +1063,10 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       removeEventListener("focus", readLayout);
     };
   }, [host]);
+  // Rows of a list that lets them be picked are picked with Shift or ⌘ and a click, in any list of the window's.
+  useEffect(() => selecting(MAC), []);
+  // What was done to a workspace's rows is undone in it alone, so another opened in its place starts with nothing to undo.
+  useEffect(() => () => lists.clear(), []);
   useEffect(() => host.navigated(), [host, place.path]);
   // Back and Forward arrive without going through `navigate`.
   useEffect(() => setSidebarInFront(false), [place.path, place.query]);

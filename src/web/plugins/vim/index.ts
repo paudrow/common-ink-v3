@@ -1,4 +1,5 @@
 import { dismissing, type Plugin } from "../../plugin-api.ts";
+import { onList } from "../lib/listHistory.ts";
 import { FOLD_KEYS, KEYS, TODO_KEYS } from "./keys.ts";
 import { surfaces } from "./surfaces.ts";
 
@@ -67,7 +68,7 @@ export const vim: Plugin = {
         host.commands.register({ id: "vim.back", title: "Go back with vim's keys", keys: ["ctrl+o"], group: "Vim", when, escapesFrames: true, run: () => void host.commands.run("nav.back") });
         host.commands.register({ id: "vim.forward", title: "Go forward with vim's keys", keys: ["ctrl+i"], group: "Vim", when, escapesFrames: true, run: () => void host.commands.run("nav.forward") });
 
-        const outside = (ui = surfaces({ normal: editing.jumpsFrom, dismissing }));
+        const outside = (ui = surfaces({ normal: editing.jumpsFrom, dismissing, undoable: () => onList(host), run: host.commands.run }));
         calm = editing.toNormal;
         document.addEventListener("focusin", landed);
         document.documentElement.dataset.vimKeys = "";

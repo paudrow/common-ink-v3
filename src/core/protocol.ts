@@ -470,9 +470,16 @@ export const Op = z.discriminatedUnion("type", [
       (op) => [op.revisions, op.to, op.author].filter((given) => given !== undefined).length === 1,
       "pass one of revisions, the changes to revert, to, the revision to return to, or author, whose changes to revert",
     ),
-  /** Takes back the author's own latest change that still stands. */
-  z.object({ type: z.literal("note.undo"), id: Id }),
-  z.object({ type: z.literal("note.redo"), id: Id }),
+  /**
+   * Takes back the author's own latest change that still stands. With `revision`, takes back exactly
+   * that change of theirs, if it still stands and isn't itself an undo.
+   */
+  z.object({ type: z.literal("note.undo"), id: Id, revision: Revision.optional() }),
+  /**
+   * Takes back the author's latest undo that still stands, until they edit again. With `revision`,
+   * takes back exactly that undo of theirs, if it still stands, whatever they did since.
+   */
+  z.object({ type: z.literal("note.redo"), id: Id, revision: Revision.optional() }),
   /** The notes that changed, latest change first, each with how many changes it had and the lines they added and removed. */
   z.object({
     type: z.literal("history.summary"),

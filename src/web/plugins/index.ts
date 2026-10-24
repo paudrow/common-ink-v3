@@ -19,6 +19,7 @@ import { forms } from "./forms/index.ts";
 import { kanban } from "./kanban/index.ts";
 import { lineNumbers } from "./lineNumbers.ts";
 import { links } from "./links/index.ts";
+import { listSelection } from "./listSelection.ts";
 import { math } from "./math/index.ts";
 import { media } from "./media/index.ts";
 import { members } from "./members/index.tsx";
@@ -53,6 +54,7 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [folders, "folders.tsx"],
   [tags, "tags/index.tsx"],
   [noteList, "noteList.tsx"],
+  [listSelection, "listSelection.ts"],
   [tabs, "tabs/index.tsx"],
   [quickOpen, "quickOpen.tsx"],
   [commandPalette, "commandPalette.tsx"],

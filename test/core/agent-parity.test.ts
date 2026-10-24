@@ -97,8 +97,8 @@ const COMMANDS: Record<string, string[][]> = {
     ["revert", ID, "--author", AUTHOR, "--preview", "--resolve", "keep", "--at", "3"],
   ],
   revert_author: [["revert-author", AUTHOR, "--note", ID, "--after", ID, "--resolve", `{"${ID}": {"at": 3, "choices": "back"}}`, "--trash-emptied", "true"]],
-  undo: [["undo", ID]],
-  redo: [["redo", ID]],
+  undo: [["undo", ID, "--revision", "3"]],
+  redo: [["redo", ID, "--revision", "4"]],
   list_sources: [["sources"]],
   list_events: [["events", "--from", "2026-10-11", "--to", "2026-10-18", "--timezone", "America/Chicago"]],
   update_event: [

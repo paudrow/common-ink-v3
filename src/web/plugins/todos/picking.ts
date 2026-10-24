@@ -17,15 +17,21 @@ export type PutAway = Exclude<TodoState, "open">;
 
 /**
  * How the Todos page puts a todo in each state: the menu item and button that do it, the icon they
- * show, the command and the keys that do it to the row the keyboard is on, what is said once it is
- * done, and what it was, said when Undo finds the line changed since.
+ * show, the command and the keys that do it to the row the keyboard is on, what it says once it is
+ * done (`toldOf`), and what it was, said when Undo finds the line changed since.
  */
-export const PUTTING: Record<PutAway, { label: string; icon: IconName; command: string; title: string; keys: readonly string[]; told: string; past: string }> = {
-  done: { label: "Complete", icon: "check", command: "todos.complete", title: "Complete the selected todo, or open it again", keys: ["x"], told: "Task completed", past: "checked off" },
-  abandoned: { label: "Abandon", icon: "abandoned", command: "todos.abandon", title: "Abandon the selected todo, or open it again", keys: ["-"], told: "Task abandoned", past: "abandoned" },
+export const PUTTING: Record<PutAway, { label: string; icon: IconName; command: string; title: string; keys: readonly string[]; did: string; past: string }> = {
+  done: { label: "Complete", icon: "check", command: "todos.complete", title: "Complete the selected todo, or open it again", keys: ["x"], did: "completed", past: "checked off" },
+  abandoned: { label: "Abandon", icon: "abandoned", command: "todos.abandon", title: "Abandon the selected todo, or open it again", keys: ["-"], did: "abandoned", past: "abandoned" },
   // Where > is typed with Shift, as on most keyboards, the press is written shift+>.
-  backlog: { label: "Move to backlog", icon: "backlog", command: "todos.backlog", title: "Move the selected todo to the backlog, or open it again", keys: ["shift+>", ">"], told: "Task moved to the backlog", past: "moved to the backlog" },
+  backlog: { label: "Move to backlog", icon: "backlog", command: "todos.backlog", title: "Move the selected todo to the backlog, or open it again", keys: ["shift+>", ">"], did: "moved to the backlog", past: "moved to the backlog" },
 };
+
+/** What is said once todos are put in a state, or opened again: "Task completed", "3 tasks completed", or "2 of 3 tasks completed" when the rest were refused. */
+export function toldOf(state: TodoState, count: number, of?: number) {
+  const which = of ? `${count} of ${of} tasks` : count === 1 ? "Task" : `${count} tasks`;
+  return `${which} ${state === "open" ? "opened again" : PUTTING[state].did}`;
+}
 
 /** What a key, a button or a menu item for a state makes a todo: that state, or open again when it is in it already. */
 export const pressed = (state: TodoState, to: PutAway): TodoState => (state === to ? "open" : to);
@@ -66,12 +72,25 @@ export function keyed(lines: readonly KeyedLine[], to: PutAway): Keyed | null {
   const put = todos.filter((todo) => todo.state !== state).map(({ from }) => ({ from, state }));
   return put.length ? { put } : null;
 }
-
+/**
+ * What a key, a button or a menu item for a state does to several todos at once: when every one of
+ * them is in it already, opens them all again; else puts in it each that isn't, and leaves the rest.
+ * For one todo it is `pressed`.
+ */
+export function pressedAll<T extends { state: TodoState }>(todos: readonly T[], to: PutAway): (readonly [T, TodoState])[] {
+  if (todos.every((todo) => todo.state === to)) return todos.map((todo) => [todo, "open"]);
+  return todos.filter((todo) => todo.state !== to).map((todo) => [todo, to]);
+}
 /** The chips of a todo that open a popover of choices, in a note and on the Todos page. */
 export type ChipKind = "due" | "importance" | "every";
 
-/** What a press on a todo's box puts it in, by the keys held with it: ⇧ abandons and ⌥ moves to the backlog, or opens again what is there. */
-export const pressedWith = (state: TodoState, keys: { shiftKey: boolean; altKey: boolean }): TodoState => (keys.shiftKey ? pressed(state, "abandoned") : keys.altKey ? pressed(state, "backlog") : clicked(state));
+type Held = { shiftKey: boolean; altKey: boolean };
+
+/** The state a press on a todo's box is for, by the keys held with it: ⇧ abandons and ⌥ moves to the backlog. With several selected, all of them are put in it as `pressedAll` puts them. */
+export const boxedTo = (keys: Held): PutAway => (keys.shiftKey ? "abandoned" : keys.altKey ? "backlog" : "done");
+
+/** What a press on a todo's box puts it in, by the keys held with it, or opens again what is there. Without a key, it is a click. */
+export const pressedWith = (state: TodoState, keys: Held): TodoState => (boxedTo(keys) === "done" ? clicked(state) : pressed(state, boxedTo(keys)));
 
 /** What a press on a todo's box does, by the keys held with it, said where the box is pointed at. */
 export function boxHint(state: TodoState, shift: string, alt: string): string {

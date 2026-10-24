@@ -15,7 +15,7 @@ function ArchivedMark({ host, note }: NoteView) {
       {note.access === "edit" && (
         <>
           <span aria-hidden="true">·</span>
-          <button type="button" className="link" onClick={() => void lifecycle(host).setArchived(note.id, false)}>
+          <button type="button" className="link" onClick={() => void lifecycle(host).setArchived([note.id], false)}>
             Unarchive
           </button>
         </>
@@ -31,7 +31,7 @@ function ArchiveButton({ host, note }: NoteView) {
   const label = archived ? "Unarchive" : "Archive";
   const keys = host.commands.list().find((c) => c.id === ARCHIVE_COMMAND)?.shortcut;
   return (
-    <button type="button" className="icon-button" aria-label={label} title={keys ? `${label} (${keys})` : label} onClick={() => void lifecycle(host).setArchived(note.id, !archived)}>
+    <button type="button" className="icon-button" aria-label={label} title={keys ? `${label} (${keys})` : label} onClick={() => void lifecycle(host).setArchived([note.id], !archived)}>
       <Icon name={archived ? "unarchive" : "archive"} />
     </button>
   );
@@ -46,7 +46,7 @@ function TrashBanner({ host, note }: NoteView) {
   return (
     <div className="trash-banner" role="group" aria-label="In Trash">
       <span>This note is in Trash, where it can be read and not changed. {leftSentence(daysLeft(note.purgesAt ?? now, now))}</span>
-      <button type="button" className="button small" disabled={note.access !== "edit"} onClick={() => void restore(note.id)}>
+      <button type="button" className="button small" disabled={note.access !== "edit"} onClick={() => void restore([note.id])}>
         Restore
       </button>
       {mayPurge(host, note) && <Purge title={note.title} onPurge={() => purge(note.id)} />}
@@ -83,7 +83,7 @@ export const trash: Plugin = {
       keys: ["mod+shift+e"],
       run() {
         const note = open();
-        if (note) void setArchived(note.id, note.state !== "archived");
+        if (note) void setArchived([note.id], note.state !== "archived");
       },
     });
     host.commands.register({
@@ -92,7 +92,7 @@ export const trash: Plugin = {
       group: "Notes",
       run() {
         const note = open();
-        if (note) void moveToTrash(note.id);
+        if (note) void moveToTrash([note.id]);
       },
     });
 

@@ -101,6 +101,10 @@ A file you upload is yours alone until you put it in a note, which moves it into
 
 **Move to Trash** keeps a note in Trash for 30 days, where you can read it but not change it. **Restore** puts it back in its folder, or in Unsorted if that folder is gone. After 30 days the note and its history are removed. The member who made the note, or an admin, can **Delete forever** sooner.
 
+To act on several notes at once, select their cards in a folder's list, in Search, or on a tag's page: Shift+↓ and Shift+↑ select the next or previous card too, Shift-click selects every card from the last one you selected, and Cmd-click (Ctrl-click off a Mac) selects a card or unselects it. A card's **E**, its Archive button and its menu then act on every card selected, and so do **Archive**, **Move to…** and **Move to Trash** above the list. Escape clears the selection. Trash, Uploads and the Todos page select their rows the same way.
+
+Whatever you do to a list's rows, Cmd+Z undoes while the list has the keyboard, and Cmd+Shift+Z does it again: archiving, moving, trashing and restoring notes and files, and checking off todos, wherever you did it. The notice that says what was done has **Undo** too.
+
 ## Tabs and splits
 
 A single click opens a note in a preview tab, shown in italics, which the next single click replaces. To keep a tab, double-click it, edit the note, or choose **Keep open** from the tab's menu.
@@ -123,6 +127,8 @@ Outside a note's text, wherever you are not typing, vim's keys move through the 
 | `h` | Collapse the selected row, or go to its parent |
 | `za` | Expand or collapse the selected row |
 | `dd` | Abandon the selected todo on the Todos page, or open an abandoned one again |
+| `V` | Select rows from the selected one as you move, or stop |
+| `u`, `ctrl+r` | Undo what was last done to a list's rows, and redo it |
 | `/`, then `escape` | Go to the search box, and back to the list |
 | `ctrl+w`, then `h`, `j`, `k`, or `l` | Go to the sidebar, editor group, or inspector on that side |
 | `gt`, `gT` | Go to the next or previous tab |

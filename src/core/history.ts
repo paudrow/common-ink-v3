@@ -612,8 +612,12 @@ export function settledRevert({ changes, conflicts }: Reverting, text: string, c
  * undo of it, made before undo stopped there, since taking that back would take the first save back.
  */
 export function undoTarget(mine: readonly Step[], reverted: ReadonlyMap<number, number>): number | null {
-  const firstSave = (s: Step) => s.revision === 1 || (s.reverts?.how === "redo" && mine.some((u) => s.reverts!.revisions.includes(u.revision) && u.reverts?.revisions.includes(1)));
-  return mine.findLast((s) => !firstSave(s) && !reverted.has(s.revision) && s.reverts?.how !== "undo")?.revision ?? null;
+  return mine.findLast((s) => !isFirstSave(mine, s) && !reverted.has(s.revision) && s.reverts?.how !== "undo")?.revision ?? null;
+}
+
+/** Whether undo leaves `step` of the author's be as the note's first save, as `undoTarget` says. */
+export function isFirstSave(mine: readonly Step[], step: Step): boolean {
+  return step.revision === 1 || (step.reverts?.how === "redo" && mine.some((u) => step.reverts!.revisions.includes(u.revision) && u.reverts?.revisions.includes(1)));
 }
 
 /** The author's latest undo that still stands, unless they have edited since: what redo takes back. */

@@ -110,14 +110,14 @@ function Info({ host, open, app, note }: ViewProps & { host: PluginHost; open: O
       </dd>
       <dt>Archive</dt>
       <dd>
-        <button type="button" className="button small" disabled={locked || inTrash} onClick={() => void setArchived(note.id, note.state !== "archived")}>
+        <button type="button" className="button small" disabled={locked || inTrash} onClick={() => void setArchived([note.id], note.state !== "archived")}>
           {note.state === "archived" ? "Unarchive" : "Archive"}
         </button>
         <p className="soon">{note.state === "archived" ? "Archived: left out of listings unless they include archived notes." : "An archived note keeps its folder and links, and is left out of listings."}</p>
       </dd>
       <dt>Trash</dt>
       <dd>
-        <button type="button" className="button small" disabled={locked} onClick={() => void (inTrash ? restore(note.id) : trash(note.id))}>
+        <button type="button" className="button small" disabled={locked} onClick={() => void (inTrash ? restore([note.id]) : trash([note.id]))}>
           {inTrash ? "Restore" : "Move to Trash"}
         </button>
         <p className="soon">{inTrash ? "In Trash: read, and not changed, until it is restored." : "A note in Trash can be restored for 30 days."}</p>

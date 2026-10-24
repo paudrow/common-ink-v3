@@ -3,6 +3,7 @@ import { Icon, draggableAs, openedAt, useDismiss, type App, type Opened, type Pa
 import { hoverCards } from "./lib/hoverCard.tsx";
 import { ContextMenu } from "./lib/Menu.tsx";
 import { arrive, goes, hold, listOf, preview, step } from "./lib/rows.ts";
+import { SelectionBar } from "./lib/SelectionBar.tsx";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
@@ -21,6 +22,7 @@ function Sidebar({ app }: ViewProps) {
   /** The section shown over the page from the closed bar, if any. */
   const [picking, setPicking] = useState<App["sectionNames"][number] | null>(null);
   const pickerButton = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLElement>(null);
   const closePicker = useCallback(() => setPicking(null), []);
   if ((open || app.focus) && picking) setPicking(null);
   const links = (nav: PageInfo["nav"]) => under(nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled={open} />);
@@ -104,14 +106,16 @@ function Sidebar({ app }: ViewProps) {
     );
   return (
     // One list from the pages through the folders to the tags, whose rows the arrow keys go through. Enter on a link or a folder
-    // opens it and goes there with the keyboard, and Space opens it and stays.
-    <aside className="sidebar" aria-label="Sidebar" data-list data-beside onKeyDown={onKey}>
+    // opens it and goes there with the keyboard, and Space opens it and stays. Its rows are selected by the keys alone, with nothing
+    // yet to do to them together: Shift and ⌘ with a click are a link's own.
+    <aside ref={list} className="sidebar" aria-label="Sidebar" data-list data-selectable="keys" data-beside onKeyDown={onKey}>
       <WorkspaceMenu app={app} />
       <NewNote app={app} />
       <nav aria-label="Modes" className="modes">
         {pages}
       </nav>
       {app.sections}
+      <SelectionBar list={list} />
     </aside>
   );
 }

@@ -1,6 +1,6 @@
 import { EditorSelection, Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { choicesFor, clicked, keyed, linesTouched, picking, pressed, repeatOf, repeats, sameRule, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
+import { choicesFor, clicked, keyed, linesTouched, picking, pressed, pressedAll, pressedWith, repeatOf, repeats, sameRule, tagged, toldOf, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
 
 const run = (events: PickingEvent[], from: Picking = null) => events.reduce(picking, from);
 const open = (row: string, chip: Opened): PickingEvent => ({ type: "open", row, chip });
@@ -125,6 +125,30 @@ describe("a todo's box", () => {
     expect(from.map((state) => pressed(state, "done"))).toEqual(["done", "open", "done", "done"]);
     expect(from.map((state) => pressed(state, "abandoned"))).toEqual(["abandoned", "abandoned", "open", "abandoned"]);
     expect(from.map((state) => pressed(state, "backlog"))).toEqual(["backlog", "backlog", "backlog", "open"]);
+  });
+
+  it("is abandoned with ⇧ and moved to the backlog with ⌥, or opened again from there", () => {
+    const from = ["open", "done", "abandoned", "backlog"] as const;
+    expect(from.map((state) => pressedWith(state, { shiftKey: true, altKey: false }))).toEqual(["abandoned", "abandoned", "open", "abandoned"]);
+    expect(from.map((state) => pressedWith(state, { shiftKey: false, altKey: true }))).toEqual(["backlog", "backlog", "backlog", "open"]);
+    expect(from.map((state) => pressedWith(state, { shiftKey: false, altKey: false }))).toEqual(["done", "open", "open", "open"]);
+  });
+});
+
+describe("several todos put in a state at once", () => {
+  const todos = (...states: ("open" | "done" | "abandoned" | "backlog")[]) => states.map((state, i) => ({ id: `t${i}`, state }));
+  const made = (pairs: (readonly [{ id: string }, string])[]) => pairs.map(([todo, state]) => `${todo.id} ${state}`);
+
+  it("puts in it each that isn't, and leaves those that are", () => {
+    expect(made(pressedAll(todos("open", "done", "abandoned"), "done"))).toEqual(["t0 done", "t2 done"]);
+  });
+
+  it("opens them all again when every one is in it already", () => {
+    expect(made(pressedAll(todos("backlog", "backlog"), "backlog"))).toEqual(["t0 open", "t1 open"]);
+  });
+
+  it("is said by how many: one is a task, more are counted", () => {
+    expect([toldOf("done", 1), toldOf("abandoned", 3), toldOf("backlog", 2), toldOf("open", 1), toldOf("done", 1, 3)]).toEqual(["Task completed", "3 tasks abandoned", "2 tasks moved to the backlog", "Task opened again", "1 of 3 tasks completed"]);
   });
 });
 
