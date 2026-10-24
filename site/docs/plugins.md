@@ -15,7 +15,7 @@ Each card says what kind of plugin it is:
 | Label | What it means |
 | --- | --- |
 | Built-in, full access | Comes with Common Ink and runs inside the app with everything you have |
-| Built-in, sandboxed | Comes with Common Ink and runs shut off from the app, such as Word count and Backlinks |
+| Built-in, sandboxed | Comes with Common Ink and runs shut off from the app, such as Word count and Quick timer |
 | Third-party | An admin installed it, and it runs shut off from the app |
 | Third-party, full trust | An admin installed it, and it runs inside the app once it is granted and you turn it on |
 

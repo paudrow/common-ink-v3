@@ -104,7 +104,6 @@ describe("what one of Common Ink's own that runs shut off runs as", () => {
       ["sample-calendar", false, null, []],
       ["coin", false, null, []],
       ["dice", false, null, []],
-      ["backlinks", false, null, [["notes.read", "allowed", true]]],
     ]);
     for (const own of OWN_RECORDS) expect(decideRun(own, undefined)).toEqual({ as: "sandbox", plugin: own });
   });

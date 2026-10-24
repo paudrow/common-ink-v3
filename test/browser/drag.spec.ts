@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import { folderRow, noteCard, noteIdIn, openKept, ownPlugin, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
+import { folderRow, noteCard, noteIdIn, openKept, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -31,9 +31,16 @@ const today = (page: Page) => page.evaluate(() => new Date().toLocaleDateString(
 /**
  * Each kind of thing that drags to the editor area: where the window is when it is dragged (Projects'
  * list in front, or its note Plan open from it in front of the list), what is dragged, and the tab
- * it opens. `checked` is anything more the drop did.
+ * it opens. `prepared` is anything more the window needs before the drag, and `checked` anything more the drop did.
  */
-const KINDS: { kind: string; scene: "list" | "note"; source: (page: Page) => Locator; opens: (page: Page) => Promise<string> | string; checked?: (page: Page, made: Made) => Promise<void> }[] = [
+const KINDS: {
+  kind: string;
+  scene: "list" | "note";
+  prepared?: (page: Page) => Promise<void>;
+  source: (page: Page) => Locator;
+  opens: (page: Page) => Promise<string> | string;
+  checked?: (page: Page, made: Made) => Promise<void>;
+}[] = [
   { kind: "a note's card", scene: "list", source: (page) => noteCard(page, "Plan").locator(".card-head"), opens: () => "Plan" },
   { kind: "a folder's row", scene: "list", source: (page) => folderRow(page, "Reading"), opens: () => "Reading" },
   {
@@ -64,6 +71,16 @@ const KINDS: { kind: string; scene: "list" | "note"; source: (page: Page) => Loc
   { kind: "the workspace's crumb", scene: "note", source: (page) => crumbs(page).getByRole("button").first(), opens: () => "All notes" },
   { kind: "a note's crumb", scene: "note", source: (page) => crumbs(page).locator(".crumb-note"), opens: () => "Plan" },
   { kind: "a tab", scene: "note", source: (page) => tabs(page).filter({ hasText: /^Plan$/ }), opens: () => "Plan" },
+  {
+    kind: "a Backlinks entry",
+    scene: "note",
+    prepared: async (page) => {
+      await perform(page, { type: "note.create", text: "# Diary\n\nSee [[Plan]]." });
+      await pinPanel(page, "Backlinks");
+    },
+    source: (page) => page.getByRole("navigation", { name: "Backlinks" }).getByRole("link", { name: /Diary/ }),
+    opens: () => "Diary",
+  },
   {
     kind: "New note in the sidebar",
     scene: "list",
@@ -96,10 +113,11 @@ async function scene(page: Page, which: "list" | "note") {
   await expect(tabs(page)).toHaveText(["Projects", "Plan"]);
 }
 
-for (const { kind, scene: which, source, opens, checked } of KINDS) {
+for (const { kind, scene: which, prepared, source, opens, checked } of KINDS) {
   test(`${kind} dropped on a group's right edge opens in a split there`, async ({ page }) => {
     const made = await withFolders(page);
     await scene(page, which);
+    await prepared?.(page);
     const { width, height } = (await group(page, 1).boundingBox())!;
     await source(page).dragTo(group(page, 1), { targetPosition: { x: width * 0.9, y: height / 2 } });
     await expect(group(page, 2)).toBeVisible();
@@ -112,6 +130,7 @@ for (const { kind, scene: which, source, opens, checked } of KINDS) {
   test(`${kind} dropped on a tab bar opens a tab at that gap`, async ({ page }) => {
     const made = await withFolders(page);
     await scene(page, which);
+    await prepared?.(page);
     await source(page).dragTo(tabBar(page), { targetPosition: { x: 5, y: 10 } });
     const title = await opens(page);
     await expect(tabs(page).first()).toHaveText(title);
@@ -202,15 +221,4 @@ test("a link that opens nothing a tab holds, of the app's own or another site's,
     await expect(group(page, 2)).toHaveCount(0);
     await expect(tabs(page)).toHaveCount(2);
   }
-});
-
-test("a Backlinks entry is a link to the note's own address, though the browser takes no drop from the frame it is in", async ({ page }) => {
-  await signInAsNewPerson(page, "Ada Lovelace");
-  const target = await perform(page, { type: "note.create", text: "# Target" });
-  const source = await perform(page, { type: "note.create", text: "# Source\n\nSee [[Target]]." });
-  await page.goto(`/note/target-${target.id}`);
-  await pinPanel(page, "Backlinks");
-  const row = ownPlugin(page, "Backlinks").getByRole("link", { name: /Source/ });
-  await expect(row).toHaveAttribute("href", `/note/${source.id}`);
-  expect(await row.evaluate((a: HTMLAnchorElement) => new URL(a.href).pathname)).toBe(`/note/${source.id}`);
 });

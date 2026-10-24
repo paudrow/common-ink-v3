@@ -1,5 +1,6 @@
 import type { Plugin } from "../plugin-api.ts";
 import { agents } from "./agents/index.tsx";
+import { backlinks } from "./backlinks.tsx";
 import { blame } from "./blame/index.ts";
 import { bullets } from "./bullets/index.ts";
 import { calendar } from "./calendar/index.tsx";
@@ -64,6 +65,7 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [agents, "agents/index.tsx"],
   [members, "members/index.tsx"],
   [sharing, "sharing/index.tsx"],
+  [backlinks, "backlinks.tsx"],
   [noteInfo, "noteInfo.tsx"],
   [trash, "trash/index.tsx"],
   [embedMenu, "embedMenu.ts"],
@@ -99,4 +101,4 @@ export const BUILT_INS: readonly Plugin[] = AT.map(([plugin]) => plugin);
 export const SOURCE_OF: ReadonlyMap<string, string> = new Map(AT.map(([plugin, file]) => [plugin.id, file]));
 
 /** Which of the plugins above each plugin that runs shut off comes after, so its contributions keep the place they had when it ran inside the app. */
-export const PLACED_AFTER: Readonly<Record<string, string>> = { backlinks: "sharing", coin: "vim", dice: "vim", "quick-timer": "note-clocks", "sample-calendar": "calendar", "word-count": "vim", weather: "dashboard" };
+export const PLACED_AFTER: Readonly<Record<string, string>> = { coin: "vim", dice: "vim", "quick-timer": "note-clocks", "sample-calendar": "calendar", "word-count": "vim", weather: "dashboard" };

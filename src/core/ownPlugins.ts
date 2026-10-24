@@ -55,13 +55,6 @@ const DECLARED = {
     icon: "play",
     views: [{ slot: "page", id: "dice", label: "Dice", icon: "play" }],
   },
-  backlinks: {
-    name: "Backlinks",
-    description: "The notes that link to the open note, in the inspector.",
-    icon: "backlinks",
-    capabilities: [{ name: "notes.read", reason: "It lists the notes that link to the one you have open, and opens the one you pick." }],
-    views: [{ slot: "inspector", id: "backlinks", label: "Backlinks", icon: "backlinks" }],
-  },
 } as const;
 
 export type OwnSandboxedId = keyof typeof DECLARED;

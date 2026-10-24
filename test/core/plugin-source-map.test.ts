@@ -36,7 +36,7 @@ describe("where each built-in plugin's source starts", () => {
 
   it("is plugins/sandboxed/<id>.js for each that runs shut off, which is in no table of the ones that run in the page", async () => {
     expect(files.filter((file) => file.startsWith("sandboxed/")).sort()).toEqual(OWN_SANDBOXED_IDS.map((id) => `sandboxed/${id}.js`).sort());
-    expect(rows.map((row) => row.file).filter((file) => /sandboxed|wordCount|quickTimer|backlinks/.test(file))).toEqual([]);
+    expect(rows.map((row) => row.file).filter((file) => /sandboxed|wordCount|quickTimer/.test(file))).toEqual([]);
     for (const id of OWN_SANDBOXED_IDS) {
       const listed = { id, kind: "built-in", record: null, own: OWN_SANDBOXED[id] } as unknown as Listed;
       const original = (await editableOf(listed, "w"))!;
