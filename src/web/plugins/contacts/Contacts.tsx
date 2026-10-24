@@ -3,6 +3,7 @@ import type { Contact, PluginHost, ViewProps } from "../../plugin-api.ts";
 import { personPath } from "../lib/person.ts";
 import { initialsOf } from "../mentions/fields.ts";
 import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
+import { DuplicateList, useDuplicates } from "./Duplicates.tsx";
 import { matches } from "./matching.ts";
 
 type Listing = { status: "reading" } | { status: "listed"; contacts: readonly Contact[]; more: boolean } | { status: "failed"; message: string };
@@ -30,6 +31,7 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
   }, [host, asked, setSources]);
 
   const connected = (sources ?? []).some((s) => s.kind === "contacts" && s.state === "connected");
+  const duplicates = useDuplicates(host, connected, asked);
   const all = listing.status === "listed" ? listing.contacts : null;
   const found = useMemo(() => (all ?? []).filter((contact) => matches(contact, typed)), [all, typed]);
 
@@ -43,6 +45,12 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
       )}
       {connected && (
         <>
+          {duplicates.problem && (
+            <p role="alert" className="said failed">
+              {duplicates.problem}
+            </p>
+          )}
+          {duplicates.pairs && <DuplicateList app={app} pairs={duplicates.pairs} onDismiss={(pair) => void duplicates.dismiss(pair)} />}
           <input type="search" className="contacts-search" aria-label="Search contacts" placeholder="Search by name, email or organization" value={typed} onChange={(e) => setTyped(e.target.value)} />
           {listing.status === "failed" && (
             <p role="alert" className="said failed">

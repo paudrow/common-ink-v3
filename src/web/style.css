@@ -12449,6 +12449,44 @@ a.file-chip:hover .file-chip-name {
   margin: 0;
 }
 
+/* Contacts that look like one person: on the Contacts page as a list, and under a contact on its page. */
+.contact-duplicates h2 {
+  margin: 0 0 6px;
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.contact-duplicates ul,
+.contact-same-as {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contact-duplicates li,
+.contact-same-as li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.contact-duplicate-names,
+.contact-same-as li > span {
+  flex: 1 1 14rem;
+}
+
+.contact-duplicate-why {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
 /* A contact edited as a contacts app does: a label beside each field, its lines one under another. */
 .contact-form {
   display: grid;

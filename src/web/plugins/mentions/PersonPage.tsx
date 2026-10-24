@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { MAX_SEARCH_LENGTH, today, useInspected, writtenMention, type App, type PersonPage as Person, type PluginHost, type Results, type Showing, type Source } from "../../plugin-api.ts";
 import { personPath } from "../lib/person.ts";
 import { QueryBar } from "../lib/QueryBar.tsx";
 import { TodoList } from "../todos/Todos.tsx";
+import { SameAs, useDuplicates } from "../contacts/Duplicates.tsx";
 import { ContactSection } from "./ContactEditor.tsx";
 import { initialsOf } from "./fields.ts";
 import { addingTo } from "./people.ts";
@@ -61,6 +62,8 @@ export function PersonPage({ host, app, who, openAt }: Props) {
   useEffect(() => {
     host.perform({ type: "source.list" }).then((r) => setSources(r.sources), () => {});
   }, [host, changed]);
+
+  const duplicates = useDuplicates(host, (person?.contacts.length ?? 0) > 0, changed);
 
   const wanted = typed.trim();
   useEffect(() => {
@@ -173,18 +176,20 @@ export function PersonPage({ host, app, who, openAt }: Props) {
         </p>
       )}
       {person.contacts.map((card) => (
-        <ContactSection
-          key={`${card.sourceId} ${card.id}`}
-          host={host}
-          card={card}
-          source={sources.find((s) => s.id === card.sourceId)}
-          onConnect={(source) => void connectToEdit(source)}
-          onSaved={(saved, change) => {
-            // A contact renamed is found by its new name: the page goes there, as a mention of that name would.
-            if (change.name !== undefined && !person.member) return app.go(personPath(saved.name), { replace: true });
-            setChanged((n) => n + 1);
-          }}
-        />
+        <Fragment key={`${card.sourceId} ${card.id}`}>
+          <ContactSection
+            host={host}
+            card={card}
+            source={sources.find((s) => s.id === card.sourceId)}
+            onConnect={(source) => void connectToEdit(source)}
+            onSaved={(saved, change) => {
+              // A contact renamed is found by its new name: the page goes there, as a mention of that name would.
+              if (change.name !== undefined && !person.member) return app.go(personPath(saved.name), { replace: true });
+              setChanged((n) => n + 1);
+            }}
+          />
+          {duplicates.pairs && <SameAs app={app} card={card} pairs={duplicates.pairs} onDismiss={(pair) => void duplicates.dismiss(pair)} />}
+        </Fragment>
       ))}
       {!person.contacts.length && (addTo ?? couldAddTo) && (
         <section className="person-contact person-not-contact" aria-label="Not in your contacts">

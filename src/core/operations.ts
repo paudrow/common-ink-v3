@@ -80,7 +80,7 @@ import { paging } from "./paging.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listMail, listSources, mailSenders, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, contactCards, createContact, createEvent, dismissDuplicate, listContacts, listDuplicates, listEvents, listMail, listSources, mailSenders, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
 import { holdsOldLinks, linksConverted } from "./oldLinks.ts";
 import { referencesIn } from "./references.ts";
 import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
@@ -3558,6 +3558,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "contact.update": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateContact(asker(ctx), sourceId, id, etag, change) },
   "contact.photo": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => photoContact(asker(ctx), op.sourceId, op.id, op.photo) },
   "contact.create": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, type: _, ...fields }) => createContact(asker(ctx), sourceId, fields) },
+  // Which of the member's contacts are one person is theirs to say, and leads to merging them, which is theirs alone too. See NOT_FOR_AGENTS.
+  "contact.duplicates": { needs: "view", by: "member", own: true, run: (ctx) => listDuplicates(asker(ctx)) },
+  "contact.dismiss": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => dismissDuplicate(asker(ctx), op.sourceId, op.ids) },
   // A person's mail is theirs as their calendar is, and read-only: nothing changes a message.
   "email.list": { needs: "view", own: true, run: (ctx, op) => listMail(asker(ctx), op) },
   "email.thread": { needs: "view", own: true, run: (ctx, op) => readMail(asker(ctx), op.sourceId, op.id) },

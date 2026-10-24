@@ -1,8 +1,9 @@
 import { inOrder, widened, within, type Span } from "./events.ts";
+import { duplicatePairs, pairKey } from "./duplicates.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
 import { writtenEventLink } from "./links.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type DuplicatePair, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -319,6 +320,26 @@ export async function listContacts(asker: Asker, query: string | undefined): Pro
   const contacts = read.flatMap((r) => r.contacts).filter((contact) => !query || contactMatches(contact, query));
   contacts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || (a.id < b.id ? -1 : 1));
   return { contacts, sources, more: read.some((r) => r.more) };
+}
+
+/** The pairs of the asker's contacts that look like the same person, leaving out each pair they said is not. */
+export async function listDuplicates(asker: Asker): Promise<{ pairs: DuplicatePair[]; sources: Source[] }> {
+  const { contacts, sources } = await listContacts(asker, undefined);
+  const { results } = await asker.db.prepare("SELECT data_source, first_id, second_id FROM contact_dismissals WHERE person_id = ?").bind(asker.personId).all<{ data_source: string; first_id: string; second_id: string }>();
+  const dismissed = new Set(results.map((r) => pairKey(r.data_source, r.first_id, r.second_id)));
+  return { pairs: duplicatePairs(contacts).filter((p) => !dismissed.has(pairKey(p.sourceId, p.contacts[0].id, p.contacts[1].id))), sources };
+}
+
+/** Remembers that two of the asker's contacts are not the same person. Said again, it is still said once. */
+export async function dismissDuplicate(asker: Asker, sourceId: string, ids: [string, string]): Promise<{ dismissed: true }> {
+  await sourceOf(asker, sourceId, "contacts");
+  const [first, second] = ids.toSorted();
+  if (first === second) throw new OpError("invalid", "A contact is always the same person as itself");
+  await asker.db
+    .prepare("INSERT INTO contact_dismissals (person_id, data_source, first_id, second_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")
+    .bind(asker.personId, sourceId, first, second, asker.now)
+    .run();
+  return { dismissed: true };
 }
 
 /** A contacts data source's way to change them, or why there is none: read-only, or agreed to for reading alone. */

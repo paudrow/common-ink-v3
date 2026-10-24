@@ -931,6 +931,10 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("contact.photo"), sourceId: SourceId, id: RecordId, photo: Photo.nullable() }),
   /** Adds a contact to the asker's own contacts where they are kept: a name, and whatever else is known of them. */
   z.object({ type: z.literal("contact.create"), sourceId: SourceId, ...z.object(ContactFields).partial().shape, name: ContactFields.name }),
+  /** The pairs of the asker's contacts that look like the same person, but those they said are not. */
+  z.object({ type: z.literal("contact.duplicates") }),
+  /** Says two of the asker's contacts are not the same person, so they aren't listed as a pair again. */
+  z.object({ type: z.literal("contact.dismiss"), sourceId: SourceId, ids: z.tuple([RecordId, RecordId]) }),
   /**
    * The asker's email threads, the latest first: what they sent, copied or forwarded to the address
    * `address` names. `query` keeps those with every word of it in a message's subject, sender,
@@ -1864,6 +1868,8 @@ export interface Results {
   "contact.update": ContactCard;
   "contact.photo": ContactCard;
   "contact.create": ContactCard;
+  "contact.duplicates": { pairs: DuplicatePair[]; sources: Source[] };
+  "contact.dismiss": { dismissed: true };
   /** `address` is where mail is sent to be kept; `more` when there are threads after the last. */
   "email.list": { threads: MailThread[]; sources: Source[]; more: boolean; address: string | null };
   "email.thread": MailThreadRead;
@@ -2022,6 +2028,16 @@ export interface ContactCard extends Contact {
   urls: ContactLine[];
   /** Sent back with a change, which is refused when the contact has changed since. */
   etag: string;
+}
+
+/** What makes two contacts look like the same person: an email address, a phone number, or their name. */
+export type SameBy = "email" | "phone" | "name";
+
+/** Two contacts in one data source that look like the same person, and each way they do. */
+export interface DuplicatePair {
+  sourceId: string;
+  contacts: [Contact, Contact];
+  sameBy: SameBy[];
 }
 
 /** A change to a contact: each field given is the whole of it, and null takes it away. */

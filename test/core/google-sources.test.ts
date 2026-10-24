@@ -584,6 +584,47 @@ describe("editing a Google contact", () => {
   });
 });
 
+describe("duplicate Google contacts", () => {
+  /** Sam twice more: once by his number with Google's own country code, once by his name in other case. */
+  const withDuplicates = async () => {
+    const asked = await connected({ scopes: [...ALL_SCOPES, CONTACTS_WRITE] });
+    asked.google.people.push(
+      { resourceName: "people/c5", etag: "%Eg", names: [{ displayName: "Okafor Plumbing" }], phoneNumbers: [{ value: "555-0142", type: "work" }] },
+      { resourceName: "people/c6", etag: "%Eg", names: [{ displayName: "sam okafor" }], emailAddresses: [{ value: "sam@okafor.example" }] },
+    );
+    return asked;
+  };
+  const listed = async (ask: Awaited<ReturnType<typeof connected>>["ask"]) => (await ask({ type: "contact.duplicates" })).pairs.map((p) => [p.contacts[0].name, p.contacts[1].name, p.sameBy]);
+
+  it("are the pairs of the member's contacts that share a number or a name, read from Google and sent nothing", async () => {
+    const { google, ask } = await withDuplicates();
+    expect(await listed(ask)).toEqual([
+      ["Okafor Plumbing", "Sam Okafor", ["phone"]],
+      ["Sam Okafor", "sam okafor", ["name"]],
+    ]);
+    expect(google.sent.filter((s) => s.method !== "GET")).toEqual([]);
+  });
+
+  it("leave out a pair the member said is not the same person, for good, and only for them", async () => {
+    const { ask, google } = await withDuplicates();
+    expect(await ask({ type: "contact.dismiss", sourceId: "google-contacts", ids: ["people/c1", "people/c5"] })).toEqual({ dismissed: true });
+    // Said again, the other way round, it is still one answer.
+    await ask({ type: "contact.dismiss", sourceId: "google-contacts", ids: ["people/c5", "people/c1"] });
+    expect(await listed(ask)).toEqual([["Sam Okafor", "sam okafor", ["name"]]]);
+    expect(google.sent.filter((s) => s.method !== "GET")).toEqual([]);
+    expect(await refusal(ask({ type: "contact.dismiss", sourceId: "google-contacts", ids: ["people/c1", "people/c1"] }))).toBe("invalid: A contact is always the same person as itself");
+    const { results } = await env.DB.prepare("SELECT data_source, first_id, second_id FROM contact_dismissals").all();
+    expect(results).toEqual([{ data_source: "google-contacts", first_id: "people/c1", second_id: "people/c5" }]);
+  });
+
+  it("are the member's alone to list and dismiss: an agent is refused both", async () => {
+    const { ada, ask } = await withDuplicates();
+    const agent: Actor = { kind: "agent", agentId: "agent-1", personId: ada.personId, workspaceId: ada.workspaceId };
+    expect(await refusal(ask({ type: "contact.duplicates" }, agent))).toBe("forbidden: An agent can't contact.duplicates");
+    expect(await refusal(ask({ type: "contact.dismiss", sourceId: "google-contacts", ids: ["people/c1", "people/c5"] }, agent))).toBe("forbidden: An agent can't contact.dismiss");
+  });
+});
+
 describe("disconnecting", () => {
   it("tells Google to end what was agreed to, deletes the tokens, and leaves the member's other workspace mates untouched", async () => {
     const { google, ada, ask, sources } = await connected();

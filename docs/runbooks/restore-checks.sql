@@ -4,6 +4,7 @@ SELECT
   (SELECT count(*) FROM changes) AS changes,
   (SELECT count(*) FROM clipper_grants) AS clipper_grants,
   (SELECT count(*) FROM completions) AS completions,
+  (SELECT count(*) FROM contact_dismissals) AS contact_dismissals,
   (SELECT count(*) FROM daily_notes) AS daily_notes,
   (SELECT count(*) FROM folders) AS folders,
   (SELECT count(*) FROM frame_grants) AS frame_grants,
