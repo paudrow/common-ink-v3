@@ -1,4 +1,4 @@
-import { MAIL_PROVIDER, MAIL_SOURCE, addSender, forgetMail, isMessage, listSenders, listThreads, readThread, removeSender } from "../../core/mailbox.ts";
+import { MAIL_PROVIDER, MAIL_SOURCE, addSender, forgetMail, isMessage, listRules, listSenders, listThreads, readThread, removeMatching, removeRule, removeSender, ruleMatches, saveRule } from "../../core/mailbox.ts";
 import type { MailSource } from "../../core/sources.ts";
 import { connectPlain, connectionOf } from "./connections.ts";
 import type { Provider } from "./index.ts";
@@ -6,8 +6,8 @@ import type { Provider } from "./index.ts";
 /**
  * Email: the mail a person sends, copies or forwards to `address`, which src/worker/mail.ts keeps
  * for them. It is connected by saying so, as nothing outside Common Ink is agreed to, and until it
- * is, mail from the person is dropped. Disconnecting forgets every message kept and every address
- * added, so nothing of it is left here.
+ * is, mail from the person is dropped. Disconnecting forgets every message kept, every address
+ * added and every skip rule, so nothing of it is left here.
  */
 export function mail(db: D1Database, address: string, now: () => number): Provider {
   return {
@@ -25,6 +25,13 @@ export function mail(db: D1Database, address: string, now: () => number): Provid
           list: () => listSenders(db, personId),
           add: (said) => addSender(db, personId, said, now()),
           remove: (said) => removeSender(db, personId, said),
+        },
+        rules: {
+          list: () => listRules(db, personId),
+          save: (id, rule) => saveRule(db, personId, id, rule, now()),
+          remove: (id) => removeRule(db, personId, id),
+          matches: (rule, shown) => ruleMatches(db, personId, MAIL_SOURCE, rule, shown),
+          removeMatching: (rule) => removeMatching(db, personId, rule),
         },
       };
       return [source];

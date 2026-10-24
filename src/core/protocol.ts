@@ -221,6 +221,17 @@ export type SearchSort = (typeof SEARCH_SORTS)[number];
 const SourceId = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, "not a data source's id");
 /** A record's id as its data source gave it. It is passed back to that data source and read as nothing else. */
 const RecordId = z.string().min(1).max(1024);
+
+const RuleField = z.string().trim().max(500).default("");
+/**
+ * What a skip rule asks of a message for it not to be kept, as a mail app's filter asks: each field
+ * left empty asks nothing, and a rule asks at least one thing. `from` and `to` are addresses or
+ * domains, any of them; `subject` is words the subject holds; `hasWords` are words or "phrases" the
+ * message holds, all of them; `doesntHave` are ones it holds none of; `list` is in its List-Id.
+ */
+export const MailRuleCriteria = z
+  .object({ from: RuleField, to: RuleField, subject: RuleField, hasWords: RuleField, doesntHave: RuleField, list: RuleField, hasAttachment: z.boolean().default(false) })
+  .refine((rule) => rule.hasAttachment || Object.values(rule).some((value) => typeof value === "string" && value !== ""), "A rule asks at least one thing of a message");
 /** What one line of a contact's says: an email, a phone number, an address, a page. */
 const LineValue = (max: number) => z.string().trim().min(1).max(max);
 /** A line of a contact's with its label: Google's own type, one the member wrote, or none. */
@@ -950,6 +961,13 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("email.addSender"), address: z.string().trim().toLowerCase().max(254).pipe(z.email()) }),
   /** Stops recognizing an address the asker added. Mail already kept from it stays. */
   z.object({ type: z.literal("email.removeSender"), address: z.string().trim().toLowerCase().max(254) }),
+  /** The asker's skip rules: mail any of them matches isn't kept as it arrives. */
+  z.object({ type: z.literal("email.rules") }),
+  /** How many of the asker's kept threads a rule matches, with the latest few of them. */
+  z.object({ type: z.literal("email.matchRule"), rule: MailRuleCriteria }),
+  /** Adds a skip rule, or changes the one `id` names. `removeKept` also deletes the kept messages it matches. */
+  z.object({ type: z.literal("email.saveRule"), id: Id.optional(), rule: MailRuleCriteria, removeKept: z.boolean().optional() }),
+  z.object({ type: z.literal("email.removeRule"), id: Id }),
   /**
    * A person, as a mention names them, as the asker may be told of them: what their page shows. `who`
    * is a member's id, or a name. A name one member has is that member, for an asker told who the
@@ -1873,6 +1891,12 @@ export interface Results {
   /** `code` is what mail from the address carries to verify it: once, and never again. */
   "email.addSender": MailSenders & { code: string };
   "email.removeSender": MailSenders;
+  "email.rules": { rules: MailRule[] };
+  /** `count` threads and `messages` messages kept match it; `threads` are the latest few. */
+  "email.matchRule": { count: number; messages: number; threads: MailThread[] };
+  /** `removed` is how many kept messages were deleted. */
+  "email.saveRule": { rules: MailRule[]; removed: number };
+  "email.removeRule": { rules: MailRule[] };
   "person.read": PersonPage;
   "record.refer": Reference;
   "record.read": SourceRecord;
@@ -2088,6 +2112,8 @@ export interface MailMessage {
   /** Its HTML with everything that runs, loads or tracks taken out, or null when it had none. */
   html: string | null;
   attachments: MailAttachment[];
+  /** The mailing list it came through, as its List-Id header names it, or null. */
+  listId: string | null;
   /** `sent`: the member's own, sent or copied to the address. `forwarded`: someone else's, which the member forwarded. */
   via: "sent" | "forwarded";
   /** What the member wrote above a message they forwarded. */
@@ -2122,6 +2148,14 @@ export interface MailSender {
   verified: boolean;
   /** For one waiting: when its code lapses. */
   expiresAt: number | null;
+}
+
+export type MailRuleFields = z.infer<typeof MailRuleCriteria>;
+
+/** A skip rule of the member's: mail it matches isn't kept. */
+export interface MailRule extends MailRuleFields {
+  id: string;
+  createdAt: number;
 }
 
 export interface MailSenders {

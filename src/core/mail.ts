@@ -30,6 +30,8 @@ export interface Incoming {
   text: string;
   html: string | null;
   attachments: MailAttachment[];
+  /** The mailing list it came through, as its List-Id header names it, or null. */
+  listId: string | null;
 }
 
 /** What reached notes@: the message as sent, and, when it forwards one, the message forwarded and what was written above it. */
@@ -109,6 +111,7 @@ async function incoming(email: Email): Promise<Incoming> {
     cc: mailboxes(email.cc),
     html: html?.trim() ? html : null,
     attachments: attachmentsOf(email),
+    listId: email.headers.find((h) => h.key.toLowerCase() === "list-id")?.value.trim().slice(0, 500) || null,
   };
 }
 
@@ -150,6 +153,7 @@ export async function inlineForward(text: string, outer: Pick<Incoming, "sentAt"
       cc: mailboxes(addressParser(said.cc ?? "")),
       html: null,
       attachments: [],
+      listId: null,
     },
   };
 }

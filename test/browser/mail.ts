@@ -23,10 +23,12 @@ interface Mail {
   date?: string;
   /** Headers of the message forwarded, attached whole, which is then what is kept. */
   forwards?: string[];
+  /** The forwarded message's Message-ID, without its brackets. */
+  original?: string;
 }
 
 /** One message from the signed-in member to notes@, kept for them. */
-export async function mail(page: Page, { subject, text, from, id, date, forwards }: Mail): Promise<Record<string, unknown>> {
+export async function mail(page: Page, { subject, text, from, id, date, forwards, original }: Mail): Promise<Record<string, unknown>> {
   const email = (await me(page)).person.email;
   const domain = email.replace(/.*@/, "");
   const head = [vouched(domain), `From: Me <${email}>`, "To: notes@in.commonink.app", `Subject: ${forwards ? `Fwd: ${subject}` : subject}`, `Message-ID: <${id ?? crypto.randomUUID()}@${domain}>`, `Date: ${date ?? new Date().toUTCString()}`, "MIME-Version: 1.0"];
@@ -45,7 +47,7 @@ export async function mail(page: Page, { subject, text, from, id, date, forwards
     `From: ${from}`,
     "To: Me <me@example.com>",
     `Subject: ${subject}`,
-    `Message-ID: <${crypto.randomUUID()}@forwarded.example>`,
+    `Message-ID: <${original ?? `${crypto.randomUUID()}@forwarded.example`}>`,
     `Date: ${date ?? new Date().toUTCString()}`,
     ...forwards,
     "Content-Type: text/plain; charset=utf-8",

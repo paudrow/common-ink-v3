@@ -74,6 +74,7 @@ const CONTACTS =
   "A contact is how the member reaches someone: the address their mail goes to, the number their phone calls, in every app that reads their Google contacts. A change to one is not a change in history, so it can't be reverted the way an agent's edits can, and nothing in Common Ink shows it was made. An agent reads notes other people wrote, so one that was talked into it could quietly send the member's mail or calls for a colleague to a stranger. An agent reads the member's contacts, and only the member, signed in, changes or adds one.";
 
 
+const MAIL_RULES = "Which mail is kept is the member's to say, in Settings, where they see what a rule matches before it deletes any.";
 const MAIL_SENDERS =
   "Which addresses are the member's decides whose mail is kept as theirs, and is proved by mail from the address itself, which an agent can't send. An agent that was talked into adding a stranger's address would have that stranger's mail read as the member's. Only the member, signed in, adds or removes one.";
 
@@ -115,6 +116,10 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "email.senders": "The addresses a member's mail is recognized by are only of use for managing them, which an agent can't do. What came from them is list_email's.",
   "email.addSender": MAIL_SENDERS,
   "email.removeSender": MAIL_SENDERS,
+  "email.rules": MAIL_RULES,
+  "email.matchRule": MAIL_RULES,
+  "email.saveRule": MAIL_RULES,
+  "email.removeRule": MAIL_RULES,
   "contact.update": CONTACTS,
   "contact.photo": CONTACTS,
   "contact.create": CONTACTS,

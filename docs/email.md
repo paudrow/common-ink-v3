@@ -12,14 +12,17 @@ Mail a person sends, copies (BCC) or forwards to **notes@in.commonink.app** is k
 4. The Email page lists your threads beside the one you read, as a mail app does: who wrote, the subject, how the latest message begins, and when. Search by words, `from:`, `subject:` and `has:attachment`, or press **Has attachments** or **From contacts**. j, k and the arrow keys move through the list, and Enter opens a thread. Its earlier messages are folded to a line each, and so is what a reply quotes. A message's formatting is drawn in a frame of its own origin that runs nothing and loads nothing from anywhere; **Show text** shows its text instead. Attachments are listed by name, type and size. **Make a note from this** makes a note with a link to the thread and its messages quoted.
 5. A thread opens at `/email/<id>`. To link to it from a note, type `@` and words of its subject or sender, or press **Copy link** on the thread or on one message. The note holds `[[email:ref]]` and nothing of the mail. You see the link as the thread's subject; a click or vim's `gd` opens it, and resting on it shows who sent it, when, and how it begins. Everyone else who reads the note, members, guests and anyone with a share link, sees "Email" and nothing more. `[[email:ref|words]]` shows the words instead, to everyone. Notes written before links held `::email{ref subject}`, which is converted to `[[email:ref]]` once.
 
+6. **Skip rules**, under Email in Settings, say what mail not to keep, as a mail app's filters do: from an address or a domain, to one, words in the subject, words or "phrases" it has, words it doesn't have, the mailing list it came through (its List-Id), and whether it has attachments, any of them in one rule. A forwarded message is read as its sender wrote it, never as you who forwarded it. While you write a rule it says how many threads you have kept it matches, and saving one that matches some asks whether to remove them too. **Skip mail like this**, on a thread, opens Settings with a rule started from its list or its sender. Only you see or change your rules; an agent can't.
+
 Mail is dropped, and its sender told nothing, when any of these is true:
 
 - it comes from an address that isn't yours;
 - its domain didn't vouch for it (DMARC, or DKIM aligned with the From address);
+- one of your skip rules matches it;
 - it is over 10 MB;
 - one address sent more than 60 messages in an hour, or a person more than 500 in a day.
 
-Disconnecting Email deletes every message kept and every address you added.
+Disconnecting Email deletes every message kept, every address you added and every skip rule.
 
 ## How it is built
 
@@ -28,13 +31,14 @@ Disconnecting Email deletes every message kept and every address you added.
 | Inbound: the Worker's `email()` handler, the recipient check, `/dev/email` | `src/worker/mail.ts`, `src/worker/index.ts` |
 | Reading a message: MIME (postal-mime), forwards, Authentication-Results, HTML sanitizing | `src/core/mail.ts` |
 | The frame a message's HTML is drawn in: its document and policy, whose only script is its own, by hash | `src/worker/frames.ts` (`/embed-frame/mail`), `src/web/htmlFrame.ts` |
-| Keeping it: senders and codes, threads, dedupe, limits, `receive` | `src/core/mailbox.ts` |
+| Keeping it: senders and codes, threads, dedupe, limits, skip rules kept and applied, `receive` | `src/core/mailbox.ts` |
+| What a skip rule matches | `src/core/mailRules.ts` |
 | The data source (`MailSource`, a third `DataSource` kind) and its operations | `src/core/sources.ts`, `src/worker/sources/mail.ts` |
-| Operations: `email.list`, `email.thread`, `email.senders`, `email.addSender`, `email.removeSender`, and `record.refer` / `record.read` for `[[email:ref]]` | `src/core/protocol.ts`, `src/core/operations.ts` |
+| Operations: `email.list`, `email.thread`, `email.senders`, `email.addSender`, `email.removeSender`, `email.rules`, `email.matchRule`, `email.saveRule`, `email.removeRule`, and `record.refer` / `record.read` for `[[email:ref]]` | `src/core/protocol.ts`, `src/core/operations.ts` |
 | Agents: `list_email`, `read_email_thread` (read-only), and `ink email`, `ink thread` | `src/worker/mcp/tools.ts`, `scripts/ink-cli.ts` |
 | The Email plugin: the page, `@` and links to threads, the Settings section | `src/web/plugins/email/` |
-| Tables | `migrations/0064_email.sql` |
-| Tests | `test/core/mail.test.ts`, `test/core/plugin-email.test.ts` |
+| Tables | `migrations/0064_email.sql`, `migrations/0069_mail_rules.sql` |
+| Tests | `test/core/mail.test.ts`, `test/core/mail-rules.test.ts`, `test/core/plugin-email.test.ts`, `test/browser/email*.spec.ts` |
 
 Email extends the plugin system in no new way. It is a built-in plugin that registers a `page`, a `settings` view and an embed (`referenceEmbed`, as Contacts does), and reads through `host.perform`. Like `source.*`, `event.*` and `contact.*`, `email.*` is refused to every plugin that isn't Common Ink's own (`OwnOnly`). The extension point it needed was on the server: a third member of `DataSource`, which ADR 0006 named as the way to add a kind of data source.
 
@@ -118,6 +122,9 @@ What a message is trusted by is the topmost `Authentication-Results` header, whi
 3. `npx wrangler tail common-ink-v3` shows one line for each message, such as `Mail kept` or `Mail dropped: unauthenticated`. It never shows who sent it.
 
 ## Open questions
+
+- **Rules and mail kept before List-Id was.** A message keeps its List-Id from when skip rules came in; one kept before has none, so a mailing-list rule never matches it.
+- **Matching a rule against everything kept** reads every message of the person's, a page at a time. That is fine at a person's size; a bigger mailbox would want the cheap parts of a rule asked of D1 first.
 
 - **Attachments.** Only names, types and sizes are kept. Keeping the bytes means R2 objects of the person's own, outside any workspace, deleted with the account and on disconnect. Another way is saving one as an upload into a workspace the member picks.
 - **Retention.** Mail is kept until the member disconnects or deletes their account. A limit, such as a year, or a cap per person, isn't set.

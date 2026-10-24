@@ -1,6 +1,7 @@
 import { newId } from "./ids.ts";
 import { MAX_RAW_BYTES, answers, bareSubject, headerBlock, normalAddress, readMessage, vouched, type Incoming } from "./mail.ts";
-import { OpError, type MailAddress, type MailMessage, type MailSender, type MailThread, type MailThreadRead } from "./protocol.ts";
+import { skips, type Ruled } from "./mailRules.ts";
+import { MailRuleCriteria, OpError, type MailAddress, type MailMessage, type MailRule, type MailRuleFields, type MailSender, type MailThread, type MailThreadRead } from "./protocol.ts";
 
 /*
  * A person's mail, kept: what reached notes@ from an address that is theirs, put in threads by the
@@ -139,6 +140,7 @@ interface MessageRow {
   attachments: string;
   via: "sent" | "forwarded";
   comment: string | null;
+  list_id: string | null;
 }
 
 const toMessage = (sourceId: string, r: MessageRow): MailMessage => ({
@@ -157,6 +159,7 @@ const toMessage = (sourceId: string, r: MessageRow): MailMessage => ({
   text: r.text,
   html: r.html,
   attachments: JSON.parse(r.attachments) as MailMessage["attachments"],
+  listId: r.list_id,
   via: r.via,
   comment: r.comment,
 });
@@ -340,10 +343,10 @@ export async function keep(db: D1Database, personId: string, m: Incoming, how: {
     await db.batch([
       db
         .prepare(
-          `INSERT INTO mail_messages (id, person_id, thread_id, message_id, in_reply_to, refs, sender, from_name, from_address, to_list, cc_list, subject, sent_at, received_at, text, html, attachments, via, comment)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)`,
+          `INSERT INTO mail_messages (id, person_id, thread_id, message_id, in_reply_to, refs, sender, from_name, from_address, to_list, cc_list, subject, sent_at, received_at, text, html, attachments, via, comment, list_id)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)`,
         )
-        .bind(id, personId, threadId, m.messageId, m.inReplyTo, m.references.join(" "), how.sender, m.from.name, m.from.address, JSON.stringify(m.to), JSON.stringify(m.cc), m.subject, sentAt, how.now, m.text, m.html, JSON.stringify(m.attachments), how.via, how.comment),
+        .bind(id, personId, threadId, m.messageId, m.inReplyTo, m.references.join(" "), how.sender, m.from.name, m.from.address, JSON.stringify(m.to), JSON.stringify(m.cc), m.subject, sentAt, how.now, m.text, m.html, JSON.stringify(m.attachments), how.via, how.comment, m.listId),
       ...ids.map((messageId) => db.prepare("INSERT INTO mail_ids (person_id, message_id, thread_id) VALUES (?, ?, ?) ON CONFLICT (person_id, message_id) DO NOTHING").bind(personId, messageId, threadId)),
       db.prepare("UPDATE mail_threads SET last_at = MAX(last_at, ?) WHERE id = ?").bind(sentAt, threadId),
     ]);
@@ -359,9 +362,95 @@ export async function keep(db: D1Database, personId: string, m: Incoming, how: {
   return { kept: id };
 }
 
+// Skip rules ----------------------------------------------------------------------------------
+
+/** How many skip rules a person may have. */
+export const MAX_RULES = 100;
+/** How many kept messages are read at once to find those a rule matches. */
+const RULE_PAGE = 100;
+
+export async function listRules(db: D1Database, personId: string): Promise<MailRule[]> {
+  const { results } = await db.prepare("SELECT id, criteria, created_at FROM mail_rules WHERE person_id = ? ORDER BY created_at, id").bind(personId).all<{ id: string; criteria: string; created_at: number }>();
+  // A rule is read again as the protocol reads one, so what is kept can never ask less than a rule must.
+  return results.flatMap((r) => {
+    const read = MailRuleCriteria.safeParse(JSON.parse(r.criteria));
+    return read.success ? [{ id: r.id, createdAt: r.created_at, ...read.data }] : [];
+  });
+}
+
+/** Adds a rule, or changes the person's rule `id`. */
+export async function saveRule(db: D1Database, personId: string, id: string | undefined, rule: MailRuleFields, now: number): Promise<void> {
+  const criteria = JSON.stringify(rule);
+  if (id) {
+    const done = await db.prepare("UPDATE mail_rules SET criteria = ?, updated_at = ? WHERE id = ? AND person_id = ?").bind(criteria, now, id, personId).run();
+    if (!done.meta.changes) throw new OpError("not_found", "No such rule");
+    return;
+  }
+  const { n } = (await db.prepare("SELECT COUNT(*) AS n FROM mail_rules WHERE person_id = ?").bind(personId).first<{ n: number }>())!;
+  if (n >= MAX_RULES) throw new OpError("conflict", `You can have at most ${MAX_RULES} rules`);
+  await db.prepare("INSERT INTO mail_rules (id, person_id, criteria, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").bind(newId(), personId, criteria, now, now).run();
+}
+
+export async function removeRule(db: D1Database, personId: string, id: string): Promise<void> {
+  const done = await db.prepare("DELETE FROM mail_rules WHERE id = ? AND person_id = ?").bind(id, personId).run();
+  if (!done.meta.changes) throw new OpError("not_found", "No such rule");
+}
+
+/** Whether any of the person's rules matches a message, which then isn't kept. */
+export const skipped = async (db: D1Database, personId: string, m: Ruled) => (await listRules(db, personId)).some((rule) => skips(rule, m));
+
+/** The person's kept messages a rule matches, as the ids of each and of its thread, read a page at a time. */
+async function matching(db: D1Database, personId: string, rule: MailRuleFields): Promise<{ id: string; thread_id: string }[]> {
+  const found: { id: string; thread_id: string }[] = [];
+  for (let after = ""; ; ) {
+    const { results } = await db
+      .prepare("SELECT id, thread_id, from_name, from_address, to_list, cc_list, subject, text, list_id, json_array_length(attachments) AS files FROM mail_messages WHERE person_id = ? AND id > ? ORDER BY id LIMIT ?")
+      .bind(personId, after, RULE_PAGE)
+      .all<{ id: string; thread_id: string; from_name: string; from_address: string; to_list: string; cc_list: string; subject: string; text: string; list_id: string | null; files: number }>();
+    for (const r of results) {
+      const m: Ruled = { from: { name: r.from_name, address: r.from_address }, to: JSON.parse(r.to_list) as MailAddress[], cc: JSON.parse(r.cc_list) as MailAddress[], subject: r.subject, text: r.text, listId: r.list_id, attachments: r.files };
+      if (skips(rule, m)) found.push({ id: r.id, thread_id: r.thread_id });
+    }
+    if (results.length < RULE_PAGE) return found;
+    after = results[results.length - 1]!.id;
+  }
+}
+
+/** How many of the person's kept threads and messages a rule matches, and the latest `shown` of those threads. */
+export async function ruleMatches(db: D1Database, personId: string, sourceId: string, rule: MailRuleFields, shown: number): Promise<{ count: number; messages: number; threads: MailThread[] }> {
+  const found = await matching(db, personId, rule);
+  const threadIds = [...new Set(found.map((m) => m.thread_id))];
+  if (!threadIds.length) return { count: 0, messages: 0, threads: [] };
+  const { results } = await db
+    .prepare(`SELECT id FROM mail_threads WHERE person_id = ? AND id IN (SELECT value FROM json_each(?)) ORDER BY last_at DESC, id LIMIT ?`)
+    .bind(personId, JSON.stringify(threadIds), shown)
+    .all<{ id: string }>();
+  const threads = (await Promise.all(results.map((t) => readThread(db, personId, sourceId, t.id)))).filter((t) => t !== null);
+  return { count: threadIds.length, messages: found.length, threads: threads.map(({ messages: _, ...thread }) => thread) };
+}
+
+/**
+ * Deletes the person's kept messages a rule matches. A thread left with none goes too, with the ids
+ * it was found by; one with some left is dated by its latest. Answers how many messages went.
+ */
+export async function removeMatching(db: D1Database, personId: string, rule: MailRuleFields): Promise<number> {
+  const found = await matching(db, personId, rule);
+  if (!found.length) return 0;
+  const ids = JSON.stringify(found.map((m) => m.id));
+  const threads = JSON.stringify([...new Set(found.map((m) => m.thread_id))]);
+  await db.batch([
+    db.prepare("DELETE FROM mail_messages WHERE person_id = ? AND id IN (SELECT value FROM json_each(?))").bind(personId, ids),
+    db.prepare("DELETE FROM mail_ids WHERE person_id = ?1 AND thread_id IN (SELECT value FROM json_each(?2)) AND NOT EXISTS (SELECT 1 FROM mail_messages WHERE thread_id = mail_ids.thread_id)").bind(personId, threads),
+    db.prepare("DELETE FROM mail_threads WHERE person_id = ?1 AND (id IN (SELECT value FROM json_each(?2)) OR merged_into IN (SELECT value FROM json_each(?2))) AND NOT EXISTS (SELECT 1 FROM mail_messages WHERE thread_id = mail_threads.id) AND NOT EXISTS (SELECT 1 FROM mail_ids WHERE thread_id = mail_threads.id)").bind(personId, threads),
+    db.prepare("UPDATE mail_threads SET last_at = (SELECT MAX(sent_at) FROM mail_messages WHERE thread_id = mail_threads.id) WHERE person_id = ?1 AND id IN (SELECT value FROM json_each(?2))").bind(personId, threads),
+  ]);
+  return found.length;
+}
+
 /** Everything a person's mail is kept as, and the addresses they added: what disconnecting it, or deleting the account, takes. */
 export const forgetMail = (db: D1Database, personId: string) =>
   db.batch([
+    db.prepare("DELETE FROM mail_rules WHERE person_id = ?").bind(personId),
     db.prepare("DELETE FROM mail_ids WHERE person_id = ?").bind(personId),
     db.prepare("DELETE FROM mail_messages WHERE person_id = ?").bind(personId),
     db.prepare("DELETE FROM mail_threads WHERE person_id = ?").bind(personId),
@@ -375,12 +464,13 @@ export type Received =
   | { kept: string; personId: string }
   | { duplicate: string; personId: string }
   | { verified: string }
-  | { dropped: "too_large" | "unreadable" | "unauthenticated" | "unknown" | "not_connected" | "too_many"; why?: string };
+  | { dropped: "too_large" | "unreadable" | "unauthenticated" | "unknown" | "not_connected" | "skipped" | "too_many"; why?: string };
 
 /**
  * Takes one message that reached notes@ and keeps it for the person it is from, or drops it. It is
  * kept only when the From domain vouched for it (`vouched`) and the address is a person's, by
- * their sign-in email or one they verified, who has their mail connected. A message from an address
+ * their sign-in email or one they verified, who has their mail connected, and none of their skip
+ * rules matches it. A message from an address
  * waiting for its code, carrying that code, verifies it instead. A forward keeps the message it
  * forwards, as written by whoever wrote it; that message's own domain can't be checked, and it is
  * the member's word, as anything they paste into a note is.
@@ -406,13 +496,16 @@ export async function receive(db: D1Database, raw: string | ArrayBuffer | Uint8A
   const personId = await personOf(db, sender);
   if (!personId) return { dropped: "unknown" };
   if (!(await db.prepare("SELECT 1 FROM source_connections WHERE person_id = ? AND provider = ?").bind(personId, MAIL_PROVIDER).first())) return { dropped: "not_connected" };
+  // A rule is read against the message that would be kept: for a forward, the one forwarded, as its sender wrote it.
+  const kept = read.forwarded?.original ?? read.outer;
+  if (await skipped(db, personId, { ...kept, attachments: kept.attachments.length })) return { dropped: "skipped" };
   const counts = await db
     .prepare("SELECT SUM(sender = ?2 AND received_at > ?3) AS hour, COUNT(*) AS day FROM mail_messages WHERE person_id = ?1 AND received_at > ?4")
     .bind(personId, sender, opts.now - HOUR, opts.now - DAY)
     .first<{ hour: number | null; day: number }>();
   if ((counts?.hour ?? 0) >= PER_SENDER_HOUR || (counts?.day ?? 0) >= PER_PERSON_DAY) return { dropped: "too_many" };
-  const kept = read.forwarded
+  const done = read.forwarded
     ? await keep(db, personId, read.forwarded.original, { sender, via: "forwarded", comment: read.forwarded.comment, now: opts.now })
     : await keep(db, personId, read.outer, { sender, via: "sent", comment: null, now: opts.now });
-  return { ...kept, personId };
+  return { ...done, personId };
 }

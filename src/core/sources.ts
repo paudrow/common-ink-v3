@@ -2,7 +2,7 @@ import { inOrder, widened, within, type Span } from "./events.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
 import { writtenEmailLink, writtenEventLink } from "./links.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type MailRule, type MailRuleFields, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -82,6 +82,17 @@ export interface MailSource {
     /** Answers the code mail from the address carries to verify it. */
     add(address: string): Promise<string>;
     remove(address: string): Promise<void>;
+  };
+  /** What the person asks of mail for it not to be kept, which are theirs whether or not it is connected. */
+  rules: {
+    list(): Promise<MailRule[]>;
+    /** Adds a rule, or changes the one `id` names. */
+    save(id: string | undefined, rule: MailRuleFields): Promise<void>;
+    remove(id: string): Promise<void>;
+    /** How many kept threads and messages a rule matches, and the latest `shown` of those threads. */
+    matches(rule: MailRuleFields, shown: number): Promise<{ count: number; messages: number; threads: MailThread[] }>;
+    /** Deletes the kept messages a rule matches, and answers how many. */
+    removeMatching(rule: MailRuleFields): Promise<number>;
   };
 }
 
@@ -544,4 +555,25 @@ export async function addMailSender(asker: Asker, address: string): Promise<{ ad
 export async function removeMailSender(asker: Asker, address: string): Promise<{ address: string | null; senders: MailSender[] }> {
   await (await mailOf(asker)).senders.remove(address);
   return mailSenders(asker);
+}
+
+/** How many threads a rule's preview shows. */
+const RULE_SHOWN = 5;
+
+export const mailRules = async (asker: Asker): Promise<{ rules: MailRule[] }> => ({ rules: await (await mailOf(asker)).rules.list() });
+
+export const matchMailRule = async (asker: Asker, rule: MailRuleFields) => (await mailOf(asker)).rules.matches(rule, RULE_SHOWN);
+
+/** Saves a skip rule, and, where the member said so, deletes the kept messages it matches. */
+export async function saveMailRule(asker: Asker, id: string | undefined, rule: MailRuleFields, removeKept: boolean): Promise<{ rules: MailRule[]; removed: number }> {
+  const source = await mailOf(asker);
+  await source.rules.save(id, rule);
+  const removed = removeKept ? await source.rules.removeMatching(rule) : 0;
+  return { rules: await source.rules.list(), removed };
+}
+
+export async function removeMailRule(asker: Asker, id: string): Promise<{ rules: MailRule[] }> {
+  const source = await mailOf(asker);
+  await source.rules.remove(id);
+  return { rules: await source.rules.list() };
 }

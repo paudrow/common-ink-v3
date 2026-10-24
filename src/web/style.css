@@ -14232,9 +14232,82 @@ button.crumb[aria-expanded="true"] {
   font-size: calc(12px * var(--text-scale));
   white-space: pre-wrap;
 }
-
 :root[data-night-shift] .usage {
   --usage-person: var(--night-swatch-red);
   --usage-agent: var(--night-swatch-orange);
   --usage-plugin: var(--night-swatch-yellow);
+}
+
+/* Email's skip rules in Settings: the rules, and one being written beside what it matches. */
+.email-rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg-elev);
+}
+
+.email-rule-lead {
+  margin: 0;
+  font-weight: 600;
+}
+
+.email-rule-row {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.email-rule-row input:not([type="checkbox"]) {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.email-rule-check {
+  grid-template-columns: auto 1fr;
+  justify-self: start;
+}
+
+.email-rule-preview p,
+.email-rule-ask p {
+  margin: 0;
+}
+
+.email-rule-preview ul {
+  margin: 4px 0 0;
+  padding-left: 1.25rem;
+}
+
+.email-rule-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.email-rule-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 3px solid var(--danger);
+  padding-left: 10px;
+}
+
+.button.danger {
+  color: var(--danger);
+}
+
+@media (max-width: 560px) {
+  .email-rule-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

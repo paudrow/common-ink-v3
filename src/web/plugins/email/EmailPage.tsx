@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Icon, sandboxed, type App, type MailAddress, type MailMessage, type MailThread, type MailThreadRead, type PluginHost, type ViewProps } from "../../plugin-api.ts";
+import { Icon, ruleLike, sandboxed, type App, type MailAddress, type MailMessage, type MailThread, type MailThreadRead, type PluginHost, type ViewProps } from "../../plugin-api.ts";
 import { step } from "../lib/rows.ts";
 import { Segmented } from "../lib/Segmented.tsx";
 import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
 import { EMAIL_PATH, linkTo, threadPath, when } from "./linking.tsx";
 import { noteOf, quoted } from "./quoting.ts";
 import { Senders } from "./Senders.tsx";
+import { skipLike } from "./SkipRules.tsx";
 
 type Listing = { status: "reading" } | { status: "listed"; threads: readonly MailThread[]; more: boolean } | { status: "failed"; message: string };
 type Reading = { status: "reading" } | { status: "read"; thread: MailThreadRead } | { status: "failed"; message: string };
@@ -281,6 +282,9 @@ function Conversation({ host, app, id }: { host: PluginHost; app: App; id: strin
   if (reading.status === "reading") return <p className="email-none">Reading…</p>;
   const { thread } = reading;
   const last = thread.messages[thread.messages.length - 1];
+  // Mail like this is what someone else sent, the latest the member forwarded, or what came through a list. The member's own is never
+  // offered: a rule from their own address would drop all they send.
+  const theirs = thread.messages.findLast((m) => m.via === "forwarded") ?? thread.messages.findLast((m) => m.listId !== null);
   return (
     <article className="email-conversation" aria-label={thread.subject}>
       <header className="email-thread-head">
@@ -295,6 +299,11 @@ function Conversation({ host, app, id }: { host: PluginHost; app: App; id: strin
           <button type="button" className="button small" onClick={() => void copyLink(host, thread.id, `the thread ${thread.subject}`)}>
             Copy link
           </button>
+          {theirs && (
+            <button type="button" className="button small" onClick={() => skipLike(app, ruleLike(theirs))}>
+              Skip mail like this
+            </button>
+          )}
         </div>
       </header>
       <ol className="email-messages">
