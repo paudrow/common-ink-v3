@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { connectAgent } from "../../src/core/agents.ts";
 import { aligned, authResults, bareSubject, headerBlock, htmlText, idsIn, inlineForward, readMessage, sanitizeHtml, vouched } from "../../src/core/mail.ts";
-import { PER_SENDER_HOUR, personOf, receive } from "../../src/core/mailbox.ts";
+import { PER_SENDER_HOUR, personOf, readQuery, receive } from "../../src/core/mailbox.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type OpInput } from "../../src/core/protocol.ts";
 import worker from "../../src/worker/index.ts";
@@ -384,6 +384,45 @@ describe("threads", () => {
     await got({ from: email, subject: "Long", id: "r149@x", date: new Date(T0 - HOUR).toUTCString() });
     await got({ from: email, subject: "Re: Long", references: Array.from({ length: 150 }, (_, n) => `<r${n}@x>`).join(" ") });
     expect((await threads(actor)).map((t) => [t.subject, t.count])).toEqual([["Long", 2]]);
+  });
+});
+
+describe("searching the threads", () => {
+  it("reads from:, subject:, has:attachment and quoted phrases as a mail app's search box does", () => {
+    expect(readQuery('from:grace subject:"engine plans" has:attachment budget "see you" to:me')).toEqual({ words: ["budget", "see you", "to:me"], from: ["grace"], subject: ["engine plans"], attachment: true });
+    expect(readQuery(undefined)).toEqual({ words: [], from: [], subject: [], attachment: false });
+    expect(readQuery("has:pictures")).toEqual({ words: ["has:pictures"], from: [], subject: [], attachment: false });
+  });
+
+  it("finds threads by sender, subject, files, words and contacts, each in one message, and says which have files", async () => {
+    const { actor, email } = await connected();
+    const pdf = ["--m", 'Content-Type: application/pdf; name="r.pdf"', 'Content-Disposition: attachment; filename="r.pdf"', "Content-Transfer-Encoding: base64", "", "JVBERi0xLjQK", "--m--", ""];
+    const withFile = mail({ from: email, subject: "Receipt", body: "Total 42.", date: new Date(T0 - 3 * HOUR).toUTCString() }).replace("Content-Type: text/plain; charset=utf-8\r\n\r\nTotal 42.", ["Content-Type: multipart/mixed; boundary=\"m\"", "", "--m", "Content-Type: text/plain; charset=utf-8", "", "Total 42.", ...pdf].join("\r\n"));
+    await receive(env.DB, withFile, { authserv: AUTHSERV, now: T0 });
+    await got({ from: email, subject: "Fwd: Compiler", attached: mail({ from: "Grace Hopper <grace@example.com>", subject: "Compiler", body: "It compiles.", date: new Date(T0 - 2 * HOUR).toUTCString() }), body: "" });
+    await got({ from: email, subject: "Engine plans", body: "See you at ten.\n\n> Earlier words", date: new Date(T0 - HOUR).toUTCString() });
+    const subjects = async (query?: string, fromContacts?: boolean) => (await as(actor, { type: "email.list", ...(query && { query }), ...(fromContacts && { fromContacts }) })).threads.map((t) => t.subject).sort();
+
+    expect(await subjects("from:grace")).toEqual(["Compiler"]);
+    expect(await subjects('from:"grace hopper"')).toEqual(["Compiler"]);
+    expect(await subjects("subject:engine")).toEqual(["Engine plans"]);
+    expect(await subjects("subject:compiles")).toEqual([]);
+    expect(await subjects("has:attachment")).toEqual(["Receipt"]);
+    expect(await subjects('"see you at ten"')).toEqual(["Engine plans"]);
+    expect(await subjects("from:grace has:attachment")).toEqual([]);
+    const listed = (await as(actor, { type: "email.list" })).threads;
+    expect(listed.map((t) => [t.subject, t.attachments, t.snippet])).toEqual([
+      ["Engine plans", false, "See you at ten."],
+      ["Compiler", false, "It compiles."],
+      ["Receipt", true, "Total 42."],
+    ]);
+
+    // From contacts keeps Grace's: the sample contacts, where dev sign-in is on, have her address.
+    const dev = sourcesFor({ ...env, DEV_SIGN_IN: "1" } as Env, new URL("http://localhost/api/ops"));
+    await perform(env.DB, actor, { type: "source.connect", id: "sample-contacts" }, T0, dev);
+    expect((await perform(env.DB, actor, { type: "email.list", fromContacts: true }, T0, dev)).threads.map((t) => t.subject)).toEqual(["Compiler"]);
+    // With no contacts connected, no thread is from one.
+    expect(await subjects(undefined, true)).toEqual([]);
   });
 });
 

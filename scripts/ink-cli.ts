@@ -185,8 +185,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
             [--location TEXT] [--description TEXT]
                                       add an event to one of the calendars events lists
   contacts [QUERY]                    your member's contacts, or those matching every word
-  email [QUERY] [--before TIME] [--limit N]
-                                      your member's email threads, latest first, or those with a message matching every word
+  email [QUERY] [--from-contacts true|false] [--before TIME] [--limit N]
+                                      your member's email threads, latest first, or those with a message matching every word, from:, subject: and has:attachment
   thread ID                           an email thread with every message in it, by its id or one of its messages'
   person WHO [--limit N]              a person's page: the member they are, your member's contacts that are
                                       them, their open todos, and the lines that mention them
@@ -937,7 +937,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "email":
         tool = "list_email";
-        args = { ...(id === undefined ? {} : { query: id }), ...given({ before: ["before", time], limit: ["limit", integer] }) };
+        args = { ...(id === undefined ? {} : { query: id }), ...given({ fromContacts: ["from-contacts", truth], before: ["before", time], limit: ["limit", integer] }) };
         break;
       case "thread":
         tool = "read_email_thread";

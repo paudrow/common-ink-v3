@@ -4,7 +4,7 @@
 // gives them nosniff, the referrer rule and DATA, and test/core/headers.test.ts holds the two in step.
 // HSTS is the zone's, not the Worker's.
 
-import { EMBED_FRAME_PATH } from "../core/frames.ts";
+import { EMBED_FRAME_PATH, MAIL_FRAME_PATH } from "../core/frames.ts";
 import { embedOrigin, FRAME_ORIGINS, GRANTED_PATH } from "./frames.ts";
 
 /** A policy as each directive and its sources. A later PR that loads something new adds its source here. */
@@ -98,7 +98,7 @@ const policyFor = (path: string): Policy =>
 const framed = (url: URL, env: { EMBED_ORIGIN?: string }): Policy => {
   const origin = embedOrigin(env);
   const hosts = [url.origin, ...(origin ? [origin] : [])];
-  return { ...PAGE, "frame-src": [...hosts.flatMap((host) => [host + EMBED_FRAME_PATH, host + GRANTED_PATH]), ...PAGE["frame-src"]!] };
+  return { ...PAGE, "frame-src": [...hosts.flatMap((host) => [host + EMBED_FRAME_PATH, host + MAIL_FRAME_PATH, host + GRANTED_PATH]), ...PAGE["frame-src"]!] };
 };
 
 /**

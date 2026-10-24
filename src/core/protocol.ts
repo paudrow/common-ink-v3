@@ -933,10 +933,12 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("contact.create"), sourceId: SourceId, ...z.object(ContactFields).partial().shape, name: ContactFields.name }),
   /**
    * The asker's email threads, the latest first: what they sent, copied or forwarded to the address
-   * `address` names. `query` keeps those with every word of it in a message's subject, sender,
-   * recipients or text. `before` is the `lastAt` of the last thread of the page before.
+   * `address` names. `query` keeps those with a message holding every word of it in its subject,
+   * sender, recipients or text, and `from:`, `subject:` and `has:attachment` in it narrow by those
+   * alone. `fromContacts` keeps those with a message from one of the asker's contacts. `before` is
+   * the `lastAt` of the last thread of the page before.
    */
-  z.object({ type: z.literal("email.list"), query: z.string().max(200).optional(), before: Time.optional(), limit: Limit(50, 100) }),
+  z.object({ type: z.literal("email.list"), query: z.string().max(200).optional(), fromContacts: z.boolean().optional(), before: Time.optional(), limit: Limit(50, 100) }),
   /** One of the asker's email threads with every message in it, oldest first. `id` is a thread's or one of its messages'. */
   z.object({ type: z.literal("email.thread"), sourceId: SourceId, id: RecordId }),
   /** The addresses the asker's mail is recognized by: their sign-in email, and those they added, each verified or waiting for its code. */
@@ -2104,6 +2106,8 @@ export interface MailThread {
   count: number;
   /** The start of the latest message's text. */
   snippet: string;
+  /** Whether a message in it came with files. */
+  attachments: boolean;
 }
 
 export interface MailThreadRead extends MailThread {

@@ -71,7 +71,8 @@ export interface MailSource {
   info: Described;
   /** Where mail is sent to be kept, such as notes@in.commonink.app. */
   address: string;
-  list(ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; more: boolean }>;
+  /** `senders` keeps the threads with a message from one of those addresses. */
+  list(ask: { query?: string | undefined; before?: number | undefined; limit: number; senders?: readonly string[] | undefined }): Promise<{ threads: MailThread[]; more: boolean }>;
   /** The thread an id names: a thread's, or one of its messages'. */
   thread(id: string): Promise<MailThreadRead | null>;
   /** Whether an id is one message's, which a reference then points at within its thread. */
@@ -496,11 +497,31 @@ async function mailOf(asker: Asker): Promise<MailSource> {
   return source;
 }
 
-/** A page of the asker's email threads, latest first. With email not connected there are none, and `sources` says so. */
-export async function listMail(asker: Asker, ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; sources: Source[]; more: boolean; address: string | null }> {
-  const { sources, read } = await readEach<MailSource, { threads: MailThread[]; more: boolean; address: string }>(asker, "email", async (source) => ({ ...(await source.list(ask)), address: source.address }));
+/** The most contacts' addresses the threads from contacts are looked for by. */
+const MOST_SENDERS = 2000;
+
+/**
+ * A page of the asker's email threads, latest first. With email not connected there are none, and
+ * `sources` says so. `fromContacts` keeps those from an address one of the asker's contacts has,
+ * as their contacts are read now; contacts that can't be read leave none.
+ */
+export async function listMail(
+  asker: Asker,
+  ask: { query?: string | undefined; fromContacts?: boolean | undefined; before?: number | undefined; limit: number },
+): Promise<{ threads: MailThread[]; sources: Source[]; more: boolean; address: string | null }> {
+  const senders = ask.fromContacts ? await contactAddresses(asker) : undefined;
+  const { sources, read } = await readEach<MailSource, { threads: MailThread[]; more: boolean; address: string }>(asker, "email", async (source) => ({
+    ...(await source.list({ query: ask.query, before: ask.before, limit: ask.limit, senders })),
+    address: source.address,
+  }));
   const address = read[0]?.address ?? (await mailOf(asker).then((s) => s.address, () => null));
   return { threads: read.flatMap((r) => r.threads), sources, more: read.some((r) => r.more), address };
+}
+
+/** Every address the asker's contacts have, in lower case, as their connected contacts say now. */
+async function contactAddresses(asker: Asker): Promise<string[]> {
+  const { read } = await readEach<ContactsSource, Contact[]>(asker, "contacts", async (source) => (await source.list()).contacts).catch(() => ({ read: [] as Contact[][] }));
+  return [...new Set(read.flat().flatMap((c) => c.emails.map((e) => e.value.trim().toLowerCase())))].slice(0, MOST_SENDERS);
 }
 
 export async function readMail(asker: Asker, sourceId: string, id: string): Promise<MailThreadRead> {

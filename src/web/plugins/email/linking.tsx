@@ -100,7 +100,7 @@ export function emailLinks(host: PluginHost) {
     host,
     kind: "email",
     title: "Email",
-    shown: (record) => ({ text: shownMessage(record)?.subject || record.thread.subject, title: "" }),
+    shown: (record) => ({ text: (record.messageId && shownMessage(record)?.subject) || record.thread.subject, title: "" }),
     open: (record) => host.app().go(threadPath(record.messageId ?? record.thread.id)),
     card(el, record) {
       shown.set(record.ref, record);

@@ -161,53 +161,100 @@ const toMessage = (sourceId: string, r: MessageRow): MailMessage => ({
   comment: r.comment,
 });
 
-const snippetOf = (text: string) => text.replace(/\s+/g, " ").trim().slice(0, 200);
+/** How a message begins, as a list shows it: its own words, without the lines it quotes. */
+const snippetOf = (text: string) =>
+  text
+    .split("\n")
+    .filter((line) => !/^\s*>/.test(line))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
 
 /** A thread as a list shows it, from its messages in order. */
-function summed(sourceId: string, id: string, subject: string, messages: Pick<MailMessage, "from" | "sentAt" | "text">[]): MailThread {
+function summed(sourceId: string, id: string, subject: string, messages: (Pick<MailMessage, "from" | "sentAt" | "text"> & { attached: boolean })[]): MailThread {
   const from: MailAddress[] = [];
   for (const m of messages) if (!from.some((f) => f.address === m.from.address)) from.push(m.from);
   const last = messages[messages.length - 1];
-  return { sourceId, id, subject, from, firstAt: messages[0]?.sentAt ?? 0, lastAt: last?.sentAt ?? 0, count: messages.length, snippet: snippetOf(last?.text ?? "") };
+  return { sourceId, id, subject, from, firstAt: messages[0]?.sentAt ?? 0, lastAt: last?.sentAt ?? 0, count: messages.length, snippet: snippetOf(last?.text ?? ""), attachments: messages.some((m) => m.attached) };
 }
 
-/** Words a list is narrowed by, each to be found in some field of one message, as LIKE patterns. */
-const likes = (query: string | undefined) =>
-  (query ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 10)
-    // D1 takes a LIKE pattern of at most 50 bytes, so a long word is looked for by its start.
-    .map((w) => {
-      let kept = "";
-      for (const c of w.replace(/[\\%_]/g, (special) => `\\${special}`)) {
-        if (new TextEncoder().encode(kept + c).length > 40) break;
-        kept += c;
-      }
-      return `%${kept.endsWith("\\") && !kept.endsWith("\\\\") ? kept.slice(0, -1) : kept}%`;
-    });
+/** A word to look for with LIKE, escaped. D1 takes a pattern of at most 50 bytes, so a long word is looked for by its start. */
+function like(word: string): string {
+  let kept = "";
+  for (const c of word.replace(/[\\%_]/g, (special) => `\\${special}`)) {
+    if (new TextEncoder().encode(kept + c).length > 40) break;
+    kept += c;
+  }
+  return `%${kept.endsWith("\\") && !kept.endsWith("\\\\") ? kept.slice(0, -1) : kept}%`;
+}
 
-/** A page of the person's threads, latest first, each with a message holding every word of `query`. */
-export async function listThreads(db: D1Database, personId: string, sourceId: string, ask: { query?: string | undefined; before?: number | undefined; limit: number }): Promise<{ threads: MailThread[]; more: boolean }> {
-  const words = likes(ask.query);
+/**
+ * What a search of the threads asks for, as a mail app's search box reads it: words, each to be found
+ * somewhere in one message, `from:` words in its sender's name or address, `subject:` words in its
+ * subject, and `has:attachment`. A phrase in quotes is one word.
+ */
+export interface MailQuery {
+  words: string[];
+  from: string[];
+  subject: string[];
+  attachment: boolean;
+}
+
+const TERM = /(?:(from|subject|has):)?(?:"([^"]*)"?|(\S+))/gi;
+
+export function readQuery(query: string | undefined): MailQuery {
+  const read: MailQuery = { words: [], from: [], subject: [], attachment: false };
+  for (const [, op, quoted, bare] of (query ?? "").matchAll(TERM)) {
+    const word = (quoted ?? bare ?? "").trim();
+    const key = op?.toLowerCase();
+    if (key === "has" && /^attachments?$/i.test(word)) read.attachment = true;
+    else if (key === "from" && word) read.from.push(word);
+    else if (key === "subject" && word) read.subject.push(word);
+    else if (word) read.words.push(op ? `${op}:${word}` : word);
+  }
+  // At most so many of each, so a search is one statement D1 binds.
+  return { words: read.words.slice(0, 10), from: read.from.slice(0, 5), subject: read.subject.slice(0, 5), attachment: read.attachment };
+}
+
+/**
+ * A page of the person's threads, latest first, each with a message that has all `query` asks for.
+ * `senders`, where it is given, keeps those with a message from one of those addresses.
+ */
+export async function listThreads(
+  db: D1Database,
+  personId: string,
+  sourceId: string,
+  ask: { query?: string | undefined; before?: number | undefined; limit: number; senders?: readonly string[] | undefined },
+): Promise<{ threads: MailThread[]; more: boolean }> {
+  const { words, from, subject, attachment } = readQuery(ask.query);
+  const binds: unknown[] = [personId, ask.before ?? null, ask.limit + 1];
+  const bound = (value: unknown) => `?${binds.push(value)}`;
   const haystack = "(m.subject || ' ' || m.from_name || ' ' || m.from_address || ' ' || m.to_list || ' ' || m.cc_list || ' ' || COALESCE(m.comment, '') || ' ' || m.text)";
+  const holds = [
+    ...words.map((w) => `${haystack} LIKE ${bound(like(w))} ESCAPE '\\'`),
+    ...from.map((w) => `(m.from_name || ' ' || m.from_address) LIKE ${bound(like(w))} ESCAPE '\\'`),
+    ...subject.map((w) => `m.subject LIKE ${bound(like(w))} ESCAPE '\\'`),
+    ...(attachment ? ["m.attachments != '[]'"] : []),
+    ...(ask.senders ? [`m.from_address IN (SELECT value FROM json_each(${bound(JSON.stringify(ask.senders))}))`] : []),
+  ];
   const { results } = await db
     .prepare(
       `SELECT t.id, t.subject FROM mail_threads t WHERE t.person_id = ?1 AND t.merged_into IS NULL AND (?2 IS NULL OR t.last_at < ?2)
-       AND EXISTS (SELECT 1 FROM mail_messages m WHERE m.thread_id = t.id${words.length ? ` AND ${words.map((_, i) => `${haystack} LIKE ?${i + 4} ESCAPE '\\'`).join(" AND ")}` : ""})
+       AND EXISTS (SELECT 1 FROM mail_messages m WHERE m.thread_id = t.id${holds.map((h) => ` AND ${h}`).join("")})
        ORDER BY t.last_at DESC, t.id LIMIT ?3`,
     )
-    .bind(personId, ask.before ?? null, ask.limit + 1, ...words)
+    .bind(...binds)
     .all<{ id: string; subject: string }>();
   const page = results.slice(0, ask.limit);
   if (!page.length) return { threads: [], more: false };
   const { results: rows } = await db
-    .prepare(`SELECT thread_id, from_name, from_address, sent_at, substr(text, 1, 400) AS text FROM mail_messages WHERE thread_id IN (${page.map(() => "?").join(",")}) ORDER BY sent_at, received_at, id`)
+    .prepare(`SELECT thread_id, from_name, from_address, sent_at, substr(text, 1, 400) AS text, attachments != '[]' AS attached FROM mail_messages WHERE thread_id IN (${page.map(() => "?").join(",")}) ORDER BY sent_at, received_at, id`)
     .bind(...page.map((t) => t.id))
-    .all<{ thread_id: string; from_name: string; from_address: string; sent_at: number; text: string }>();
+    .all<{ thread_id: string; from_name: string; from_address: string; sent_at: number; text: string; attached: number }>();
   const byThread = Map.groupBy(rows, (r) => r.thread_id);
   return {
-    threads: page.map((t) => summed(sourceId, t.id, t.subject, (byThread.get(t.id) ?? []).map((r) => ({ from: { name: r.from_name, address: r.from_address }, sentAt: r.sent_at, text: r.text })))),
+    threads: page.map((t) => summed(sourceId, t.id, t.subject, (byThread.get(t.id) ?? []).map((r) => ({ from: { name: r.from_name, address: r.from_address }, sentAt: r.sent_at, text: r.text, attached: r.attached === 1 })))),
     more: results.length > ask.limit,
   };
 }
@@ -223,7 +270,7 @@ export async function readThread(db: D1Database, personId: string, sourceId: str
   if (!thread || thread.merged_into) return null;
   const { results } = await db.prepare("SELECT * FROM mail_messages WHERE thread_id = ? AND person_id = ? ORDER BY sent_at, received_at, id").bind(thread.id, personId).all<MessageRow>();
   const messages = results.map((r) => toMessage(sourceId, r));
-  return { ...summed(sourceId, thread.id, thread.subject, messages), messages };
+  return { ...summed(sourceId, thread.id, thread.subject, messages.map((m) => ({ ...m, attached: m.attachments.length > 0 }))), messages };
 }
 
 /** Whether `id` names one message of the person's (and not a thread). */

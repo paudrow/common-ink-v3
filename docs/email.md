@@ -9,7 +9,8 @@ Mail a person sends, copies (BCC) or forwards to **notes@in.commonink.app** is k
 3. Send, BCC or forward mail to notes@in.commonink.app from your addresses:
    - **BCC on mail you send** keeps your own message. Your replies join the thread they answer.
    - **Forwarding** keeps the message you forwarded, from its sender, and what you wrote above it. Forwarding as an attachment keeps the original's ids, so it threads exactly. A forward written into the text, as Gmail, Apple Mail and Outlook write one, threads by its subject and the people in it.
-4. A thread opens at `/email/<id>`. To link to it from a note, type `@` and words of its subject or sender, or press **Copy link** on the thread or on one message. The note holds `[[email:ref]]` and nothing of the mail. You see the link as the thread's subject; a click or vim's `gd` opens it, and resting on it shows who sent it, when, and how it begins. Everyone else who reads the note, members, guests and anyone with a share link, sees "Email" and nothing more. `[[email:ref|words]]` shows the words instead, to everyone. Notes written before links held `::email{ref subject}`, which is converted to `[[email:ref]]` once.
+4. The Email page lists your threads beside the one you read, as a mail app does: who wrote, the subject, how the latest message begins, and when. Search by words, `from:`, `subject:` and `has:attachment`, or press **Has attachments** or **From contacts**. j, k and the arrow keys move through the list, and Enter opens a thread. Its earlier messages are folded to a line each, and so is what a reply quotes. A message's formatting is drawn in a frame of its own origin that runs nothing and loads nothing from anywhere; **Show text** shows its text instead. Attachments are listed by name, type and size. **Make a note from this** makes a note with a link to the thread and its messages quoted.
+5. A thread opens at `/email/<id>`. To link to it from a note, type `@` and words of its subject or sender, or press **Copy link** on the thread or on one message. The note holds `[[email:ref]]` and nothing of the mail. You see the link as the thread's subject; a click or vim's `gd` opens it, and resting on it shows who sent it, when, and how it begins. Everyone else who reads the note, members, guests and anyone with a share link, sees "Email" and nothing more. `[[email:ref|words]]` shows the words instead, to everyone. Notes written before links held `::email{ref subject}`, which is converted to `[[email:ref]]` once.
 
 Mail is dropped, and its sender told nothing, when any of these is true:
 
@@ -26,6 +27,7 @@ Disconnecting Email deletes every message kept and every address you added.
 |---|---|
 | Inbound: the Worker's `email()` handler, the recipient check, `/dev/email` | `src/worker/mail.ts`, `src/worker/index.ts` |
 | Reading a message: MIME (postal-mime), forwards, Authentication-Results, HTML sanitizing | `src/core/mail.ts` |
+| The frame a message's HTML is drawn in: its document and policy, whose only script is its own, by hash | `src/worker/frames.ts` (`/embed-frame/mail`), `src/web/htmlFrame.ts` |
 | Keeping it: senders and codes, threads, dedupe, limits, `receive` | `src/core/mailbox.ts` |
 | The data source (`MailSource`, a third `DataSource` kind) and its operations | `src/core/sources.ts`, `src/worker/sources/mail.ts` |
 | Operations: `email.list`, `email.thread`, `email.senders`, `email.addSender`, `email.removeSender`, and `record.refer` / `record.read` for `[[email:ref]]` | `src/core/protocol.ts`, `src/core/operations.ts` |
@@ -59,6 +61,8 @@ MAIL
 ```
 
 It answers what became of the message, such as `{"kept":"…","personId":"…"}` or `{"dropped":"not_connected"}`.
+
+`node scripts/sample-mail.ts --url http://localhost:5173` keeps a few sample threads for the dev user this way: a conversation, an HTML receipt with a file, forwards from a sample contact and from someone who isn't one, and two from a mailing list.
 
 ## Setting it up in Cloudflare (by hand)
 
@@ -117,7 +121,7 @@ What a message is trusted by is the topmost `Authentication-Results` header, whi
 
 - **Attachments.** Only names, types and sizes are kept. Keeping the bytes means R2 objects of the person's own, outside any workspace, deleted with the account and on disconnect. Another way is saving one as an upload into a workspace the member picks.
 - **Retention.** Mail is kept until the member disconnects or deletes their account. A limit, such as a year, or a cap per person, isn't set.
-- **Search.** It is a `LIKE` over each message, fine for a person's mail at this size. The notes' full-text index (`note_search`) is per workspace and isn't used.
+- **Search.** It is a `LIKE` over each message, fine for a person's mail at this size. **From contacts** reads the member's contacts from Google at each listing, up to 2,000 addresses. The notes' full-text index (`note_search`) is per workspace and isn't used.
 - **Paging.** The next page of threads is asked for by the last one's time alone, so a thread whose latest message arrived in the same millisecond as the last one listed can be skipped. A cursor of time and id would fix it, at the cost of one more argument for every agent.
 - **Threads merged by an old id.** Any id in References joins threads. Two threads of a mailing list that share one ancestor become one, and stay one.
 - **A domain that lets anyone send as anyone.** Trust is the domain's: where one user can send as another's address, they can verify it as theirs. The code's prompt warns against sending a code someone else gave you.

@@ -5,7 +5,7 @@
 // of its own and no network. Those hold whatever the frame's attributes say, and whoever loads it.
 // WebRTC is the exception: no header a browser honours today stops a peer connection.
 
-import { EMBED_FRAME_PATH } from "../core/frames.ts";
+import { EMBED_FRAME_PATH, MAIL_FRAME_PATH } from "../core/frames.ts";
 import { readOrigin } from "../core/plugins.ts";
 
 /**
@@ -92,6 +92,72 @@ const embedFrame = (ancestors: string, network: readonly string[] | null = null)
     },
   });
 
+// The document a message's HTML is drawn in on the Email page. Unlike an embed's, what it is given
+// is never run: the only script its policy lets run is this one, by its hash, so no handler, script
+// or javascript: link in the message can, whatever the sanitizing on arrival missed. It draws the
+// message on its own page, opens each link in a tab of its own, and tells the app how tall it is.
+const MAIL_SCRIPT = `if (parent !== window) {
+  addEventListener("message", function take(event) {
+    if (event.source !== parent || !event.data || typeof event.data.html !== "string") return;
+    removeEventListener("message", take);
+    const given = new DOMParser().parseFromString(event.data.html, "text/html");
+    // What arrival's sanitizing took out already, taken out again: what would load, run, or send the frame elsewhere.
+    for (const out of given.querySelectorAll("script, link, base, meta[http-equiv], iframe, object, embed")) out.remove();
+    document.head.append(...given.head.childNodes);
+    document.body.replaceChildren(...given.body.childNodes);
+    for (const link of document.querySelectorAll("a")) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    const tell = function () { parent.postMessage({ embedFrame: "height", height: document.documentElement.scrollHeight }, "*"); };
+    parent.postMessage({ embedFrame: "drawn" }, "*");
+    tell();
+    new ResizeObserver(tell).observe(document.body);
+  });
+  parent.postMessage({ embedFrame: "ready" }, "*");
+}`;
+
+const MAIL_DOCUMENT = `<!doctype html>
+<meta charset="utf-8">
+<title>Email</title>
+<style>html, body { margin: 0; } body { padding: 12px 16px; overflow-wrap: anywhere; } img { max-width: 100%; height: auto; }</style>
+<script>${MAIL_SCRIPT}</script>
+<body></body>
+`;
+
+const sha256 = async (text: string) => btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))));
+/** The script's hash, made the first time it is asked for: a Worker hashes nothing as it starts, outside a request. */
+let mailHash: Promise<string> | null = null;
+
+/**
+ * The policy the mail document is served with: an origin of its own, no network, pictures only from
+ * the message itself, and no script but its own. Its links may open a tab, which it has no hold on.
+ */
+export async function mailPolicy(ancestors: string): Promise<string> {
+  return [
+    "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox",
+    "default-src 'none'",
+    `script-src 'sha256-${await (mailHash ??= sha256(MAIL_SCRIPT))}'`,
+    "style-src 'unsafe-inline'",
+    "img-src data:",
+    "frame-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+    `frame-ancestors ${ancestors}`,
+  ].join("; ");
+}
+
+const mailFrame = async (ancestors: string) =>
+  new Response(MAIL_DOCUMENT, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": await mailPolicy(ancestors),
+      "Cache-Control": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+    },
+  });
+
 /** The address of a host given to HTML embeds alone, when `EMBED_ORIGIN` names one. */
 export function embedOrigin(env: { EMBED_ORIGIN?: string }): string | null {
   if (!env.EMBED_ORIGIN) return null;
@@ -113,6 +179,7 @@ type Redeem = (token: string) => Promise<readonly string[] | null>;
  */
 async function served(path: string, redeem: Redeem, ancestors: string): Promise<Response> {
   if (path === EMBED_FRAME_PATH) return embedFrame(ancestors);
+  if (path === MAIL_FRAME_PATH) return mailFrame(ancestors);
   const sites = path.startsWith(GRANTED_PATH) ? await redeem(path.slice(GRANTED_PATH.length)) : null;
   return sites ? embedFrame(ancestors, sites) : new Response("Not found", { status: 404 });
 }
