@@ -258,7 +258,7 @@ test("the menu in a card's corner archives with Undo, moves, shares, copies the 
   await menu(page).getByRole("menuitem", { name: "Move to Trash" }).click();
   await expect(listedNotes(page)).toHaveCount(0);
   await expect.poll(async () => (await perform(page, { type: "note.read", id: long.id })).state).toBe("trashed");
-  await page.getByRole("button", { name: "Undo" }).click();
+  await page.locator(".toast-card").filter({ hasText: "Moved to Trash" }).getByRole("button", { name: "Undo" }).click();
   await expect(listedNotes(page)).toHaveText(["Long"]);
 });
 

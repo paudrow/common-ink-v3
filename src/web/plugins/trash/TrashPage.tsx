@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ago, useNow, type PluginHost, type TrashedNote, type TrashedUpload, type ViewProps } from "../../plugin-api.ts";
 import { reasonOf } from "../lib/FoundNote.tsx";
-import { lifecycle, mayPurge, restoredMessage } from "../lib/lifecycle.ts";
+import { lifecycle, mayPurge, uploadLifecycle } from "../lib/lifecycle.ts";
 import { ShowMore, usePaged } from "../lib/paged.tsx";
+import { SelectionBar } from "../lib/SelectionBar.tsx";
+import { actedOn, clear } from "../lib/selecting.ts";
 import { daysLeft, leftLabel } from "./days.ts";
 import { Purge } from "./Purge.tsx";
 
@@ -12,14 +14,21 @@ const titleOf = (note: { title: string }) => note.title || "Untitled";
 const PAGE = 100;
 const MOST = 500;
 
-/** Trash: every note waiting there that the member can see, with the way back and the way out. */
+/**
+ * Trash: every note waiting there that the member can see, with the way back and the way out. Notes,
+ * and files, can be selected to restore together, which is a step that undo takes back. Delete
+ * forever is one at a time, and nothing takes it back.
+ */
 export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   const now = useNow();
   const [asked, setAsked] = useState(0);
   const [files, setFiles] = useState<TrashedUpload[] | null>(null);
   /** Why the files couldn't be read, until they are. */
   const [filesUnread, setFilesUnread] = useState<string | null>(null);
-  const { restoring, purge } = lifecycle(host);
+  const { restore, purge } = lifecycle(host);
+  const uploads = uploadLifecycle(host);
+  const notesList = useRef<HTMLUListElement>(null);
+  const filesList = useRef<HTMLUListElement>(null);
   // Read again whenever the app learns that Trash changed, here or anywhere else.
   const known = app.trashed.map((n) => n.id).sort().join(",");
 
@@ -52,24 +61,19 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
       live = false;
     };
   }, [host, asked, known]);
+  // A file restored or trashed again, here or anywhere else, is told to the app, and the files are read again.
+  useEffect(() => host.uploads.onReferred(() => setAsked((n) => n + 1)), [host]);
 
-  /** Tells the app what a file is now, so each note that shows it follows. */
-  const restoreFile = (file: TrashedUpload) =>
-    host.perform({ type: "upload.restore", id: file.id }).then(
-      ({ folderGone, name, type, kind, size, width, height, state }) => {
-        host.uploads.learn([{ id: file.id, upload: { name, type, kind, size, width, height, state } }]);
-        host.app().notify({ message: `${file.name}: ${restoredMessage(folderGone)}`, icon: "check" });
-        setAsked((n) => n + 1);
-        app.refresh();
-      },
-      (err: Error) => host.app().notify({ message: err.message }),
-    );
-
-  const restore = (note: TrashedNote) =>
-    restoring(note.id).then(
-      (said) => host.app().notify({ ...said, message: `${titleOf(note)}: ${said.message}` }),
-      (err: Error) => host.app().notify({ message: err.message }),
-    );
+  /** Restores the notes, or the files, of rows: a row's own, or every row selected with it, which are let go. */
+  const of = <T extends { id: string; access: string }>(all: readonly T[] | null, rows: readonly HTMLElement[]) => (all ?? []).filter((t) => t.access === "edit" && rows.some((row) => row.dataset.row === t.id));
+  const restoreNotes = (rows: readonly HTMLElement[]) => {
+    if (notesList.current) clear(notesList.current);
+    void restore(of(listed, rows).map((n) => n.id));
+  };
+  const restoreFiles = (rows: readonly HTMLElement[]) => {
+    if (filesList.current) clear(filesList.current);
+    void uploads.restore(of(files, rows));
+  };
 
   return (
     <section className="mode-view trash-page" aria-label="Trash">
@@ -81,12 +85,13 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
         </p>
       )}
       {listed && !listed.length && files?.length === 0 && <p className="trash-none">Trash is empty.</p>}
+      <SelectionBar list={notesList} actions={[{ label: "Restore", icon: "restore", run: restoreNotes }]} />
       {listed && listed.length > 0 && (
-        <ul className="trash-list" aria-label="Notes in Trash">
+        <ul ref={notesList} className="trash-list" aria-label="Notes in Trash" data-selectable>
           {listed.map((note) => {
             const folder = note.folderId && app.folders?.byId.has(note.folderId) ? app.folders.pathName(note.folderId) : null;
             return (
-              <li key={note.id}>
+              <li key={note.id} data-row={note.id}>
                 <div className="trash-what">
                   <a
                     href={app.notePath(note.id)}
@@ -108,7 +113,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
                   </span>
                 </div>
                 <div className="trash-actions">
-                  <button type="button" className="button small" disabled={note.access !== "edit"} onClick={() => void restore(note)}>
+                  <button type="button" className="button small" disabled={note.access !== "edit"} onClick={(e) => restoreNotes(actedOn(e.currentTarget.closest("li")!))}>
                     Restore
                   </button>
                   {mayPurge(host, note) && (
@@ -131,11 +136,12 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
       {files && files.length > 0 && (
         <>
           <h2 className="trash-part">Files</h2>
-          <ul className="trash-list" aria-label="Files in Trash">
+          <SelectionBar list={filesList} actions={[{ label: "Restore", icon: "restore", run: restoreFiles }]} />
+          <ul ref={filesList} className="trash-list" aria-label="Files in Trash" data-selectable>
             {files.map((file) => {
               const folder = file.folderId && app.folders?.byId.has(file.folderId) ? app.folders.pathName(file.folderId) : null;
               return (
-                <li key={file.id}>
+                <li key={file.id} data-row={file.id}>
                   <div className="trash-what">
                     <span className="trash-title">{file.name}</span>
                     <span className="trash-meta">
@@ -147,7 +153,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
                     </span>
                   </div>
                   <div className="trash-actions">
-                    <button type="button" className="button small" disabled={file.access !== "edit"} onClick={() => void restoreFile(file)}>
+                    <button type="button" className="button small" disabled={file.access !== "edit"} onClick={(e) => restoreFiles(actedOn(e.currentTarget.closest("li")!))}>
                       Restore
                     </button>
                     {file.access === "edit" && (host.workspace.role === "admin" || host.workspace.role === "editor") && (

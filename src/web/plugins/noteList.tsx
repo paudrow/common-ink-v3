@@ -5,6 +5,8 @@ import { lifecycle } from "./lib/lifecycle.ts";
 import { ContextMenu, type MenuItem } from "./lib/Menu.tsx";
 import { QueryBar } from "./lib/QueryBar.tsx";
 import { Segmented } from "./lib/Segmented.tsx";
+import { SelectionBar, type SelectionAction } from "./lib/SelectionBar.tsx";
+import { actedOn, clear, selectedIn, subscribe } from "./lib/selecting.ts";
 import { EXCERPT_HEIGHT, ITEM_ICONS, ITEM_LABELS, NEAR_PX, cardItems, editorLabel, editorsOf, estimatedHeight, shownHeight, type CardItem } from "./noteCard.ts";
 import { NoteCrumbs } from "./NoteCrumbs.tsx";
 import { INITIAL_VIEW, LIVES, ORDERS, fits, includeArchivedOf, lifeOf, listReducer, listed, notesIn, showOf, taggedQuery, titleOf, todosOf, withLife, withTodos, withoutTagMarks, TODO_CHOICES, type Life, type TodoChoice, type ListAction, type ListView } from "./noteListView.ts";
@@ -223,14 +225,15 @@ function folderForNew(app: App, folderId: string) {
 export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, autoFocus, inspected, onWiden, whichNotes = true, tag, again = 0 }: FinderProps) {
   const ids = useId();
   const now = useNow();
-  const { setArchived, trash } = useMemo(() => lifecycle(host), [host]);
+  const { setArchived, trash, move } = useMemo(() => lifecycle(host), [host]);
   const field = useRef<HTMLInputElement>(null);
+  const ul = useRef<HTMLUListElement>(null);
   const [typed, setTyped] = useState(view.query);
   /** The query this list last set. Any other one in its view came from outside, as from the address, and is shown in the field. */
   const written = useRef(view.query);
   const [search, dispatch] = useReducer(reduce, IDLE);
-  /** The menu that is open: a card's, or the folders one of its notes can be moved to. */
-  const [menu, setMenu] = useState<{ noteId: string; x: number; y: number; of: "note" | "folders" } | null>(null);
+  /** The menu that is open: a card's, or the folders its note, and every note selected with it, can be moved to. */
+  const [menu, setMenu] = useState<{ noteId: string; x: number; y: number; of: "note" | "folders"; moving?: readonly string[] } | null>(null);
   /** What had the keyboard when the menu was opened, which gets it back when the menu closes. */
   const menuFrom = useRef<HTMLElement | null>(null);
   /** The cards that have come near the list's window, whose notes are drawn. One that has been drawn stays drawn, so nothing running in it stops as it is scrolled away. */
@@ -380,6 +383,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     });
   }, [inFolder, search, view.show, view.hasTodos, view.sort, order, namesArchived, namesTrashed, namesOpen, app.notes, app.trashed, folderId, tag, typedWhere]);
   const notes = items.map((item) => item.note);
+  /** The notes of cards, in the list's order. */
+  const notesOf = (rows: readonly HTMLElement[]) => notes.filter((n) => rows.some((row) => row.dataset.row === n.id));
+  /** Whether every note selected is archived, when the selection bar's Archive is Unarchive. */
+  const allArchived = useSyncExternalStore(subscribe, () => !!ul.current && notesOf(selectedIn(ul.current)).every((n) => n.state === "archived"));
   // History is then the history of the notes found, and Info counts them, each following the query.
   // Told only once the list answers its query: while a search is on its way it says what it said before.
   const told = useRef<Showing | null>(null);
@@ -512,21 +519,50 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     act({ type: "wholeOrLess", noteId });
   };
   const card = (noteId: string) => scroller.current?.querySelector<HTMLElement>(`[data-note="${noteId}"]`);
-  /** Gives the keyboard to the card after one that is about to leave the list, so the next press is for the next note. */
-  const toNext = (at: number) => {
-    const next = notes[at + 1] ?? notes[at - 1];
+  /** The notes an action on a card is for: every note selected with it when it is one of them, or else its own. */
+  const forCard = (note: NoteSummary) => {
+    const row = ul.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(note.id)}"]`);
+    return row ? notesOf(actedOn(row)) : [note];
+  };
+  /**
+   * Gives the keyboard to the first card after the ones about to leave the list that stays, or else
+   * the nearest before them, so the next press is for the next note.
+   */
+  const toNext = (leaving: readonly NoteSummary[]) => {
+    const at = notes.findLastIndex((n) => leaving.includes(n));
+    const next = at < 0 ? undefined : [...notes.slice(at + 1), ...notes.slice(0, at).reverse()].find((n) => !leaving.includes(n));
     if (!next) return;
     setAtId(next.id);
     // It is about to be where the card that leaves is now, so the list is not scrolled to it where it is.
     card(next.id)?.focus({ preventScroll: true });
   };
-  /** Archives a note, or brings an archived one back. */
-  const archiveOrNot = (note: NoteSummary, at: number) => {
-    // The card stays where the query names the place the note goes to: an unarchived note is open, which a query naming no place lists.
-    const stays = note.state === "archived" ? namesOpen || !(namesArchived || namesTrashed) : namesArchived;
-    if (!stays) toNext(at);
-    void setArchived(note.id, note.state !== "archived");
+  /**
+   * What is done to notes from the list, to a card's note or to every note selected with it, each as
+   * one step that undo takes back. What was selected is let go first, so that the keyboard going on to
+   * the next card doesn't take the selection there.
+   */
+  const archiveAll = (of: readonly NoteSummary[], archive: boolean) => {
+    if (ul.current) clear(ul.current);
+    const going = of.filter((n) => n.access === "edit" && (n.state === "archived") !== archive);
+    // The cards stay where the query names the place the notes go to: an unarchived note is open, which a query naming no place lists.
+    const stays = archive ? namesArchived : namesOpen || !(namesArchived || namesTrashed);
+    if (!stays) toNext(going);
+    void setArchived(going.map((n) => n.id), archive);
   };
+  const trashAll = (of: readonly NoteSummary[]) => {
+    if (ul.current) clear(ul.current);
+    const going = of.filter((n) => n.access === "edit");
+    toNext(going);
+    void trash(going.map((n) => n.id));
+  };
+  const moveAll = (of: readonly NoteSummary[], to: string) => {
+    if (ul.current) clear(ul.current);
+    const going = of.filter((n) => n.access === "edit" && n.folderId !== to);
+    if (folderId !== ALL_NOTES) toNext(going);
+    void move(going.map((n) => n.id), to);
+  };
+  /** A card's own Archive, its key and its menu's: what the card says, for every note selected with it. */
+  const archiveOrNot = (note: NoteSummary) => archiveAll(forCard(note), note.state !== "archived");
 
   const onCardKey = (e: KeyboardEvent, note: NoteSummary, at: number) => {
     if (e.target !== e.currentTarget) return;
@@ -545,7 +581,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
       open(note, withModifier(e) ? "behind" : "preview");
     } else if (e.key === "e" && !e.metaKey && !e.ctrlKey && !e.altKey && note.access === "edit") {
       e.preventDefault();
-      archiveOrNot(note, at);
+      archiveOrNot(note);
     } else if (e.key === " " && !withModifier(e) && !e.shiftKey && !e.altKey && e.currentTarget.querySelector("[data-row-toggle]")) {
       // Space grows the card to the whole note, or cuts it back, as its Show whole note does. A card that is all there scrolls the list as Space does.
       e.preventDefault();
@@ -599,31 +635,23 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     });
   const runs = (note: NoteSummary, at: { x: number; y: number }): Record<CardItem, () => void> => ({
     share: () => app.toggleOverlay(SHARE_OVERLAY, { noteId: note.id }),
-    move: () => setMenu({ noteId: note.id, ...at, of: "folders" }),
+    move: () => setMenu({ noteId: note.id, ...at, of: "folders", moving: forCard(note).map((n) => n.id) }),
     copyLink: () => void copyText(`${location.origin}${app.notePath(note.id)}`).then(() => app.notify({ message: "Link copied" })),
     splitRight: () => app.openBeside?.({ kind: "note", id: note.id }, "right"),
     splitDown: () => app.openBeside?.({ kind: "note", id: note.id }, "down"),
     info: () => app.toggleOverlay(INFO_OVERLAY, { noteId: note.id }),
-    archive: () => archiveOrNot(note, notes.indexOf(note)),
-    unarchive: () => archiveOrNot(note, notes.indexOf(note)),
-    trash: () => {
-      toNext(notes.indexOf(note));
-      void trash(note.id);
-    },
+    archive: () => archiveOrNot(note),
+    unarchive: () => archiveOrNot(note),
+    trash: () => trashAll(forCard(note)),
   });
-  const menuItems = (note: NoteSummary, at: { x: number; y: number }, of: "note" | "folders"): MenuItem[] =>
-    of === "note"
-      ? itemsOf(note).map((item) => ({ label: ITEM_LABELS[item], icon: ITEM_ICONS[item], action: runs(note, at)[item] }))
+  /** The notes the folders' menu moves: the card's, and every note selected with it. */
+  const moving = (note: NoteSummary, ids: readonly string[] = [note.id]) => notes.filter((n) => ids.includes(n.id));
+  const menuItems = (note: NoteSummary, open: NonNullable<typeof menu>): MenuItem[] =>
+    open.of === "note"
+      ? itemsOf(note).map((item) => ({ label: ITEM_LABELS[item], icon: ITEM_ICONS[item], action: runs(note, open)[item] }))
       : targets
-          .filter((t) => t.id !== note.folderId)
-          .map((t) => ({
-            label: t.name,
-            icon: "folders" as const,
-            action: () => {
-              if (folderId !== ALL_NOTES) toNext(notes.indexOf(note));
-              void app.moveNote(note.id, t.id).catch((err: unknown) => app.notify({ message: reasonOf(err) }));
-            },
-          }));
+          .filter((t) => moving(note, open.moving).some((n) => n.folderId !== t.id))
+          .map((t) => ({ label: t.name, icon: "folders" as const, action: () => moveAll(moving(note, open.moving), t.id) }));
   /**
    * Opens a card's menu. For a private note the server is asked first whether this person may share it,
    * so the menu opens with every item it will have and none arrives under the pointer.
@@ -653,7 +681,28 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
   };
 
   const menuNote = menu && notes.find((n) => n.id === menu.noteId);
+  const menuMoves = menu && menuNote ? moving(menuNote, menu.moving) : [];
   const tabStop = notes.some((n) => n.id === atId) ? atId : notes[0]?.id;
+  /** What the selection bar does to every note selected. Move to opens the folders' menu under it, for all of them. */
+  const batch: SelectionAction[] = [
+    allArchived ? { label: "Unarchive", icon: "unarchive", run: (rows) => archiveAll(notesOf(rows), false) } : { label: "Archive", icon: "archive", run: (rows) => archiveAll(notesOf(rows), true) },
+    ...(targets.length
+      ? [
+          {
+            label: "Move to…",
+            icon: "folders" as const,
+            run: (rows: readonly HTMLElement[]) => {
+              const of = notesOf(rows);
+              const under = scroller.current?.querySelector(".folder-head .selection-bar")?.getBoundingClientRect();
+              if (!of[0] || !under) return;
+              menuFrom.current = card(of[0].id) ?? null;
+              setMenu({ noteId: of[0].id, x: under.left, y: under.bottom + 4, of: "folders", moving: of.map((n) => n.id) });
+            },
+          },
+        ]
+      : []),
+    { label: "Move to Trash", icon: "trash", run: (rows) => trashAll(notesOf(rows)) },
+  ];
 
   return (
     <section
@@ -673,6 +722,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
           <span className="folder-count" aria-live="polite">
             {status}
           </span>
+          <SelectionBar list={ul} actions={batch} />
           {newIn && (
             <button
               type="button"
@@ -747,14 +797,15 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
         {found?.indexing && <p className="search-status">{STILL_INDEXING}</p>}
         <nav aria-label="Notes">
           {!notes.length && (tag === undefined ? search.status !== "failed" && search.status !== "searching" : !!found) && <p className="empty">{nothing}</p>}
-          <ul className="cards" data-list aria-busy={search.status === "searching"}>
+          {/* Its cards can be selected, to archive, move or trash together. */}
+          <ul ref={ul} className="cards" data-list data-selectable aria-busy={search.status === "searching"}>
             {items.map(({ note, matches }, at) => {
               const whole = !!view.whole[note.id];
               const name = titleOf(note);
               const archived = note.state === "archived";
               const here = note.id === tabStop ? 0 : -1;
               return (
-                <li key={note.id} data-card={note.id}>
+                <li key={note.id} data-card={note.id} data-row={note.id}>
                   <article
                     className={snippets || whole ? "card" : "card titled"}
                     data-note={note.id}
@@ -789,7 +840,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
                           tabIndex={here}
                           aria-label={`${archived ? "Unarchive" : "Archive"} ${name}`}
                           title={archived ? "Unarchive (E)" : "Archive (E)"}
-                          onClick={() => archiveOrNot(note, at)}
+                          onClick={() => archiveOrNot(note)}
                         >
                           <Icon name={archived ? "unarchive" : "archive"} />
                         </button>
@@ -873,10 +924,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
       {menu && menuNote && (
         <ContextMenu
           key={menu.of}
-          label={menu.of === "note" ? `${titleOf(menuNote)} note` : `Move ${titleOf(menuNote)} to`}
+          label={menu.of === "note" ? `${titleOf(menuNote)} note` : `Move ${menuMoves.length > 1 ? `${menuMoves.length} notes` : titleOf(menuNote)} to`}
           x={menu.x}
           y={menu.y}
-          items={menuItems(menuNote, menu, menu.of)}
+          items={menuItems(menuNote, menu)}
           onClose={() => {
             // An item that opens something takes the keyboard there after this.
             if (menuFrom.current?.isConnected) menuFrom.current.focus();
@@ -921,7 +972,7 @@ export function keeping() {
 function NoteMenu({ app, host, note }: ViewProps & { host: PluginHost; note: NoteSummary }) {
   const button = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; of: "note" | "folders"; mayShare?: boolean } | null>(null);
-  const { setArchived, trash } = lifecycle(host);
+  const { setArchived, trash, move } = lifecycle(host);
   const sharing = host.commands.list().some((c) => c.id === SHARE_COMMAND);
   const targets = app.folders ? [...app.folders.byId.values()].filter((f) => f.access === "edit" && f.id !== note.folderId).map((f) => ({ id: f.id, name: app.folders!.pathName(f.id) })).sort((a, b) => a.name.localeCompare(b.name)) : [];
   const close = () => {
@@ -948,15 +999,15 @@ function NoteMenu({ app, host, note }: ViewProps & { host: PluginHost; note: Not
     splitRight: () => {},
     splitDown: () => {},
     info: () => app.toggleOverlay(INFO_OVERLAY, { noteId: note.id }),
-    archive: () => void setArchived(note.id, true),
-    unarchive: () => void setArchived(note.id, false),
-    trash: () => void trash(note.id),
+    archive: () => void setArchived([note.id], true),
+    unarchive: () => void setArchived([note.id], false),
+    trash: () => void trash([note.id]),
   });
   const items: MenuItem[] = !menu
     ? []
     : menu.of === "note"
       ? cardItems(note, { standing: host.workspace.role, sharing, splits: false, targets: targets.length, mayShare: menu.mayShare }).map((item) => ({ label: ITEM_LABELS[item], icon: ITEM_ICONS[item], action: runs(menu)[item] }))
-      : targets.map((t) => ({ label: t.name, icon: "folders" as const, action: () => void app.moveNote(note.id, t.id).catch((err: unknown) => app.notify({ message: reasonOf(err) })) }));
+      : targets.map((t) => ({ label: t.name, icon: "folders" as const, action: () => void move([note.id], t.id) }));
   return (
     <>
       <button ref={button} type="button" className="icon-button" aria-label="Note menu" title="More" aria-haspopup="menu" aria-expanded={menu !== null} onClick={() => (menu ? close() : open())}>

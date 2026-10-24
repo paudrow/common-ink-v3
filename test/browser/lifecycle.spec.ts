@@ -189,7 +189,7 @@ test("a note moved to Trash leaves the list at once, and Undo brings it back", a
 
   await expect(banner(page)).toHaveCount(0);
   await expect.poll(() => stateOf(page, note.id)).toBe("live");
-  await expect(notice(page)).toContainText("Restored from Trash.");
+  await expect(notice(page)).toHaveText("Undone: Moved to TrashRedo");
   await notice(page).locator(".toast-text").click();
   await expect(notice(page)).toHaveCount(0);
   await listShows(page, ["Scrap"]);
@@ -267,18 +267,20 @@ test("what an Undo answers is said in the card's place, and goes by itself once 
   await openNote(page, note);
   await openInfo(page);
   await inspector(page).getByRole("button", { name: "Move to Trash" }).click();
-  await notice(page).getByRole("button", { name: "Undo" }).click();
-  await expect(notice(page)).toHaveText("Restored from Trash.");
-  await page.mouse.move(5, 5);
-  // Five seconds for a card with nothing to press, with the pointer and the keyboard elsewhere.
-  await expect(notice(page)).toHaveCount(0, { timeout: 9000 });
-
-  await inspector(page).getByRole("button", { name: "Move to Trash" }).click();
   await notice(page).getByRole("button", { name: "Undo" }).press("Enter");
-  await expect(notice(page)).toHaveText("Restored from Trash.");
+  await expect(notice(page)).toHaveText("Undone: Moved to TrashRedo");
   await expect(notice(page)).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(notice(page)).toHaveCount(0);
+
+  // Deleted for good meanwhile, the note can't be restored, and the card says why, with nothing on it.
+  await inspector(page).getByRole("button", { name: "Move to Trash" }).click();
+  await perform(page, { type: "note.purge", id: note.id });
+  await notice(page).getByRole("button", { name: "Undo" }).click();
+  await expect(notice(page)).toHaveText("No such note");
+  await page.mouse.move(5, 5);
+  // Five seconds for a card with nothing to press, with the pointer and the keyboard elsewhere.
+  await expect(notice(page)).toHaveCount(0, { timeout: 9000 });
 });
 
 test("three notices with long titles still fit a small window, each cut to its card", async ({ page }) => {
@@ -319,7 +321,7 @@ for (const width of [1280, 420]) {
       await trashRows(page).filter({ hasText: title }).getByRole("button", { name: "Restore" }).press("Enter");
       await expect(notice(page)).toHaveCount(i + 1);
     }
-    await expect(notice(page)).toHaveText(["First: Restored from Trash.", "Second: Restored from Trash.", "Third: Restored from Trash."]);
+    await expect(notice(page)).toHaveText(["First: Restored from Trash.Undo", "Second: Restored from Trash.Undo", "Third: Restored from Trash.Undo"]);
     // A notice from any plugin is the same card: the todos' "Task completed" is drawn as these are.
     await expect(notice(page).first()).toHaveClass("toast-card");
 
@@ -344,7 +346,7 @@ for (const width of [1280, 420]) {
 
     // A fourth sends the oldest away.
     await trashRows(page).filter({ hasText: "Fourth" }).getByRole("button", { name: "Restore" }).press("Enter");
-    await expect(notice(page)).toHaveText(["Second: Restored from Trash.", "Third: Restored from Trash.", "Fourth: Restored from Trash."]);
+    await expect(notice(page)).toHaveText(["Second: Restored from Trash.Undo", "Third: Restored from Trash.Undo", "Fourth: Restored from Trash.Undo"]);
     await laidOut();
   });
 }

@@ -801,9 +801,16 @@ button.link:hover {
 
 .folder-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+/* What is selected of the cards is a line of its own under the title, which keeps its room. */
+.folder-head > .selection-bar {
+  flex-basis: 100%;
+  order: 1;
 }
 
 .folder-head h1 {
@@ -1349,6 +1356,11 @@ button.link:hover {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* A selected card is tinted itself, over the row it is in. */
+.cards > li[data-selected] > .card {
+  background-color: var(--selection);
 }
 
 /* A card is its note. What is said about it besides (private, archived) and what can be done at once (archive, the menu) sit in its top right corner and the note's text runs beside them. A card is picked up by this corner. */
@@ -9505,6 +9517,11 @@ button.todo-tag[aria-pressed="true"] {
 .selection-bar .button svg {
   width: 13px;
   height: 13px;
+}
+
+.sidebar > .selection-bar {
+  margin-top: 8px;
+  padding: 0 4px 0 10px;
 }
 
 .selection-count {
