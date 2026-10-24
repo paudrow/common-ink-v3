@@ -1,0 +1,224 @@
+/* PROTOTYPE, throw away. Row layouts for the Todos page, picked with ?rows=. */
+
+.rows-proto-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 9999;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 12px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #ffd84d;
+  color: #111;
+  font: 600 13px/1.2 system-ui, sans-serif;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.45);
+}
+.rows-proto-bar button {
+  border: 0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgb(0 0 0 / 0.12);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.rows-proto-bar small {
+  opacity: 0.6;
+  font-weight: 500;
+}
+
+/* Shared by B, C and D: rows divided by a hairline, no rounded hover pill, and what can be set (the unset chips and the
+   Abandon / Backlog buttons) laid over the right end of the row on hover or focus, holding no room at rest. */
+.todo-list:is([data-rows="B"], [data-rows="C"], [data-rows="D"]) > .todo-row {
+  position: relative;
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: 0;
+}
+.todo-list:is([data-rows="B"], [data-rows="C"], [data-rows="D"]) > .todo-row + .todo-row {
+  border-top: 1px solid var(--line);
+}
+.todo-list:is([data-rows="B"], [data-rows="C"], [data-rows="D"]) > .todo-row:focus,
+.todo-list:is([data-rows="B"], [data-rows="C"], [data-rows="D"]) > .todo-row:focus-within {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  outline: none;
+}
+.todo-list:is([data-rows="B"], [data-rows="C"], [data-rows="D"]) .todo-chip[data-unset],
+.todo-list:is([data-rows="B"], [data-rows="C"], [data-rows="D"]) .todo-states {
+  display: none;
+}
+.todo-list:is([data-rows="B"], [data-rows="C"], [data-rows="D"]) > .todo-row:is(:hover, :focus-within, [data-picking]) .todo-states {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px 4px 3px 14px;
+  transform: translateY(-50%);
+  background: linear-gradient(to right, transparent, var(--hover) 14px);
+}
+.todo-list:is([data-rows="B"], [data-rows="C"], [data-rows="D"]) > .todo-row:is(:hover, :focus-within, [data-picking]) .todo-chip[data-unset] {
+  display: inline-flex;
+}
+
+/* B: everything on one line. The box, the words, what is set as chips, and the note's name at the far right, small and quiet.
+   A long todo wraps its words; the chips stay at the right of the first line. */
+.todo-list[data-rows="B"] > .todo-row {
+  grid-template-columns: 1.02em minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+.todo-list[data-rows="B"] .todo-text {
+  grid-row: 1;
+  grid-column: 2;
+}
+.todo-list[data-rows="B"] .todo-chips {
+  grid-row: 1;
+  grid-column: 3;
+  margin: 0;
+  justify-content: flex-end;
+}
+.todo-list[data-rows="B"] .todo-note {
+  grid-row: 1;
+  grid-column: 4;
+  max-width: 18cqi;
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+@container todos (max-width: 440px) {
+  .todo-list[data-rows="B"] .todo-text {
+    grid-column: 2 / 4;
+  }
+  .todo-list[data-rows="B"] .todo-chips {
+    grid-row: 2;
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+  .todo-list[data-rows="B"] .todo-note {
+    grid-row: 2;
+    grid-column: 3 / 5;
+    justify-self: end;
+  }
+}
+
+/* C: two compact lines. The words, then one quiet line of what is set followed by the note's name, so every row has the same
+   rhythm without an empty line held open. Grouped under when it is due. */
+.todo-list[data-rows="C"] > .todo-row {
+  grid-template-columns: 1.02em minmax(0, 1fr);
+  row-gap: 2px;
+}
+.todo-list[data-rows="C"] .todo-text {
+  grid-row: 1;
+  grid-column: 2;
+}
+.todo-list[data-rows="C"] .todo-chips {
+  grid-row: 2;
+  grid-column: 2;
+  margin: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+}
+.todo-list[data-rows="C"] .todo-chips:empty {
+  display: none;
+}
+.todo-list[data-rows="C"] .todo-note {
+  grid-row: 2;
+  grid-column: 2;
+  justify-self: end;
+  font-size: 11.5px;
+}
+
+/* D: grouped under each note's name; a row doesn't repeat its note. */
+.todo-list[data-rows="D"] > .todo-row {
+  grid-template-columns: 1.02em minmax(0, 1fr) auto;
+  align-items: center;
+}
+.todo-list[data-rows="D"] .todo-text {
+  grid-row: 1;
+  grid-column: 2;
+}
+.todo-list[data-rows="D"] .todo-chips {
+  grid-row: 1;
+  grid-column: 3;
+  margin: 0;
+  justify-content: flex-end;
+}
+.todo-list[data-rows="D"] .todo-note {
+  display: none;
+}
+
+/* The group headers C and D add. */
+.todo-list > .todo-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 14px 10px 6px;
+  background: var(--panel, var(--bg));
+  color: var(--muted);
+  font: 600 11.5px/1.2 var(--prose);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  list-style: none;
+}
+.todo-list > .todo-group:first-child {
+  padding-top: 6px;
+}
+.todo-list > .todo-group[data-when="Overdue"] {
+  color: var(--danger, #e5675c);
+}
+.todo-list > .todo-group small {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.7;
+}
+.todo-list[data-rows="D"] > .todo-group {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* E: A as it is on a wide list. On a narrow one, the chips and the note's name share the second line, chips at the left and the
+   name at the right, so no line is held open. What can be set shows only on hover or focus, laid over the right end of that line. */
+@container todos (max-width: 440px) {
+  .todo-list[data-rows="E"] > .todo-row {
+    position: relative;
+  }
+  .todo-list[data-rows="E"] .todo-chips {
+    grid-row: 2;
+    grid-column: 2;
+  }
+  .todo-list[data-rows="E"] .todo-note {
+    grid-row: 2;
+    grid-column: 3;
+    justify-self: end;
+    align-self: baseline;
+    max-width: 40cqi;
+  }
+  .todo-list[data-rows="E"] .todo-chip[data-unset],
+  .todo-list[data-rows="E"] .todo-states {
+    display: none;
+  }
+  .todo-list[data-rows="E"] > .todo-row:is(:hover, :focus-within, [data-picking]) .todo-chip[data-unset] {
+    display: inline-flex;
+  }
+  .todo-list[data-rows="E"] > .todo-row:is(:hover, :focus-within, [data-picking]) .todo-states {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    gap: 4px;
+    padding: 2px 4px 2px 14px;
+    background: linear-gradient(to right, transparent, var(--hover) 14px);
+  }
+}

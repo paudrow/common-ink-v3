@@ -9,6 +9,7 @@ import { Assignees, sameWho, whoOf } from "./Assignees.tsx";
 import { ChipMenu, MoreTags, TagMenu, type PlacedTag } from "./ChipMenu.tsx";
 import { putAway, refused, takeBack } from "./completed.ts";
 import { QuickAdd } from "./QuickAdd.tsx";
+import { RowsSwitcher, useRowVariant, whenGroup } from "./RowsPrototype.tsx"; // PROTOTYPE
 import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery, tickedLabel } from "./dates.ts";
 import { leaving, narrowingOf } from "./leaving.ts";
@@ -847,6 +848,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
   const sending = useRef({ last: Promise.resolve(), count: 0, revisions: new Map<string, number>() });
   // Today is the member's own: the day it is in this browser, looked at again each minute.
   const now = dayOf(new Date(useNow()));
+  const rows = useRowVariant(); // PROTOTYPE
   const read = useMemo(() => parseQuery(query, "todos"), [query]);
   const ask = useMemo(() => ({ query, today: now, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }), [query, now]);
   useEffect(() => setProblem(null), [query]);
@@ -1150,6 +1152,7 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
           <ul
             ref={ul}
             className="todo-list"
+            data-rows={rows}
             aria-label={label}
             onFocus={(e) => {
               const row = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
@@ -1165,14 +1168,26 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
               if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented) return;
               const at = e.target as HTMLElement;
               if (!e.currentTarget.contains(at) || at.closest(".todo-edit, [role='menu']")) return;
-              const rows = [...e.currentTarget.children];
-              const next = rows[rows.findIndex((row) => row.contains(at)) + (e.key === "ArrowDown" ? 1 : -1)];
+              const found = [...e.currentTarget.querySelectorAll(":scope > .todo-row")];
+              const next = found[found.findIndex((row) => row.contains(at)) + (e.key === "ArrowDown" ? 1 : -1)];
               if (!next) return;
               e.preventDefault();
               selectRow(next);
             }}
           >
-            {listed.map((todo) => (
+            {(rows === "D" ? [...listed].sort((a, b) => (splitTags(a.noteTitle).lead || "").localeCompare(splitTags(b.noteTitle).lead || "")) : listed).map((todo, i, shown) => {
+              // PROTOTYPE: group headers for ?rows=C (when it is due) and ?rows=D (its note).
+              const groupOf = (t: typeof todo) => (rows === "C" ? whenGroup(t.due, now) : rows === "D" ? splitTags(t.noteTitle).lead || "Untitled" : null);
+              const group = groupOf(todo);
+              const header = group !== null && (i === 0 || groupOf(shown[i - 1]!) !== group);
+              const count = header ? shown.filter((t) => groupOf(t) === group).length : 0;
+              return (
+              <Fragment key={keyOf(todo)}>
+              {header && (
+                <li className="todo-group" data-when={group} aria-hidden="true">
+                  {group} <small>{count}</small>
+                </li>
+              )}
               <Row
                 key={keyOf(todo)}
                 todo={todo}
@@ -1193,8 +1208,11 @@ export function TodoList({ host, app, onOpen, query, label, inspected = false, n
                 onPicking={onPicking}
                 onTag={onTag}
               />
-            ))}
+              </Fragment>
+              );
+            })}
           </ul>
+          <RowsSwitcher variant={rows} />
         </div>
       )}
       {page?.next != null && (
