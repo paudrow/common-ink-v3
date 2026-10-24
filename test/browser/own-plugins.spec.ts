@@ -1,9 +1,9 @@
 import { expect, type Page } from "@playwright/test";
-import { anotherPerson, join, me, newEmail, ownFrame, ownPlugin, perform, showPanel, signInAs, signInAsNewPerson, test } from "./helpers.ts";
+import { anotherPerson, join, me, newEmail, ownFrame, ownPlugin, panelBody, perform, showPanel, signInAs, signInAsNewPerson, test } from "./helpers.ts";
 import { asPlugin, frameFor, install, openDetails, pluginRow, relist, runCommand, toast, turnOn, type Written } from "./third-party-helpers.ts";
 
 /*
- * Word count, Quick timer and Backlinks run shut off from the app, through the door a workspace's
+ * Word count and Quick timer run shut off from the app, through the door a workspace's
  * plugin has. Each is tried here as code that has gone wrong would try it, and a workspace's plugin
  * is given the same door and tries to be taken for one of them.
  */
@@ -19,7 +19,7 @@ const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const bar = (page: Page) => page.getByRole("group", { name: "Bottom bar" });
 const wordCount = (page: Page) => ownPlugin(page, "Word count").getByLabel("Word count");
 const quickTimer = (page: Page) => ownPlugin(page, "Quick timer").getByRole("button", { name: /^Quick timer/ });
-const backlinks = (page: Page) => ownPlugin(page, "Backlinks").getByRole("navigation", { name: "Backlinks" }).getByRole("link");
+const backlinks = (page: Page) => page.getByRole("navigation", { name: "Backlinks" }).getByRole("link");
 
 type Ink = {
   perform(op: object): Promise<unknown>;
@@ -41,7 +41,7 @@ const inside = (frame: ReturnType<typeof ownPlugin>, ask: string, arg?: unknown)
     { ask, arg },
   );
 
-test("the three run in frames with no way to the page, each held to what it declares by the app and again by the server, as the member it runs for", async ({ page }) => {
+test("Word count and Quick timer run in frames with no way to the page, each held to what it declares by the app and again by the server, as the member it runs for", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const workspaceId = (await me(page)).workspaces[0]!.id;
   const plan = await perform(page, { type: "note.create", text: "# Plan\n\none two three" });
@@ -52,15 +52,9 @@ test("the three run in frames with no way to the page, each held to what it decl
   });
   await page.goto(`/note/${plan.id}`);
   await expect(wordCount(page)).toHaveText("4 words · 1 min read");
-  await showPanel(page, "Backlinks");
-  await expect(backlinks(page)).toHaveText([/^Diary/]);
-
-  // What Backlinks asked went to its own address, where the server holds it to its manifest, and never out as the member's own.
-  expect(asked.filter((ask) => ask.type === "note.backlinks").map((ask) => ask.url)).toEqual([`/api/workspaces/${workspaceId}/plugins/backlinks/ops`]);
-  expect(asked.filter((ask) => /\/plugins\//.test(ask.url)).map((ask) => `${ask.url.split("/").at(-2)} ${ask.type}`).sort()).toEqual(["backlinks folder.list", "backlinks note.backlinks"]);
 
   // From inside each frame: no origin, nothing of the page, no cookie, no storage of the app's.
-  for (const view of ["Word count", "Quick timer", "Backlinks"]) {
+  for (const view of ["Word count", "Quick timer"]) {
     const reach = await ownPlugin(page, view)
       .locator("body")
       .evaluate(() => {
@@ -84,32 +78,33 @@ test("the three run in frames with no way to the page, each held to what it decl
   // No plugin puts a question before the member that no command of theirs led to.
   expect(await inside(timer, "(ink) => ink.prompt({ title: 'Sign in again' })")).toBe("forbidden: Quick timer asks a question only after you run one of its commands");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  // Word count and Backlinks read notes and nothing else, in an admin's session too.
-  for (const [view, name] of [["Word count", "Word count"], ["Backlinks", "Backlinks"]] as const) {
-    const frame = ownPlugin(page, view);
-    expect(await inside(frame, "(ink, id) => ink.perform({ type: 'note.read', id }).then((note) => note.title)", plan.id)).toBe('done: "Plan"');
-    for (const op of [
-      { type: "note.write", id: plan.id, baseRevision: 1, text: "# Taken" },
-      { type: "note.create", text: "# Planted" },
-      { type: "member.list" },
-      { type: "member.invite", email: "mallory@example.com", as: "admin" },
-      { type: "plugin.install", manifest: "{}", code: "" },
-      { type: "plugin.list" },
-      { type: "draft.list" },
-      { type: "settings.read" },
-      { type: "grant.link", noteId: plan.id, link: "public" },
-    ]) {
-      expect(await inside(frame, "(ink, op) => ink.perform(op)", op), `${view} asking ${op.type}`).toBe(`forbidden: ${name} isn't permitted to ${op.type}`);
-    }
+  // Word count reads notes and nothing else, in an admin's session too.
+  const counter = ownPlugin(page, "Word count");
+  expect(await inside(counter, "(ink, id) => ink.perform({ type: 'note.read', id }).then((note) => note.title)", plan.id)).toBe('done: "Plan"');
+  for (const op of [
+    { type: "note.write", id: plan.id, baseRevision: 1, text: "# Taken" },
+    { type: "note.create", text: "# Planted" },
+    { type: "member.list" },
+    { type: "member.invite", email: "mallory@example.com", as: "admin" },
+    { type: "plugin.install", manifest: "{}", code: "" },
+    { type: "plugin.list" },
+    { type: "draft.list" },
+    { type: "settings.read" },
+    { type: "grant.link", noteId: plan.id, link: "public" },
+  ]) {
+    expect(await inside(counter, "(ink, op) => ink.perform(op)", op), op.type).toBe(`forbidden: Word count isn't permitted to ${op.type}`);
   }
+  // What it was let ask went to its own address, where the server holds it to its manifest. What the app refused never left the page.
+  expect(asked.filter((ask) => /\/plugins\//.test(ask.url)).map((ask) => `${ask.url.split("/").at(-2)} ${ask.type}`)).toEqual(["word-count note.read"]);
   // And were the app's own check not there, the server's is: the same asked at each one's address with the member's session.
-  for (const id of ["word-count", "quick-timer", "backlinks"]) {
+  for (const id of ["word-count", "quick-timer"]) {
     expect((await asPlugin(page, workspaceId, id, { type: "note.write", id: plan.id, baseRevision: 1, text: "# Taken" })).status, id).toBe(403);
     expect((await asPlugin(page, workspaceId, id, { type: "member.invite", email: "mallory@example.com", as: "admin" })).status, id).toBe(403);
     expect((await asPlugin(page, workspaceId, id, { type: "plugin.uninstall", id: "aaaaaaaaaaaa" })).status, id).toBe(403);
   }
   expect((await asPlugin(page, workspaceId, "quick-timer", { type: "note.read", id: plan.id })).body.message).toBe("Quick timer isn't permitted to note.read");
-  expect((await asPlugin(page, workspaceId, "vim", { type: "note.list" })).body.message).toBe("That plugin isn't installed in this workspace");
+  // A plugin that runs inside the app has no address of its own to be asked at.
+  for (const id of ["vim", "backlinks"]) expect((await asPlugin(page, workspaceId, id, { type: "note.list" })).body.message, id).toBe("That plugin isn't installed in this workspace");
   expect((await perform(page, { type: "note.read", id: plan.id })).text).toBe("# Plan\n\none two three");
   expect((await perform(page, { type: "member.list" })).map((m) => m.name)).toEqual(["Ada Lovelace"]);
 
@@ -319,7 +314,7 @@ test("a member's copy of one of the app's own runs in its place for them alone, 
   await expect(wordCount(mel)).toHaveText("2 words · 1 min read");
 });
 
-test("a guest has the three too, as that guest: nothing of a note they weren't shared, and no draft", async ({ page }) => {
+test("a guest has the app's own plugins too, as that guest: nothing of a note they weren't shared, and no draft", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const plan = await perform(page, { type: "note.create", text: "# Shared plan\n\nFor Grace to read." });
   await perform(page, { type: "note.create", text: `# Secret\n\nNot for Grace, about [[${plan.id}]].` });
@@ -330,9 +325,9 @@ test("a guest has the three too, as that guest: nothing of a note they weren't s
   await grace.goto(`/note/${plan.id}`);
   await expect(wordCount(grace)).toHaveText("6 words · 1 min read");
   await showPanel(grace, "Backlinks");
-  await expect(ownPlugin(grace, "Backlinks").locator("body")).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
-  expect(await inside(ownPlugin(grace, "Backlinks"), "(ink) => ink.perform({ type: 'note.list' }).then(({ notes }) => notes.map((n) => n.title))")).toBe('done: ["Shared plan"]');
-  expect(await inside(ownPlugin(grace, "Backlinks"), "(ink) => ink.perform({ type: 'search', query: 'Secret' }).then((found) => JSON.stringify(found).includes('Not for Grace'))")).toBe("done: false");
+  await expect(panelBody(grace)).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
+  expect(await inside(ownPlugin(grace, "Word count"), "(ink) => ink.perform({ type: 'note.list' }).then(({ notes }) => notes.map((n) => n.title))")).toBe('done: ["Shared plan"]');
+  expect(await inside(ownPlugin(grace, "Word count"), "(ink) => ink.perform({ type: 'search', query: 'Secret' }).then((found) => JSON.stringify(found).includes('Not for Grace'))")).toBe("done: false");
   expect((await asPlugin(grace, workspaceId, "word-count", { type: "note.list" })).body.notes).toHaveLength(1);
   const draft = await grace.evaluate(
     async (workspaceId) => (await fetch(`/api/workspaces/${workspaceId}/plugins/word-count/draft/ops`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "note.list" }) })).status,

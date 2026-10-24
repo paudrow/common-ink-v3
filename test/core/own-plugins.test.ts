@@ -46,7 +46,7 @@ async function team() {
 
 describe("Common Ink's own plugins that run shut off", () => {
   it("declare themselves in the manifest every plugin has, and only their names and pictures set them apart", () => {
-    expect(OWN_SANDBOXED_IDS).toEqual(["word-count", "quick-timer", "weather", "sample-calendar", "coin", "dice", "backlinks"]);
+    expect(OWN_SANDBOXED_IDS).toEqual(["word-count", "quick-timer", "weather", "sample-calendar", "coin", "dice"]);
     for (const id of OWN_SANDBOXED_IDS) {
       const { name, icon, ...rest } = OWN_SANDBOXED[id];
       const views = rest.views.map(({ icon: _, ...view }) => view);
@@ -65,13 +65,13 @@ describe("Common Ink's own plugins that run shut off", () => {
     const { ada, eve, vera, secret, shared } = await team();
     expect(await outcome(pluginOf(vera, "word-count"), { type: "note.read", id: shared })).toBe("done");
     expect(await outcome(pluginOf(eve, "word-count"), { type: "note.write", id: shared, baseRevision: 1, text: "# Taken" })).toBe("forbidden: Word count isn't permitted to note.write");
-    expect(await outcome(pluginOf(eve, "backlinks"), { type: "note.backlinks", id: shared })).toBe("done");
+    expect(await outcome(pluginOf(eve, "word-count"), { type: "note.backlinks", id: shared })).toBe("done");
     // The quick timer declares nothing, and is refused everything.
     for (const op of [{ type: "note.list" }, { type: "note.read", id: shared }, { type: "member.list" }, { type: "todo.list" }, { type: "note.backlinks", id: shared }] as OpInput[]) {
       expect(await outcome(pluginOf(ada, "quick-timer"), op)).toBe(`forbidden: Quick timer isn't permitted to ${op.type}`);
     }
     // One that runs in the page has no address to act from, and neither has a name nobody has.
-    for (const id of ["vim", "tabs", "nothing", "html-embeds", "__proto__", "constructor", "toString"]) expect(await outcome(pluginOf(ada, id), { type: "note.list" })).toBe("forbidden: That plugin isn't installed in this workspace");
+    for (const id of ["vim", "tabs", "backlinks", "nothing", "html-embeds", "__proto__", "constructor", "toString"]) expect(await outcome(pluginOf(ada, id), { type: "note.list" })).toBe("forbidden: That plugin isn't installed in this workspace");
     expect(await outcome(pluginOf(vera, "word-count"), { type: "note.read", id: secret })).toBe("not_found: No such note");
   });
 
@@ -107,18 +107,18 @@ describe("Common Ink's own plugins that run shut off", () => {
     expect((await perform(env.DB, ada, { type: "member.list" })).find((m) => m.personId === eve.personId)!.role).toBe("editor");
   });
 
-  it("read as the member they run for, and Backlinks names no note that member can't open", async () => {
+  it("read as the member they run for, and name no note linking to one that member can't open", async () => {
     const { ada, eve, vera, gus, secret, shared } = await team();
-    const linking = async (member: Actor) => (await perform(env.DB, pluginOf(member, "backlinks"), { type: "note.backlinks", id: shared })).map((n) => n.id);
+    const linking = async (member: Actor) => (await perform(env.DB, pluginOf(member, "word-count"), { type: "note.backlinks", id: shared })).map((n) => n.id);
     expect(await linking(eve)).toEqual([secret]);
     for (const other of [ada, vera, gus]) {
-      const told = await perform(env.DB, pluginOf(other, "backlinks"), { type: "note.backlinks", id: shared });
+      const told = await perform(env.DB, pluginOf(other, "word-count"), { type: "note.backlinks", id: shared });
       expect(told).toEqual([]);
       expect(JSON.stringify((await perform(env.DB, pluginOf(other, "word-count"), { type: "note.list" })).notes)).not.toContain("only-eve-knows");
-      expect(await outcome(pluginOf(other, "backlinks"), { type: "note.backlinks", id: secret })).toBe("not_found: No such note");
+      expect(await outcome(pluginOf(other, "word-count"), { type: "note.backlinks", id: secret })).toBe("not_found: No such note");
     }
     // A person and a workspace sent along in the operation are not the ones it is performed for.
-    expect(await perform(env.DB, pluginOf(vera, "backlinks"), { type: "note.backlinks", id: shared, personId: eve.personId, workspaceId: eve.workspaceId } as never)).toEqual([]);
+    expect(await perform(env.DB, pluginOf(vera, "word-count"), { type: "note.backlinks", id: shared, personId: eve.personId, workspaceId: eve.workspaceId } as never)).toEqual([]);
   });
 
   it("run for a guest as that guest: what they were shared and nothing else, and never as a draft", async () => {
@@ -205,7 +205,7 @@ describe("over HTTP", () => {
     expect((await post(ada, "/plugins/word-count/ops", { type: "member.setRole", memberId: eve.personId, as: "viewer" })).status).toBe(403);
     // Vera's session reads nothing of Eve's by naming Eve.
     expect((await post(vera, "/plugins/word-count/ops", { type: "note.read", id: secret, personId: eve.personId, actor: { kind: "member", personId: eve.personId } })).status).toBe(404);
-    expect((await post(vera, "/plugins/backlinks/ops", { type: "note.backlinks", id: shared, personId: eve.personId })).body).toEqual([]);
+    expect((await post(vera, "/plugins/word-count/ops", { type: "note.backlinks", id: shared, personId: eve.personId })).body).toEqual([]);
     expect((await post(vera, "/plugins/word-count/draft/ops", read)).status).toBe(403);
     for (const path of ["/plugins/vim/ops", "/plugins/word-count%2F..%2F/ops", "/plugins/Word-Count/ops", "/plugins/word-count/draft/draft/ops"]) expect((await post(ada, path, read)).status, path).not.toBe(200);
   });

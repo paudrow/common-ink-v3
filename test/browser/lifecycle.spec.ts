@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { anotherPerson, asViewerOfNote, join, listedNotes, me, noteCard, openAllNotes, ownPlugin, perform, pinPanel, showPanel, signInAsNewPerson, test } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, join, listedNotes, me, noteCard, openAllNotes, perform, pinPanel, showPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const lines = (page: Page) => editor(page).locator(".cm-line");
@@ -163,7 +163,7 @@ test("a link to an archived note opens it, and the backlink from an archived not
   await perform(page, { type: "note.archive", id: diary.id, archived: true });
   await lookAgain(page);
   await showPanel(page, "Backlinks");
-  await expect(ownPlugin(page, "Backlinks").getByRole("navigation", { name: "Backlinks" }).getByRole("link")).toContainText(["Archived"]);
+  await expect(page.getByRole("navigation", { name: "Backlinks" }).getByRole("link")).toContainText(["Archived"]);
 });
 
 test("a note moved to Trash leaves the list at once, and Undo brings it back", async ({ page }) => {

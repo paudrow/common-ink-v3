@@ -4756,6 +4756,16 @@ kbd {
   overflow-y: auto;
 }
 
+.backlinks {
+  margin: -14px;
+}
+
+.backlinks ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .info {
   display: flex;
   flex-direction: column;

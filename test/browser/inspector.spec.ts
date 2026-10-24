@@ -123,8 +123,8 @@ test("the bar has the same icons in the same places whatever is in front and how
     expect(await drawn(page), `${kind}, closed`).toEqual(first);
     for (const [name, text] of Object.entries(says)) {
       await icon(page, name).click();
-      // Backlinks runs shut off, so what it says for a note is in its frame.
-      const framed = (name === "Backlinks" || name === "Sample calendar") && kind === "a note";
+      // Sample calendar runs shut off, so what it says for a note is in its frame.
+      const framed = name === "Sample calendar" && kind === "a note";
       await expect(framed ? ownPlugin(page, name).locator("body") : body(page), `${name} for ${kind}`).toHaveText(text);
       expect(await drawn(page), `${kind}, ${name} over the page`).toEqual(first);
       await pin(page).click();

@@ -100,7 +100,7 @@ const PLUGINS = {
   "their own draft of the plugin permitted to read and write notes, asking to read notes and todos": { permitted: DECLARED, installed: true, draft: ["notes.read", "todos.read"] },
   "Common Ink's own Word count, run shut off, which declares reading notes": { permitted: ["notes.read"], installed: true, own: "word-count" },
   "Common Ink's own Quick timer, run shut off, which declares nothing": { permitted: [], installed: true, own: "quick-timer" },
-  "their own draft of Common Ink's own Backlinks, asking to read and write notes and to read members": { permitted: ["notes.read"], installed: true, own: "backlinks", draft: ["notes.read", "notes.write", "members.read"] },
+  "their own draft of Common Ink's own Word count, asking to read and write notes and to read members": { permitted: ["notes.read"], installed: true, own: "word-count", draft: ["notes.read", "notes.write", "members.read"] },
 } as const satisfies Record<string, PluginRow>;
 /**
  * `draft` is the actor's own copy of the plugin, running, and what its manifest asks for: some of

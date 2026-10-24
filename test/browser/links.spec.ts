@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { connectAgent, me, ownPlugin, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
+import { connectAgent, me, panelBody, perform, pinPanel, signInAsNewPerson, test } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -13,8 +13,7 @@ const lines = (page: Page, group = 0) => editor(page, group).locator(".cm-line")
 const options = (page: Page) => page.getByRole("listbox").getByRole("option");
 const drawnLinks = (page: Page, group = 0) => editor(page, group).getByRole("link");
 const tabs = (page: Page) => page.getByRole("tablist", { name: "Open notes" }).first().getByRole("tab");
-/** Backlinks runs shut off from the app, in a frame of its own in the inspector. */
-const backlinks = (page: Page) => ownPlugin(page, "Backlinks").getByRole("navigation", { name: "Backlinks" }).getByRole("link");
+const backlinks = (page: Page) => page.getByRole("navigation", { name: "Backlinks" }).getByRole("link");
 const text = async (page: Page, id: string) => (await perform(page, { type: "note.read", id })).text;
 const create = (page: Page, noteText: string) => perform(page, { type: "note.create", text: noteText });
 const keys = async (page: Page, ...presses: string[]) => {
@@ -154,18 +153,17 @@ test("the Backlinks tab lists the notes that link to the open note, follows link
   await perform(page, { type: "note.revert", id: trip.id, revision: 1 });
   await expect(backlinks(page)).toHaveText([/^Diary/], { timeout: 15_000 });
 
-  // The keyboard reaches a backlink as it reaches anything else: Tab from the panel's pin, its last control, goes into the frame, and Enter opens the note.
+  // The keyboard reaches a backlink as it reaches anything else: Tab from the panel's pin, its last control, goes to it, and Enter opens the note.
   await page.getByRole("complementary", { name: "Inspector" }).getByRole("button", { name: "Pin beside the page" }).focus();
   await page.keyboard.press("Tab");
   await expect(backlinks(page)).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/note\/diary-/);
-  await expect(ownPlugin(page, "Backlinks").getByRole("paragraph")).toContainText("No notes link here yet.");
+  await expect(panelBody(page)).toContainText("No notes link here yet.");
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/note/plan-${plan.id}$`));
 
-  // With the pointer: a frame is under a shield until the pointer is on it. ⌘ or Ctrl opens the note in a tab behind this one, as it does in the note list.
-  await page.locator('.plugin-frame[aria-label="Backlinks"]').hover();
+  // With the pointer, ⌘ or Ctrl opens the note in a tab behind this one, as it does in the note list.
   await backlinks(page).click({ modifiers: ["ControlOrMeta"] });
   await expect(page.getByRole("tab", { name: "Diary" })).toHaveAttribute("aria-selected", "false");
   await expect(page).toHaveURL(new RegExp(`/note/plan-${plan.id}$`));

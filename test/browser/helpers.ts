@@ -284,3 +284,6 @@ export const panelIcons = (page: Page) => () =>
 
 /** The name of the panel the inspector shows, in the panel's header. */
 export const shownPanel = (page: Page) => page.getByRole("complementary", { name: "Inspector" }).locator(".panel-head h2");
+
+/** What the inspector's panel shows, under its header. */
+export const panelBody = (page: Page) => page.getByRole("complementary", { name: "Inspector" }).locator(".inspector-body");

@@ -32,7 +32,6 @@ describe("the demo plugins that come with the app", () => {
       ["Sample calendar", false],
       ["Coin", false],
       ["Dice", false],
-      ["Backlinks", true],
     ]);
   });
 
@@ -44,7 +43,6 @@ describe("the demo plugins that come with the app", () => {
       ["Sample calendar", true],
       ["Coin", true],
       ["Dice", true],
-      ["Backlinks", true],
     ]);
   });
 
@@ -58,7 +56,6 @@ describe("the demo plugins that come with the app", () => {
         ["Sample calendar", dev],
         ["Coin", dev],
         ["Dice", true],
-        ["Backlinks", true],
       ]);
     }
     expect(onFor(true, { "coin.enabled": false }).find(([name]) => name === "Coin")).toEqual(["Coin", false]);
