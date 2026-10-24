@@ -26,6 +26,7 @@ import { bearerToken } from "./mcp/mcp.ts";
 import { handleClientFault, opName, report, reportOf, told, traceOf, type Report, type Trace } from "./report.ts";
 import { handleEmail, logged, mailAddress } from "./mail.ts";
 import { siteResponse } from "./site/index.ts";
+import { forgetMergedContacts } from "../core/sources.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 import { usageCounter } from "./usage.ts";
@@ -266,7 +267,7 @@ export default {
       report(env, (sent) => ctx.waitUntil(sent), { source: "job", route: "email", requestId: null, op: "mail.receive", status: null, ...told(err) });
     }
   },
-  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, notes nobody wrote in that were left a day ago, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
+  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, the copies of merged contacts whose 30 days are up, notes nobody wrote in that were left a day ago, uploads that never finished, and what deleted workspaces held. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env, ctx) {
     const broke = (what: string, err: unknown) => report(env, (sent) => ctx.waitUntil(sent), { source: "job", route: "cron", requestId: null, op: what, status: null, ...told(err) });
     keyLinks(env);
@@ -308,6 +309,12 @@ export default {
       if (pruned) console.log(`Removed ${pruned} records of deletions too old for a restore to bring back`);
     } catch (err) {
       broke("pruneDeletions", err);
+    }
+    try {
+      const forgotten = await forgetMergedContacts(env.DB, controller.scheduledTime);
+      if (forgotten) console.log(`Let go of ${forgotten} copies of merged contacts whose 30 days are up`);
+    } catch (err) {
+      broke("forgetMergedContacts", err);
     }
     // What OAuth sign-ins left behind that nobody came back to. Also done when someone starts one, so this is for a quiet day.
     try {

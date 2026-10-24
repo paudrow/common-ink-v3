@@ -258,6 +258,8 @@ interface Props {
   onSaved: (card: ContactCard, change: ContactChange) => void;
   /** Connects the data source again, asking to change it too. */
   onConnect: (source: Source) => void;
+  /** Whether the page is of this contact by another name: a member's, or a contact merged into this one. */
+  otherName?: boolean;
 }
 
 /**
@@ -265,7 +267,7 @@ interface Props {
  * opens it as a form where its data source takes changes; where it would once the member agreed to
  * more, it says so and offers to connect it again.
  */
-export function ContactSection({ host, card, source, onSaved, onConnect }: Props) {
+export function ContactSection({ host, card, source, onSaved, onConnect, otherName = false }: Props) {
   const [editing, setEditing] = useState(false);
   if (editing)
     return (
@@ -284,7 +286,7 @@ export function ContactSection({ host, card, source, onSaved, onConnect }: Props
   return (
     <section className="person-contact" aria-label={`Your contact ${card.name}`}>
       <div className="person-contact-head">
-        <p className="person-whose">From your contacts. Only you see this.</p>
+        <p className="person-whose">{otherName ? `${card.name}, from your contacts.` : "From your contacts."} Only you see this.</p>
         {source?.writable && (
           <button type="button" className="button small" onClick={() => setEditing(true)}>
             Edit

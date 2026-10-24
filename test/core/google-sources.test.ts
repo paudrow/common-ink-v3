@@ -8,6 +8,7 @@ import worker from "../../src/worker/index.ts";
 import { sign } from "../../src/worker/session.ts";
 import { connectionOf, keepTokens } from "../../src/worker/sources/connections.ts";
 import { patchOf, personOf, toCard } from "../../src/worker/sources/google.ts";
+import { forgetMergedContacts } from "../../src/core/sources.ts";
 import { sourcesFor } from "../../src/worker/sources/index.ts";
 import { vault } from "../../src/worker/vault.ts";
 import { FakeGoogle, INSUFFICIENT, RATE_LIMITED, idToken, type FakeCalendar } from "./google.ts";
@@ -622,6 +623,224 @@ describe("duplicate Google contacts", () => {
     const agent: Actor = { kind: "agent", agentId: "agent-1", personId: ada.personId, workspaceId: ada.workspaceId };
     expect(await refusal(ask({ type: "contact.duplicates" }, agent))).toBe("forbidden: An agent can't contact.duplicates");
     expect(await refusal(ask({ type: "contact.dismiss", sourceId: "google-contacts", ids: ["people/c1", "people/c5"] }, agent))).toBe("forbidden: An agent can't contact.dismiss");
+  });
+});
+
+describe("merging Google contacts", () => {
+  const DAY = 86_400_000;
+  /**
+   * Sam, and Okafor Plumbing: the same man by his work number, with what a contact's page shows and
+   * what it doesn't (a nickname, a relation, a contact group, a website that isn't https).
+   */
+  const twoSams = async (scopes = [...ALL_SCOPES, CONTACTS_WRITE]) => {
+    const asked = await connected({ scopes });
+    Object.assign(asked.google.people[0] as object, { names: [{ displayName: "Sam Okafor", givenName: "Sam", familyName: "Okafor", unstructuredName: "Sam Okafor" }], urls: [{ value: "http://sam.example", type: "homePage" }] });
+    asked.google.people.push({
+      resourceName: "people/c5",
+      etag: "%Eg",
+      names: [{ displayName: "Okafor Plumbing" }],
+      nicknames: [{ value: "The plumber" }],
+      phoneNumbers: [{ value: "+1 415 555 0142", type: "work" }, { value: "+1 555 0199", type: "workMobile", formattedType: "Work Mobile" }],
+      emailAddresses: [{ value: "jobs@okafor.example", type: "work" }],
+      organizations: [{ name: "Okafor & Sons", title: "Plumber" }],
+      urls: [{ value: "https://okafor-plumbing.example", type: "work" }, { value: "http://old-shop.example" }],
+      biographies: [{ value: "Call before 8.", contentType: "TEXT_PLAIN" }],
+      relations: [{ person: "Ngozi", type: "spouse" }],
+      memberships: [{ contactGroupMembership: { contactGroupId: "family", contactGroupResourceName: "contactGroups/family" } }, { domainMembership: { inViewerDomain: true } }],
+      photos: [{ url: "https://lh3.googleusercontent.com/contacts/c5", metadata: { source: { type: "CONTACT" } } }],
+    });
+    const at = <T extends OpInput>(now: number, op: T) => perform(env.DB, asked.ada, op, now, asked.sources);
+    const kept = async () => (await env.DB.prepare("SELECT data_source, kept_id, kept_name, merged_id, merged_name, copy IS NOT NULL AS has_copy, restored_at FROM contact_merges WHERE person_id = ?").bind(asked.ada.personId).all()).results;
+    return { ...asked, at, kept };
+  };
+  const merging = { type: "contact.merge", sourceId: "google-contacts", mainId: "people/c1", mainEtag: "%Eg", otherId: "people/c5", otherEtag: "%Eg" } as const;
+  const busy = () => Response.json({ error: { code: 500, message: "Internal error", status: "INTERNAL" } }, { status: 500 });
+  const changing = (google: FakeGoogle) => google.sent.filter((s) => s.method !== "GET").map((s) => `${s.method} ${s.url.pathname}`);
+
+  it("shows the main contact as merging would make it, with every line of both once, and sends Google nothing to change", async () => {
+    const { google, ask } = await twoSams();
+    const { main, other, combined } = await ask({ type: "contact.combine", sourceId: "google-contacts", mainId: "people/c1", otherId: "people/c5" });
+    expect([main.name, other.name]).toEqual(["Sam Okafor", "Okafor Plumbing"]);
+    expect(combined).toMatchObject({
+      id: "people/c1",
+      name: "Sam Okafor",
+      // +1 415 555 0142 is not taken for +1 555 0142: a number is one only as itself, or with its country code.
+      phones: [{ value: "+1 555 0142", type: "mobile" }, { value: "+1 415 555 0142", type: "work" }, { value: "+1 555 0199", type: "Work Mobile" }],
+      emails: [{ value: "jobs@okafor.example", type: "work" }],
+      organization: "Okafor Plumbing",
+      title: "Owner",
+      urls: [{ value: "https://okafor-plumbing.example", type: "work" }],
+      notes: "Call before 8.",
+    });
+    expect(changing(google)).toEqual([]);
+  });
+
+  it("keeps a full copy of the other before anything changes in Google, gives the main one only what it lacks, then deletes the other", async () => {
+    const { google, ask, kept } = await twoSams();
+    const seen: unknown[] = [];
+    google.during.set("PATCH /v1/people/c1:updateContact", async () => seen.push(await kept()));
+    google.during.set("DELETE /v1/people/c5:deleteContact", async () => seen.push(await kept()));
+    const c5 = structuredClone(google.people[4]);
+    const { contact, merge } = await ask(merging);
+    const copy = { data_source: "google-contacts", kept_id: "people/c1", kept_name: "Sam Okafor", merged_id: "people/c5", merged_name: "Okafor Plumbing", has_copy: 1, restored_at: null };
+    expect(seen).toEqual([[copy], [copy]]);
+    expect(changing(google)).toEqual(["PATCH /v1/people/c1:updateContact", "DELETE /v1/people/c5:deleteContact"]);
+    // The copy is the person as Google gave every field of them, those a contact's page doesn't show too.
+    expect(google.asked("GET", /\/v1\/people\/c5$/).at(-2)!.url.searchParams.get("personFields")).toContain("relations");
+    expect(JSON.parse((await env.DB.prepare("SELECT copy FROM contact_merges WHERE id = ?").bind(merge.id).first<{ copy: string }>())!.copy)).toEqual(c5);
+
+    const [patch] = google.asked("PATCH", /c1:updateContact$/);
+    // Only what changes is written: Sam's own name and the rest of him are left as Google holds them.
+    expect(patch!.url.searchParams.get("updatePersonFields")).toBe("nicknames,emailAddresses,phoneNumbers,urls,organizations,biographies,relations,memberships");
+    expect(JSON.parse(patch!.body)).toEqual({
+      etag: "%Eg",
+      nicknames: [{ value: "The plumber" }],
+      emailAddresses: [{ value: "jobs@okafor.example", type: "work" }],
+      phoneNumbers: [{ value: "+1 555 0142", type: "mobile" }, { value: "+1 415 555 0142", type: "work" }, { value: "+1 555 0199", type: "workMobile" }],
+      urls: [{ value: "http://sam.example", type: "homePage" }, { value: "https://okafor-plumbing.example", type: "work" }, { value: "http://old-shop.example" }],
+      organizations: [{ name: "Okafor Plumbing", title: "Owner", department: "Boilers" }, { name: "Okafor & Sons", title: "Plumber" }],
+      biographies: [{ value: "Call before 8.", contentType: "TEXT_PLAIN" }],
+      relations: [{ person: "Ngozi", type: "spouse" }],
+      memberships: [{ contactGroupMembership: { contactGroupResourceName: "contactGroups/family" } }],
+    });
+    expect((google.people[0] as { names: unknown }).names).toEqual([{ displayName: "Sam Okafor", givenName: "Sam", familyName: "Okafor", unstructuredName: "Sam Okafor" }]);
+    expect(google.people.map((p) => (p as { resourceName: string }).resourceName)).toEqual(["people/c1", "people/c2", "people/c3", "people/c4"]);
+    expect(contact).toMatchObject({ id: "people/c1", emails: [{ value: "jobs@okafor.example", type: "work" }], notes: "Call before 8." });
+    expect(merge).toEqual({ id: merge.id, sourceId: "google-contacts", name: "Okafor Plumbing", into: "Sam Okafor", mergedAt: T0, until: T0 + 30 * DAY });
+    expect(await ask({ type: "contact.merges" })).toEqual({ merges: [merge] });
+  });
+
+  it("goes on finding the merged contact's name: its page shows the contact it was merged into", async () => {
+    const { ask } = await twoSams();
+    await ask(merging);
+    expect((await ask({ type: "person.read", who: "Okafor Plumbing" })).contacts.map((c) => [c.id, c.name])).toEqual([["people/c1", "Sam Okafor"]]);
+    expect((await ask({ type: "contact.duplicates" })).pairs).toEqual([]);
+  });
+
+  it("finds a name merged twice in the contact it is part of now: A into B, then B into C", async () => {
+    const { ask, google } = await twoSams();
+    google.people.push({ resourceName: "people/c6", etag: "%Eg", names: [{ displayName: "S. Okafor" }], emailAddresses: [{ value: "s@okafor.example" }] });
+    await ask(merging);
+    const sam = (await ask({ type: "person.read", who: "Sam Okafor" })).contacts[0]!;
+    await ask({ type: "contact.merge", sourceId: "google-contacts", mainId: "people/c6", mainEtag: "%Eg", otherId: "people/c1", otherEtag: sam.etag });
+    for (const who of ["Okafor Plumbing", "Sam Okafor", "S. Okafor"]) expect((await ask({ type: "person.read", who })).contacts.map((c) => c.id)).toEqual(["people/c6"]);
+  });
+
+  it("changes nothing when the update fails: both contacts stay as they were in Google, nothing is deleted, and no copy is kept", async () => {
+    const { google, ask, kept } = await twoSams();
+    const before = structuredClone(google.people);
+    google.once.set("PATCH /v1/people/c1:updateContact", busy);
+    expect(await refusal(ask(merging))).toBe("unavailable: Google is busy. Try again in a moment.");
+    expect(google.people).toEqual(before);
+    expect(google.asked("DELETE", /deleteContact$/)).toEqual([]);
+    expect(await kept()).toEqual([]);
+    expect(await ask({ type: "contact.merges" })).toEqual({ merges: [] });
+  });
+
+  it("refuses a merge when either contact changed since the member looked, before anything is kept or sent", async () => {
+    const { google, ask, kept } = await twoSams();
+    expect(await refusal(ask({ ...merging, otherEtag: "%Old" }))).toBe("conflict: One of them was changed since you looked. Look at them again, then merge them.");
+    expect(await refusal(ask({ ...merging, otherId: "people/c1", otherEtag: "%Eg" }))).toBe("invalid: A contact can't be merged into itself");
+    expect(changing(google)).toEqual([]);
+    expect(await kept()).toEqual([]);
+  });
+
+  it("doesn't delete the other when it changed after it was copied, so the change isn't lost with it", async () => {
+    const { google, ask, kept } = await twoSams();
+    google.during.set("PATCH /v1/people/c1:updateContact", async () => Object.assign(google.people[4] as object, { etag: "%Edited", nicknames: [{ value: "Plumber Sam" }] }));
+    expect(await refusal(ask(merging))).toBe("conflict: Sam Okafor has everything Okafor Plumbing had now, but Okafor Plumbing wasn't deleted: it was changed meanwhile. Look at them again, then merge them again to delete it.");
+    expect(google.asked("DELETE", /deleteContact$/)).toEqual([]);
+    expect(google.people).toHaveLength(5);
+    expect(await kept()).toEqual([]);
+  });
+
+  it("keeps the copy once the main contact has changed, whatever happens to the deletion, and merging again keeps one copy", async () => {
+    const { google, ask, kept } = await twoSams();
+    google.once.set("DELETE /v1/people/c5:deleteContact", busy);
+    expect(await refusal(ask(merging))).toBe("conflict: Sam Okafor has everything Okafor Plumbing had now, but Okafor Plumbing wasn't deleted: Google is busy. Try again in a moment. Look at them again, then merge them again to delete it.");
+    expect(google.people).toHaveLength(5);
+    expect(await kept()).toMatchObject([{ merged_id: "people/c5", has_copy: 1 }]);
+    // Merged again, nothing is added twice, the other goes, and one copy of it is kept.
+    const { main } = await ask({ type: "contact.combine", sourceId: "google-contacts", mainId: "people/c1", otherId: "people/c5" });
+    const { contact } = await ask({ ...merging, mainEtag: main.etag });
+    expect(contact.phones).toEqual([{ value: "+1 555 0142", type: "mobile" }, { value: "+1 415 555 0142", type: "work" }, { value: "+1 555 0199", type: "Work Mobile" }]);
+    expect(google.people).toHaveLength(4);
+    expect(await kept()).toMatchObject([{ merged_id: "people/c5", has_copy: 1 }]);
+  });
+
+  it("holds both contacts while it merges them, so another merge of either is refused until it is done", async () => {
+    const { google, ask } = await twoSams();
+    let meanwhile: string | undefined;
+    google.during.set("PATCH /v1/people/c1:updateContact", async () => (meanwhile = await refusal(ask({ ...merging, mainId: "people/c5", otherId: "people/c1" }))));
+    await ask(merging);
+    expect(meanwhile).toBe("conflict: One of them is being merged already. Wait a moment, then look at them again.");
+    expect(google.people).toHaveLength(4);
+    // Done, they are let go.
+    google.people.push({ resourceName: "people/c7", etag: "%Eg", names: [{ displayName: "Sam" }] });
+    const sam = (await ask({ type: "person.read", who: "Sam Okafor" })).contacts[0]!;
+    expect((await ask({ ...merging, otherId: "people/c7", mainEtag: sam.etag })).contact.id).toBe("people/c1");
+  });
+
+  it("restores a merged contact with createContact from the full copy, once, and its name is its own again", async () => {
+    const { google, ask, kept } = await twoSams();
+    const { merge } = await ask(merging);
+    const restored = await ask({ type: "contact.restore", id: merge.id });
+    expect(google.asked("POST", /createContact$/).map((s) => JSON.parse(s.body) as unknown)).toEqual([
+      {
+        names: [{ unstructuredName: "Okafor Plumbing" }],
+        nicknames: [{ value: "The plumber" }],
+        emailAddresses: [{ value: "jobs@okafor.example", type: "work" }],
+        phoneNumbers: [{ value: "+1 415 555 0142", type: "work" }, { value: "+1 555 0199", type: "workMobile" }],
+        urls: [{ value: "https://okafor-plumbing.example", type: "work" }, { value: "http://old-shop.example" }],
+        organizations: [{ name: "Okafor & Sons", title: "Plumber" }],
+        biographies: [{ value: "Call before 8.", contentType: "TEXT_PLAIN" }],
+        relations: [{ person: "Ngozi", type: "spouse" }],
+        memberships: [{ contactGroupMembership: { contactGroupResourceName: "contactGroups/family" } }],
+      },
+    ]);
+    expect(restored).toMatchObject({ name: "Okafor Plumbing", organization: "Okafor & Sons" });
+    expect(await ask({ type: "contact.merges" })).toEqual({ merges: [] });
+    expect(await kept()).toMatchObject([{ has_copy: 0, restored_at: T0 }]);
+    expect(await refusal(ask({ type: "contact.restore", id: merge.id }))).toBe("not_found: There is no merged contact to restore");
+    expect(google.asked("POST", /createContact$/)).toHaveLength(1);
+    expect((await ask({ type: "person.read", who: "Okafor Plumbing" })).contacts.map((c) => c.id)).toEqual([restored.id]);
+  });
+
+  it("can be restored again after a restore that failed, and says one Google didn't answer may have been made", async () => {
+    const { google, ask } = await twoSams();
+    const { merge } = await ask(merging);
+    google.once.set("POST /v1/people:createContact", busy);
+    expect(await refusal(ask({ type: "contact.restore", id: merge.id }))).toBe("unavailable: Google is busy. Try again in a moment. It may have been restored all the same: look in your contacts before you restore it again.");
+    expect(await ask({ type: "contact.merges" })).toEqual({ merges: [merge] });
+    expect(await ask({ type: "contact.restore", id: merge.id })).toMatchObject({ name: "Okafor Plumbing" });
+  });
+
+  it("lets go of the copy after 30 days, and the merged name goes on finding the contact it was merged into", async () => {
+    const { ask, at, kept } = await twoSams();
+    const { merge } = await ask(merging);
+    const later = T0 + 30 * DAY + 1;
+    expect(await at(later, { type: "contact.merges" })).toEqual({ merges: [] });
+    expect(await refusal(at(later, { type: "contact.restore", id: merge.id }))).toBe("not_found: There is no merged contact to restore");
+    await forgetMergedContacts(env.DB, T0 + 29 * DAY);
+    expect(await kept()).toMatchObject([{ has_copy: 1 }]);
+    expect(await forgetMergedContacts(env.DB, later)).toBeGreaterThanOrEqual(1);
+    expect(await kept()).toMatchObject([{ merged_name: "Okafor Plumbing", has_copy: 0, restored_at: null }]);
+    expect((await at(later, { type: "person.read", who: "Okafor Plumbing" })).contacts.map((c) => c.id)).toEqual(["people/c1"]);
+  });
+
+  it("is refused before anything is kept or sent while the member agreed only to read contacts, though what it would make can be shown", async () => {
+    const { google, ask, kept } = await twoSams(ALL_SCOPES);
+    expect((await ask({ type: "contact.combine", sourceId: "google-contacts", mainId: "people/c1", otherId: "people/c5" })).combined.name).toBe("Sam Okafor");
+    expect(await refusal(ask(merging))).toBe("forbidden: Connect Google Contacts again to edit contacts");
+    expect(changing(google)).toEqual([]);
+    expect(await kept()).toEqual([]);
+  });
+
+  it("is the member's alone: an agent can't combine, merge, list or restore", async () => {
+    const { ada, ask } = await twoSams();
+    const agent: Actor = { kind: "agent", agentId: "agent-1", personId: ada.personId, workspaceId: ada.workspaceId };
+    for (const op of [{ type: "contact.combine", sourceId: "google-contacts", mainId: "people/c1", otherId: "people/c5" }, merging, { type: "contact.merges" }, { type: "contact.restore", id: "aaaaaaaaaaaa" }] as const)
+      expect(await refusal(ask(op, agent))).toBe(`forbidden: An agent can't ${op.type}`);
   });
 });
 

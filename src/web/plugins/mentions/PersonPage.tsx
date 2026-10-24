@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { MAX_SEARCH_LENGTH, today, useInspected, writtenMention, type App, type PersonPage as Person, type PluginHost, type Results, type Showing, type Source } from "../../plugin-api.ts";
+import { MAX_SEARCH_LENGTH, today, useInspected, writtenMention, type App, type PersonPage as Person, type ContactMerge, type PluginHost, type Results, type Showing, type Source } from "../../plugin-api.ts";
 import { personPath } from "../lib/person.ts";
+import { sameName } from "../lib/pointing.ts";
 import { QueryBar } from "../lib/QueryBar.tsx";
 import { TodoList } from "../todos/Todos.tsx";
-import { SameAs, useDuplicates } from "../contacts/Duplicates.tsx";
+import { Merged, SameAs, useDuplicates } from "../contacts/Duplicates.tsx";
 import { ContactSection } from "./ContactEditor.tsx";
 import { initialsOf } from "./fields.ts";
 import { addingTo } from "./people.ts";
@@ -64,6 +65,7 @@ export function PersonPage({ host, app, who, openAt }: Props) {
   }, [host, changed]);
 
   const duplicates = useDuplicates(host, (person?.contacts.length ?? 0) > 0, changed);
+  const [merged, setMerged] = useState<ContactMerge | null>(null);
 
   const wanted = typed.trim();
   useEffect(() => {
@@ -175,12 +177,23 @@ export function PersonPage({ host, app, who, openAt }: Props) {
           {problem}
         </p>
       )}
+      {merged && (
+        <Merged
+          host={host}
+          merge={merged}
+          onRestored={() => {
+            setMerged(null);
+            setChanged((n) => n + 1);
+          }}
+        />
+      )}
       {person.contacts.map((card) => (
         <Fragment key={`${card.sourceId} ${card.id}`}>
           <ContactSection
             host={host}
             card={card}
             source={sources.find((s) => s.id === card.sourceId)}
+            otherName={!sameName(card.name, person.name)}
             onConnect={(source) => void connectToEdit(source)}
             onSaved={(saved, change) => {
               // A contact renamed is found by its new name: the page goes there, as a mention of that name would.
@@ -188,7 +201,21 @@ export function PersonPage({ host, app, who, openAt }: Props) {
               setChanged((n) => n + 1);
             }}
           />
-          {duplicates.pairs && <SameAs app={app} card={card} pairs={duplicates.pairs} onDismiss={(pair) => void duplicates.dismiss(pair)} />}
+          {duplicates.pairs && (
+            <SameAs
+              host={host}
+              app={app}
+              sources={sources}
+              card={card}
+              pairs={duplicates.pairs}
+              onDismiss={(pair) => void duplicates.dismiss(pair)}
+              onConnect={(source) => void connectToEdit(source)}
+              onMerged={({ merge }) => {
+                setMerged(merge);
+                setChanged((n) => n + 1);
+              }}
+            />
+          )}
         </Fragment>
       ))}
       {!person.contacts.length && (addTo ?? couldAddTo) && (

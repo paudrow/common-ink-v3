@@ -1,9 +1,9 @@
 import { inOrder, widened, within, type Span } from "./events.ts";
-import { duplicatePairs, pairKey } from "./duplicates.ts";
+import { combinedContact, duplicatePairs, pairKey } from "./duplicates.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
 import { writtenEventLink } from "./links.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type DuplicatePair, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactMerge, type DuplicatePair, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -50,6 +50,18 @@ export interface ContactChanges {
   /** A JPEG or PNG in base64, or null to take the contact's own picture off. */
   photo(id: string, photo: string | null): Promise<ContactCard>;
   create(fields: ContactChange & { name: string }): Promise<ContactCard>;
+  /** Deletes a contact. One that is already gone is deleted. */
+  delete(id: string): Promise<void>;
+  /** All the data source holds of a contact, every field and not only those Common Ink shows, kept as it is to make again with `remake`. Null for no such contact. */
+  copy(id: string): Promise<string | null>;
+  /** Makes a contact again from a `copy`, every field the data source lets be written. */
+  remake(copy: string): Promise<ContactCard>;
+  /**
+   * Gives a contact, as `etag` says it was read, what a `copy` of another holds besides: what Common
+   * Ink shows as `combinedContact` combines it, and every other line of the other's beside its own.
+   * Only the fields that change are written.
+   */
+  absorb(id: string, etag: string, copy: string): Promise<ContactCard>;
 }
 
 export interface ContactsSource {
@@ -349,7 +361,7 @@ function changesOf(source: ContactsSource): ContactChanges {
 }
 
 /** Runs a change on a contacts data source, saying what went wrong outside as an operation says it. */
-async function changing(source: ContactsSource, change: () => Promise<ContactCard>): Promise<ContactCard> {
+async function changing<T>(source: ContactsSource, change: () => Promise<T>): Promise<T> {
   try {
     return await change();
   } catch (err) {
@@ -394,6 +406,147 @@ export async function createContact(asker: Asker, sourceId: string, fields: Cont
   const source = await sourceOf(asker, sourceId, "contacts");
   const changes = changesOf(source);
   return changing(source, () => changes.create(fields));
+}
+
+/** How long the copy of a contact merged into another is kept to restore it. */
+export const MERGE_KEPT_DAYS = 30;
+const MERGE_KEPT_MS = MERGE_KEPT_DAYS * 86_400_000;
+
+const sameContact = (mainId: string, otherId: string) => {
+  if (mainId === otherId) throw new OpError("invalid", "A contact can't be merged into itself");
+};
+
+/** Two of the asker's contacts as they are kept now, and the main one as merging the other into it would make it. Nothing is changed. */
+export async function combineContacts(asker: Asker, sourceId: string, mainId: string, otherId: string): Promise<{ main: ContactCard; other: ContactCard; combined: ContactCard }> {
+  sameContact(mainId, otherId);
+  const source = await sourceOf(asker, sourceId, "contacts");
+  const [main, other] = await Promise.all([contactOf(source, mainId), contactOf(source, otherId)]);
+  return { main, other, combined: combinedContact(main, other) };
+}
+
+/** How long a merge holds its two contacts, at most, so another merge of either waits for it. */
+const MERGING_MS = 120_000;
+
+/** Holds contacts for one merge, or refuses when another merge holds one of them. Answers what lets them go. */
+async function hold(asker: Asker, sourceId: string, ids: string[]): Promise<() => Promise<unknown>> {
+  const { db, personId, now } = asker;
+  await db.prepare("DELETE FROM contact_locks WHERE person_id = ? AND until < ?").bind(personId, now).run();
+  try {
+    await db.batch(ids.map((id) => db.prepare("INSERT INTO contact_locks (person_id, data_source, record_id, until) VALUES (?, ?, ?, ?)").bind(personId, sourceId, id, now + MERGING_MS)));
+  } catch (err) {
+    if (!/UNIQUE/.test(String(err))) throw err;
+    throw new OpError("conflict", "One of them is being merged already. Wait a moment, then look at them again.");
+  }
+  return () => db.batch(ids.map((id) => db.prepare("DELETE FROM contact_locks WHERE person_id = ? AND data_source = ? AND record_id = ?").bind(personId, sourceId, id)));
+}
+
+/**
+ * Merges one of the asker's contacts into another where they are kept: the main contact is given
+ * what the other holds, then the other is deleted. A full copy of the other, every field its data
+ * source holds, is kept here first, so nothing is deleted that can't be made again. A change that
+ * fails leaves both contacts as they were and keeps no copy. Once the main contact is changed the
+ * copy stays, whatever happens to the other: it is deleted only as it was copied, and a deletion
+ * that fails leaves it there and says so.
+ */
+export async function mergeContacts(asker: Asker, merging: { sourceId: string; mainId: string; mainEtag: string; otherId: string; otherEtag: string }): Promise<{ contact: ContactCard; merge: ContactMerge }> {
+  const { sourceId, mainId, otherId } = merging;
+  sameContact(mainId, otherId);
+  const source = await sourceOf(asker, sourceId, "contacts");
+  const changes = changesOf(source);
+  const letHold = await hold(asker, sourceId, [mainId, otherId]);
+  try {
+    const [main, other] = await Promise.all([contactOf(source, mainId), contactOf(source, otherId)]);
+    if (main.etag !== merging.mainEtag || other.etag !== merging.otherEtag) throw new OpError("conflict", "One of them was changed since you looked. Look at them again, then merge them.");
+    const copy = await changing(source, () => changes.copy(otherId));
+    if (copy === null) throw new OpError("not_found", "No such contact");
+    const id = newId();
+    await asker.db
+      .prepare("INSERT INTO contact_merges (id, person_id, data_source, kept_id, kept_name, merged_id, merged_name, copy, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, asker.personId, sourceId, mainId, main.name, otherId, other.name, copy, asker.now)
+      .run();
+    const letGo = () => asker.db.prepare("DELETE FROM contact_merges WHERE id = ?").bind(id).run();
+    let contact: ContactCard;
+    try {
+      contact = await changing(source, () => changes.absorb(mainId, main.etag, copy));
+    } catch (err) {
+      await letGo();
+      throw err;
+    }
+    const left = (why: string): never => {
+      throw new OpError("conflict", `${contact.name} has everything ${other.name} had now, but ${other.name} wasn't deleted: ${why}. Look at them again, then merge them again to delete it.`);
+    };
+    // A change made to the other since it was copied would go with it, so it is deleted only as it was copied.
+    const now = await source.get(otherId).catch(() => undefined);
+    if (now === undefined) left("it couldn't be read again");
+    if (now && now.etag !== other.etag) {
+      await letGo();
+      left("it was changed meanwhile");
+    }
+    if (now) {
+      try {
+        await changing(source, () => changes.delete(otherId));
+      } catch (err) {
+        left(err instanceof Error ? err.message.replace(/\.$/, "") : "it didn't answer");
+      }
+    }
+    // A mention of a contact merged into the other before goes on finding the contact it is part of now; a copy of the other kept by a merge that didn't delete it is this one now.
+    await asker.db.batch([
+      asker.db.prepare("UPDATE contact_merges SET kept_id = ?1, kept_name = ?2 WHERE person_id = ?3 AND data_source = ?4 AND kept_id IN (?1, ?5)").bind(mainId, contact.name, asker.personId, sourceId, otherId),
+      asker.db.prepare("DELETE FROM contact_merges WHERE person_id = ? AND data_source = ? AND merged_id = ? AND id != ? AND restored_at IS NULL").bind(asker.personId, sourceId, otherId, id),
+    ]);
+    return { contact, merge: { id, sourceId, name: other.name, into: contact.name, mergedAt: asker.now, until: asker.now + MERGE_KEPT_MS } };
+  } finally {
+    await letHold();
+  }
+}
+
+/** The contacts the asker merged into others that can still be restored, latest first. */
+export async function listMerges(asker: Asker): Promise<{ merges: ContactMerge[] }> {
+  const { results } = await asker.db
+    .prepare("SELECT id, data_source, kept_name, merged_name, created_at FROM contact_merges WHERE person_id = ? AND restored_at IS NULL AND copy IS NOT NULL AND created_at > ? ORDER BY created_at DESC, id")
+    .bind(asker.personId, asker.now - MERGE_KEPT_MS)
+    .all<{ id: string; data_source: string; kept_name: string; merged_name: string; created_at: number }>();
+  return { merges: results.map((r) => ({ id: r.id, sourceId: r.data_source, name: r.merged_name, into: r.kept_name, mergedAt: r.created_at, until: r.created_at + MERGE_KEPT_MS })) };
+}
+
+/**
+ * Makes a contact the asker merged into another a contact of its own again, from the copy kept of
+ * it, where it was kept. The contact it was merged into keeps what it gained.
+ */
+export async function restoreContact(asker: Asker, id: string): Promise<ContactCard> {
+  const row = await asker.db
+    .prepare("SELECT data_source, copy FROM contact_merges WHERE id = ? AND person_id = ? AND restored_at IS NULL AND copy IS NOT NULL AND created_at > ?")
+    .bind(id, asker.personId, asker.now - MERGE_KEPT_MS)
+    .first<{ data_source: string; copy: string }>();
+  if (!row) throw new OpError("not_found", "There is no merged contact to restore");
+  const source = await sourceOf(asker, row.data_source, "contacts");
+  const changes = changesOf(source);
+  // Taken before the contact is made, so two restores at once make one contact.
+  const taken = await asker.db.prepare("UPDATE contact_merges SET restored_at = ? WHERE id = ? AND restored_at IS NULL RETURNING id").bind(asker.now, id).first();
+  if (!taken) throw new OpError("not_found", "There is no merged contact to restore");
+  let card: ContactCard;
+  try {
+    card = await changing(source, () => changes.remake(row.copy));
+  } catch (err) {
+    await asker.db.prepare("UPDATE contact_merges SET restored_at = NULL WHERE id = ?").bind(id).run();
+    // Not answering is not saying no: the contact may have been made.
+    if (err instanceof OpError && err.code === "unavailable") throw new OpError("unavailable", `${err.message.replace(/\.$/, "")}. It may have been restored all the same: look in your contacts before you restore it again.`);
+    throw err;
+  }
+  await asker.db.prepare("UPDATE contact_merges SET copy = NULL WHERE id = ?").bind(id).run();
+  return card;
+}
+
+/** Lets go of each copy of a merged contact kept for its 30 days. The names stay, for the mentions of them. */
+export async function forgetMergedContacts(db: D1Database, now: number): Promise<number> {
+  const { meta } = await db.prepare("UPDATE contact_merges SET copy = NULL WHERE copy IS NOT NULL AND created_at <= ?").bind(now - MERGE_KEPT_MS).run();
+  return meta.changes;
+}
+
+/** Each of the asker's contacts that a contact `named` was merged into, as `sourceId id`: who a mention of a merged contact's name is now. */
+export async function mergedInto(asker: Asker, named: (name: string) => boolean): Promise<Set<string>> {
+  const { results } = await asker.db.prepare("SELECT data_source, kept_id, merged_name FROM contact_merges WHERE person_id = ? AND restored_at IS NULL").bind(asker.personId).all<{ data_source: string; kept_id: string; merged_name: string }>();
+  return new Set(results.filter((r) => named(r.merged_name)).map((r) => `${r.data_source} ${r.kept_id}`));
 }
 
 /** The asker's own contacts that `is` says are someone, each with all its source holds. A source that can't be read gives none. */

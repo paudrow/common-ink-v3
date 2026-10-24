@@ -12466,20 +12466,64 @@ a.file-chip:hover .file-chip-name {
   list-style: none;
 }
 
-.contact-duplicates li,
-.contact-same-as li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 12px;
+.contact-duplicates li {
   padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
-.contact-duplicate-names,
-.contact-same-as li > span {
+.contact-duplicate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.contact-duplicate-names {
   flex: 1 1 14rem;
+}
+
+/* Merging a pair: which is the main contact, and that contact as merging would make it. */
+.contact-merge {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.contact-merge-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.contact-merge-main legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.contact-merge-main label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.contact-merge .person-whose {
+  margin: 0;
+}
+
+.contact-merged-said {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0;
 }
 
 .contact-duplicate-why {

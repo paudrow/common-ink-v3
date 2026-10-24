@@ -2,6 +2,7 @@ import { z } from "zod";
 import { shiftDay } from "../../core/events.ts";
 import { logLine } from "../../core/logs.ts";
 import { CONTACT_LABELS, labelType, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactLine, type EventWhen, type LabelledField } from "../../core/protocol.ts";
+import { joinedNotes, sameLine } from "../../core/duplicates.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type DataSource, type Described, type EventChange } from "../../core/sources.ts";
 import { covers, isGoogleSource, refresh, revoke, writes as agreedToWrite, type GoogleConfig, type GoogleSourceId } from "../google.ts";
 import type { Vault } from "../vault.ts";
@@ -511,6 +512,71 @@ export function personOf(change: ContactChange, was: Entry = {}): { person: Entr
   return { person, fields };
 }
 
+/** Every field People gives of a person, for a copy that holds all of them. */
+const ALL_FIELDS = "addresses,biographies,birthdays,calendarUrls,clientData,emailAddresses,events,externalIds,genders,imClients,interests,locales,locations,memberships,miscKeywords,names,nicknames,occupations,organizations,phoneNumbers,photos,relations,sipAddresses,skills,urls,userDefined";
+/** The fields People's createContact and updateContact write: all but the picture, which is written apart, and skills, which are only read. */
+const WRITTEN = ["names", "nicknames", "emailAddresses", "phoneNumbers", "addresses", "urls", "organizations", "occupations", "birthdays", "events", "biographies", "relations", "imClients", "sipAddresses", "calendarUrls", "externalIds", "interests", "locales", "locations", "memberships", "miscKeywords", "genders", "userDefined", "clientData"] as const;
+/** Fields with one entry that counts: the main contact's, or the other's where it has none. */
+const ONE_OF = new Set<string>(["names", "birthdays", "genders"]);
+const LABELLED_BY = Object.fromEntries((Object.entries(LINES) as [LabelledField, readonly [string, string]][]).map(([field, [people, key]]) => [people, { field, key }]));
+
+/** A field's entries as they can be written: what People works out itself taken off. */
+function writtenEntries(field: string, list: Entry[]): Entry[] {
+  return list.flatMap((entry) => {
+    const { formattedProtocol: _, ...rest } = kept(entry);
+    if (field === "names") {
+      const { displayName, displayNameLastFirst: __, ...name } = rest;
+      return [Object.keys(name).length ? name : { unstructuredName: displayName }];
+    }
+    if (field === "genders") {
+      const { formattedValue: __, ...gender } = rest;
+      return [gender];
+    }
+    // A contact group the member made or Google's own; a domain's is not one a contact is put in.
+    if (field === "memberships") {
+      const group = (rest.contactGroupMembership as Entry | undefined)?.contactGroupResourceName;
+      return typeof group === "string" ? [{ contactGroupMembership: { contactGroupResourceName: group } }] : [];
+    }
+    return [rest];
+  });
+}
+
+/** A copy of a person as createContact makes them again. */
+const writtenFrom = (copy: Entry): Entry =>
+  Object.fromEntries(
+    WRITTEN.flatMap((field) => {
+      const list = writtenEntries(field, entries(copy, field));
+      return list.length ? [[field, list]] : [];
+    }),
+  );
+
+const same = (a: Entry, b: Entry) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * One field of the main person's after another is merged into it: its own entries, then each of the
+ * other's it doesn't have. An email, phone, address or website is one it has as `sameLine` says, and
+ * takes the other's label where its own has none. A name, a birthday and a gender are the main's, or
+ * the other's where it has none, and the notes are joined as `joinedNotes` joins them.
+ */
+function absorbed(field: string, mine: Entry[], theirs: Entry[]): Entry[] {
+  if (ONE_OF.has(field)) return mine.length ? mine : theirs;
+  if (field === "biographies") {
+    const [first, ...rest] = mine;
+    const value = joinedNotes(typeof first?.value === "string" ? first.value : null, theirs.map((b) => b.value).find((v): v is string => typeof v === "string") ?? null);
+    return first ? [{ ...first, value }, ...rest] : theirs;
+  }
+  const lines = LABELLED_BY[field];
+  const out = mine.map((entry) => ({ ...entry }));
+  for (const entry of theirs) {
+    const one = lines
+      ? out.find((e) => (typeof e[lines.key] === "string" && typeof entry[lines.key] === "string" ? sameLine(lines.field, e[lines.key] as string, entry[lines.key] as string) : same(e, entry)))
+      : out.find((e) => same(e, entry));
+    if (!one) out.push(entry);
+    else if (lines && !one.type && entry.type) one.type = entry.type;
+  }
+  return out;
+}
+
 function toContact(raw: unknown): Contact | null {
   const parsed = Person.safeParse(raw);
   const key = parsed.success ? PERSON.exec(parsed.data.resourceName)?.[1] : undefined;
@@ -583,6 +649,33 @@ function contactsSource(session: Session, info: Described, writable: boolean): C
         },
         async create(fields) {
           return answered(await ask(`${PEOPLE}/people:createContact?${card}`, sent("POST", personOf(fields).person)));
+        },
+        async copy(id) {
+          const person = await ask(`${PEOPLE}/people/${keyOf(id)}?${new URLSearchParams({ personFields: ALL_FIELDS })}`);
+          return person === null ? null : JSON.stringify(person);
+        },
+        async remake(copy) {
+          return answered(await ask(`${PEOPLE}/people:createContact?${card}`, sent("POST", writtenFrom(JSON.parse(copy) as Entry))));
+        },
+        async absorb(id, etag, copy) {
+          const key = keyOf(id);
+          const was = await ask(`${PEOPLE}/people/${key}?${new URLSearchParams({ personFields: ALL_FIELDS })}`);
+          if (was === null) throw new SourceError("refused", "No such contact");
+          const other = JSON.parse(copy) as Entry;
+          const person: Entry = {};
+          for (const field of WRITTEN) {
+            const mine = writtenEntries(field, entries(was as Entry, field));
+            const merged = absorbed(field, mine, writtenEntries(field, entries(other, field)));
+            if (JSON.stringify(merged) !== JSON.stringify(mine)) person[field] = merged;
+          }
+          const fields = Object.keys(person);
+          if (!fields.length) return answered(was);
+          // Only what changes is written, so the rest of the main person stays as Google holds it; and only if it is still as the member read it.
+          return answered(await ask(`${PEOPLE}/people/${key}:updateContact?${new URLSearchParams({ updatePersonFields: fields.join(","), personFields: CARD_FIELDS })}`, sent("PATCH", { ...person, etag })));
+        },
+        async delete(id) {
+          // A contact already gone answers null, which is what was asked for.
+          await ask(`${PEOPLE}/people/${keyOf(id)}:deleteContact`, { method: "DELETE" });
         },
       },
     }),

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Contact, PluginHost, ViewProps } from "../../plugin-api.ts";
+import type { Contact, ContactMerge, PluginHost, Source, ViewProps } from "../../plugin-api.ts";
 import { personPath } from "../lib/person.ts";
 import { initialsOf } from "../mentions/fields.ts";
 import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
-import { DuplicateList, useDuplicates } from "./Duplicates.tsx";
+import { DuplicateList, Merged, RecentlyMerged, useDuplicates, useMerges } from "./Duplicates.tsx";
 import { matches } from "./matching.ts";
 
 type Listing = { status: "reading" } | { status: "listed"; contacts: readonly Contact[]; more: boolean } | { status: "failed"; message: string };
@@ -32,6 +32,18 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
 
   const connected = (sources ?? []).some((s) => s.kind === "contacts" && s.state === "connected");
   const duplicates = useDuplicates(host, connected, asked);
+  const merges = useMerges(host, connected, asked);
+  const [merged, setMerged] = useState<ContactMerge | null>(null);
+  const again = () => {
+    setListing({ status: "reading" });
+    setAsked((n) => n + 1);
+  };
+  /** Connects a contacts data source again, asking to change it too: off to agree to it where that is somewhere else. */
+  const connectToEdit = async (source: Source) => {
+    const answer = await host.perform({ type: "source.connect", id: source.id, back: app.path, edit: true });
+    if (answer.redirect) return void (location.href = answer.redirect);
+    setSources(answer.sources);
+  };
   const all = listing.status === "listed" ? listing.contacts : null;
   const found = useMemo(() => (all ?? []).filter((contact) => matches(contact, typed)), [all, typed]);
 
@@ -50,7 +62,30 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
               {duplicates.problem}
             </p>
           )}
-          {duplicates.pairs && <DuplicateList app={app} pairs={duplicates.pairs} onDismiss={(pair) => void duplicates.dismiss(pair)} />}
+          {merged && (
+            <Merged
+              host={host}
+              merge={merged}
+              onRestored={() => {
+                setMerged(null);
+                again();
+              }}
+            />
+          )}
+          {duplicates.pairs && (
+            <DuplicateList
+              host={host}
+              app={app}
+              sources={sources}
+              pairs={duplicates.pairs}
+              onDismiss={(pair) => void duplicates.dismiss(pair)}
+              onConnect={(source) => void connectToEdit(source)}
+              onMerged={({ merge }) => {
+                setMerged(merge);
+                again();
+              }}
+            />
+          )}
           <input type="search" className="contacts-search" aria-label="Search contacts" placeholder="Search by name, email or organization" value={typed} onChange={(e) => setTyped(e.target.value)} />
           {listing.status === "failed" && (
             <p role="alert" className="said failed">
@@ -92,6 +127,14 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
               </li>
             ))}
           </ul>
+          <RecentlyMerged
+            host={host}
+            merges={merges.filter((m) => m.id !== merged?.id)}
+            onRestored={() => {
+              setMerged(null);
+              again();
+            }}
+          />
         </>
       )}
       <Sources

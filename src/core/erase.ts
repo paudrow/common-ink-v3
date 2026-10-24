@@ -66,6 +66,8 @@ export const PERSON_COLUMNS: readonly PersonColumn[] = [
   { at: "source_refs.person_id", fate: "delete" },
   { at: "sample_records.person_id", fate: "delete" },
   { at: "contact_dismissals.person_id", fate: "delete" },
+  { at: "contact_merges.person_id", fate: "delete" },
+  { at: "contact_locks.person_id", fate: "delete" },
   // Their mail, kept for them alone, and the addresses it knew them by. Ids before messages, messages before their threads.
   { at: "mail_ids.person_id", fate: "delete" },
   { at: "mail_messages.person_id", fate: "delete" },

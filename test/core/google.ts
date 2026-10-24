@@ -2,7 +2,7 @@
  * Google, as far as Common Ink asks anything of it: a stand-in at the one place the Worker reaches
  * out. It answers in the shapes Google's API reference gives for the token and revoke endpoints,
  * Calendar's calendarList, events and events.insert, and People's connections, get, updateContact,
- * updateContactPhoto, deleteContactPhoto and createContact, and refuses the way they refuse.
+ * updateContactPhoto, deleteContactPhoto, createContact and deleteContact, and refuses the way they refuse.
  * It throws for a request to any other host, so no test passes by reaching somewhere else.
  */
 
@@ -214,6 +214,10 @@ export class FakeGoogle {
       found.photos = [{ url: `https://lh3.googleusercontent.com/contacts/${found.resourceName.slice(7)}-${this.sent.length}`, metadata: { source: { type: "CONTACT" } } }];
       found.etag = etag();
       return json({ person: found });
+    }
+    if (action === "deleteContact" && method === "DELETE") {
+      this.people.splice(this.people.indexOf(found), 1);
+      return json({});
     }
     if (action === "deleteContactPhoto" && method === "DELETE") {
       found.photos = [];

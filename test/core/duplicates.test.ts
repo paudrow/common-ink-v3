@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { duplicatePairs, pairKey } from "../../src/core/duplicates.ts";
-import type { Contact } from "../../src/core/protocol.ts";
+import { combinedContact, duplicatePairs, pairKey } from "../../src/core/duplicates.ts";
+import type { Contact, ContactCard } from "../../src/core/protocol.ts";
 
 const contact = (id: string, name: string, more: { emails?: string[]; phones?: string[]; sourceId?: string } = {}): Contact => ({
   sourceId: more.sourceId ?? "google-contacts",
@@ -24,6 +24,10 @@ describe("contacts that look like the same person", () => {
 
   it("are two whose phone numbers end the same, so a country code or punctuation doesn't hide one", () => {
     expect(pairs([contact("a", "Sam", { phones: ["+1 (555) 014-2"] }), contact("b", "Okafor Plumbing", { phones: ["555 0142"] }), contact("c", "Other", { phones: ["+1 555 0143"] })])).toEqual([["a", "b", ["phone"]]]);
+  });
+
+  it("are two with one number dialled at home and from abroad", () => {
+    expect(pairs([contact("a", "Ada", { phones: ["020 7946 0000"] }), contact("b", "Countess", { phones: ["+44 20 7946 0000"] })])).toEqual([["a", "b", ["phone"]]]);
   });
 
   it("are not two that share a short number or only its last digits", () => {
@@ -52,5 +56,64 @@ describe("contacts that look like the same person", () => {
 
   it("names a pair the same whichever way round it is found", () => {
     expect(pairKey("google-contacts", "people/c2", "people/c1")).toBe(pairKey("google-contacts", "people/c1", "people/c2"));
+  });
+});
+
+const card = (id: string, fields: Partial<ContactCard>): ContactCard => ({ sourceId: "google-contacts", id, name: "", emails: [], phones: [], organization: null, url: null, title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], etag: `${id}-1`, ...fields });
+
+describe("two contacts as one", () => {
+  const ada = card("a", {
+    name: "Ada Lovelace",
+    emails: [{ value: "ada@example.com", type: null }],
+    phones: [{ value: "+44 20 7946 0000", type: "home" }],
+    organization: "Analytical Engines",
+    title: null,
+    addresses: [{ value: "12 St James's Square, London", type: "home" }],
+    birthday: "1815-12-10",
+    urls: [{ value: "https://ada.example/", type: "blog" }],
+    notes: "Wrote the first program.",
+    photo: "https://lh3.googleusercontent.com/a",
+  });
+  const king = card("b", {
+    name: "Ada King",
+    emails: [{ value: "ADA@example.com", type: "home" }, { value: "countess@lovelace.example", type: "work" }],
+    phones: [{ value: "020 7946 0000", type: "mobile" }, { value: "+44 20 7946 0001", type: null }],
+    organization: "Royal Society",
+    title: "Countess",
+    addresses: [{ value: "12 st james's square london", type: "work" }, { value: "Ockham Park, Surrey", type: null }],
+    birthday: "--12-10",
+    urls: [{ value: "https://ada.example", type: null }],
+    notes: "Married William King.",
+  });
+
+  it("is the main contact with every line of the other it doesn't have, after its own, once each", () => {
+    expect(combinedContact(ada, king)).toEqual({
+      ...ada,
+      // The same address in another case, and the same number dialled at home rather than from abroad, are the main's.
+      emails: [{ value: "ada@example.com", type: "home" }, { value: "countess@lovelace.example", type: "work" }],
+      phones: [{ value: "+44 20 7946 0000", type: "home" }, { value: "+44 20 7946 0001", type: null }],
+      addresses: [{ value: "12 St James's Square, London", type: "home" }, { value: "Ockham Park, Surrey", type: null }],
+      urls: [{ value: "https://ada.example/", type: "blog" }],
+      notes: "Wrote the first program.\n\nMarried William King.",
+    });
+  });
+
+  it("keeps the main's name, work, birthday and picture where it has them, and fills in the other's where it has none", () => {
+    expect(combinedContact(ada, king)).toMatchObject({ id: "a", etag: "a-1", name: "Ada Lovelace", organization: "Analytical Engines", title: null, birthday: "1815-12-10", photo: "https://lh3.googleusercontent.com/a" });
+    const bare = card("c", { name: " " });
+    expect(combinedContact(bare, king)).toMatchObject({ id: "c", name: "Ada King", organization: "Royal Society", title: "Countess", birthday: "--12-10", notes: "Married William King.", photo: null });
+  });
+
+  it("takes the other's label for a line both have where the main's has none", () => {
+    expect(combinedContact(card("a", { emails: [{ value: "ada@example.com", type: null }] }), card("b", { emails: [{ value: "Ada@Example.com", type: "work" }] })).emails).toEqual([{ value: "ada@example.com", type: "work" }]);
+  });
+
+  it("writes notes once where one already holds the other's", () => {
+    const notes = (main: string | null, other: string | null) => combinedContact(card("a", { notes: main }), card("b", { notes: other })).notes;
+    expect(notes("Met at the workshop. Likes tea.", "Likes tea.")).toBe("Met at the workshop. Likes tea.");
+    expect(notes("Likes tea.", "Met at the workshop. Likes tea.")).toBe("Met at the workshop. Likes tea.");
+    expect(notes(null, "Likes tea.")).toBe("Likes tea.");
+    expect(notes("Likes tea.", null)).toBe("Likes tea.");
+    expect(notes(null, null)).toBeNull();
   });
 });
