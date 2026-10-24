@@ -2,6 +2,8 @@ import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { EditorView, RectangleMarker, ViewPlugin, drawSelection, keymap, layer } from "@codemirror/view";
 import { Vim, getCM, vim, type MotionFn } from "@replit/codemirror-vim";
 import { dismissing, following, historyStepped, noteJump } from "../../plugin-api.ts";
+import { bulletCommands } from "../bullets/outlining.ts";
+import { FOLD_KEYS, TODO_KEYS } from "./keys.ts";
 
 let run: (commandId: string) => boolean = () => false;
 
@@ -53,6 +55,23 @@ Vim.defineAction("nextTab", () => void run("vim.tab.next"));
 Vim.defineAction("previousTab", () => void run("vim.tab.previous"));
 Vim.mapCommand("gt", "action", "nextTab", {}, { context: "normal" });
 Vim.mapCommand("gT", "action", "previousTab", {}, { context: "normal" });
+
+// gx, g- and g> put the todos on the cursor's line, or on the lines visual mode selects, in a state as ⌘Enter and its like do, and
+// leave visual mode as Escape does. In a note g begins many of vim's own keys, so they are vim's to map and not the window's.
+for (const { id, vim: keys, runs } of TODO_KEYS) {
+  Vim.defineAction(id, (cm, _, state) => {
+    run(runs);
+    if (state.visualMode) Vim.exitVisualMode(cm);
+  });
+  for (const context of ["normal", "visual"]) Vim.mapCommand(keys, "action", id, {}, { context });
+}
+
+// za, zc and zo toggle, close and open the fold of the bullet the cursor is on, and zM and zR close and open them all: the bullets'
+// own commands, where they have something to do, and nothing anywhere else, as in vim where there is no fold.
+for (const { vim: keys, runs } of FOLD_KEYS) {
+  Vim.defineAction(runs, () => void (bulletCommands[runs].when() && run(`bullets.${runs}`)));
+  Vim.mapCommand(keys, "action", runs, {}, { context: "normal" });
+}
 
 // zz, zt and zb put the cursor's line in the middle, at the top or at the foot of what is seen, and z., z<CR> and z- do the
 // same with the cursor on the line's first letter. The library's own scroll the editor, which here never scrolls: its pane does.

@@ -47,3 +47,26 @@ export const KEYS: readonly VimKey[] = [
   { id: "tab.next", title: "Vim: next tab", surface: "tabs", keys: ["g t"], run: (ui) => ui.tab(1), arrives: true },
   { id: "tab.previous", title: "Vim: previous tab", surface: "tabs", keys: ["g shift+t"], run: (ui) => ui.tab(-1), arrives: true },
 ];
+
+/**
+ * Vim's keys for a todo's state: in a note's text in normal and visual mode, each runs the todos' own command for the todos on
+ * the cursor's line or the selection's, and on a row of the Todos page it runs the page's own, which x, - and > run. `vim` is
+ * how vim writes them, and `keys` how the app's commands do.
+ */
+export const TODO_KEYS = [
+  { id: "todos.complete", title: "Vim: complete the todo, or open it again", vim: "gx", keys: ["g x"], runs: "todos.note.complete", onRow: "todos.complete" },
+  { id: "todos.abandon", title: "Vim: abandon the todo, or open it again", vim: "g-", keys: ["g -"], runs: "todos.note.abandon", onRow: "todos.abandon" },
+  { id: "todos.backlog", title: "Vim: move the todo to the backlog, or open it again", vim: "g>", keys: ["g shift+>"], runs: "todos.note.backlog", onRow: "todos.backlog" },
+] as const;
+
+/**
+ * Vim's fold keys, in a note's text in normal mode: each runs the bullets' own command, `runs` under `bullets.`. A fold is a bullet
+ * with something under it, so zf, which makes a fold of lines vim is told, has nothing to do here.
+ */
+export const FOLD_KEYS = [
+  { id: "fold.toggle", title: "Vim: fold or unfold the bullet", vim: "za", keys: ["z a"], runs: "toggleFold" },
+  { id: "fold.close", title: "Vim: fold the bullet", vim: "zc", keys: ["z c"], runs: "fold" },
+  { id: "fold.open", title: "Vim: unfold the bullet", vim: "zo", keys: ["z o"], runs: "unfold" },
+  { id: "fold.closeAll", title: "Vim: fold all bullets", vim: "zM", keys: ["z shift+m"], runs: "foldAll" },
+  { id: "fold.openAll", title: "Vim: unfold all bullets", vim: "zR", keys: ["z shift+r"], runs: "unfoldAll" },
+] as const;

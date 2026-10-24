@@ -1,3 +1,4 @@
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { Facet, StateEffect, StateField, type ChangeDesc, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, showTooltip, type Tooltip, type TooltipView } from "@codemirror/view";
 import { parseTodo, type PluginHost, type Todo } from "../../plugin-api.ts";
@@ -6,8 +7,8 @@ import { openFrom, openPopover } from "../lib/Popover.tsx";
 import { replacing } from "../lib/rewrite.ts";
 import { todoLines } from "../lib/todoLines.ts";
 import { CHIP_ICONS } from "./chipIcons.ts";
-import { chipMenu, tagMenu } from "./chips.ts";
-import { CHIP_NAMES, pickerLabel, type RowChip } from "./picking.ts";
+import { chipMenu, putTodos, tagMenu } from "./chips.ts";
+import { CHIP_NAMES, keyed, linesTouched, pickerLabel, type KeyedLine, type PutAway, type RowChip } from "./picking.ts";
 
 /**
  * What a todo can be given from beside it in a note, in the order the Todos page has them: its chip's
@@ -214,6 +215,39 @@ export function todoAtCursor(): EditorView | null {
   const view = last?.dom.isConnected ? last : null;
   if (!view || !writable(view.state)) return null;
   return openTodoAt(view.state, view.state.doc.lineAt(view.state.selection.main.head).from) ? view : null;
+}
+
+/** A list item's mark and the space after it, which a todo's box is written after. */
+const ITEM = /^([ \t]*)(?:[-*+]|\d+[.)])[ \t]/;
+
+/** The lines a key for a todo's state acts on in `state`: those its selection takes in that are todos, or list items with no box. */
+function keyedLines(state: EditorState): KeyedLine[] {
+  return linesTouched(state.doc, state.selection.ranges).flatMap((from): KeyedLine[] => {
+    const line = state.doc.lineAt(from);
+    const todo = parseTodo(line.text);
+    if (todo) return state.field(todoLines).has(from) ? [{ from, state: todo.state }] : [];
+    const item = ITEM.exec(line.text);
+    // A line that only looks like an item, as one in a code block does, is none.
+    const tree = ensureSyntaxTree(state, line.to, 50) ?? syntaxTree(state);
+    return item && tree.resolveInner(from + item[1]!.length, 1).name === "ListMark" ? [{ from, box: from + item[0].length }] : [];
+  });
+}
+
+/** What a key for `to` would do now in the note editor the keyboard is in, or with `orLast` was last in, for the palette, and in which. */
+export function keyedHere(to: PutAway, orLast = false) {
+  const view = last?.dom.isConnected && (orLast || last.hasFocus) ? last : null;
+  const made = view && writable(view.state) ? keyed(keyedLines(view.state), to) : null;
+  return view && made ? { view, made } : null;
+}
+
+/** Puts the todos on the lines the selection takes in in `to`, or opens them again. Done's key makes todos of the list items there first. */
+export function putHere(to: PutAway) {
+  const at = keyedHere(to, true);
+  if (!at) return;
+  if ("put" in at.made) return putTodos(at.view, at.made.put);
+  const changes = at.view.state.changes(at.made.boxed.map((from) => ({ from, insert: "[ ] " })));
+  // A cursor where the box goes goes after it, to the todo's words, as it would had the box been typed.
+  at.view.dispatch({ changes, selection: at.view.state.selection.map(changes, 1), userEvent: "input.task" });
 }
 
 /**

@@ -65,7 +65,7 @@ export type Context =
 export type ErrorCode = OpErrorCode | "rate_limited" | "signed_out" | "unknown";
 
 export type ToPlugin =
-  | { v: 1; init: { context: Context; settings: Record<string, SettingValue>; granted: Capability[]; plugin: { name: string; version: string }; keys: readonly { chord: string; field: boolean }[] } }
+  | { v: 1; init: { context: Context; settings: Record<string, SettingValue>; granted: Capability[]; plugin: { name: string; version: string }; keys: readonly { chord: string; field: boolean }[]; layout: Readonly<Record<string, string>> } }
   | { v: 1; reply: number; ok: true; result: unknown }
   | { v: 1; reply: number; ok: false; error: { code: ErrorCode; message: string } }
   | { v: 1; event: "command"; id: string }
@@ -79,7 +79,7 @@ export type ToPlugin =
   /** The app changed theme: the frame's scheme and its styles, made again from the app's. */
   | { v: 1; event: "look"; scheme: "light" | "dark"; styles: string }
   /** The chords the frame gives back, told again when the member's keybindings change. */
-  | { v: 1; event: "keys"; keys: readonly { chord: string; field: boolean }[] };
+  | { v: 1; event: "keys"; keys: readonly { chord: string; field: boolean }[]; layout: Readonly<Record<string, string>> };
 
 /** Whether `value` is plain data small enough to be worth writing out: no more than `MAX_MESSAGE` of strings and nodes, counted without building anything. */
 function small(value: unknown): boolean {

@@ -1,4 +1,4 @@
-import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
+import { Facet, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { createElement, type ReactNode } from "react";
 import { changeTodo, markOf, parseTodo, rewriteTodo, tagsOn, type Importance, type LastDone, type PluginHost, type Ticking, type TodoState } from "../../plugin-api.ts";
@@ -108,7 +108,6 @@ const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
     return todo && todo.box.to < offset + line.length ? [{ ...todo.box, state: todo.state }] : [];
   },
   draw(el, token, source) {
-    const { host, noteId, onCompleted, onRecurred } = context;
     const box = document.createElement("input");
     box.type = "checkbox";
     box.checked = token.state === "done";
@@ -129,28 +128,7 @@ const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
       box.checked = to === "done";
       const editor = el.closest<HTMLElement>(".cm-editor");
       const view = editor && EditorView.findFromDOM(editor);
-      const at = view?.posAtDOM(el);
-      const was = view && at !== undefined ? parseTodo(view.state.doc.lineAt(Math.min(at, view.state.doc.length)).text) : null;
-      // What was typed before the click goes first, in a write of its own, so that the change that completes a recurring todo holds the check alone and Undo takes back nothing else.
-      const before = box.checked && was?.every ? host.app().saveNote(noteId) : undefined;
-      source.rewrite(`[${markOf(to)}]`);
-      // Saved at once, so the write holds the check alone and not what is typed on the line in the pause after it.
-      const saved = host.app().saveNote(noteId);
-      if (!box.checked || !view || at === undefined) return;
-      const line = view.state.doc.lineAt(Math.min(at, view.state.doc.length));
-      const todo = parseTodo(line.text);
-      // A note that can't be written has nothing to undo.
-      if (todo?.state !== "done") return;
-      if (todo.every) {
-        // The server completes it, and says so of the write that checked it: that change is what Undo takes back.
-        void Promise.all([saved, before]).then((writes) => {
-          const completing = writes.find((note) => note?.filed);
-          if (completing) onRecurred(completing.revision);
-        });
-        return;
-      }
-      view.dispatch({ effects: tick.of({ from: line.from, text: line.text }) });
-      onCompleted(view);
+      if (view) putTodos(view, [{ from: view.state.doc.lineAt(Math.min(view.posAtDOM(el), view.state.doc.length)).from, state: to }]);
     });
     // The keyboard stays in the note: a box ticked with the pointer is not somewhere the next key goes.
     el.addEventListener("mousedown", (event) => {
@@ -166,6 +144,41 @@ const checkbox = (context: TodoChipsContext): Chip<Checkbox> => ({
     if (token.state === "done") tickedCard(el, box, !source.readOnly, () => historyOf(context, source).then((history) => history.completed));
   },
 });
+
+/** What a note's editor checks its todos off through, by their box and by their keys. */
+const contextIs = Facet.define<TodoChipsContext, TodoChipsContext | null>({ combine: (contexts) => contexts[0] ?? null });
+
+/**
+ * Puts the todos whose lines start at each `from` in their state, as one edit of the member's. It is saved at once, so the
+ * write holds it alone and not what is typed on the line in the pause after it. One todo checked off is told of, so it can
+ * be undone: the server completes one that repeats, and says so of the write that checked it. Several are only written.
+ */
+export function putTodos(view: EditorView, put: readonly { from: number; state: TodoState }[]) {
+  const context = view.state.facet(contextIs);
+  if (!context || !writable(view.state)) return;
+  const { host, noteId, onCompleted, onRecurred } = context;
+  const todos = put.flatMap(({ from, state }) => {
+    const todo = parseTodo(view.state.doc.lineAt(from).text, from);
+    return todo && todo.state !== state ? [{ todo, state }] : [];
+  });
+  if (!todos.length) return;
+  // What was typed before goes first, in a write of its own, so that the change that completes a recurring todo holds the check alone and Undo takes back nothing else.
+  const before = todos.some(({ todo, state }) => state === "done" && todo.every) ? host.app().saveNote(noteId) : undefined;
+  view.dispatch({ changes: todos.map(({ todo, state }) => ({ from: todo.box.from + 1, to: todo.box.to - 1, insert: markOf(state) })), userEvent: "input.task" });
+  const saved = host.app().saveNote(noteId);
+  const only = todos.length === 1 ? todos[0]! : null;
+  if (only?.state !== "done") return;
+  if (only.todo.every) {
+    void Promise.all([saved, before]).then((writes) => {
+      const completing = writes.find((note) => note?.filed);
+      if (completing) onRecurred(completing.revision);
+    });
+    return;
+  }
+  const line = view.state.doc.lineAt(only.todo.box.from);
+  view.dispatch({ effects: tick.of({ from: line.from, text: line.text }) });
+  onCompleted(view);
+}
 
 let cards = 0;
 
@@ -521,4 +534,4 @@ const look = EditorView.baseTheme({
 });
 
 /** Draws a todo's checkbox and its options as chips. */
-export const todoChips = (context: TodoChipsContext): Extension => [todoLines, ticked, chips(checkbox(context)), chips(importance), chips(due), chips(every), chips(lastDone(context)), chips(tag(context)), stateWords, continuedTodos, asWritten, look];
+export const todoChips = (context: TodoChipsContext): Extension => [contextIs.of(context), todoLines, ticked, chips(checkbox(context)), chips(importance), chips(due), chips(every), chips(lastDone(context)), chips(tag(context)), stateWords, continuedTodos, asWritten, look];

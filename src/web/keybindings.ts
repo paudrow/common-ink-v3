@@ -1,5 +1,7 @@
 interface Pressed {
   key: string;
+  /** The key on the keyboard, whatever it writes, such as `BracketLeft`. */
+  code?: string;
   metaKey: boolean;
   ctrlKey: boolean;
   altKey: boolean;
@@ -10,13 +12,65 @@ const MODIFIERS = ["mod", "ctrl", "alt", "shift"];
 /** The keys whose own character is what keys are written with: a chord is joined with + and a sequence is spaced. */
 const NAMED: Record<string, string> = { " ": "space", "+": "plus" };
 
+/** What a US keyboard's keys type, by their code: what a key is taken to type where the browser can't say for the member's keyboard. */
+const US: Readonly<Record<string, string>> = {
+  ...Object.fromEntries([..."abcdefghijklmnopqrstuvwxyz"].map((letter) => [`Key${letter.toUpperCase()}`, letter])),
+  ...Object.fromEntries([..."0123456789"].map((digit) => [`Digit${digit}`, digit])),
+  BracketLeft: "[",
+  BracketRight: "]",
+  Minus: "-",
+  Equal: "=",
+  Semicolon: ";",
+  Quote: "'",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+  Backslash: "\\",
+  Backquote: "`",
+};
+
+let layoutNow = US;
+const layoutHeard = new Set<() => void>();
+
+/**
+ * What each key types on the member's keyboard with nothing held, by its code: their layout where the browser says, as Chrome
+ * does, and a US keyboard's where it can't. A key whose letter isn't one a key is written with, as on a Cyrillic keyboard, is
+ * the US keyboard's too, as shortcuts on such a keyboard are.
+ */
+export const keyboardLayout = () => layoutNow;
+
+/** Calls `heard` each time the member's keyboard layout is read as another. */
+export function onLayout(heard: () => void) {
+  layoutHeard.add(heard);
+  return () => void layoutHeard.delete(heard);
+}
+
+/** Reads the member's keyboard layout, again when it may have changed: they may switch keyboards while the window is away. */
+export function readLayout() {
+  const keyboard = (navigator as { keyboard?: { getLayoutMap?: () => Promise<Iterable<[string, string]>> } }).keyboard;
+  keyboard?.getLayoutMap?.().then((map) => {
+    const read = { ...US, ...Object.fromEntries([...map].flatMap(([code, typed]) => (/^[!-~]$/.test(typed) ? [[code, typed.toLowerCase()]] : []))) };
+    if (JSON.stringify(read) === JSON.stringify(layoutNow)) return;
+    layoutNow = read;
+    for (const heard of layoutHeard) heard();
+  }, () => {});
+}
+
 /**
  * A key press written the way a command writes its keys: modifiers in the order mod, ctrl, alt,
  * shift, then the key. `mod` is ⌘ on a Mac and Ctrl elsewhere. `ctrl` is the Control key, which
  * only a Mac tells apart from `mod`. Off a Mac the Windows key is `meta`, which no chord has.
+ * `layout` is what each key types on the member's keyboard, by its code.
  */
-export const chordOf = (e: Pressed, mac: boolean) =>
-  [(mac ? e.metaKey : e.ctrlKey) && "mod", mac ? e.ctrlKey && "ctrl" : e.metaKey && "meta", e.altKey && "alt", e.shiftKey && "shift", NAMED[e.key] ?? e.key.toLowerCase()].filter(Boolean).join("+");
+export function chordOf(e: Pressed, mac: boolean, layout: Readonly<Record<string, string>> = layoutNow) {
+  // Option held with ⌘ or ⌃ on a Mac still writes its own character, as ⌥⌘[ writes “, so the key is what that key types without
+  // Option on the member's keyboard: [ is wherever their layout has it. Off a Mac, Ctrl and Alt together are also AltGr, which types a
+  // sign, as AltGr+8 types [ on a German keyboard: that is the key 8, which a chord of the sign would take from what is typed. A letter
+  // is left as it is written, so the chord is the same on any keyboard's letters.
+  const optioned = e.altKey && (e.metaKey || e.ctrlKey) && (mac ? /^[^ -~]$/u : /^[^\p{L}]$/u).test(e.key) && e.code && layout[e.code];
+  const key = optioned || e.key;
+  return [(mac ? e.metaKey : e.ctrlKey) && "mod", mac ? e.ctrlKey && "ctrl" : e.metaKey && "meta", e.altKey && "alt", e.shiftKey && "shift", NAMED[key] ?? key.toLowerCase()].filter(Boolean).join("+");
+}
 
 /**
  * A command's keys as this platform's key presses are written: off a Mac, `ctrl` is `mod`. Keys may

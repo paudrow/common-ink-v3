@@ -14,7 +14,7 @@ import { Icon } from "./icons.tsx";
 import { InspectorBar, InspectorPanel, type Subject } from "./Inspector.tsx";
 import type { Showing } from "./inspected.ts";
 import { layoutOf, reduce, restored, showing, type Side, type SideAction } from "./inspectorState.ts";
-import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, typed } from "./keybindings.ts";
+import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, readLayout, typed } from "./keybindings.ts";
 import { lastChange, relisted, withChanged } from "./knownNotes.ts";
 import { LOOK_SETTINGS, lookOf } from "./look.ts";
 import { NoteEditor, type SaveShown } from "./NoteEditor.tsx";
@@ -1041,14 +1041,17 @@ export function Workspace({ me, workspace, settings, place: at, navigate: naviga
       e.preventDefault();
       e.stopPropagation();
     };
+    readLayout();
     addEventListener("keydown", onKey, true);
     addEventListener("focusin", giveUp, true);
     addEventListener("pointerdown", giveUp, true);
+    addEventListener("focus", readLayout);
     return () => {
       giveUp();
       removeEventListener("keydown", onKey, true);
       removeEventListener("focusin", giveUp, true);
       removeEventListener("pointerdown", giveUp, true);
+      removeEventListener("focus", readLayout);
     };
   }, [host]);
   useEffect(() => host.navigated(), [host, place.path]);

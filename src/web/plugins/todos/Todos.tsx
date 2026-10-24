@@ -515,6 +515,8 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
       data-row={row}
       data-state={todo.state === "open" ? undefined : todo.state}
       data-gone={gone || undefined}
+      // A row the Todos page's keys put in a state, which is where vim's gx, g- and g> run them.
+      data-row-puts={readOnly ? undefined : ""}
       data-picking={picked ?? (menu ? "menu" : undefined)}
       // Selected by the keys, not a stop of its own for Tab.
       tabIndex={-1}

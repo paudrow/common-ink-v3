@@ -5,7 +5,7 @@ import type { Op } from "../../core/protocol.ts";
 import { ApiError } from "../api.ts";
 import { useDismiss } from "../dismiss.ts";
 import { guardFrames } from "../frameGuard.ts";
-import { frameKeys } from "../keybindings.ts";
+import { frameKeys, keyboardLayout, onLayout } from "../keybindings.ts";
 import type { Plugin, SettingValue } from "../plugin-api.ts";
 import { INSTALLED_EMBED } from "../pluginHost.ts";
 import { appsOwn, createBroker, granted, kept } from "./broker.ts";
@@ -195,7 +195,7 @@ export function adapt(installed: InstalledPlugin, reach: Reach): Plugin {
           switch (decision.kind) {
             case "ready":
               if (started) return;
-              opened?.post({ v: 1, init: { context, settings: settings(), granted: has, plugin: { name, version: manifest.version }, keys: frameKeys().chords } });
+              opened?.post({ v: 1, init: { context, settings: settings(), granted: has, plugin: { name, version: manifest.version }, keys: frameKeys().chords, layout: keyboardLayout() } });
               started = true;
               for (const message of waiting.splice(0)) opened?.post(message);
               opened?.show();
@@ -406,17 +406,22 @@ export function adapt(installed: InstalledPlugin, reach: Reach): Plugin {
 
       let told = JSON.stringify(settings());
       let toldKeys = "";
+      /** Tells the frames the keys the app takes back from them, and the keyboard's layout they read presses by, when either has changed. */
+      const tellKeys = () => {
+        const keys = JSON.stringify([frameKeys().chords, keyboardLayout()]);
+        if (keys === toldKeys) return;
+        toldKeys = keys;
+        for (const frame of running) frame.post({ v: 1, event: "keys", keys: frameKeys().chords, layout: keyboardLayout() });
+      };
       host.settings.subscribe(() => {
         const now = settings();
         if (JSON.stringify(now) !== told) {
           told = JSON.stringify(now);
           for (const frame of running) frame.post({ v: 1, event: "settings", settings: now });
         }
-        const keys = JSON.stringify(frameKeys().chords);
-        if (keys === toldKeys) return;
-        toldKeys = keys;
-        for (const frame of running) frame.post({ v: 1, event: "keys", keys: frameKeys().chords });
+        tellKeys();
       });
+      stops.add(onLayout(tellKeys));
 
       return () => {
         endBackground();

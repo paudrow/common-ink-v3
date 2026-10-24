@@ -234,7 +234,8 @@ test("the selected row is named by its words and its state, with its keys; Space
   });
   expect(fill).toEqual([true, true]);
 
-  for (const key of ["Control+Enter", "Alt+Enter", "Shift+Enter", "Control+Space", "Alt+Space"]) await page.keyboard.press(key);
+  // ⌘Enter, Ctrl+Enter off a Mac, is a note's key to complete a todo, and completes a row too.
+  for (const key of ["Alt+Enter", "Shift+Enter", "Control+Space", "Alt+Space"]) await page.keyboard.press(key);
   await expect(page).toHaveURL(/\/todos$/);
   expect(await lines()).toEqual(before);
   await expectRowSelected(row(page, "Sweep"));
@@ -371,15 +372,77 @@ test("with vim's keys on, dd abandons the selected todo and goes on to the next;
   await expect.poll(lines).toEqual(["- [-] Sweep due:2031-10-01", "- [-] Dust due:2031-10-02", "- [>] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
 });
 
+test("on a selected row, ⌘Enter, ⇧⌘Enter and ⌥⌘Enter complete, abandon and move to the backlog as x, - and > do, with the same Undo and the next row selected, and the same key again opens it", async ({ page }) => {
+  const { lines } = await open(page);
+  await box(page, "Sweep").focus();
+
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [ ] Dust due:2031-10-02", "- [ ] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(toast(page, "Task completed")).toHaveText("Task completedUndo");
+  await expectRowSelected(row(page, "Dust"));
+
+  await page.keyboard.press("ControlOrMeta+Shift+Enter");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [-] Dust due:2031-10-02", "- [ ] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(toast(page, "Task abandoned")).toHaveText("Task abandonedUndo");
+  await expectRowSelected(row(page, "Paint the fence"));
+
+  await page.keyboard.press("ControlOrMeta+Alt+Enter");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [-] Dust due:2031-10-02", "- [>] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(toast(page, "Task moved to the backlog")).toHaveText("Task moved to the backlogUndo");
+  await expectRowSelected(row(page, "Learn the cello"));
+
+  // In a list that has both states, the key for the state a todo is in opens it again, and the row stays.
+  await bar(page).fill("is:open OR is:backlog");
+  await expect(words(page)).toHaveText(["Learn the cello", "Paint the fence"]);
+  await box(page, "Paint the fence").focus();
+  await page.keyboard.press("ControlOrMeta+Alt+Enter");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [-] Dust due:2031-10-02", "- [ ] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(words(page)).toHaveText(["Learn the cello", "Paint the fence"]);
+});
+
+test("with vim's keys on, gx, g- and g> on a selected row complete, abandon and move it to the backlog, beside x, - and > and dd, and go on to the next row", async ({ page }) => {
+  const { lines } = await open(page, { "vim.enabled": true });
+  await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
+  await box(page, "Sweep").focus();
+  await page.keyboard.press("j");
+  await expectRowSelected(row(page, "Dust"));
+
+  await page.keyboard.press("g");
+  await page.keyboard.press("x");
+  await expect.poll(lines).toEqual(["- [ ] Sweep due:2031-10-01", "- [x] Dust due:2031-10-02", "- [ ] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(toast(page, "Task completed")).toHaveText("Task completedUndo");
+  await expectRowSelected(row(page, "Paint the fence"));
+
+  await page.keyboard.press("g");
+  await page.keyboard.press("-");
+  await expect.poll(lines).toEqual(["- [ ] Sweep due:2031-10-01", "- [x] Dust due:2031-10-02", "- [-] Paint the fence due:2031-10-03", "- [ ] Learn the cello due:2031-10-04"]);
+  await expect(toast(page, "Task abandoned")).toHaveText("Task abandonedUndo");
+  await expectRowSelected(row(page, "Learn the cello"));
+
+  await page.keyboard.press("g");
+  await page.keyboard.press("Shift+Period");
+  await expect.poll(lines).toEqual(["- [ ] Sweep due:2031-10-01", "- [x] Dust due:2031-10-02", "- [-] Paint the fence due:2031-10-03", "- [>] Learn the cello due:2031-10-04"]);
+  await expect(toast(page, "Task moved to the backlog")).toHaveText("Task moved to the backlogUndo");
+
+  // gg is still the first row, and x is still a key of its own.
+  await expect(words(page)).toHaveText(["Sweep"]);
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
+  await expectRowSelected(row(page, "Sweep"));
+  await page.keyboard.press("x");
+  await expect.poll(lines).toEqual(["- [x] Sweep due:2031-10-01", "- [x] Dust due:2031-10-02", "- [-] Paint the fence due:2031-10-03", "- [>] Learn the cello due:2031-10-04"]);
+});
+
 test("the keyboard shortcuts list the keys for a todo under Todos, and vim's dd under Vim", async ({ page }) => {
   await open(page, { "vim.enabled": true });
   await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
   // ? is vim's search where a search box is in reach, so the sheet is opened from the palette.
   await runCommand(page, "Keyboard shortcuts");
   await expect(sheet(page)).toBeVisible();
-  await expect(keysOf(page, "Todos", "Complete the selected todo, or open it again")).toHaveText(["X"]);
-  await expect(keysOf(page, "Todos", "Abandon the selected todo, or open it again")).toHaveText(["-"]);
-  await expect(keysOf(page, "Todos", "Move the selected todo to the backlog, or open it again")).toHaveText([">"]);
+  await expect(keysOf(page, "Todos", "Complete the selected todo, or open it again")).toHaveText(["X", /^(⌘Enter|Ctrl\+Enter)$/]);
+  await expect(keysOf(page, "Todos", "Abandon the selected todo, or open it again")).toHaveText(["-", /^(⇧⌘Enter|Ctrl\+Shift\+Enter)$/]);
+  await expect(keysOf(page, "Todos", "Move the selected todo to the backlog, or open it again")).toHaveText([">", /^(⌥⌘Enter|Ctrl\+Alt\+Enter)$/]);
+  await expect(keysOf(page, "Todos", "Vim: complete the todo, or open it again")).toHaveText(["G X"]);
   await expect(keysOf(page, "Vim", "Vim: delete the selected row, or abandon the selected todo")).toHaveText(["D D"]);
 });
 

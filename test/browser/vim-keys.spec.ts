@@ -345,8 +345,10 @@ test("in Settings, Enter on a setting goes to its field and Escape comes back to
   await expect(shown("Vim: go to the next region, round to the first")).toHaveText([MAC ? /^⌃W W/ : /^Ctrl\+W W/]);
   await expect(shown("Vim: next tab")).toHaveText([/^G T/]);
   await expect(shown("Vim: next row, from a field")).toHaveText(MAC ? [/^⌃J/, /^⌃N/] : [/^Ctrl\+J/, /^Ctrl\+N/]);
-  await expect(all).toHaveCount(23);
-  await expect(shortcuts.locator("tbody tr")).toHaveCount(23);
+  await expect(shown("Vim: complete the todo, or open it again")).toHaveText([/^G X/]);
+  await expect(shown("Vim: fold or unfold the bullet")).toHaveText([/^Z A/]);
+  await expect(all).toHaveCount(31);
+  await expect(shortcuts.locator("tbody tr")).toHaveCount(31);
 
   // Escape leaves the search box for the list, on its first row, and the keys go on through the shortcuts.
   await page.keyboard.press("Escape");
@@ -366,10 +368,16 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
   await first.getByRole("button", { name: "Record a key for Vim: first row of a list" }).click();
   const recorder = page.getByRole("dialog", { name: "Record a key for Vim: first row of a list" });
   await expect(recorder.getByRole("group", { name: "Press the keys" })).toBeFocused();
-  // g is the first key of gt and gT, and of gg as it stands, which the recorder says before n is pressed after it.
+  // g is the first key of gt and gT, gx, g- and g>, and of gg as it stands, which the recorder says before n is pressed after it.
   await page.keyboard.press("g");
   await expect(recorder.locator("kbd")).toHaveText("G");
-  await expect(recorder.getByRole("alert")).toHaveText([/^G is the first key of G T, the keys for Vim: next tab\. Where both can run, G T never would\.$/, /^G is the first key of G (⇧T|Shift\+T), the keys for Vim: previous tab\./]);
+  await expect(recorder.getByRole("alert")).toHaveText([
+    /^G is the first key of G T, the keys for Vim: next tab\. Where both can run, G T never would\.$/,
+    /^G is the first key of G (⇧T|Shift\+T), the keys for Vim: previous tab\./,
+    /^G is the first key of G X, the keys for Vim: complete the todo, or open it again\./,
+    /^G is the first key of G -, the keys for Vim: abandon the todo, or open it again\./,
+    /^G is the first key of G >, the keys for Vim: move the todo to the backlog, or open it again\./,
+  ]);
   await page.keyboard.press("n");
   await expect(recorder.locator("kbd")).toHaveText("G N");
   await expect(recorder.getByRole("alert")).toHaveCount(0);
@@ -401,7 +409,7 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
   await expectSelected(changed.nth(3), "the last note, with g alone");
   await open(page, "/settings/keyboard");
   await expect(page.getByRole("list", { name: "Problems" }).getByRole("listitem")).toHaveText([
-    /^keybindings\.vim\.list\.last g is the first key of g g, the keys for Vim: first row of a list \(vim\.list\.first\), and of g t, the keys for Vim: next tab \(vim\.tab\.next\), and of g shift\+t, the keys for Vim: previous tab \(vim\.tab\.previous\)\. Where both can run, g runs Vim: last row of a list and the longer keys never run\.$/,
+    /^keybindings\.vim\.list\.last g is the first key of g g, the keys for Vim: first row of a list \(vim\.list\.first\), and of g t, the keys for Vim: next tab \(vim\.tab\.next\), and of g shift\+t, the keys for Vim: previous tab \(vim\.tab\.previous\), and of g x, the keys for Vim: complete the todo, or open it again \(vim\.todos\.complete\), and of g -, the keys for Vim: abandon the todo, or open it again \(vim\.todos\.abandon\), and of g shift\+>, the keys for Vim: move the todo to the backlog, or open it again \(vim\.todos\.backlog\)\. Where both can run, g runs Vim: last row of a list and the longer keys never run\.$/,
   ]);
 });
 

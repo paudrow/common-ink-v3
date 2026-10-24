@@ -1,5 +1,5 @@
 import { dismissing, type Plugin } from "../../plugin-api.ts";
-import { KEYS } from "./keys.ts";
+import { FOLD_KEYS, KEYS, TODO_KEYS } from "./keys.ts";
 import { surfaces } from "./surfaces.ts";
 
 const isField = (el: Element | null): el is HTMLElement =>
@@ -84,6 +84,12 @@ export const vim: Plugin = {
             },
           });
         }
+        // In a note's text vim takes these, so the window takes them only on a row of todos. From the palette they are the note's.
+        for (const key of TODO_KEYS) {
+          host.commands.register({ id: `vim.${key.id}`, title: key.title, keys: key.keys, group: "Todos", when: outside.on.puttable, run: () => void host.commands.run(outside.on.puttable() ? key.onRow : key.runs) });
+        }
+        // Vim takes these in a note's text, and they mean nothing anywhere else: they are here to be listed with the bullets' keys, and run from the palette.
+        for (const key of FOLD_KEYS) host.commands.register({ id: `vim.${key.id}`, title: key.title, keys: key.keys, group: "Folding", when: () => false, run: () => void host.commands.run(`bullets.${key.runs}`) });
       },
       () => !stopped && host.report(new Error("Vim's editing couldn't be loaded, so notes are edited without it. Reload the page to try again.")),
     );
