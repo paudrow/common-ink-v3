@@ -16,7 +16,7 @@ import { spaceRuns } from "./plugins/lib/markdownSpaces.ts";
 import { readOnly } from "./readOnly.ts";
 import { noteTabs } from "./tabbing.ts";
 import { fontLoaded } from "./noteFont.ts";
-import { inEditorOf, openNote } from "./openNotes.ts";
+import { inEditorOf, openNote, startingPlace } from "./openNotes.ts";
 import { holdingOpen } from "./holding.ts";
 import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, worthRetrying, type SaveState } from "./sync.ts";
@@ -73,6 +73,8 @@ const typingIn = (el: Element | null) =>
 interface Props {
   workspaceId: string;
   noteId: string;
+  /** The pane the note is drawn in, such as a group of tabs: the note starts where it was last left there, or else where it was last left. */
+  pane?: string;
   onLoaded: (note: Note) => void;
   onSaved: (note: Note) => void;
   /** The note's latest revision as the workspace knows it. A later one than the editor has is read in. */
@@ -127,7 +129,7 @@ function textLeftIn(view: EditorView, pane: HTMLElement): number {
   return Math.round(content.getBoundingClientRect().left + padding(content) + padding(line) - pane.getBoundingClientRect().left);
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, marks, above, onSaveShown, live }: Props) {
+export function NoteEditor({ workspaceId, noteId, pane, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, marks, above, onSaveShown, live }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const foot = useRef<HTMLDivElement>(null);
   const footRow = useRef<HTMLDivElement>(null);
@@ -152,8 +154,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const [read, setRead] = useState<Pick<Note, "access" | "state"> | undefined>(undefined);
   const trashed = (state ?? read?.state) === "trashed";
   const canEdit = (access ?? read?.access) === "edit" && !trashed;
-  const now = useRef({ focus, onFocused, extensions, access, state, onRejected });
-  now.current = { focus, onFocused, extensions, access, state, onRejected };
+  const now = useRef({ focus, onFocused, extensions, access, state, onRejected, pane });
+  now.current = { focus, onFocused, extensions, access, state, onRejected, pane };
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   /** Counts up to read the note again after a read that failed. */
@@ -182,10 +184,13 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         // Opened beside another editor of the note, it starts from what that one holds, typing not yet saved included.
         const text = sync.text ?? note.text;
         sync.hold(inTrash);
+        const { selection, scrollTo } = startingPlace(noteId, now.current.pane, text.length);
         view = viewRef.current = new EditorView({
           parent: host.current,
+          scrollTo,
           state: EditorState.create({
             doc: text,
+            selection,
             extensions: [
               locked.of(writable ? [] : readOnly),
               // Before the editor's own keys, so a plugin's keys are tried first.
@@ -208,7 +213,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
               sync.extension,
-              openNote(noteId),
+              openNote(noteId, { pane: now.current.pane, scroller: host.current.parentElement! }),
               holdingOpen(workspaceId, noteId),
               EditorView.updateListener.of((u) => {
                 if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();

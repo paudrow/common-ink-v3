@@ -213,7 +213,11 @@ test("a click on a drawn link opens its note as any note is opened, ⌘-click op
   await editor(page).getByText(plan.id).click({ modifiers: ["ControlOrMeta"] });
   await expect(page).toHaveURL(/\/note\/plan-/);
   await expect(tabs(page)).toHaveText(["Diary", "Plan"]);
+  // Back on its tab the cursor is where it was, in the link, which is still shown as written; leaving it draws the link.
   await tabs(page).first().click();
+  await expect(lines(page).last()).toHaveText(`Read [[${plan.id}|the plan]] today.`);
+  await editor(page).evaluate((el) => el.focus());
+  await page.keyboard.press("End");
   await expect(drawnLinks(page)).toHaveText(["the plan"]);
 });
 
@@ -309,10 +313,11 @@ test("in vim, gd on a mention opens the person's page, and gd on a reference or 
   const goTo = async (...presses: string[]) => {
     await page.goto(`/note/${note.id}`);
     await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
-    await expect(editor(page).locator(".md-chip-mention")).toHaveCount(2);
-    // Focused, not pressed: a press can land on a mention, which opens its page.
+    // Focused, not pressed: a press can land on a mention, which opens its page. The cursor is where the last goTo left it, so it goes to the top first.
     await editor(page).focus();
-    await keys(page, "g", "g", ...presses, "g", "d");
+    await keys(page, "g", "g");
+    await expect(editor(page).locator(".md-chip-mention")).toHaveCount(2);
+    await keys(page, ...presses, "g", "d");
   };
 
   await goTo("2", "j", "w");

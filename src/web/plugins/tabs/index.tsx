@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { folderTitle, openedAt, type App, type Dragged, type EditorProps, type Opened, type Plugin } from "../../plugin-api.ts";
+import { folderTitle, keepPlacesIn, openedAt, type App, type Dragged, type EditorProps, type Opened, type Plugin } from "../../plugin-api.ts";
 import { lifecycle } from "../lib/lifecycle.ts";
 import { EditorGroups, showTabMenu, type Dropped } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, keyed, keyedLayout, notesIn, same, type CloseScope, type EditorAction } from "./editorLayout.ts";
@@ -45,6 +45,9 @@ export const tabs: Plugin = {
   needs: "room",
   activate(host) {
     let layout = keptLayout(host.storage.get("layout"));
+    /** A note's place in a group is kept while its tab is there: a group made later with the same id starts afresh. */
+    const keepPlaces = () => keepPlacesIn(layout.groups.flatMap((g) => g.tabs.flatMap((t) => (t.kind === "note" ? [{ noteId: t.id, pane: g.id }] : []))));
+    keepPlaces();
     /** Each page's name as it last was, by its id, so a tab left on a page that has gone since still says what it was. */
     let pageNames = namesOf(host.storage.get("pageNames"));
     const homeId = () => host.app().pages.find((p) => p.home)?.id;
@@ -87,6 +90,7 @@ export const tabs: Plugin = {
         const had = notesIn(layout);
         const has = notesIn(next);
         layout = next;
+        keepPlaces();
         for (const noteId of had) if (!has.has(noteId)) host.app().left(noteId);
         host.storage.set("layout", layout);
         for (const listener of [...listeners]) listener();
@@ -164,6 +168,7 @@ export const tabs: Plugin = {
                 ? renderPage(tab.id, tab.path)
                 : renderNote(tab.id, {
                     onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }),
+                    pane: group.id,
                     focus: group.id === cursorGroup,
                     onFocused: cursorPut,
                     // A note open in two groups takes the cursor in the one in front, or else the first that shows it.
