@@ -9,6 +9,7 @@ import { forEditor } from "./editorExtensions.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import type { EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
+import { embedContent } from "./embedContent.ts";
 import { spaceRuns } from "./plugins/lib/markdownSpaces.ts";
 import { reading } from "./readOnly.ts";
 import { committed } from "./sync.ts";
@@ -64,7 +65,7 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
               extensions: [
                 reading,
                 added.of(now.current.extensions),
-                markdown({ base: markdownLanguage, extensions: spaceRuns }),
+                markdown({ base: markdownLanguage, extensions: [spaceRuns, embedContent] }),
                 noteHighlighting,
                 embedding(noteId),
                 embedded.of(embedsAre(now.current.embeds)),

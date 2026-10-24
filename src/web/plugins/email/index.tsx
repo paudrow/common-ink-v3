@@ -8,7 +8,7 @@ const when = (time: number) => new Date(time).toLocaleString(undefined, { dateSt
 /**
  * Email: the mail the member sends, copies or forwards to notes@, kept as threads that nobody else in
  * the workspace sees and nothing here changes. A note references a thread, or one message in it, as
- * `::email{ref subject}`, which shows it as it is now to the member whose it is and the subject to
+ * `/email(ref subject)`, which shows it as it is now to the member whose it is and the subject to
  * everyone else.
  */
 export const email: Plugin = {

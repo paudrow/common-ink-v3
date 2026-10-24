@@ -585,7 +585,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     expect(await claude.json("list_tags")).toMatchObject({ indexing: true });
   });
 
-  it("is refused its member's calendar and contacts, which are in no folder, and reads a reference in its notes as its label alone", async () => {
+  it("is refused its member's calendar and contacts, which are in no folder, and reads a reference or a mention in its notes as it is written, and nothing of the record", async () => {
     const w = await world();
     const asked: string[] = [];
     const lunch = { sourceId: "cal", id: "a1", calendarId: "mine", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
@@ -638,7 +638,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
       expect(await claude.call("update_event", { sourceId: "cal", id: "a1", etag: "e1", title: "Taken" })).toEqual(changes("event.update"));
       expect(await claude.call("create_event", { sourceId: "cal", calendarId: "mine", title: "Taken", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } })).toEqual(changes("event.create"));
       // What its note says of them is what every reader of the note is told: the reference and its label.
-      expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n[[event:${event.ref}]] with ::contact{${contact.ref} Sam Okafor}`);
+      expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n[[event:${event.ref}]] with [[person:Sam Okafor]]`);
       await claude.json("search", { query: "Lunch" });
       await claude.json("note_history", { id: w.deep.id });
       // Sam's page tells it the name it asked by and nothing of its member's contact.
@@ -875,8 +875,8 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
     const binned = await upload(w.ada, "Binned-outside.png", PNG, { folderId: w.journal });
     await perform(env.DB, w.ada, { type: "upload.trash", id: binned.id });
     // A note inside shows one of each, and a note outside shows the one inside.
-    const showing = await perform(env.DB, w.ada, { type: "note.create", folderId: w.projects, text: `# Gallery\n\n::image{${inside.id} 1x1}\n\n::image{${outside.id} 1x1}\n\n::file{${loose.id}}\n\n::image{${binned.id} 1x1}` });
-    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Album-outside\n\n::image{${inside.id} 1x1}` });
+    const showing = await perform(env.DB, w.ada, { type: "note.create", folderId: w.projects, text: `# Gallery\n\n/image(${inside.id} 1x1)\n\n/image(${outside.id} 1x1)\n\n/file(${loose.id})\n\n/image(${binned.id} 1x1)` });
+    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Album-outside\n\n/image(${inside.id} 1x1)` });
     const marks = [...w.marks, "Photo-outside", "Scan-outside", "Binned-outside", "Album-outside", "bytes-outside", "loose-outside"];
 
     const claude = await asAgent(w.limited.token);

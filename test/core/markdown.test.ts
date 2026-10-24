@@ -87,12 +87,12 @@ describe("a note's title without a # heading", () => {
   });
 
   it("passes over a form's JSON, and keeps an unclosed opening as prose", () => {
-    expect(summarize(':::form{}\n{\n  "prompt": "#launch"\n}\n:::\n# Real').title).toBe("Real");
+    expect(summarize('/form()\n~~~json\n{\n  "prompt": "#launch"\n}\n~~~\n# Real').title).toBe("Real");
     expect(summarize(":::form{}\n{\n# Kept").title).toBe("Kept");
   });
 
   it("passes over what is drawn and says nothing: an embed, an image, a rule, math's fence, a link by id, a code block", () => {
-    expect(summarize("::timer{5m}\n![a cat](/files/abc)\n---\n[[abc123def456]]\n```js\nconst a = 1;\n```\n$$\nReal words here").title).toBe("Real words here");
+    expect(summarize("/timer(5m)\n![a cat](/files/abc)\n---\n[[abc123def456]]\n```js\nconst a = 1;\n```\n$$\nReal words here").title).toBe("Real words here");
   });
 
   it("passes over a line that is only a web address when another line says something, and is that address when none does", () => {
@@ -101,7 +101,7 @@ describe("a note's title without a # heading", () => {
   });
 
   it("is empty only for a note with no words: nothing, a new note's `# `, or marks alone", () => {
-    for (const text of ["", "# ", "#", "\n\n", "- [ ] ", "::timer{5m}", "---"]) expect(summarize(text).title, JSON.stringify(text)).toBe("");
+    for (const text of ["", "# ", "#", "\n\n", "- [ ] ", "/timer(5m)", "---"]) expect(summarize(text).title, JSON.stringify(text)).toBe("");
   });
 
   it("gives way to a # heading further down, and keeps the lines before it as prose", () => {
@@ -115,7 +115,7 @@ describe("a note's title without a # heading", () => {
 
 describe("a note's title, as words", () => {
   it("carries no marks: not bold, code, a link's address, a link's id, a mention's id or an embed", () => {
-    expect(summarize("# **Bold** `plan` for [the trip](https://example.com) with [[abc123def456|Groceries]] and [[person:abc123def456|Ada]] ::timer{5m}").title).toBe("Bold plan for the trip with Groceries and @Ada");
+    expect(summarize("# **Bold** `plan` for [the trip](https://example.com) with [[abc123def456|Groceries]] and [[person:abc123def456|Ada]] /timer(5m)").title).toBe("Bold plan for the trip with Groceries and @Ada");
     expect(summarize("# Notes on [[abc123def456]]").title).toBe("Notes on");
   });
 

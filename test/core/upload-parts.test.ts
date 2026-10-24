@@ -105,7 +105,7 @@ describe("a file sent in parts", () => {
     await hidden();
 
     const done = await toolJson<Upload & { line: string }>(token, "finish_upload", { uploadId: sending.id });
-    expect(done).toMatchObject({ id: sending.id, name: "episode-12.mp3", type: "audio/mpeg", kind: "audio", size, state: "live", line: `::audio{${sending.id}}` });
+    expect(done).toMatchObject({ id: sending.id, name: "episode-12.mp3", type: "audio/mpeg", kind: "audio", size, state: "live", line: `/audio(${sending.id})` });
     expect(await toolJson(token, "finish_upload", { uploadId: sending.id }), "finished again, it answers the same").toEqual(done);
     expect(await perform(env.DB, ada, { type: "upload.storage" })).toEqual({ bytes: size, files: 1, trashedBytes: 0, pendingBytes: 0 });
     expect(((await toolJson<{ uploads: { id: string }[] }>(token, "list_uploads")).uploads).map((u) => u.id)).toEqual([sending.id]);
@@ -172,7 +172,7 @@ describe("a file sent in parts", () => {
 
     const last = await toolJson<Sending>(token, "resume_upload", { uploadId: sending.id });
     expect((await put(last.address, 1, bytesOf("0123456789"))).status).toBe(200);
-    expect(await toolJson(token, "finish_upload", { uploadId: sending.id })).toMatchObject({ size: 10, type: "application/octet-stream", line: `::file{${sending.id}}` });
+    expect(await toolJson(token, "finish_upload", { uploadId: sending.id })).toMatchObject({ size: 10, type: "application/octet-stream", line: `/file(${sending.id})` });
 
     expect(await tool(token, "start_upload", { name: "huge.mov", size: 25 * 1024 ** 3 + 1 })).toEqual({ isError: true, text: expect.stringContaining("at most 25 GB") });
   });
@@ -308,7 +308,7 @@ describe("a file sent in parts", () => {
   it("can be a small file an agent holds, sent as base64, and a read-only token sends none", async () => {
     const { token } = await agentOf();
     const done = await toolJson<Upload & { line: string }>(token, "upload_file", { name: "dot.png", base64: btoa(String.fromCharCode(...PNG)) });
-    expect(done).toMatchObject({ name: "dot.png", type: "image/png", kind: "image", size: PNG.byteLength, line: `::image{${done.id} 1x1}` });
+    expect(done).toMatchObject({ name: "dot.png", type: "image/png", kind: "image", size: PNG.byteLength, line: `/image(${done.id} 1x1)` });
     expect(await tool(token, "upload_file", { name: "x.png", base64: "not base64!" })).toEqual({ isError: true, text: "invalid: base64 isn't a file's bytes in base64" });
     expect(await tool(token, "upload_file", { name: "x.bin", base64: btoa("a".repeat(4 * MIB + 1)) })).toEqual({ isError: true, text: "invalid: upload_file takes at most 4 MB. Send a larger file with start_upload" });
 

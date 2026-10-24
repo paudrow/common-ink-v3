@@ -1,6 +1,5 @@
 import { defaultOf, numberRule, SWATCHES, valueOf, type DeclaredOption, type OptionValue } from "./embedOptions.ts";
-import { blocksIn, inlineIn, type Written } from "./embedSyntax.ts";
-import { linesOutsideCode } from "./lines.ts";
+import { BUILT_IN_EMBEDS, closestOf, holdable, inlineIn, misspeltIn, readNote, type Written } from "./embedSyntax.ts";
 import { blanked, codeSpans } from "./spans.ts";
 
 /**
@@ -55,7 +54,7 @@ const size = { ...word("size", "Size", /^(?!0+x)\d{1,5}x(?!0+$)\d{1,5}$/, "The r
 const width = { ...word("width", "Width", /^(?:small|medium|large|full|(?!0{1,3}%)(?:0?\d{1,2}|100)%)$/, "small, medium, large or full, or a whole percent such as 42%."), bare: true } as const;
 const crop = word("crop", "Crop", /^\d{1,5},\d{1,5},\d{1,5},\d{1,5}$/, "X,Y,WIDTH,HEIGHT in the pixels of its size, like 120,40,800,600.");
 
-/** A contact's or an email's: the id `@` or refer_record wrote, then its label. */
+/** An email's: the id refer_record wrote, then its label. */
 const reference: EmbedSchema = { keys: [{ ...word("ref", "Reference", /^[a-z0-9]{12}$/, "A reference's id: 12 lowercase letters and digits."), bare: true, required: true }], rest: { id: "label", label: "Label" } };
 
 const HTML_OPTIONS: readonly DeclaredOption[] = [{ type: "number", id: "height", label: "Height", min: 40, max: 2000, step: 1, default: 320 }];
@@ -66,11 +65,10 @@ export const EMBED_SCHEMAS: Readonly<Record<string, EmbedSchema>> = {
   html: { keys: HTML_OPTIONS },
   kanban: { keys: [] },
   form: { keys: [] },
-  contact: reference,
   email: reference,
   image: { keys: [{ ...upload, required: true }, size, width, crop] },
   video: { keys: [{ ...upload, required: true }, size, width] },
-  // `::drawing{}` is one not drawn yet.
+  // `/drawing()` is one not drawn yet.
   drawing: { keys: [upload, size, width] },
   audio: { keys: [{ ...upload, required: true }] },
   file: { keys: [{ ...upload, required: true }] },
@@ -162,27 +160,8 @@ function placedIn(schema: EmbedSchema, config: string): Placed[] {
   });
 }
 
-/** The edit distance between two short words. */
-function distance(a: string, b: string): number {
-  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const next = [i];
-    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
-    row = next;
-  }
-  return row[b.length]!;
-}
-
 /** The key=value key `key` was most likely meant to be: two edits away or less, or the start of one. */
-function closestTo(schema: EmbedSchema, key: string): string | undefined {
-  let best: { id: string; far: number } | undefined;
-  for (const { id, bare } of schema.keys) {
-    if (bare) continue;
-    const far = key.length >= 2 && id.startsWith(key) ? 0 : distance(key, id);
-    if (far <= 2 && (!best || far < best.far)) best = { id, far };
-  }
-  return best?.id;
-}
+const closestTo = (schema: EmbedSchema, key: string) => closestOf(key, schema.keys.filter((k) => !k.bare).map((k) => k.id));
 
 /** What a config says against its schema: each key's text, which keys it writes, and what is wrong with it. */
 export function readConfig(schema: EmbedSchema, config: string): Reading {
@@ -253,7 +232,7 @@ export function ruleOf(key: EmbedKey): string {
     case "date":
       return "A day written like 2026-10-16.";
     case "text":
-      return "Words, with no quotes or braces.";
+      return "Words, with no quotes or line breaks.";
   }
 }
 
@@ -301,7 +280,7 @@ export function setKey(schema: EmbedSchema, config: string, id: string, text: st
   if (!key) {
     if (schema.rest?.id !== id) return `No setting ${id}.`;
     if (!t) return clearKey(schema, config, id);
-    if (/[{}\r\n]/.test(t)) return "Braces and line breaks can't be in it.";
+    if (/["\r\n]/.test(t) || !holdable(t)) return "Quotes, line breaks and unmatched parentheses can't be in it.";
     const rest = placed.filter((p) => p.is === "rest");
     if (rest.length) return { config: config.slice(0, rest[0]!.word.from) + t + config.slice(rest.at(-1)!.word.to) };
     return { config: inserted(config, bareSpot(schema, placed, Infinity), t) };
@@ -430,29 +409,38 @@ export function keysText(schema: EmbedSchema): string {
 export interface EmbedProblems {
   /** Its line in the note, from 1. */
   line: number;
-  /** The embed as written: an inline one whole, a block's opening line. */
+  /** The embed as written, from its `/` to its `)`. */
   written: string;
   problems: string[];
 }
 
-/** What is wrong with each built-in embed a note writes outside code, in the note's order. A plugin's embed is the plugin's to read. */
+/**
+ * What is wrong with each built-in embed a note writes outside code, in the note's order, and each
+ * `/name(args)` whose name is close to a built-in's and no embed's. A plugin's embed is the plugin's to read.
+ */
 export function embedProblemsIn(text: string): EmbedProblems[] {
-  if (!text.includes("::")) return [];
-  const blocks = blocksIn(text);
-  // A block's body is the block's own: an embed in it is the block's to read, and a fence in it is no fence of the note's.
-  let outside = text;
-  for (const b of blocks) outside = outside.slice(0, b.bodyFrom) + b.body.replace(/[^\n]/g, " ") + outside.slice(b.bodyFrom + b.body.length);
+  if (!text.includes("(")) return [];
+  const { lines, blocks } = readNote(text);
   const found: Written[] = [...blocks];
-  for (const { line, from } of linesOutsideCode(outside)) {
-    if (line.includes("::")) found.push(...inlineIn(blanked(line, codeSpans(line), " "), from));
+  // An embed in a block's content is the block's to read.
+  for (const { line, from, is } of lines) {
+    if (is === "prose" && line.includes("(")) found.push(...inlineIn(blanked(line, codeSpans(line), " "), from));
   }
-  return found
-    .filter((w) => Object.hasOwn(EMBED_SCHEMAS, w.name))
-    .sort((a, b) => a.from - b.from)
-    .flatMap((w) => {
-      const schema = EMBED_SCHEMAS[w.name]!;
-      const problems = readConfig(schema, w.config).problems.map((p) => problemText(schema, p));
-      const written = w.block ? text.slice(w.from, w.bodyFrom).trimEnd() : text.slice(w.from, w.to);
-      return problems.length ? [{ line: text.slice(0, w.from).split("\n").length, written, problems }] : [];
-    });
+  const misspelt = lines.flatMap(({ line, from, is }) => (is === "prose" && line.includes("(") ? misspeltIn(blanked(line, codeSpans(line), " "), from, Object.keys(BUILT_IN_EMBEDS)) : []));
+  const lineOf = (at: number) => text.slice(0, at).split("\n").length;
+  return [
+    ...found
+      .filter((w) => Object.hasOwn(EMBED_SCHEMAS, w.name))
+      .flatMap((w) => {
+        const schema = EMBED_SCHEMAS[w.name]!;
+        const problems = readConfig(schema, w.config).problems.map((p) => problemText(schema, p));
+        return problems.length ? [{ at: w.from, line: lineOf(w.from), written: text.slice(w.from, w.configFrom + w.config.length + 1), problems }] : [];
+      }),
+    ...misspelt.map((m) => ({ at: m.from, line: lineOf(m.from), written: `/${m.name}(`, problems: [misspeltText(m)] })),
+  ]
+    .sort((a, b) => a.at - b.at)
+    .map(({ at: _, ...p }) => p);
 }
+
+/** What is said of a `/name(args)` whose name is close to an embed's. */
+export const misspeltText = ({ name, meant }: { name: string; meant: string }) => `No embed called ${name}. Did you mean /${meant}? In backticks it is text.`;

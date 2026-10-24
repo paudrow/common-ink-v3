@@ -56,6 +56,19 @@ export function perform<T extends OpInput>(page: Page, op: T, workspaceId?: stri
   ) as Promise<Results[T["type"]]>;
 }
 
+/** A reference to a thread of the signed-in person's email for each subject, from mail they sent to notes@, as Email Routing hands it over. */
+export async function mailed(page: Page, ...subjects: string[]) {
+  await perform(page, { type: "source.connect", id: "email" });
+  const email = (await me(page)).person.email;
+  const domain = email.replace(/.*@/, "");
+  for (const subject of subjects) {
+    const raw = [`Authentication-Results: mx.cloudflare.net; dkim=pass header.d=${domain}; dmarc=pass header.from=${domain}`, `From: ${email}`, "To: notes@in.commonink.app", `Subject: ${subject}`, "", "Hi."].join("\r\n");
+    await page.evaluate(async (raw) => void (await fetch("/dev/email", { method: "POST", body: raw })), raw);
+  }
+  const { threads } = await perform(page, { type: "email.list" });
+  return Promise.all(subjects.map((subject) => perform(page, { type: "record.refer", sourceId: "email", id: threads.find((t) => t.subject === subject)!.id })));
+}
+
 /** What the built Worker answers for a request it dropped: a 500 whose body is miniflare's own words, not the Worker's JSON. */
 export const DROPPED = { status: 500, contentType: "text/plain", body: "Error: Network connection lost." };
 

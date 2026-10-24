@@ -1,10 +1,9 @@
-import type { Plugin } from "../plugin-api.ts";
+import { callsIn, type Plugin } from "../plugin-api.ts";
 import { finished, readClock, shown, type Clock } from "./lib/clock.ts";
 import { openNotes } from "./lib/openNotes.ts";
 import { useTick } from "./lib/useTick.ts";
 
 const KINDS = { timer: "Timer", stopwatch: "Stopwatch" } as const;
-const WRITTEN = /(?<!:)::(timer|stopwatch)\{([^{}\n]*)\}/g;
 
 interface Running {
   kind: keyof typeof KINDS;
@@ -15,10 +14,11 @@ interface Running {
 
 /** The timers and stopwatches a note's text has running, or run out and not yet set back, in the order they are written. */
 export function runningIn(text: string, kinds: ReadonlySet<string>): Running[] {
-  return [...text.matchAll(WRITTEN)].flatMap((match) => {
-    const kind = match[1] as keyof typeof KINDS;
-    const clock = kinds.has(kind) ? readClock(match[2]!, kind) : null;
-    return clock?.run.is === "running" ? [{ kind, clock, at: match.index }] : [];
+  return callsIn(text).flatMap((call) => {
+    if (!Object.hasOwn(KINDS, call.name) || !kinds.has(call.name)) return [];
+    const kind = call.name as keyof typeof KINDS;
+    const clock = readClock(call.config, kind);
+    return clock?.run.is === "running" ? [{ kind, clock, at: call.from }] : [];
   });
 }
 

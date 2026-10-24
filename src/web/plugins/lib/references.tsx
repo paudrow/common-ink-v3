@@ -71,7 +71,7 @@ interface Kind<K extends SourceRecord["kind"]> {
 }
 
 /**
- * An embed that stands for one contact or email: `::contact{ref label}`. It is one chip in the line,
+ * An embed that stands for one email: `/email(ref label)`. It is one chip in the line,
  * drawn with the label the note holds and then, for the member whose record it is, with the record
  * as it is now. Anyone else is shown the label, which is all the note says. No menu lists it: `@`
  * finds people and writes their references, and one can be typed or pasted by hand.
@@ -221,7 +221,7 @@ const NOTHING = { shown: () => ({ text: "", title: "" }), details: () => null };
 
 /**
  * References as whoever holds a link sees them: a link to an event as "Event", or its own words, and
- * a contact or an email as the label the note holds, in gray, and nothing of the record. A link's
+ * an email as the label the note holds, in gray, and nothing of the record. A link's
  * page has no member whose record it could be, so nothing is asked.
  */
 export const labelledReferences: Plugin = {
@@ -230,7 +230,6 @@ export const labelledReferences: Plugin = {
   activate(host) {
     const events = eventLinks(NOTHING);
     host.editorExtensions.register({ id: "references.events", extension: (editor) => events(editor.noteId) });
-    host.embeds.register(referenceEmbed({ kind: "contact", title: "Contact", hint: "", ...NOTHING }));
     host.embeds.register(referenceEmbed({ kind: "email", title: "Email", hint: "", ...NOTHING }));
   },
 };

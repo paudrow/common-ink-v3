@@ -133,7 +133,7 @@ test("a file uploaded on the Uploads page is listed with its picture, and its de
   await expect(detail).toContainText("320 × 200");
   await detail.getByRole("button", { name: "More for harbour.png" }).click();
   await page.getByRole("menu", { name: "More for harbour.png" }).getByRole("menuitem", { name: "Copy embed" }).click();
-  await expect(toast(page).filter({ hasText: upload!.id })).toContainText(`::image{${upload!.id} 320x200}`);
+  await expect(toast(page).filter({ hasText: upload!.id })).toContainText(`/image(${upload!.id} 320x200)`);
   await expect(detail.getByRole("region", { name: "Used in" })).toContainText("No note you can see uses this file.");
   const download = page.waitForEvent("download");
   await detail.getByRole("button", { name: "More for harbour.png" }).click();
@@ -144,7 +144,7 @@ test("a file uploaded on the Uploads page is listed with its picture, and its de
   await expect.poll(() => page.getByRole("dialog", { name: "Preview of harbour.png" }).locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(320);
   await page.keyboard.press("Escape");
 
-  const note = await perform(page, { type: "note.create", text: `# Trip\n\n::image{${upload!.id} 320x200}\n` });
+  const note = await perform(page, { type: "note.create", text: `# Trip\n\n/image(${upload!.id} 320x200)\n` });
   await page.reload();
   await expect(detail.getByRole("region", { name: "Used in" }).getByRole("link", { name: "Trip" })).toBeVisible();
   await detail.getByRole("region", { name: "Used in" }).getByRole("link", { name: "Trip" }).click();
@@ -209,14 +209,14 @@ test("a picture pasted into a note is sent to the note's folder and written with
   await give(page, "paste", [{ name: "dusk.png", type: "image/png", bytes: png(320, 200) }]);
   await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.map((u) => [u.name, u.folderId, u.private])).toEqual([["dusk.png", folder.id, false]]);
   const [upload] = (await perform(page, { type: "upload.list", includeArchived: false })).uploads;
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe harbour at dusk. Plain words.\n::image{${upload!.id} 320x200}\n`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe harbour at dusk. Plain words.\n/image(${upload!.id} 320x200)\n`);
   await expect.poll(() => drawnWidth(page)).toBe(320);
   const box = await below(page, "image").boundingBox();
   expect([Math.round(box!.width), Math.round(box!.height)]).toEqual([320, 200]);
   // The cursor is on the line under the picture, so the line that writes it shows nothing of it.
   await expect(page.locator(".cm-line").nth(3)).toHaveText("");
   await page.keyboard.type("and after");
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe harbour at dusk. Plain words.\n::image{${upload!.id} 320x200}\nand after`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe harbour at dusk. Plain words.\n/image(${upload!.id} 320x200)\nand after`);
   // One change by the member, as typing is.
   const { changes } = await perform(page, { type: "history.list", noteIds: [note.id], diffs: false, limit: 10 });
   expect(changes.every((c) => c.author.kind === "member")).toBe(true);
@@ -237,7 +237,7 @@ test("a file dropped on a private note is uploaded private, a file that is no pi
   await give(page, "drop", [{ name: "minutes.bin", type: "application/octet-stream", bytes: Buffer.from("What was said.") }]);
   await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.map((u) => [u.name, u.private, u.kind])).toEqual([["minutes.bin", true, "file"]]);
   const [upload] = (await perform(page, { type: "upload.list", includeArchived: false })).uploads;
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Diary\n\nWords.\n::file{${upload!.id}}\n`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Diary\n\nWords.\n/file(${upload!.id})\n`);
   const card = below(page, "file");
   await expect(card.locator(".upload-card-head")).toContainText("14 bytes");
   const chip = card.getByRole("link", { name: "minutes.bin", exact: true });
@@ -273,12 +273,12 @@ test("/ offers an image, a video, a recording and any file to upload, and each a
     expect(await asked.element().getAttribute("accept"), typed).toBe(accept);
     await asked.setFiles(file);
     await expect(line(page, typed)).toHaveCount(0);
-    await expect.poll(async () => (await noteText(page, note.id)).match(/::\w+\{/g)?.length ?? 0, `${file.name} written`).toBe(i + 1);
+    await expect.poll(async () => (await noteText(page, note.id)).match(/^\/\w+\(/gm)?.length ?? 0, `${file.name} written`).toBe(i + 1);
   }
 
   await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.length).toBe(4);
   const id = Object.fromEntries((await perform(page, { type: "upload.list", includeArchived: false })).uploads.map((u) => [u.name, u.id]));
-  await expect.poll(() => noteText(page, note.id)).toMatch(new RegExp(`^# Trip\\n\\n::image\\{${id["map.png"]} 200x100\\}\\n::video\\{${id["clip.mp4"]} \\d+x\\d+\\}\\n::audio\\{${id["song.mp3"]}\\}\\n::file\\{${id["minutes.bin"]}\\}\\n$`));
+  await expect.poll(() => noteText(page, note.id)).toMatch(new RegExp(`^# Trip\\n\\n/image\\(${id["map.png"]} 200x100\\)\\n/video\\(${id["clip.mp4"]} \\d+x\\d+\\)\\n/audio\\(${id["song.mp3"]}\\)\\n/file\\(${id["minutes.bin"]}\\)\\n$`));
   await expect.poll(() => drawnWidth(page)).toBe(200);
 });
 
@@ -305,7 +305,7 @@ test("a file asked for from the / menu among words is written under their line, 
 
   await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).uploads.length).toBe(1);
   const [upload] = (await perform(page, { type: "upload.list", includeArchived: false })).uploads;
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip to Lima\n\nsee later\n::image{${upload!.id} 200x100}\n`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip to Lima\n\nsee later\n/image(${upload!.id} 200x100)\n`);
 });
 
 test("with the cursor on a picture's line its text is shown above the picture, which is lower by that line and nothing else moves, and typing elsewhere neither draws the picture again nor asks for it again", async ({ page }) => {
@@ -316,7 +316,7 @@ test("with the cursor on a picture's line its text is shown above the picture, w
   const asked: string[] = [];
   page.on("request", (request) => request.url().includes(`/api/workspaces/${workspaceId}/uploads/`) && asked.push(new URL(request.url()).pathname.slice(-12)));
   await page.setViewportSize({ width: 1600, height: 1900 });
-  const note = await perform(page, { type: "note.create", text: `# Pictures\n\nbefore it\n\n::image{${wide.id} 320x200}\n\nbetween them\n\n::image{${tall.id} 300x900}\n\nafter them\n` });
+  const note = await perform(page, { type: "note.create", text: `# Pictures\n\nbefore it\n\n/image(${wide.id} 320x200)\n\nbetween them\n\n/image(${tall.id} 300x900)\n\nafter them\n` });
   await open(page, note.id, "after them");
   await expect(picture(page)).toHaveCount(2);
   await expect.poll(() => picture(page).evaluateAll((imgs: HTMLImageElement[]) => imgs.map((img) => img.naturalWidth))).toEqual([320, 300]);
@@ -329,8 +329,8 @@ test("with the cursor on a picture's line its text is shown above the picture, w
 
   await picture(page).evaluateAll((imgs) => imgs.forEach((img) => ((img as HTMLImageElement & { marked?: boolean }).marked = true)));
   for (const [lineNumber, written] of [
-    [5, `::image{${wide.id} 320x200}`],
-    [9, `::image{${tall.id} 300x900}`],
+    [5, `/image(${wide.id} 320x200)`],
+    [9, `/image(${tall.id} 300x900)`],
   ] as const) {
     for (const elsewhere of [3, 11, 7]) {
       await goTo(page, elsewhere);
@@ -376,7 +376,7 @@ test("a picture's room is its full size before a byte of it has arrived, and a v
     await route.continue();
   });
   await page.setViewportSize({ width: 1600, height: 1400 });
-  const note = await perform(page, { type: "note.create", text: `# Slow\n\n::image{${photo.id} 320x200}\n\n::video{${film.id} 640x360}\n\n::audio{${song.id}}\n\nafter\n` });
+  const note = await perform(page, { type: "note.create", text: `# Slow\n\n/image(${photo.id} 320x200)\n\n/video(${film.id} 640x360)\n\n/audio(${song.id})\n\nafter\n` });
   await open(page, note.id, "after");
   await expect(picture(page)).toHaveCount(1);
   await settled(page);
@@ -429,7 +429,7 @@ test("quick open finds an upload by its file name and opens the Uploads page on 
 test("a file moved to Trash says so in the notes that use it, comes back when restored, and is a file that isn't available once deleted for good", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const upload = await send(page, "chart.png", png(320, 200));
-  const note = await perform(page, { type: "note.create", text: `# Report\n\n::image{${upload.id} 320x200}\n\nafter\n` });
+  const note = await perform(page, { type: "note.create", text: `# Report\n\n/image(${upload.id} 320x200)\n\nafter\n` });
   await open(page, note.id, "after");
   await expect.poll(() => drawnWidth(page)).toBe(320);
   const room = (await measured(page)).rooms;
@@ -474,7 +474,7 @@ test("a member who can't see a file is shown a placeholder of the same size that
   const { workspaceId } = await join(bob, page, "editor");
   const secret = await send(page, "salaries-2026.png", png(320, 200), { private: true });
   const paper = await send(page, "contract-draft.txt", Buffer.from("terms"), { private: true });
-  const note = await perform(page, { type: "note.create", text: `# Board\n\n::image{${secret.id} 320x200}\n\nSee ::file{${paper.id}} too.\n\nafter\n` });
+  const note = await perform(page, { type: "note.create", text: `# Board\n\n/image(${secret.id} 320x200)\n\nSee /file(${paper.id}) too.\n\nafter\n` });
 
   const answered: [string, number][] = [];
   bob.on("response", (response) => /\/api\/.*\/uploads\//.test(response.url()) && answered.push([new URL(response.url()).pathname, response.status()]));
@@ -515,7 +515,7 @@ test("a folder's link shows the pictures in the folder by the link's own address
   const folder = await perform(page, { type: "folder.create", name: "Handbook" });
   const inside = await send(page, "office-map.png", png(320, 200), { folderId: folder.id });
   const outside = await send(page, "floor-plan.png", png(320, 200));
-  const note = await perform(page, { type: "note.create", text: `# Welcome\n\n::image{${inside.id} 320x200}\n\n::image{${outside.id} 320x200}\n\nafter\n`, folderId: folder.id });
+  const note = await perform(page, { type: "note.create", text: `# Welcome\n\n/image(${inside.id} 320x200)\n\n/image(${outside.id} 320x200)\n\nafter\n`, folderId: folder.id });
   const onFolder = await perform(page, { type: "grant.link", folderId: folder.id, link: "public" });
   const onNote = await perform(page, { type: "grant.link", noteId: note.id, link: "public" });
   if (onFolder?.to.kind !== "link" || onNote?.to.kind !== "link") throw new Error("no link was made");
@@ -548,7 +548,7 @@ test("an SVG draws as a picture in a note, and opened by its address it is a dow
   const upload = await send(page, "diagram.svg", SVG);
   expect([upload.kind, upload.type]).toEqual(["image", "image/svg+xml"]);
   const workspaceId = await workspaceOf(page);
-  const note = await perform(page, { type: "note.create", text: `# Diagram\n\n::image{${upload.id} 120x80}\n\nafter\n` });
+  const note = await perform(page, { type: "note.create", text: `# Diagram\n\n/image(${upload.id} 120x80)\n\nafter\n` });
   await open(page, note.id, "after");
   await expect.poll(() => drawnWidth(page)).toBe(120);
   await expect.poll(() => page.evaluate(() => (window as { hacked?: boolean }).hacked)).toBeUndefined();

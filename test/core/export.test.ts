@@ -62,7 +62,7 @@ async function world() {
   const deep = await perform(env.DB, ada, { type: "folder.create", name: "Deep", parentId: plans.id });
   const launch = await perform(env.DB, ada, { type: "note.create", folderId: plans.id, text: "# Launch\n\nSee [[aaaaaaaaaaaa]]" });
   const chart = await upload(ada, "chart.png", PNG, { folderId: deep.id });
-  const inDeep = await perform(env.DB, ada, { type: "note.create", folderId: deep.id, text: `# Inside\n\n::image{${chart.id} 1x1}` });
+  const inDeep = await perform(env.DB, ada, { type: "note.create", folderId: deep.id, text: `# Inside\n\n/image(${chart.id} 1x1)` });
   const loose = await perform(env.DB, ada, { type: "note.create", text: "no heading here" });
   const old = await perform(env.DB, ada, { type: "note.create", folderId: plans.id, text: "# Old" });
   await perform(env.DB, ada, { type: "note.archive", id: old.id, archived: true });
@@ -159,7 +159,7 @@ describe("exporting a workspace", { timeout: 30_000 }, () => {
     expect(plan.parts.map((p) => [p.number, p.notes, p.uploads])).toEqual([[1, 4, 1]]);
     expect(names(parts[0]!)).toEqual(["Plans/", "Plans/Deep/", "Plans/Deep/Inside.md", "Plans/Deep/chart.png", "Plans/Launch.md", "Plans/Old.md", "Unsorted/", "Unsorted/no heading here.md"]);
     expect(parts[0]!.get("Plans/Launch.md")).toBe("# Launch\n\nSee [[aaaaaaaaaaaa]]");
-    expect(parts[0]!.get("Plans/Deep/Inside.md")).toBe(`# Inside\n\n::image{${w.chart.id} 1x1}`);
+    expect(parts[0]!.get("Plans/Deep/Inside.md")).toBe(`# Inside\n\n/image(${w.chart.id} 1x1)`);
     const index = indexOf(parts[0]!);
     expect(index.notes.map((n) => [n.id, n.path, n.title, n.state]).sort()).toEqual(
       [

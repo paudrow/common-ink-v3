@@ -452,6 +452,15 @@ export const Op = z.discriminatedUnion("type", [
    */
   z.object({ type: z.literal("note.convertLinks"), after: Id.optional() }),
   /** Puts the note back to how it was at `revision`, as a new change. */
+  /**
+   * Writes the embeds notes wrote before embeds were `/name(args)` the way they are written now,
+   * once: `::name{config}` as `/name(config)`, and `:::name{config}` … `:::` as `/name(config)` with
+   * its content in a fence under it, outside code (src/core/oldEmbeds.ts). It converts a batch of the
+   * notes waiting to be, each as a change of the asker's labeled "Embeds converted", so it can be put
+   * back, and leaves a note the asker may not change for someone who may. `after` carries on from
+   * where the batch before stopped. The app sends it as a member comes in.
+   */
+  z.object({ type: z.literal("note.convertEmbeds"), after: Id.optional() }),
   z.object({ type: z.literal("note.revert"), id: Id, revision: Revision, resolve: Resolve.optional() }),
   /**
    * Reverts the chosen changes and keeps the rest, as one new change. Reverting a change that was
@@ -958,8 +967,9 @@ export const Op = z.discriminatedUnion("type", [
    */
   z.object({ type: z.literal("person.read"), who: Person, limit: z.number().int().min(1).max(200).default(50) }),
   /**
-   * What a note writes to reference an event or a contact: `ref`, an id that says nothing of the
-   * record, and `text`, the embed that carries it. Asked again of the same record it answers the same.
+   * What a note writes to reference an event, a contact or an email: `ref`, an id that says nothing of
+   * the record, and `text`: a link to the event, a mention of the contact by name, or the email's embed,
+   * which carries the ref. Asked again of the same record it answers the same.
    */
   z.object({ type: z.literal("record.refer"), sourceId: SourceId, id: RecordId }),
   /** The event or contact a reference stands for, as it is now. A reference someone else made reads as none at all. */
@@ -1773,6 +1783,8 @@ export interface Results {
   "note.linkDates": { id: string; revision: number; changed: boolean };
   /** The notes converted, each at its new revision, and where to carry on from, or null when no note the asker can see is waiting. */
   "note.convertLinks": { converted: { id: string; revision: number }[]; next: string | null };
+  /** The notes converted, each at its new revision, and where to carry on from, or null when no note the asker can see is waiting. */
+  "note.convertEmbeds": { converted: { id: string; revision: number }[]; next: string | null };
   "note.revert": Written;
   "note.revertChanges": Written;
   "note.previewRevert": RevertPreview;
@@ -2149,7 +2161,7 @@ export interface NoteAbout {
 export interface Reference {
   ref: string;
   kind: SourceRecord["kind"];
-  /** What a note writes: a link to an event, `[[event:k3j5h8d9f0a1]]`, or an embed, such as `::contact{k3j5h8d9f0a1 Sam Okafor}`. */
+  /** What a note writes: a link to an event, `[[event:k3j5h8d9f0a1]]`, a contact's mention, `[[person:Sam Okafor]]`, or an email's embed, `/email(k3j5h8d9f0a1 Invoice)`. */
   text: string;
   /** What the record was called when it was referenced, as one line of plain words. */
   label: string;

@@ -477,7 +477,7 @@ test("in a long list only the cards near the window are drawn, each keeps its ro
   const big = await perform(page, { type: "folder.create", name: "Big" });
   const texts = Array.from({ length: 60 }, (_, i) => {
     const n = String(60 - i).padStart(2, "0");
-    return i === 0 ? `# Note ${n}\n\n::timer{5m}\n\nThe last one, with a timer.` : i % 3 === 0 ? `# Note ${n}\n\n${LONG}` : `# Note ${n}\n\nA short note.`;
+    return i === 0 ? `# Note ${n}\n\n/timer(5m)\n\nThe last one, with a timer.` : i % 3 === 0 ? `# Note ${n}\n\n${LONG}` : `# Note ${n}\n\nA short note.`;
   });
   // Made in order, so the first made is the last listed.
   for (const text of texts) await perform(page, { type: "note.create", folderId: big.id, text });

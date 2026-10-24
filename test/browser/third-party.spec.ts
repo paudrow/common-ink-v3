@@ -112,7 +112,7 @@ test("an admin installs a plugin through the form, is shown each capability with
   await expect(details).toContainText("installed by Ada Lovelace");
   await expect(details).toContainText("Counts the words in your notes.");
   await expect(page.getByRole("region", { name: "What it adds" }).getByRole("group", { name: "Commands" })).toContainText("Count notes");
-  await expect(page.getByRole("region", { name: "What it adds" }).getByRole("group", { name: "Embeds" })).toContainText("::x-wordcount{}");
+  await expect(page.getByRole("region", { name: "What it adds" }).getByRole("group", { name: "Embeds" })).toContainText("/x-wordcount()");
   await expect(permission(page, "Read notes")).toContainText("Allowed");
   await expect(permission(page, "Read notes")).toContainText("decided by Ada Lovelace");
   await expect(permission(page, "Write notes")).toContainText("Off");
@@ -156,7 +156,7 @@ async function onLine(page: Page, n: number) {
 test("a command reads notes and tells the member, a view and a page are drawn in frames of the plugin's, and an embed below its line", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const id = await install(page, COUNTER, COUNTER_CODE, ["notes.read"]);
-  const note = await perform(page, { type: "note.create", text: "# Counted\n\none two three\n\n::x-wordcount{all}\n\nend\n" });
+  const note = await perform(page, { type: "note.create", text: "# Counted\n\none two three\n\n/x-wordcount(all)\n\nend\n" });
   await turnOn(page, "Word counter");
 
   await page.goto(`/note/${note.id}`);
@@ -207,10 +207,10 @@ test("a command reads notes and tells the member, a view and a page are drawn in
   await expect(totals.locator(".said").first()).toHaveText("View totals in characters, granted notes.read");
 });
 
-test("a plugin's embed is written ::x-name{}, so one named as a built-in's is never drawn for the built-in's line, even while that built-in is off", async ({ page }) => {
+test("a plugin's embed is written /x-name(), so one named as a built-in's is never drawn for the built-in's line, even while that built-in is off", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const id = await install(page, { name: "Clock", embeds: [{ name: "timer", title: "Timer", height: 60 }] }, 'ink.root.textContent = "Clock drew " + ink.context.name + " of " + ink.context.config;');
-  const note = await perform(page, { type: "note.create", text: "# Timed\n\n::timer{5m}\n\n::x-timer{9m}\n\nend\n" });
+  const note = await perform(page, { type: "note.create", text: "# Timed\n\n/timer(5m)\n\n/x-timer(9m)\n\nend\n" });
   await perform(page, { type: "settings.write", text: JSON.stringify({ "timer.enabled": false, [`${id}.enabled`]: true }), baseRevision: (await perform(page, { type: "settings.read" })).revision });
 
   await page.goto(`/note/${note.id}`);
@@ -221,7 +221,7 @@ test("a plugin's embed is written ::x-name{}, so one named as a built-in's is ne
   await expect(editor(page).locator(".media-name")).toHaveText(["Clock plugin: Timer"]);
   await expect(page.locator(".embed-below")).toHaveCount(1);
   await expect(page.locator('.embed-below[data-embed="x-timer"] iframe')).toHaveCount(1);
-  await expect(editor(page)).toContainText("::timer{5m}");
+  await expect(editor(page)).toContainText("/timer(5m)");
   expect(running(page)).toHaveLength(1);
   await openPlugins(page);
   await expect(pluginRow(page, "Clock")).toBeVisible();
@@ -332,7 +332,7 @@ test("a plugin uninstalled while another page has it running is refused by the s
   const admin = await anotherPerson(page, "Ada Lovelace");
   const { workspaceId } = await join(page, admin, "editor");
   const id = await install(admin, COUNTER, COUNTER_CODE, ["notes.read"]);
-  const note = await perform(admin, { type: "note.create", text: "# Shared\n\n::x-wordcount{all}\n\nend\n" });
+  const note = await perform(admin, { type: "note.create", text: "# Shared\n\n/x-wordcount(all)\n\nend\n" });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Shared");
   await openPlugins(page);
@@ -364,7 +364,7 @@ test("a plugin uninstalled while another page has it running is refused by the s
   await expect.poll(() => running(page).length).toBe(0);
   await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
   await expect(panelIcon(page, "Word counter plugin: Words")).toHaveCount(0);
-  await expect(editor(page)).toContainText("::x-wordcount{all}");
+  await expect(editor(page)).toContainText("/x-wordcount(all)");
   await page.keyboard.press("ControlOrMeta+Shift+P");
   // The palette lists what matches, and nothing of the plugin's does.
   await page.getByRole("combobox", { name: "Commands" }).fill("Toggle inspector");
@@ -472,7 +472,7 @@ button.className = "primary";
 button.textContent = "Vote";
 ink.root.append(said, button);`;
   const id = await install(page, { name: "Poll", embeds: [{ name: "poll", title: "Poll", height: 100, options }] }, code);
-  const note = await perform(page, { type: "note.create", text: "# Lunch\n\n::x-poll{size=big}\n\nend\n" });
+  const note = await perform(page, { type: "note.create", text: "# Lunch\n\n/x-poll(size=big)\n\nend\n" });
   await perform(page, { type: "settings.write", text: JSON.stringify({ [`${id}.enabled`]: true }), baseRevision: (await perform(page, { type: "settings.read" })).revision });
   await page.goto(`/note/${note.id}`);
   const said = async () => (await frameFor(page, "embed", "poll")).locator(".said").textContent();
@@ -497,13 +497,13 @@ ink.root.append(said, button);`;
   await page.keyboard.press("Enter");
   await panel.getByRole("radiogroup", { name: "Open" }).getByRole("radio", { name: "Off" }).click();
   await panel.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "dots" }).click();
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("::x-poll{size=big votes=3 open=off show=dots}");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("/x-poll(size=big votes=3 open=off show=dots)");
   await expect.poll(said).toBe('{"question":"","votes":3,"open":false,"show":"dots"}');
   // Back to the default is no word at all, and so is a cleared one.
   await panel.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "bars" }).click();
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("::x-poll{size=big votes=3 open=off}");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("/x-poll(size=big votes=3 open=off)");
   await panel.getByRole("button", { name: "Clear Votes each" }).click();
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("::x-poll{size=big open=off}");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("/x-poll(size=big open=off)");
   await expect(panel.getByRole("button", { name: "Clear Votes each" })).toHaveCount(0);
 
   // The kit draws the plugin's button as the app's primary one, and the frame changes theme with the app.

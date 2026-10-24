@@ -114,7 +114,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 71. As a member, I want my data sources to be visible only to me, so that connecting my calendar doesn't expose it to the workspace.
 72. As a member, I want to edit an event in a read-write calendar and have the change written back to Google, so that I can manage my schedule here.
 73. As a member, I want a read-only data source to refuse edits, so that I can't change something I meant only to view.
-74. As a member, I want to reference an event or contact from a note without copying it, so that the note stays current.
+74. As a member, I want to reference an event or an email thread from a note without copying it, so that the note stays current.
 75. As a member, I want a Calendar view and a Contacts view, so that I can browse my data sources.
 
 ### History
@@ -150,9 +150,9 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 96. As an admin, I want to set and lock each plugin's permissions for the workspace, so that members can't widen them.
 97. As a non-admin, I want saying yes to a plugin's request to send it to an admin, so that I can ask for capabilities without granting them.
 98. As a member, I want plugins never to change my settings, other than the options a plugin remembers for itself (such as a calendar's hidden calendars), so that a plugin can't change my setup behind my back.
-99. As a member, I want to press `/` and search an insert menu of blocks and embeds as I type, each said in words with a picture of what it makes, so that I can insert widgets quickly without knowing their syntax; `::` lists the embeds alone.
-100. As a member, I want inline widgets such as a timer or stopwatch written as `::name{config}`, so that they are visible and editable in the markdown.
-101. As a member, I want block widgets such as a kanban board to store their data in the note between `:::name{config}` and `:::`, so that the data is plain markdown.
+99. As a member, I want to press `/` and search an insert menu of blocks and embeds as I type, each said in words with a picture of what it makes, so that I can insert widgets quickly without knowing their syntax.
+100. As a member, I want inline widgets such as a timer or stopwatch written as `/name(args)`, so that they are visible and editable in the markdown, and shown as written while the cursor is on them, or from Edit source in their settings (#207).
+101. As a member, I want block widgets such as a kanban board written as `/name(args)` with their data in an ordinary fenced block on the next line, tagged with what it is, so that the data is plain markdown, HTML or JSON that reads as a code block anywhere else (#207).
 102. As a member, I want kanban columns to be headings and cards to be list items, so that the board reads naturally as markdown.
 103. As a member, I want a social post (X or Bluesky) or a YouTube video to show when its bare URL is alone on a line, so that notes can include rich media. A link is a plain markdown link.
 104. As a member, I want to embed arbitrary HTML, such as a Three.js scene, safely isolated from the rest of the workspace, so that I can build visualizations without risk.
@@ -202,7 +202,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 ### Added since the first draft
 
 134. As a member, I want a Blame mode that marks each line with who last changed it, members and agents in different colours, so that I can see what my agent wrote (#72).
-135. As an agent or member, I want to ask questions in a `:::form{}` block and read the answers in that same note, with anonymous tallies as an option (#102).
+135. As an agent or member, I want to ask questions in a `/form()` block and read the answers in that same note, with anonymous tallies as an option (#102).
 136. As a member, I want a Night shift plugin, a red-on-black theme with no blue light, toggled with `mod+shift+x` or following the night from a place I set once, at a strength I choose (#100, #92).
 137. As a member, I want a browser extension that clips a page, a selection, an image, an element, or a link into a note in a folder I pick, without making a duplicate when a save is retried (#106).
 138. As an editor, I want to drag a folder onto another to nest it, or off every row to the top (#77).
@@ -263,7 +263,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 - A data source belongs to the member who connected it and is visible only to them. Records are not notes.
 - Read-write sources write edits back to the external system, attributed to the member. Read-only sources refuse edits.
-- Notes reference records without copying them, as `[[event:ref]]` and `::contact{ref label}`; a contact's label is only a fallback for readers who can't see the record, and an event is "Event" to them.
+- Notes reference records without copying them, as `[[event:ref]]` and `/email(ref label)`; an email's label is only a fallback for readers who can't see the record, and an event is "Event" to them. A contact is mentioned by name, `[[person:Name]]`, as `@` writes it.
 
 ### Plugins
 
@@ -275,7 +275,7 @@ Notes are plain markdown with no frontmatter. Settings are JSON. A person signs 
 
 ### Embeds
 
-- Inline widgets use `::name{config}`. Block widgets use `:::name{config}`, then their data as markdown, then `:::`. A social post or video is its bare URL alone on a line. A third-party plugin's embed is named `::x-name{config}`, draws below its line, and can't be a block; no plugin takes over a built-in embed's name.
+- Every embed is `/name(args)`, at the start of a line or after whitespace, for a name that is an embed's: the first arg as a value alone, then `key=value`, quoted where it has spaces. One that holds content is alone on its line, and its content is the fenced block on the very next line, tagged `markdown`, `html` or `json`, which the editor draws as that kind. It replaced `::name{config}` and `:::name{config}` … `:::`, which notes were converted from once (ADR 20). A social post or video is its bare URL alone on a line. A third-party plugin's embed is named `/x-name(config)`, draws below its line, and can't be a block; no plugin takes over a built-in embed's name.
 - Arbitrary HTML embeds run in a sandboxed frame on a separate origin. They cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission.
 
 ### Settings

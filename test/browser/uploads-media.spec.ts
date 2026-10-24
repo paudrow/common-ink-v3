@@ -179,7 +179,7 @@ test("a picture, a video and a recording are only themselves: their line takes n
   const film = await send(page, "box.webm", VIDEO);
   const song = await send(page, "tone.wav", wav());
   await page.setViewportSize({ width: 1280, height: 1600 });
-  const written = [`::image{${photo.id} 1200x800}`, `::video{${film.id} 320x180}`, `::audio{${song.id}}`];
+  const written = [`/image(${photo.id} 1200x800)`, `/video(${film.id} 320x180)`, `/audio(${song.id})`];
   await open(page, `# Media\n\nbefore them\n\n${written[0]}\n\nbetween\n\n${written[1]}\n\nand\n\n${written[2]}\n\nSee ${written[0]} here.\n\nafter them\n`, "after them");
   await expect.poll(() => pictures(page).evaluateAll((imgs: HTMLImageElement[]) => imgs.map((img) => img.naturalWidth))).toEqual([1200, 1200]);
   await expect.poll(() => below(page, "video").locator("video").evaluate((v: HTMLVideoElement) => v.readyState >= 2)).toBe(true);
@@ -240,7 +240,7 @@ test("nothing moves while a picture arrives: its room is its whole width and sha
     await route.continue();
   });
   await page.setViewportSize({ width: 1280, height: 1400 });
-  await open(page, `# Slow\n\nbefore it\n\n::image{${photo.id} 1200x800}\n\nafter it\n`, "after it");
+  await open(page, `# Slow\n\nbefore it\n\n/image(${photo.id} 1200x800)\n\nafter it\n`, "after it");
   await expect(pictures(page)).toHaveCount(1);
   await settled(page);
   expect(await pictures(page).evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(false);
@@ -262,7 +262,7 @@ for (const width of [1280, 700]) {
     // Tall enough that every picture is on screen, and so drawn.
     await page.setViewportSize({ width, height: 4200 });
     const words = ["", " huge", " small", " medium", " large", " full", " 42%"];
-    const text = words.map((w) => `::image{${wide.id} 1200x800${w}}`).concat([`::image{${narrow.id} 300x200}`, `::image{${narrow.id} 300x200 large}`]);
+    const text = words.map((w) => `/image(${wide.id} 1200x800${w})`).concat([`/image(${narrow.id} 300x200)`, `/image(${narrow.id} 300x200 large)`]);
     await open(page, `# Sizes\n\nwords\n\n${text.join("\n\n")}\n\nend\n`, "end");
     await settled(page);
     const column = await columnOf(page, 3);
@@ -286,7 +286,7 @@ test("the size handle is seen on hover or focus, steps with the keys, drags to a
   await signInAsNewPerson(page, "Ada Lovelace");
   const photo = await send(page, "harbour.png", png(1200, 800));
   await page.setViewportSize({ width: 1280, height: 1400 });
-  const embed = (word = "") => `::image{${photo.id} 1200x800${word}}`;
+  const embed = (word = "") => `/image(${photo.id} 1200x800${word})`;
   const text = (word = "") => `# Sizes\n\nbefore it\n\n${embed(word)}\n\nafter it\n\nand more\n`;
   const note = await open(page, text(), "and more");
   await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
@@ -409,7 +409,7 @@ test("a picture dragged to any width keeps its share of the column and its shape
   await signInAsNewPerson(page, "Ada Lovelace");
   const photo = await send(page, "harbour.png", png(1200, 800));
   await page.setViewportSize({ width: 1280, height: 1400 });
-  const text = (word = "") => `# Sizes\n\nbefore it\n\n::image{${photo.id} 1200x800${word}}\n\nafter it\n`;
+  const text = (word = "") => `# Sizes\n\nbefore it\n\n/image(${photo.id} 1200x800${word})\n\nafter it\n`;
   const note = await open(page, text(), "after it");
   await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
   await settled(page);
@@ -445,7 +445,7 @@ test("a member who can't change the note sees the picture cropped and the video,
   const { admin } = await asViewerOfNote(page, "# Seen\n\nwords\n");
   const photo = await send(admin, "harbour.png", quartered(1200, 800));
   const film = await send(admin, "box.webm", VIDEO);
-  const note = await perform(admin, { type: "note.create", text: `# Shown\n\n::image{${photo.id} 1200x800 medium crop=600,400,600,400}\n\n::video{${film.id} 320x180}\n\nwords\n` });
+  const note = await perform(admin, { type: "note.create", text: `# Shown\n\n/image(${photo.id} 1200x800 medium crop=600,400,600,400)\n\n/video(${film.id} 320x180)\n\nwords\n` });
   await page.goto(`/note/${note.id}`);
   await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
   await expect(below(page, "video").locator("video")).toHaveCount(1);
@@ -463,7 +463,7 @@ test("a picture cropped with the handles writes the crop into its embed, is draw
   await signInAsNewPerson(page, "Ada Lovelace");
   const photo = await send(page, "harbour.png", quartered(1200, 800));
   await page.setViewportSize({ width: 1280, height: 1400 });
-  const text = (words = "") => `# Crop\n\nbefore it\n\n::image{${photo.id} 1200x800${words}}\n\nafter it\n`;
+  const text = (words = "") => `# Crop\n\nbefore it\n\n/image(${photo.id} 1200x800${words})\n\nafter it\n`;
   const note = await open(page, text(), "after it");
   await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
   await settled(page);
@@ -527,7 +527,7 @@ test("a crop is set from the keyboard, Escape leaves it as it was, it survives a
   await signInAsNewPerson(page, "Ada Lovelace");
   const photo = await send(page, "harbour.png", quartered(1200, 800));
   await page.setViewportSize({ width: 1280, height: 1400 });
-  const text = (words = "") => `# Crop\n\nbefore it\n\n::image{${photo.id} 1200x800${words}}\n\nafter it\n`;
+  const text = (words = "") => `# Crop\n\nbefore it\n\n/image(${photo.id} 1200x800${words})\n\nafter it\n`;
   const note = await open(page, text(" crop=600,0,600,800"), "after it");
   await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1200);
   const crop = page.getByRole("button", { name: "Crop harbour.png" });
@@ -590,7 +590,7 @@ test("a folder's link shows a picture cropped, with no Crop", async ({ page }) =
   await signInAsNewPerson(page, "Ada Lovelace");
   const folder = await perform(page, { type: "folder.create", name: "Handbook" });
   const photo = await send(page, "office-map.png", quartered(1200, 800), { folderId: folder.id });
-  const note = await perform(page, { type: "note.create", text: `# Welcome\n\n::image{${photo.id} 1200x800 crop=0,0,600,400}\n\nafter\n`, folderId: folder.id });
+  const note = await perform(page, { type: "note.create", text: `# Welcome\n\n/image(${photo.id} 1200x800 crop=0,0,600,400)\n\nafter\n`, folderId: folder.id });
   const link = await perform(page, { type: "grant.link", folderId: folder.id, link: "public" });
   if (link?.to.kind !== "link") throw new Error("no link was made");
   const anyone = await visitor(page);
@@ -609,7 +609,7 @@ test("a video plays in the note from its first frame, and typing elsewhere, the 
   await signInAsNewPerson(page, "Ada Lovelace");
   const film = await send(page, "box.webm", VIDEO);
   await page.setViewportSize({ width: 1280, height: 1400 });
-  const embed = (word = "") => `::video{${film.id} 320x180${word}}`;
+  const embed = (word = "") => `/video(${film.id} 320x180${word})`;
   const note = await open(page, `# Film\n\nbefore it\n\n${embed()}\n\nafter it\n`, "after it");
   const video = below(page, "video").locator("video");
   // Its first frame is there before it is played, under the browser's own controls.
@@ -666,7 +666,7 @@ test("a full-width picture's size handle stays inside the column: the note can't
   await page.setViewportSize({ width: 1440, height: 900 });
   const shot = await send(page, "screenshot.png", png(1860, 460));
   const wide = Array.from({ length: 14 }, (_, i) => `column number ${i + 1}`);
-  const text = ["# Wide", "", `::image{${shot.id} 1860x460}`, "", `| ${wide.join(" | ")} |`, `|${wide.map(() => "---").join("|")}|`, `| ${wide.map(() => "a cell").join(" | ")} |`, "", "after it"].join("\n");
+  const text = ["# Wide", "", `/image(${shot.id} 1860x460)`, "", `| ${wide.join(" | ")} |`, `|${wide.map(() => "---").join("|")}|`, `| ${wide.map(() => "a cell").join(" | ")} |`, "", "after it"].join("\n");
   await open(page, text, "after it");
   await expect.poll(() => pictures(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1860);
   await settled(page);

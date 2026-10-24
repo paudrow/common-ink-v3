@@ -2491,6 +2491,26 @@ button.link:hover {
   color: var(--ink);
 }
 
+/* Shows what the note writes for the embed, at the panel's foot: quieter than a setting, and alone at its start. */
+.embed-edit-source {
+  align-self: flex-start;
+  padding: 4px 8px;
+  margin: 0 -8px -4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  cursor: pointer;
+}
+
+.embed-edit-source:hover,
+.embed-edit-source:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}
+
 .embed-option-hint {
   grid-column: 2;
 }
@@ -3033,12 +3053,14 @@ button.link:hover {
   line-height: 1.4;
 }
 
+/* Room inside the edge it scrolls at, so a ring around what has the keyboard isn't cut off there. */
 .kanban-columns {
   display: flex;
   gap: 10px;
   align-items: flex-start;
   overflow-x: auto;
-  padding-bottom: 4px;
+  margin: -4px -4px 0;
+  padding: 4px;
 }
 
 .kanban-column {
@@ -3073,6 +3095,135 @@ button.link:hover {
 .kanban-title {
   flex: 1;
   min-width: 0;
+}
+
+/* A column's title is a button, to rename it, drawn as the title it is. */
+button.kanban-title {
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+button.kanban-title:focus-visible,
+.kanban-column-menu:focus-visible,
+.kanban-add-column:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.kanban-name {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.kanban-column-menu {
+  flex: none;
+  align-self: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.kanban-column-menu::before {
+  content: "⋯";
+}
+
+.kanban-column-menu:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* Add column stands where the next column would. */
+.kanban-add-column {
+  flex: 0 0 8rem;
+  align-self: stretch;
+  min-height: 2.4rem;
+  padding: 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.kanban-add-column::before {
+  content: "+ ";
+}
+
+.kanban-add-column:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.kanban-columns > .kanban-name {
+  flex: 0 0 8rem;
+  align-self: flex-start;
+  padding: 8px;
+}
+
+.kanban-empty .kanban-add-column {
+  margin-top: 8px;
+  min-height: 0;
+}
+
+.kanban-menu {
+  display: grid;
+  gap: 2px;
+  min-width: 11rem;
+  padding: 2px;
+}
+
+.kanban-menu-item {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.kanban-menu-item:hover:not(:disabled),
+.kanban-menu-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.kanban-menu-item:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.kanban-menu-ask {
+  margin: 4px 8px 6px;
+  color: var(--muted);
+  font-size: calc(13px * var(--text-scale));
 }
 
 .kanban-column[data-colour] .kanban-title {
@@ -3135,6 +3286,22 @@ button.link:hover {
 
 .kanban-card.dragging {
   opacity: 0.4;
+}
+
+/* A card's lines, drawn as the note draws them, in the board's own type, without the pull that hangs a list item's rows under its words. */
+.kanban-card-text .cm-editor,
+.kanban-card-text .cm-scroller,
+.kanban-card-text .cm-content {
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  caret-color: transparent;
+}
+
+.kanban-card-text .cm-line,
+.kanban-card-text .cm-line.md-item:not(.code-line) {
+  padding: 0 !important;
+  text-indent: 0 !important;
 }
 
 .kanban-card-more {

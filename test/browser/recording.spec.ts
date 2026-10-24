@@ -62,7 +62,7 @@ test("/ Record your voice records at the cursor, says how long it has run, and S
   await recorder(page).getByRole("button", { name: "Stop", exact: true }).click();
 
   await expect(recorder(page)).toHaveCount(0);
-  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Standup\n\nWhat I did\n::audio\{[a-z0-9]{12}\}\n$/);
+  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Standup\n\nWhat I did\n\/audio\([a-z0-9]{12}\)\n$/);
   const [clip] = await uploads(page);
   expect(clip).toMatchObject({ kind: "audio", type: "audio/webm", name: expect.stringMatching(/^Recording \d{4}-\d\d-\d\d at \d\d\.\d\d\.weba$/) });
   expect(clip!.size).toBeGreaterThan(1000);
@@ -91,7 +91,7 @@ test("Escape gives the keyboard back to the note while recording goes on, and th
   await page.getByRole("button", { name: "Recording: go to the recorder" }).click();
   await expect(recorder(page).getByRole("button", { name: "Stop", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Meeting\n\nNotes while it records\n::audio\{[a-z0-9]{12}\}\n$/);
+  await expect.poll(() => noteText(page, note.id)).toMatch(/^# Meeting\n\nNotes while it records\n\/audio\([a-z0-9]{12}\)\n$/);
 });
 
 test("the Record your voice command records at the cursor of the note in front", async ({ page }) => {
@@ -99,7 +99,7 @@ test("the Record your voice command records at the cursor of the note in front",
   await runCommand(page, "Record your voice");
   await expect(recorder(page)).toContainText("Recording 0:01");
   await recorder(page).getByRole("button", { name: "Stop", exact: true }).click();
-  await expect.poll(() => noteText(page, note.id)).toMatch(/^# By command\n\n::audio\{[a-z0-9]{12}\}\n$/);
+  await expect.poll(() => noteText(page, note.id)).toMatch(/^# By command\n\n\/audio\([a-z0-9]{12}\)\n$/);
 });
 
 test("leaving the note while recording keeps the recording in the workspace, and says so with a way to it", async ({ page }) => {

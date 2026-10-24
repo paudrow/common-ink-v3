@@ -165,6 +165,13 @@ const withParts = (board: Board, column: number, change: (parts: Part[]) => void
   }),
 });
 
+/** The board with a card's lines written as `text`, as ticking its box or picking its due date writes them. Read again, so its text is what the lines now say. */
+export function changeCard(board: Board, at: Place, text: string): Board {
+  const card = board.columns[at.column] && cardsOf(board.columns[at.column]!)[at.card];
+  if (!card || text === card.lines.join("\n")) return board;
+  return parseBoard(serializeBoard(withParts(board, at.column, (parts) => void parts.splice(parts.indexOf(card), 1, { ...card, lines: text.split("\n") }))));
+}
+
 /**
  * Moves a card. `to.card` counts the cards of the column it goes to with the moved card already
  * taken out. A place that isn't on the board leaves the board as it is.
@@ -193,4 +200,62 @@ export function colourColumn(board: Board, column: number, colour: Swatch | null
   const closing = at.heading.slice(marks.length + headingIn(at.heading)!.length);
   const heading = `${marks}${at.title}${colour ? ` {.${colour}}` : ""}${closing}`;
   return { ...board, columns: board.columns.map((c, i) => (i === column ? { ...c, heading, colour } : c)) };
+}
+
+/** A column's title as a heading can hold it: one line, with no colour mark of its own at its end. */
+const titleOf = (text: string) => text.replace(/\s+/g, " ").replace(COLOUR, "").trim();
+
+/** The `#`s a new column's heading is written with: those of the board's first heading, or `## `. */
+const marksOf = (board: Board) => (board.columns[0] ? HEADING_MARK.exec(board.columns[0].heading)![0] : "## ");
+
+const endsBlank = (column: Column) => {
+  const last = column.parts.at(-1);
+  return !!last && isBlank(last);
+};
+
+/** The column with a blank line at its end, as a column followed by another is written. */
+const spaced = (column: Column): Column => (endsBlank(column) ? column : { ...column, parts: [...column.parts, { card: false, lines: [""] }] });
+
+/** The columns written one after another: a blank line after each but the last, as the board's own are. */
+const laidOut = (columns: readonly Column[]): Column[] => columns.map((c, i) => (i < columns.length - 1 ? spaced(c) : c));
+
+/** Adds a column at the end of the board, with a heading written as the board's others are. A title with nothing in it adds none. */
+export function addColumn(board: Board, title: string): Board {
+  const name = titleOf(title);
+  if (!name) return board;
+  const column: Column = { heading: `${marksOf(board)}${name}`, title: name, colour: null, parts: [] };
+  // An empty board's one empty line is no line of its own to keep.
+  const before = board.columns.length || board.before.some((line) => line.trim()) ? board.before : [];
+  return { before, columns: laidOut([...board.columns, column]) };
+}
+
+/** Gives a column another title, rewriting its heading's words and keeping its marks and its colour. */
+export function renameColumn(board: Board, column: number, title: string): Board {
+  const at = board.columns[column];
+  const name = titleOf(title);
+  if (!at || !name || name === at.title) return board;
+  const marks = HEADING_MARK.exec(at.heading)![0];
+  const closing = at.heading.slice(marks.length + headingIn(at.heading)!.length);
+  const heading = `${marks}${name}${at.colour ? ` {.${at.colour}}` : ""}${closing}`;
+  return { ...board, columns: board.columns.map((c, i) => (i === column ? { ...c, heading, title: name } : c)) };
+}
+
+/** Moves a column to another place among the columns, its heading and everything under it. */
+export function moveColumn(board: Board, column: number, to: number): Board {
+  if (!board.columns[column] || to < 0 || to >= board.columns.length || to === column) return board;
+  const columns = [...board.columns];
+  const [moved] = columns.splice(column, 1);
+  columns.splice(to, 0, moved!);
+  return { ...board, columns: laidOut(columns) };
+}
+
+/**
+ * Takes a column off the board, its heading and everything under it. With `into`, its cards go to
+ * the end of that column first, and only its other lines go with it.
+ */
+export function deleteColumn(board: Board, column: number, into: number | null = null): Board {
+  const at = board.columns[column];
+  if (!at || into === column || (into !== null && !board.columns[into])) return board;
+  const moved = into === null ? board : withParts(board, into, (parts) => void parts.splice(slot(parts, Infinity), 0, ...cardsOf(at)));
+  return { ...moved, columns: laidOut(moved.columns.filter((_, i) => i !== column)) };
 }

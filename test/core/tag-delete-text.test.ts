@@ -40,14 +40,14 @@ describe("a tag deleted from a note's text", () => {
     expect(deletedTags("Para\n\n\n#garden\n\nNext", "garden")).toBe("Para\n\n\nNext");
   });
 
-  it("is only a tag where one is read: not in code, a link's address or an embed's braces, and not a longer tag", () => {
-    const text = "`#garden` [beds](https://example.com/#garden) ::poll{question #garden today} #garden-2 #gardening a#garden\n```\n#garden\n```\n:::board{#garden x}\n:::";
+  it("is only a tag where one is read: not in code, a link's address or an embed's parentheses, and not a longer tag", () => {
+    const text = "`#garden` [beds](https://example.com/#garden) /x-poll(question #garden today) #garden-2 #gardening a#garden\n```\n#garden\n```\n/kanban(#garden x)\n```markdown\n```";
     expect(deletedTags(text, "garden")).toBe(text);
     expect(deletedTags("Weed `#garden` #garden", "garden")).toBe("Weed `#garden`");
     expect(deletedTags("No tags here.", "garden")).toBe("No tags here.");
   });
 
-  it("matches the tags the note is indexed by, so a tag in an embed's braces was never the note's", () => {
-    expect(tagsIn("::poll{question #garden today} ::event{aaaaaaaaaaaa Lunch #home} #yard")).toEqual(["yard"]);
+  it("matches the tags the note is indexed by, so a tag in an embed's parentheses was never the note's", () => {
+    expect(tagsIn("/x-poll(question #garden today) /email(aaaaaaaaaaaa Sam #home) #yard")).toEqual(["yard"]);
   });
 });

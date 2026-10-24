@@ -40,7 +40,7 @@ let n = 1
 | --- | --- |
 | Salt | 4 |
 
-::image{a1b2c3d4e5f6 1200x800}
+/image(a1b2c3d4e5f6 1200x800)
 `;
 
 describe("htmlToMarkdown", () => {
@@ -58,7 +58,7 @@ describe("htmlToMarkdown", () => {
     const markdown = htmlToMarkdown(article, { baseUrl: "https://example.com/news/story", title: "Council delays the vote", source });
     expect(markdown).toContain("[Chamber](https://example.com/vote.png)");
     expect(markdown).not.toContain("![");
-    expect(markdown).not.toContain("::image{");
+    expect(markdown).not.toContain("/image(");
   });
 
   it("leaves a javascript href as text", () => {
@@ -78,7 +78,7 @@ describe("htmlToMarkdown", () => {
       source: { ...source, pageTitle: "Table" },
       placed: { "https://example.com/x.png": { id: "a1b2c3d4e5f6", width: 10, height: 10 } },
     });
-    expect(markdown).not.toContain("::image{");
+    expect(markdown).not.toContain("/image(");
     expect(markdown).toContain("[shot](https://example.com/x.png)");
   });
 

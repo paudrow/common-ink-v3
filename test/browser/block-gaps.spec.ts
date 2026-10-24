@@ -84,15 +84,15 @@ const uploaded = (name: string, bytes: () => Buffer, as: (id: string) => string)
 const written = (text: string) => async () => text;
 
 const KINDS: readonly Kind[] = [
-  { name: "picture", written: uploaded("picture.png", () => png(320, 180), (id) => `::image{${id} 320x180}`), top: below("image"), bottom: below("image") },
-  { name: "video", written: uploaded("film.webm", () => readFileSync(new URL("fixtures/moving-box.webm", import.meta.url)), (id) => `::video{${id} 320x180}`), top: below("video"), bottom: below("video") },
-  { name: "recording", written: uploaded("tone.wav", wav, (id) => `::audio{${id}}`), top: below("audio"), bottom: below("audio") },
-  { name: "PDF", written: uploaded("paper.pdf", () => pdf({ pages: 2 }), (id) => `::file{${id}}`), top: below("file"), bottom: below("file") },
-  { name: "CSV", written: uploaded("cities.csv", () => Buffer.from("city,country\nLisbon,Portugal\nOslo,Norway\n"), (id) => `::file{${id}}`), top: below("file"), bottom: below("file") },
-  { name: "text", written: uploaded("minutes.txt", () => Buffer.from("What was said.\nWhat was done.\n"), (id) => `::file{${id}}`), top: below("file"), bottom: below("file") },
+  { name: "picture", written: uploaded("picture.png", () => png(320, 180), (id) => `/image(${id} 320x180)`), top: below("image"), bottom: below("image") },
+  { name: "video", written: uploaded("film.webm", () => readFileSync(new URL("fixtures/moving-box.webm", import.meta.url)), (id) => `/video(${id} 320x180)`), top: below("video"), bottom: below("video") },
+  { name: "recording", written: uploaded("tone.wav", wav, (id) => `/audio(${id})`), top: below("audio"), bottom: below("audio") },
+  { name: "PDF", written: uploaded("paper.pdf", () => pdf({ pages: 2 }), (id) => `/file(${id})`), top: below("file"), bottom: below("file") },
+  { name: "CSV", written: uploaded("cities.csv", () => Buffer.from("city,country\nLisbon,Portugal\nOslo,Norway\n"), (id) => `/file(${id})`), top: below("file"), bottom: below("file") },
+  { name: "text", written: uploaded("minutes.txt", () => Buffer.from("What was said.\nWhat was done.\n"), (id) => `/file(${id})`), top: below("file"), bottom: below("file") },
   { name: "video address", written: written("https://www.youtube.com/watch?v=NgRkyAlJx5s"), top: below("video"), bottom: below("video") },
-  { name: "kanban", written: written(":::kanban{}\n## To do\n- write\n\n## Done\n:::"), top: ".embed-frame-block .embed-card", bottom: ".embed-frame-block .embed-card" },
-  { name: "HTML", written: written(":::html{height=120}\n<p>hi</p>\n:::"), top: ".embed-frame-block .embed-card", bottom: below("html") },
+  { name: "kanban", written: written("/kanban()\n~~~markdown\n## To do\n- write\n\n## Done\n~~~"), top: ".embed-frame-block .embed-card", bottom: ".embed-frame-block .embed-card" },
+  { name: "HTML", written: written("/html(height=120)\n~~~html\n<p>hi</p>\n~~~"), top: ".embed-frame-block .embed-card", bottom: below("html") },
   { name: "table", written: written("| a | b |\n|---|---|\n| 1 | 2 |"), top: ".md-table-frame", bottom: ".md-table-frame" },
   { name: "formula", written: written("$$\nx^2 + y^2 = z^2\n$$"), top: ".math-block", bottom: ".math-block", replaced: true },
 ];
@@ -100,7 +100,7 @@ const KINDS: readonly Kind[] = [
 /** Where the words above and below a block are, where the block is, and the lines of the note between the words. */
 const measure = (page: Page, kind: Kind) =>
   page.evaluate(({ top, bottom }) => {
-    const lines = [...document.querySelectorAll<HTMLElement>(".cm-content > .cm-line")];
+    const lines = [...document.querySelectorAll<HTMLElement>('[aria-label="Note text"] > .cm-line')];
     const [a, b] = ["Para A.", "Para B."].map((text) => lines.find((l) => l.textContent === text)!.getBoundingClientRect());
     const first = document.querySelector(top)?.getBoundingClientRect();
     const last = [...document.querySelectorAll(bottom)].at(-1)?.getBoundingClientRect();
@@ -166,15 +166,15 @@ test("the arrow keys and vim's j and k each stop on the line of an upload or an 
   await signInAsNewPerson(page, "Ada Lovelace");
   const picture = await send(page, "picture.png", png(320, 180));
   const video = "https://www.youtube.com/watch?v=NgRkyAlJx5s";
-  const note = await perform(page, { type: "note.create", text: `# Steps\n\nPara A.\n::image{${picture.id} 320x180}\n${video}\nPara B.` });
-  const shown = () => page.locator(".cm-content > .cm-line").evaluateAll((lines) => lines.map((l) => l.textContent).filter((t) => t!.startsWith("::") || t!.startsWith("https")));
+  const note = await perform(page, { type: "note.create", text: `# Steps\n\nPara A.\n/image(${picture.id} 320x180)\n${video}\nPara B.` });
+  const shown = () => page.locator(".cm-content > .cm-line").evaluateAll((lines) => lines.map((l) => l.textContent).filter((t) => t!.startsWith("/") || t!.startsWith("https")));
   const steps = [
     [[], ["ArrowDown", "j"]],
-    [[`::image{${picture.id} 320x180}`], ["ArrowDown", "j"]],
+    [[`/image(${picture.id} 320x180)`], ["ArrowDown", "j"]],
     [[video], ["ArrowDown", "j"]],
     [[], ["ArrowUp", "k"]],
     [[video], ["ArrowUp", "k"]],
-    [[`::image{${picture.id} 320x180}`], ["ArrowUp", "k"]],
+    [[`/image(${picture.id} 320x180)`], ["ArrowUp", "k"]],
     [[], []],
   ] as const;
   for (const vim of [false, true]) {
@@ -198,7 +198,7 @@ test("the arrow keys and vim's j and k each stop on the line of an upload or an 
 test("going to the end or the start of a note, as ControlOrMeta+End and ControlOrMeta+Home do, lands there and not on a line out of sight on the way, so what is typed goes there and the embed's line is left as it is", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const minutes = await send(page, "minutes.txt", Buffer.from("What was said.\n"));
-  const embed = `::file{${minutes.id}}`;
+  const embed = `/file(${minutes.id})`;
   const noteText = async (id: string) => (await perform(page, { type: "note.read", id })).text;
 
   const toEnd = await perform(page, { type: "note.create", text: `# T\n\nPara A.\n${embed}\nPara B.` });

@@ -318,6 +318,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.label": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revision: 1, name: "Start" }) },
   "note.linkDates": { on: "note", needs: "E", trashed: "refused", members: true, args: (id) => ({ id }) },
   "note.convertLinks": { on: "workspace", who: MEMBERS, args: () => ({}) },
+  "note.convertEmbeds": { on: "workspace", who: MEMBERS, args: () => ({}) },
   "note.revert": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
   "note.revertChanges": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revisions: [99] }) },
   "note.previewRevert": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, revisions: [1] }) },
@@ -1039,7 +1040,7 @@ export function accessMatrix(part: ActorName | null) {
       for (const as of ["themself", "their agent", "their agent limited to the folder Team", "their agent limited to the folder Open"] as const) {
         it(`${name}, as ${as}`, async () => {
           const w = await world();
-          await perform(env.DB, w.actors["Ada, an admin"], { type: "note.write", id: w.notes.open, baseRevision: 1, text: textOf("open", `\n::image{${w.uploads.team} 1x1}\n`) });
+          await perform(env.DB, w.actors["Ada, an admin"], { type: "note.write", id: w.notes.open, baseRevision: 1, text: textOf("open", `\n/image(${w.uploads.team} 1x1)\n`) });
           const person = w.actors[name];
           const within = as === "themself" ? undefined : LIMITED[as];
           const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope: within && { folderIds: [w.folders[within[0]!]] } };

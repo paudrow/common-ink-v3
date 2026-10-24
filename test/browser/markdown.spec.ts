@@ -994,7 +994,7 @@ test("a note with no math and no code loads neither's drawing", async ({ page })
 });
 
 test("embeds are drawn beside bullets and tasks, a board after a list still works, and / on a bullet opens the insert menu but not in code", async ({ page }) => {
-  const text = "# Mix\n\n- [ ] steep ::timer{5m} then pour\n  - cup $x^2$\n- wait\n\n:::kanban{}\n## To do\n- write\n\n## Done\n:::\n\n```\ncode\n```\n";
+  const text = "# Mix\n\n- [ ] steep /timer(5m) then pour\n  - cup $x^2$\n- wait\n\n/kanban()\n~~~markdown\n## To do\n- write\n\n## Done\n~~~\n\n```\ncode\n```\n";
   const note = await open(page, text);
 
   await expect(line(page, "steep").getByRole("button", { name: "Timer, 5:00 left" })).toBeVisible();
@@ -1005,10 +1005,10 @@ test("embeds are drawn beside bullets and tasks, a board after a list still work
   await expect(editor(page).locator(".embed-block .bullet-dot")).toHaveCount(0);
 
   await line(page, "steep").getByRole("checkbox").click();
-  await expect.poll(() => read(page, note.id)).toContain("- [x] steep ::timer{5m} then pour");
+  await expect.poll(() => read(page, note.id)).toContain("- [x] steep /timer(5m) then pour");
   await clickLine(page, "wait");
   await page.keyboard.press("Alt+ArrowUp");
-  await expect.poll(() => read(page, note.id)).toBe(text.replace("- [ ] steep ::timer{5m} then pour\n  - cup $x^2$\n- wait", "- wait\n- [x] steep ::timer{5m} then pour\n  - cup $x^2$"));
+  await expect.poll(() => read(page, note.id)).toBe(text.replace("- [ ] steep /timer(5m) then pour\n  - cup $x^2$\n- wait", "- wait\n- [x] steep /timer(5m) then pour\n  - cup $x^2$"));
   await expect(editor(page).getByRole("region", { name: "To do", exact: true }).getByRole("listitem")).toHaveCount(1);
   await expect(line(page, "steep").getByRole("button", { name: "Timer, 5:00 left" })).toBeVisible();
 

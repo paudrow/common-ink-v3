@@ -20,11 +20,11 @@ describe("note_syntax", () => {
     const answer = await callTool(null as never, { personId: "p" } as never, "note_syntax", {});
     const text = answer?.content[0]?.text ?? "";
     expect(answer?.isError).toBeUndefined();
-    expect(text).toContain(':::form{}\n{\n  "answers": {}');
-    expect(text).toContain("::image{u2p9l4d8a3c7 640x480}");
-    expect(text).toContain("::video{u2p9l4d8a3c7 640x360}");
-    expect(text).toContain("::audio{u2p9l4d8a3c7}");
-    expect(text).toContain("::file{u2p9l4d8a3c7}");
+    expect(text).toContain('/form()\n```json\n{\n  "answers": {}');
+    expect(text).toContain("/image(u2p9l4d8a3c7 640x480)");
+    expect(text).toContain("/video(u2p9l4d8a3c7 640x360)");
+    expect(text).toContain("/audio(u2p9l4d8a3c7)");
+    expect(text).toContain("/file(u2p9l4d8a3c7)");
     expect(text).toContain("See [[k3f9q2m8x1ab|Budget]] by [[2026-10-23]].");
     expect(text).toContain("Ask [[person:Ada Lovelace]].");
     expect(text).toContain("- [ ] !! Call the bank due:2026-10-14 every:1w");

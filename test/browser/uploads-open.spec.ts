@@ -48,7 +48,7 @@ async function noteWith(page: Page, text: string) {
 test("a text file's chip opens it in the app to be read, with who uploaded it, its size, Download and Copy into a new note", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const upload = await send(page, "minutes.txt", Buffer.from("What was said.\nWhat was done.\n"));
-  await noteWith(page, `# Meeting\n\nSee ::file{${upload.id}} for it.\n\nafter\n`);
+  await noteWith(page, `# Meeting\n\nSee /file(${upload.id}) for it.\n\nafter\n`);
 
   const chip = editor(page).getByRole("link", { name: "minutes.txt" });
   await expect(chip).toHaveAttribute("href", `/file/${upload.id}`);
@@ -79,7 +79,7 @@ test("a text file's chip opens it in the app to be read, with who uploaded it, i
 test("the chip is reached with the keyboard, and Enter on it opens the file", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const upload = await send(page, "plan.md", Buffer.from("# The plan\n\nGo **now**.\n"));
-  await noteWith(page, `# Plans\n\nRead ::file{${upload.id}} first.\n\nafter\n`);
+  await noteWith(page, `# Plans\n\nRead /file(${upload.id}) first.\n\nafter\n`);
   await editor(page).getByRole("link", { name: "plan.md" }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(`/file/${upload.id}`);
@@ -127,7 +127,7 @@ test("markdown is drawn as a note is, a CSV is a table, JSON is coloured code, a
 test("HTML in an uploaded markdown file waits for Run, even for a member whose HTML runs by itself, and then runs shut off from the app", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await perform(page, { type: "settings.write", text: JSON.stringify({ "html.run": "automatically" }), baseRevision: 0 });
-  const upload = await send(page, "page.md", Buffer.from(':::html{height=80}\n<p id="ran">ran</p><script>document.getElementById("ran").textContent = "ran in " + origin; try { parent.localStorage.setItem("marked", "md") } catch {}</script>\n:::\n\nafter\n'));
+  const upload = await send(page, "page.md", Buffer.from('/html(height=80)\n~~~html\n<p id="ran">ran</p><script>document.getElementById("ran").textContent = "ran in " + origin; try { parent.localStorage.setItem("marked", "md") } catch {}</script>\n~~~\n\nafter\n'));
   await page.goto(`/file/${upload.id}`);
   const shown = filePage(page, "page.md");
   const run = shown.getByRole("button", { name: /Run HTML/ });
@@ -142,7 +142,7 @@ test("a picture's chip opens it in a preview over the app, which Escape closes, 
   await signInAsNewPerson(page, "Ada Lovelace");
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGOIjr4GRAAJ5QMZ8KRTiAAAAABJRU5ErkJggg==", "base64");
   const picture = await send(page, "dot.png", png);
-  await noteWith(page, `# Look\n\nSee ::file{${picture.id}} here.\n\nafter\n`);
+  await noteWith(page, `# Look\n\nSee /file(${picture.id}) here.\n\nafter\n`);
 
   const chip = editor(page).getByRole("link", { name: "dot.png" });
   await expect(chip).not.toHaveAttribute("download");
@@ -205,7 +205,7 @@ test("a PDF's chip previews it over the app as its pages, as the Uploads page's 
   expect(me.setup.fileSite, "this server has no FILE_ORIGIN").toBe(false);
   const upload = await send(page, "paper.pdf", PDF("(A paper) Tj"));
   const address = `/api/workspaces/${await workspaceOf(page)}/uploads/${upload.id}`;
-  await noteWith(page, `# Reading\n\nRead ::file{${upload.id}} first.\n\nafter\n`);
+  await noteWith(page, `# Reading\n\nRead /file(${upload.id}) first.\n\nafter\n`);
   const chip = editor(page).getByRole("link", { name: "paper.pdf" });
   await expect(chip).toHaveAttribute("href", address);
   await expect(chip).not.toHaveAttribute("download");
@@ -271,7 +271,7 @@ test("nothing an upload holds runs script against the app, however it is opened:
   expect([html.type, svg.type, pdf.type]).toEqual(["application/octet-stream", "image/svg+xml", "application/pdf"]);
   const workspaceId = await workspaceOf(page);
   const address = (upload: Upload) => `/api/workspaces/${workspaceId}/uploads/${upload.id}`;
-  await noteWith(page, `# Files\n\n::file{${html.id}} ::file{${svg.id}} ::file{${pdf.id}}\n\n::image{${svg.id} 120x80}\n\n::file{${pdf.id}}\n\nafter\n`);
+  await noteWith(page, `# Files\n\n/file(${html.id}) /file(${svg.id}) /file(${pdf.id})\n\n/image(${svg.id} 120x80)\n\n/file(${pdf.id})\n\nafter\n`);
   const tabs = page.context().pages().length;
 
   // On a line of its own the PDF is pictures of its pages, drawn by pdf.js, and nothing of it runs.

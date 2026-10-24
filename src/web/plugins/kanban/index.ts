@@ -1,8 +1,8 @@
-import { createElement } from "react";
+import { createElement, useState } from "react";
 import { SWATCHES, type Drawn, type EmbedOptions, type Embedded, type Plugin, type Swatch } from "../../plugin-api.ts";
 import { openPopover } from "../lib/Popover.tsx";
 import { panel, sketch, words } from "../lib/sketch.ts";
-import { addCard, cardEnd, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard, type Board } from "./board.ts";
+import { addCard, addColumn, cardEnd, cardsOf, changeCard, colourColumn, deleteColumn, moveCard, moveColumn, parseBoard, renameColumn, serializeBoard, type Board } from "./board.ts";
 
 const CARD_DRAG = "application/x-common-ink-card";
 
@@ -42,6 +42,76 @@ const options: EmbedOptions = {
   set: ({ body }, id, value) => ({ body: serializeBoard(colourColumn(parseBoard(body), Number(id), (value as Swatch) || null)) }),
 };
 
+/** What a column's menu does, each a change to the board but Rename, which opens its title to type in. */
+interface ColumnActions {
+  title: string;
+  cards: number;
+  /** The column to its left, which Delete offers to move its cards to, if it has one. */
+  left: string | null;
+  right: boolean;
+  rename: () => void;
+  move: (by: -1 | 1) => void;
+  remove: (keepCards: boolean) => void;
+  shut: () => void;
+}
+
+/** A column's menu. Delete asks first when the column has cards, and offers to move them to the column on its left. */
+function ColumnMenu({ title, cards, left, right, rename, move, remove, shut }: ColumnActions) {
+  const [asking, setAsking] = useState(false);
+  const item = (label: string, run: () => void, disabled = false) => createElement("button", { key: label, type: "button", role: "menuitem", className: "kanban-menu-item", disabled, onClick: run }, label);
+  if (asking) {
+    return createElement(
+      "div",
+      { className: "kanban-menu", role: "menu", "aria-label": `Delete ${title}` },
+      createElement("p", { className: "kanban-menu-ask" }, `Delete ${title} and its ${cards === 1 ? "card" : `${cards} cards`}?`),
+      left !== null && item(`Move ${cards === 1 ? "it" : "them"} to ${left}, and delete ${title}`, () => (shut(), remove(true))),
+      item(`Delete ${title} and ${cards === 1 ? "its card" : "its cards"}`, () => (shut(), remove(false))),
+      item("Cancel", shut),
+    );
+  }
+  return createElement(
+    "div",
+    { className: "kanban-menu", role: "menu", "aria-label": `${title} column` },
+    item("Rename", () => (shut(), rename())),
+    item("Move left", () => (shut(), move(-1)), left === null),
+    item("Move right", () => (shut(), move(1)), !right),
+    item("Delete", () => (cards ? setAsking(true) : (shut(), remove(false)))),
+  );
+}
+
+/**
+ * A field in place of `shown`, to type a name in, with `value` in it to start: Enter writes it, Escape
+ * puts `shown` back, and leaving it writes it too, as a field left with something typed in it is taken.
+ * With `dropped`, a field left with no new name is that instead: told whether a key left it.
+ */
+function nameField(shown: HTMLElement, value: string, label: string, focus: string, take: (name: string) => void, dropped?: (keyed: boolean) => void): void {
+  const input = h("input", { type: "text", className: "kanban-name", data: { focus } });
+  input.value = value;
+  input.setAttribute("aria-label", label);
+  let done = false;
+  /** From a key the keyboard stays where it was, on what the field stood in for, which the board drawn again focuses as it was; from a press elsewhere it stays there. */
+  const finish = (name: string | null, keyed: boolean) => {
+    if (done) return;
+    done = true;
+    const taken = name !== null && !!name.trim() && name.trim() !== value.trim();
+    if (!taken && dropped) return dropped(keyed);
+    input.replaceWith(shown);
+    if (keyed) shown.focus();
+    if (taken) take(name!);
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") finish(input.value, true);
+    else if (e.key === "Escape") finish(null, true);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  input.addEventListener("blur", () => finish(input.value, false));
+  shown.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
 /** Where a card dropped at height `y` over a list of cards goes: before the first card whose middle is below it. */
 function dropIndex(list: HTMLElement, y: number): number {
   const cards = [...list.querySelectorAll<HTMLElement>(".kanban-card:not(.dragging)")];
@@ -55,12 +125,30 @@ function dropIndex(list: HTMLElement, y: number): number {
 function draw(el: HTMLElement, embed: Embedded): Drawn {
   const board = parseBoard(embed.body);
   const drawn = {};
+  /** What takes out each card's drawing, when the board is drawn again or goes. */
+  const undrawn: (() => void)[] = [];
   const write = (next: Board) => next !== board && embed.update({ body: serializeBoard(next) });
 
   /** What only a member who can change the note is given. */
   const controls = (...nodes: Node[]) => (embed.readOnly ? [] : nodes);
+
+  // A column is added at the end of the board: it is there at once, its name to type in its head, and once named the keyboard is on its name.
+  const addColumnButton = h("button", { type: "button", className: "kanban-add-column", textContent: "Add column", data: { focus: "add-column" } });
+  addColumnButton.addEventListener("click", () => {
+    const name = h("button", { type: "button", className: "kanban-title", data: { focus: `title:${board.columns.length}` } });
+    const added = h("section", { className: "kanban-column kanban-column-new" }, h("h3", {}, name));
+    addColumnButton.before(added);
+    const drop = (keyed: boolean) => {
+      added.remove();
+      if (keyed) addColumnButton.focus();
+    };
+    // A name that is nothing but a colour mark adds no column, and the one waiting for it goes.
+    nameField(name, "", "New column name", `title:${board.columns.length}`, (title) => (addColumn(board, title) === board ? drop(true) : write(addColumn(board, title))), drop);
+    added.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
+
   if (!board.columns.length) {
-    el.append(h("div", { className: "kanban kanban-empty" }, h("p", {}, "A kanban board has a column for each heading, such as ## To do, and a card for each list item under it.")));
+    el.append(h("div", { className: "kanban kanban-empty" }, h("p", {}, "A kanban board has a column for each heading, such as ## To do, and a card for each list item under it."), ...controls(addColumnButton)));
     return {};
   }
 
@@ -70,13 +158,16 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
     list.setAttribute("aria-label", `${column.title} cards`);
     cards.forEach((card, i) => {
       const at = { column: c, card: i };
-      const item = h("li", { className: "kanban-card" }, h("span", { className: "kanban-card-text" }, card.text));
-      if (card.more.trim()) item.append(h("span", { className: "kanban-card-more" }, card.more));
+      // A card is drawn as its lines are in the note: a todo's box ticks, a chip opens its menu, and a link is its note's title.
+      const text = h("div", { className: "kanban-card-text" });
+      const item = h("li", { className: "kanban-card" }, text);
+      // A card is changed as it is written: a press on its words puts the cursor at the end of its line in the board's markdown, which is shown above the board.
+      const editCard = () => embed.edit(cardEnd(board, at) ?? undefined);
+      undrawn.push(embed.lines(text, card.lines.join("\n"), { changed: (lines) => write(changeCard(board, at, lines)), pressed: () => !embed.readOnly && editCard() }));
       if (!embed.readOnly) {
         item.draggable = true;
         item.title = "Drag to move, or press to change its text";
-        // A card is changed as it is written: a press puts the cursor at the end of its line in the board's markdown, which is shown above the board.
-        item.addEventListener("click", () => embed.edit(cardEnd(board, at) ?? undefined));
+        item.addEventListener("click", (e) => e.target === item && editCard());
       }
       item.addEventListener("dragstart", (e) => {
         dragging = { drawn, from: at };
@@ -158,7 +249,40 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
       ),
     );
 
-    const heading = h("h3", {}, h("span", { className: "kanban-title" }, column.title), ...controls(colour), h("span", { className: "kanban-count" }, String(cards.length)));
+    // The title is renamed in place, by a double-click or Enter on it.
+    const title: HTMLElement = h(embed.readOnly ? "span" : "button", { className: "kanban-title", textContent: column.title, data: { focus: `title:${c}` } });
+    const rename = () => nameField(title, column.title, `Name of ${column.title}`, `title:${c}`, (name) => write(renameColumn(board, c, name)));
+    if (!embed.readOnly) {
+      (title as HTMLButtonElement).type = "button";
+      title.title = "Double-click or press Enter to rename";
+      title.setAttribute("aria-label", `${column.title}, press Enter to rename`);
+      title.addEventListener("dblclick", rename);
+      title.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        e.stopPropagation();
+        rename();
+      });
+    }
+    const menu = h("button", { type: "button", className: "kanban-column-menu", title: `${column.title} column`, data: { focus: `menu:${c}` } });
+    menu.setAttribute("aria-label", `${column.title} column menu`);
+    menu.setAttribute("aria-haspopup", "menu");
+    menu.addEventListener("click", () =>
+      openPopover(menu, `${column.title} column`, (shut) =>
+        createElement(ColumnMenu, {
+          title: column.title,
+          cards: cards.length,
+          left: board.columns[c - 1]?.title ?? null,
+          right: c < board.columns.length - 1,
+          rename,
+          move: (by) => write(moveColumn(board, c, c + by)),
+          remove: (keepCards) => write(deleteColumn(board, c, keepCards ? c - 1 : null)),
+          shut,
+        }),
+      ),
+    );
+
+    const heading = h("h3", {}, title, ...controls(colour), h("span", { className: "kanban-count" }, String(cards.length)), ...controls(menu));
     const section = h("section", { className: "kanban-column", data: column.colour ? { colour: column.colour } : {} }, heading, list, ...controls(adding));
     section.setAttribute("aria-label", column.title);
     const mine = (e: DragEvent) => dragging?.drawn === drawn && e.dataTransfer?.types.includes(CARD_DRAG);
@@ -177,14 +301,15 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
     return section;
   });
 
-  el.append(h("div", { className: "kanban" }, h("div", { className: "kanban-columns" }, ...columns)));
-  return {};
+  el.append(h("div", { className: "kanban" }, h("div", { className: "kanban-columns" }, ...columns, ...controls(addColumnButton))));
+  return { stop: () => undrawn.forEach((undraw) => undraw()) };
 }
 
 /**
- * A kanban board kept in a note as a block: `:::kanban{}`, a heading for each column with its cards
- * as a list under it, then `:::`. Moving or adding a card rewrites that markdown, and so does giving
- * a column a colour, which its heading then ends with: `## Doing {.blue}`.
+ * A kanban board kept in a note as a block: `/kanban()`, then its markdown in a fence under it, a
+ * heading for each column with its cards as a list under it. Moving or adding a card rewrites that markdown, and so does giving
+ * a column a colour, which its heading then ends with: `## Doing {.blue}`, and adding, renaming, moving or deleting a column,
+ * from the board itself, so nobody needs the markdown to set a board up.
  */
 export const kanban: Plugin = {
   id: "kanban",
@@ -193,6 +318,6 @@ export const kanban: Plugin = {
   icon: "board",
   screenshots: [{ src: "/plugin-shots/kanban-light.png", dark: "/plugin-shots/kanban-dark.png", alt: "A board in a note: three columns of cards, each with a button to add a card." }],
   activate(host) {
-    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, description: "Columns of cards to drag from one to another", preview: { image: PICTURE }, options, render: draw });
+    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, content: "markdown", starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, description: "Columns of cards to drag from one to another", preview: { image: PICTURE }, options, render: draw });
   },
 };

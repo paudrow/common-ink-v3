@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { clearKey, EMBED_SCHEMAS, isDuration, keysText, placeProblems, problemText, readConfig, removeWord, renameKey, schemaFor, setKey, settableKeys, type EmbedSchema } from "../../src/core/embedSchema.ts";
 import { withCrop, withShare, withUpload, writtenUpload } from "../../src/core/uploadRefs.ts";
-import { inlineIn } from "../../src/core/embedSyntax.ts";
+import { BUILT_IN_EMBEDS, inlineIn } from "../../src/core/embedSyntax.ts";
 import { writeClock } from "../../src/web/plugins/lib/clock.ts";
 import { durationParts, durationWords } from "../../src/core/embedOptions.ts";
 
 const schema = (name: string): EmbedSchema => EMBED_SCHEMAS[name]!;
-const [IMAGE, TIMER, HTML, CONTACT, DRAWING, KANBAN] = [schema("image"), schema("timer"), schema("html"), schema("contact"), schema("drawing"), schema("kanban")];
+const [IMAGE, TIMER, HTML, EMAIL, DRAWING, KANBAN] = [schema("image"), schema("timer"), schema("html"), schema("email"), schema("drawing"), schema("kanban")];
 const ID = "u2p9l4d8a3c7";
 const problems = (schema: EmbedSchema, config: string) => readConfig(schema, config).problems.map((p) => problemText(schema, p));
+
+describe("the app's own embeds", () => {
+  it("are the same embeds to the syntax, which says which hold content, as to the schemas", () => {
+    expect(Object.keys(BUILT_IN_EMBEDS).sort()).toEqual(Object.keys(EMBED_SCHEMAS).sort());
+  });
+});
 
 describe("reading an embed's config against its schema", () => {
   it("gives each key its words: bare words in schema order, an optional key passed over by a word it refuses", () => {
@@ -16,7 +22,7 @@ describe("reading an embed's config against its schema", () => {
     expect(readConfig(IMAGE, `${ID} medium`).values).toEqual({ upload: ID, width: "medium" });
     expect(readConfig(DRAWING, "").problems).toEqual([]);
     expect(readConfig(DRAWING, "800x450").values).toEqual({ size: "800x450" });
-    expect(readConfig(CONTACT, "aaaaaaaaaaaa Lunch at noon=ish").values).toEqual({ ref: "aaaaaaaaaaaa", label: "Lunch at noon=ish" });
+    expect(readConfig(EMAIL, "aaaaaaaaaaaa Lunch at noon=ish").values).toEqual({ ref: "aaaaaaaaaaaa", label: "Lunch at noon=ish" });
   });
 
   it("says which key is wrong and how", () => {
@@ -81,10 +87,10 @@ describe("setting and clearing an embed's keys", () => {
     expect(setKey(HTML, "height=480", "height", "320")).toEqual({ config: "" });
   });
 
-  it("sets and clears a contact's label, the words after its reference", () => {
-    expect(setKey(CONTACT, "aaaaaaaaaaaa Lunch", "label", "Lunch at noon")).toEqual({ config: "aaaaaaaaaaaa Lunch at noon" });
-    expect(setKey(CONTACT, "aaaaaaaaaaaa", "label", "Tea")).toEqual({ config: "aaaaaaaaaaaa Tea" });
-    expect(clearKey(CONTACT, "aaaaaaaaaaaa Lunch at noon", "label")).toEqual({ config: "aaaaaaaaaaaa" });
+  it("sets and clears an email's label, the words after its reference", () => {
+    expect(setKey(EMAIL, "aaaaaaaaaaaa Lunch", "label", "Lunch at noon")).toEqual({ config: "aaaaaaaaaaaa Lunch at noon" });
+    expect(setKey(EMAIL, "aaaaaaaaaaaa", "label", "Tea")).toEqual({ config: "aaaaaaaaaaaa Tea" });
+    expect(clearKey(EMAIL, "aaaaaaaaaaaa Lunch at noon", "label")).toEqual({ config: "aaaaaaaaaaaa" });
   });
 
   it("refuses a value its key can't take, a key the schema doesn't have, and clearing a key the embed can't do without", () => {
@@ -133,7 +139,7 @@ describe("what each embed's own writer writes", () => {
       [IMAGE, withCrop(withShare(`${ID} 640x480`, 0.5), { x: 1, y: 2, width: 3, height: 4 })],
       [TIMER, writeClock({ length: "1h30m", run: { is: "running", since: Date.parse("2026-10-10T12:00:00.000Z") } })],
       [TIMER, writeClock({ length: "90s", run: { is: "stopped", elapsed: 3_723_000 } })],
-      [CONTACT, "aaaaaaaaaaaa Lunch at noon"],
+      [EMAIL, "aaaaaaaaaaaa Lunch at noon"],
       [HTML, "height=480"],
     ] as const;
     for (const [schema, config] of written) {

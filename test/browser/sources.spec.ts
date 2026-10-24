@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import type { CalendarEvent, Me, OpInput } from "../../src/core/protocol.ts";
-import { anotherPerson, join, perform, runCommand, signInAsNewPerson, test, visitor } from "./helpers.ts";
+import type { CalendarEvent, Me, OpInput, Reference } from "../../src/core/protocol.ts";
+import { anotherPerson, join, mailed, perform, runCommand, signInAsNewPerson, test, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -28,6 +28,7 @@ const openSources = (page: Page) => calendar(page).getByRole("button", { name: "
 const contact = (page: Page, name: string) => contacts(page).getByRole("list", { name: "Contacts" }).getByRole("listitem", { name });
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const chips = (page: Page) => editor(page).locator(".ref-chip");
+const mentions = (page: Page) => editor(page).locator(".md-chip-mention");
 
 /** What the server answers `op` with, refusal or not, asked the way another tab would. */
 const answer = (page: Page, op: OpInput, workspaceId?: string) =>
@@ -378,7 +379,7 @@ test("a link to an event shows its owner the event as it is now, and every other
   await expect(chips(page)).toHaveAttribute("title", "Reconnect Sample calendar first to see this event as it is now");
 });
 
-test("a reference to a contact shows its owner the contact, and every other member the name alone", async ({ page }) => {
+test("a contact is written as a mention of them, whose page shows its owner the contact, and every other member the name alone", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const grace = await anotherPerson(page, "Grace Hopper");
   const { workspaceId } = await join(grace, page, "editor");
@@ -386,30 +387,27 @@ test("a reference to a contact shows its owner the contact, and every other memb
   const note = await perform(page, { type: "note.create", text: "# Plumbing\n\nCall " });
   await page.goto("/contacts");
 
-  // Contacts lists people and copies nothing: a reference to one is written by an agent, or by `record.refer` as here.
+  // Contacts lists people and copies nothing: an agent asks `record.refer`, as here, and is answered a mention.
   await expect(contact(page, "Sam Okafor")).toContainText("+1 555 0142");
   await expect(page.getByRole("button", { name: "Copy reference" })).toHaveCount(0);
-  const { text: written } = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
-  expect(written).toMatch(/^::contact\{[a-z0-9]{12} Sam Okafor\}$/);
+  const { ref, text: written } = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
+  expect(written).toBe("[[person:Sam Okafor]]");
+  expect((await answer(page, { type: "record.read", ref })).status).toBe(200);
 
   await openNote(page, note.id, "Call");
   await writeAtEnd(page, written);
-  await expect(chips(page)).toHaveText(["Sam Okafor"]);
-  await expect(chips(page)).toHaveAttribute("data-state", "live");
-  await expect(chips(page)).toHaveAttribute("title", "Okafor Plumbing · +1 555 0142");
-  await chips(page).click();
-  await expect(page.getByRole("dialog", { name: "Contact" })).toContainText("+1 555 0142");
-  await page.keyboard.press("Escape");
+  await expect(mentions(page)).toHaveText(["@Sam Okafor"]);
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(`# Plumbing\n\nCall ${written}\nafter`);
+  await mentions(page).click();
+  await expect(page).toHaveURL(/\/person\/Sam%20Okafor$/);
+  await expect(page.getByRole("region", { name: "Your contact Sam Okafor" })).toContainText("+1 555 0142");
 
   await openNote(grace, note.id, "Call");
-  await expect(chips(grace)).toHaveText(["Sam Okafor"]);
-  await expect(chips(grace)).toHaveAttribute("data-state", "private");
-  await expect(chips(grace)).toHaveAttribute("title", "Only the member who referenced this contact sees its details");
-  await expect.poll(() => isMuted(chips(grace))).toBe(true);
+  await expect(mentions(grace)).toHaveText(["@Sam Okafor"]);
+  await mentions(grace).click();
+  await expect(grace.getByRole("region", { name: "Sam Okafor", exact: true })).toContainText("Mentioned by name");
   await expect(grace.locator("body")).not.toContainText("555 0142");
   await expect(grace.locator("body")).not.toContainText("Okafor Plumbing");
-  const ref = /\{([a-z0-9]{12}) /.exec(written)![1]!;
   await expect.poll(async () => (await answer(grace, { type: "record.read", ref }, workspaceId)).status).toBe(404);
 });
 
@@ -424,8 +422,8 @@ test("whoever opens a link to a note sees a link to an event as an event and a r
   await signInAsNewPerson(page, "Ada Lovelace");
   await connectSample(page);
   const lunch = await perform(page, { type: "record.refer", ...(({ sourceId, id }) => ({ sourceId, id }))(await eventNamed(page, "Lunch with Sam")) });
-  const sam = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
-  const note = await perform(page, { type: "note.create", text: `# Shared plan\n\nWe meet at ${lunch.text} with ${sam.text} there.\n` });
+  const [plans] = await mailed(page, "Engine plans");
+  const note = await perform(page, { type: "note.create", text: `# Shared plan\n\nWe meet at ${lunch.text} about ${plans!.text} there.\n` });
   const link = await perform(page, { type: "grant.link", noteId: note.id, link: "public" });
   if (link?.to.kind !== "link") throw new Error("no link was made");
 
@@ -435,7 +433,7 @@ test("whoever opens a link to a note sees a link to an event as an event and a r
     if (new URL(request.url()).pathname.startsWith("/api/")) asked.push(new URL(request.url()).pathname);
   });
   await anyone.goto(`/s/${link.to.token}`);
-  await expect(chips(anyone)).toHaveText(["Event", "Sam Okafor"]);
+  await expect(chips(anyone)).toHaveText(["Event", "Engine plans"]);
   await expect(editor(anyone)).not.toContainText("[[event");
   await expect(editor(anyone)).not.toContainText(lunch.ref);
   for (const chip of await chips(anyone).all()) {
@@ -478,9 +476,7 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   // Wide enough that a line still fits on one row with its reference shown as written, which is longer than the chip.
   await page.setViewportSize({ width: 1700, height: 900 });
   await signInAsNewPerson(page, "Ada Lovelace");
-  await connectSample(page);
-  const lin = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "lin" });
-  const sam = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
+  const [lin, sam] = (await mailed(page, "Lin Wei", "Sam Okafor")) as [Reference, Reference];
   const note = await perform(page, { type: "note.create", text: `# Refs\n\nplain line above\n\nBefore ${lin.text} trailing\n\nSecond ${sam.text} and ${lin.text}\n\nnext line\n\nlast line` });
 
   // The server's answers about the references are held back, so the note is first seen with their labels alone.
@@ -513,7 +509,7 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   await expect(chips(page)).toHaveCount(3);
   expectUnmoved(await places(page, [...fixed, "trailing"]), drawn, "with the cursor on the line");
 
-  // The cursor in the first reference: it stays drawn, what the note says of it is shown right after it in its line, and nothing before it moves or shifts sideways.
+  // The cursor in the first reference: it stays drawn, what the note says of it is shown right before it in its line, and nothing before that moves or shifts sideways.
   await page.keyboard.press("Home");
   for (let i = 0; i < "Before ::".length; i++) await page.keyboard.press("ArrowRight");
   const source = editor(page).locator(".embed-source");
@@ -523,8 +519,8 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   expectUnmoved({ "plain line above": written["plain line above"]! }, { "plain line above": drawn["plain line above"]! }, "with the first reference shown as written in its line");
   for (const word of fixed) expect(Math.abs(written[word]!.x - drawn[word]!.x), `x of "${word}" with the first reference shown as written in its line`).toBeLessThanOrEqual(0.5);
   const [chip, text] = [(await chips(page).first().boundingBox())!, (await source.boundingBox())!];
-  expect(text.x, "the reference as written is after its chip").toBeGreaterThanOrEqual(chip.x + chip.width);
-  expect(written.trailing!.x, "and before the rest of its line").toBeGreaterThanOrEqual(text.x + text.width);
+  expect(chip.x, "the reference as written is before its chip").toBeGreaterThanOrEqual(text.x + text.width);
+  expect(written.trailing!.x, "and both before the rest of its line").toBeGreaterThanOrEqual(chip.x + chip.width);
 
   await page.keyboard.press("ControlOrMeta+End");
   await expect(chips(page)).toHaveText(["Lin Wei", "Sam Okafor", "Lin Wei"]);

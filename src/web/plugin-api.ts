@@ -12,6 +12,7 @@
 import type { ComponentType, ReactNode } from "react";
 import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, ReferredUpload, Results, Role, Sharing, Upload, WorkspaceSummary, Written } from "../core/protocol.ts";
 import type { DeclaredOption, Swatch } from "../core/embedOptions.ts";
+import type { ContentKind } from "../core/embedSyntax.ts";
 import type { IconName } from "./icons.tsx";
 import type { Showing } from "./inspected.ts";
 import type { UploadKind } from "../core/filetypes.ts";
@@ -81,8 +82,11 @@ export { FILE_CLASSES, TEXT_ENDINGS, fileClass, type FileClass, type UploadKind 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
 export { BOX_PATTERN, TODO_STATES, changeTodo, completeTodo, skipTodo, isDay, isTagName, locateTodo, markOf, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange, type TodoState } from "../core/todos.ts";
 
-/** The lines of a note that aren't in a fenced code block, which is where the core reads todos and tags. */
+/** The lines of a note that are its words, which is where the core reads todos and tags: not code, and not an embed's content unless that is markdown. */
 export { linesOutsideCode } from "../core/lines.ts";
+
+/** How a note writes an embed, `/name(args)` with any content in a fence under it, as the core reads it. */
+export { callsIn, writtenEmbed, type ContentKind } from "../core/embedSyntax.ts";
 
 /** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
 export { DAY_NAMES, MONTHS, MONTH_NAMES, WEEKDAYS, counted, describeRule, endLabel, isInterval, nextDue, occurrences, ordinal, parseRule, pastThe28th, ruleLabel, skippedTo, writeRule, type End, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
@@ -673,8 +677,9 @@ export interface EditorProps extends ViewProps {
 }
 
 /**
- * Content drawn inside a note where the note says `::name{config}`, or for a block embed where it
- * says `:::name{config}` on a line, then the embed's body as markdown, then `:::` on a line. It is
+ * Content drawn inside a note where the note says `/name(config)`, at the start of a line or after
+ * whitespace. A block embed holds content: it is written alone on its line, and its body is the
+ * fenced block on the very next line, tagged with what its content is. It is
  * handed what the note says of it, an element to draw in, and a way to rewrite itself, and nothing
  * else about the note, the workspace, or the member.
  */
@@ -683,8 +688,10 @@ export interface Embed {
   name: string;
   /** What a person sees it called. */
   title: string;
-  /** Whether it is written as a block, with a body. One embed is written one way. */
+  /** Whether it holds content, its body, in the fenced block under its line. One embed is written one way. */
   block?: boolean;
+  /** What a block's content is, which is how the editor draws it while its source is shown, and the tag its fence is written with. Markdown where it says none. */
+  content?: ContentKind;
   /** What a new one is written with when it is picked from the insert menu. With none, an empty config and an empty body. */
   starts?: { config?: string; body?: string };
   /** What the insert menu says it makes, in a line of words: never its syntax. With none the menu shows its title alone. */
@@ -839,7 +846,7 @@ export type BelowBox = ({ ratio: number } | { height: number }) & { maxWidth?: n
  * below it, or with the cursor on the line. So the address comes and goes and nothing moves.
  */
 export interface AddressEmbed {
-  /** A name of its own among the address embeds. A note that says `::name{}` is not this: an embed with a syntax may have the same name, as an uploaded video's `::video{}` has. */
+  /** A name of its own among the address embeds. A note that says `/name()` is not this: an embed with a syntax may have the same name, as an uploaded video's `/video()` has. */
   name: string;
   /** What a person sees it called. */
   title: string;
@@ -853,29 +860,38 @@ export interface Embedded {
   config: string;
   /** The note the embed is written in. */
   noteId: string;
-  /** A block embed's body: the note's lines between its opening and closing lines, each with its line break. Empty for an inline embed. */
+  /** A block embed's body: the lines of the fence under it, each with its line break. Empty for an inline embed, and for a block with no fence under it yet. */
   body: string;
   /** Whether the member can't change the note. `update` then does nothing, so an embed draws what it shows without the controls that would call it. */
   readOnly: boolean;
   /**
    * Rewrites this embed in the note as an edit by the member, which is saved, recorded, and undone
    * as typing is. What isn't given stays as it is. It does nothing once the note says something else
-   * of the embed than what this was drawn from, or once the embed is no longer drawn, and throws for a config holding `{`, `}`, or a line
-   * break, and for a body holding a line that is only `:::`. Called while the embed is being drawn, it is carried out
+   * of the embed than what this was drawn from, or once the embed is no longer drawn, and throws for a config holding a line
+   * break or a `)` that nothing in it opens. A body is written in the fence under the embed, which is written for it where
+   * there is none, and made longer where a line of the body would close it. Called while the embed is being drawn, it is carried out
    * right after, since the note can't be changed in the middle of drawing it.
    */
   update(next: { config?: string; body?: string }): void;
   /**
    * Puts the cursor in the embed as the note writes it, to be changed there, as moving the cursor
-   * onto it does. The embed stays drawn, the element it was, and its text is shown above its
-   * drawing for as long as the cursor is in it: an inline embed's in rows of their own above its
-   * line, a block's lines above its card. For a block, `at` is how far into its body the cursor goes,
+   * onto it does, and as Edit source in its settings does from the start of its line. The embed stays drawn, the element it was, and its text is shown before its
+   * drawing for as long as the cursor is in it: an inline embed's in its line before it, a block's
+   * lines above its card. For a block, `at` is how far into its body the cursor goes,
    * as a board puts it on the line of the card that was pressed. Without it the cursor goes in the config.
    */
   edit(at?: number): void;
+  /**
+   * Draws `text`, lines of markdown such as a board's card, into `el` as the note draws its own: a
+   * todo's box and chips, links by their names, mentions, tags and dates. What is pressed there
+   * changes the lines as it would in the note, and each change is handed to `changed` as the lines
+   * are then; a press on the words is handed to `pressed`. Where nothing of the note can be drawn,
+   * they are their text. Returns what takes the drawing out, for when the embed is drawn again.
+   */
+  lines(el: HTMLElement, text: string, on: { changed: (text: string) => void; pressed: () => void }): () => void;
 }
 
-export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts" | "description" | "preview" | "pick">;
+export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "content" | "starts" | "description" | "preview" | "pick">;
 
 /** One entry of an embed in a menu that does something to make what it writes, as "Upload a file" asks for a file. */
 export interface EmbedPick {

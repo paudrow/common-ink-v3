@@ -99,11 +99,11 @@ test("each row says who uploaded it and how far it is seen, to Ada and to Bob, a
   const secret = await send(page, "secret.png", png(40, 30), { private: true });
   await send(page, "loose.png", png(40, 30), { folderId: folder.id });
   await send(bob, "bobs.png", png(40, 30), { folderId: folder.id }, workspaceId);
-  await perform(page, { type: "note.create", folderId: folder.id, text: `# Plan\n\n::image{${plan.id} 40x30}\n` });
+  await perform(page, { type: "note.create", folderId: folder.id, text: `# Plan\n\n/image(${plan.id} 40x30)\n` });
   // Ada's private note shows two files: hers to count, and nothing Bob is told of.
-  const diary = await perform(page, { type: "note.create", folderId: folder.id, text: `# Diary\n\n::image{${shared.id} 40x30}\n\n::image{${secret.id} 40x30}\n` });
+  const diary = await perform(page, { type: "note.create", folderId: folder.id, text: `# Diary\n\n/image(${shared.id} 40x30)\n\n/image(${secret.id} 40x30)\n` });
   await perform(page, { type: "note.setPrivate", id: diary.id, private: true });
-  await perform(page, { type: "note.create", folderId: folder.id, text: `# Board\n\n::image{${shared.id} 40x30}\n` });
+  await perform(page, { type: "note.create", folderId: folder.id, text: `# Board\n\n/image(${shared.id} 40x30)\n` });
 
   await page.goto("/uploads");
   await expect(rows(page)).toHaveCount(5);
@@ -157,7 +157,7 @@ test("a query typed in the bar and one built in Advanced find the same uploads, 
   await send(page, "spare.png", png(8, 8), { folderId: folder.id });
   await send(page, "minutes.txt", Buffer.from("words"), { folderId: folder.id });
   await send(bob, "bobs.png", png(8, 8), { folderId: folder.id }, workspaceId);
-  await perform(page, { type: "note.create", folderId: folder.id, text: `# Plan\n\n::image{${used.id} 8x8}\n` });
+  await perform(page, { type: "note.create", folderId: folder.id, text: `# Plan\n\n/image(${used.id} 8x8)\n` });
   await page.goto("/uploads");
   await expect(rows(page)).toHaveCount(4);
 
@@ -281,12 +281,12 @@ test("Insert an upload in the / menu finds a file by the keyboard, writes it at 
   await page.keyboard.press("Enter");
 
   await expect(popover(page)).toHaveCount(0);
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe view:\n::image{${harbour.id} 320x200}\n`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe view:\n/image(${harbour.id} 320x200)\n`);
   await expect.poll(async () => (await perform(page, { type: "upload.read", id: harbour.id })).private).toBe(false);
   expect((await perform(page, { type: "upload.read", id: harbour.id })).folderId).toBe(folder.id);
   // The keyboard is back in the note, on the line after the picture.
   await page.keyboard.type("After.");
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe view:\n::image{${harbour.id} 320x200}\nAfter.`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe view:\n/image(${harbour.id} 320x200)\nAfter.`);
 
   await inWorkspace(bob, workspaceId, `/note/${note.id}`);
   await expect.poll(() => bob.locator('.embed-below[data-embed="image"] img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(320);
@@ -319,9 +319,9 @@ test("Escape closes the popover and leaves the note as it was before the /, and 
   await page.keyboard.press("Tab");
   await expect(popover(page).getByRole("option")).toHaveText([/^minutes\.txt/]);
   await page.keyboard.press("Enter");
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Board\n\nRead on ::file{${minutes.id}}`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Board\n\nRead on /file(${minutes.id})`);
   await page.keyboard.type(" first.");
-  await expect.poll(() => noteText(page, note.id)).toBe(`# Board\n\nRead on ::file{${minutes.id}} first.`);
+  await expect.poll(() => noteText(page, note.id)).toBe(`# Board\n\nRead on /file(${minutes.id}) first.`);
 });
 
 test("an inserted video, and a picture whose size the server couldn't read, are written with the size this browser reads, as a pasted one is", async ({ page }) => {
@@ -332,7 +332,7 @@ test("an inserted video, and a picture whose size the server couldn't read, are 
   const note = await perform(page, { type: "note.create", text: "# Clips\n\n" });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Clips");
-  for (const [name, written] of [["box.webm", `::video{${video.id} 320x180}`], ["shape.svg", `::image{${svg.id} 120x80}`]] as const) {
+  for (const [name, written] of [["box.webm", `/video(${video.id} 320x180)`], ["shape.svg", `/image(${svg.id} 120x80)`]] as const) {
     await editor(page).focus();
     await page.keyboard.press("ControlOrMeta+End");
     await page.keyboard.type("/insert", { delay: 20 });

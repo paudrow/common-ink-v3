@@ -1,4 +1,4 @@
-import { linesOutsideCode } from "./lines.ts";
+import { callsIn, readNote } from "./embedSyntax.ts";
 import { linksIn, linksOn, type WrittenLink } from "./links.ts";
 import { blanked, codeSpans } from "./spans.ts";
 import { isDay } from "./todos.ts";
@@ -61,7 +61,9 @@ const BARE = /(?<=^|[\s(])(\d{4}-\d{2}-\d{2})(?: ((?:[01]\d|2[0-3]):[0-5]\d))?(?
  */
 export function bareDatesOn(line: string, offset = 0): (LinkedDay & { from: number; to: number })[] {
   if (HEADING.test(line)) return [];
-  const read = blanked(line, codeSpans(line), "\0");
+  const coded = blanked(line, codeSpans(line), "\0");
+  // What is in an embed's parentheses is the embed's to draw.
+  const read = blanked(coded, callsIn(coded).map((c) => [c.from, c.to] as const), "\0");
   const found = [];
   for (const match of read.matchAll(BARE)) {
     const [whole, day, time] = match;
@@ -71,9 +73,7 @@ export function bareDatesOn(line: string, offset = 0): (LinkedDay & { from: numb
   return found;
 }
 
-/** A line that opens a block embed, `:::kanban{}`, whose lines up to a line of `:::` are the embed's, and one that is only `$$`, which opens or closes a formula. */
-const BLOCK_OPENS = /^\s*:::[\p{L}\p{N}_-]+\{[^}]*\}\s*$/u;
-const BLOCK_CLOSES = /^\s*:::\s*$/;
+/** A line that is only `$$`, which opens or closes a formula. */
 const FORMULA = /^\s*\$\$\s*$/;
 
 /**
@@ -84,12 +84,12 @@ const FORMULA = /^\s*\$\$\s*$/;
 export function datesAsLinks(text: string): string {
   let out = "";
   let at = 0;
-  let inside: "embed" | "formula" | null = null;
-  for (const { line, from } of linesOutsideCode(text)) {
-    if (inside === null && BLOCK_OPENS.test(line)) inside = "embed";
-    else if (inside === "embed" && BLOCK_CLOSES.test(line)) inside = null;
-    else if (FORMULA.test(line) && inside !== "embed") inside = inside === "formula" ? null : "formula";
-    if (inside !== null || BLOCK_CLOSES.test(line)) continue;
+  let formula = false;
+  for (const { line, from, is } of readNote(text).lines) {
+    // A block embed's content, and code, are left as they are.
+    if (is !== "prose") continue;
+    if (FORMULA.test(line)) formula = !formula;
+    if (formula || FORMULA.test(line)) continue;
     for (const date of bareDatesOn(line, from)) {
       out += text.slice(at, date.from) + writtenDayLink(date);
       at = date.to;

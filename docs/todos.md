@@ -16,7 +16,7 @@ A todo is a checkbox line in a note. There is no other record of it: the note's 
 | Assignee | `[[person:k3j5h8d9f0a1]]`, `[[person:Sam Okafor]]` | A mention of a person on the line: a member by their id, anyone else by name. A todo can have several. `docs/adr/0019-everything-a-note-opens-is-a-link.md` has how a mention is written. |
 | Tag | `#money` | Letters, digits, `_`, `-` and `/`, with something besides digits, so `#12` is not a tag. It tags the todo and the whole note. Matched ignoring case. |
 
-A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `a#b` is not a tag. Text in inline code, in a link (`[[…]]`, a mention too), and in a link's address (`](…)`) is never a token. Nor is a tag in an embed's braces, as `::poll{question #garden}` has.
+A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `a#b` is not a tag. Text in inline code, in a link (`[[…]]`, a mention too), and in a link's address (`](…)`) is never a token. Nor is a tag in an embed's parentheses, as `/x-poll(question #garden)` has.
 
 Where issue 1 was silent, the choices were made for text that is plain to read and to type, that parses one way, and that an agent can write without asking:
 

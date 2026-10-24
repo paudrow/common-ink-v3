@@ -35,7 +35,7 @@ A search covers live notes. It covers archived notes too when the query says `is
 
 `in:body` looks in the note's text, which has its heading in it. A todo's words are looked for in its own line, as a note's are: by the start of a word, ignoring case and accents.
 
-`has:attachment` is a note whose text shows an upload: `::image{…}`, `::video{…}`, `::audio{…}` or `::file{…}` outside code, whether or not the asker can see the upload.
+`has:attachment` is a note whose text shows an upload: `/image(…)`, `/video(…)`, `/audio(…)` or `/file(…)` outside code, whether or not the asker can see the upload.
 
 ## Uploads
 

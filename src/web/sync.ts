@@ -238,6 +238,12 @@ export async function performInSync<T extends OpInput>(workspaceId: string, op: 
     for (const { id, revision } of result.converted) await open.get(id)?.pull(revision).catch(() => {});
     return result as Results[T["type"]];
   }
+  // So are embeds written the old way converted as the member comes in.
+  if (op.type === "note.convertEmbeds") {
+    const result = (await by(workspaceId, op)) as Results["note.convertEmbeds"];
+    for (const { id, revision } of result.converted) await open.get(id)?.pull(revision).catch(() => {});
+    return result as Results[T["type"]];
+  }
   if (op.type === "history.previewRevert") {
     // What is typed and not yet saved would change the note under the preview.
     await commitTyping(op.changes.map((c) => c.noteId)).catch(() => {});

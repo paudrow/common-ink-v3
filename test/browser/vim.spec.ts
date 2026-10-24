@@ -382,8 +382,8 @@ test("moving through a note in a preview tab leaves it a preview, and an edit ke
   await expect.poll(() => italic(page)).toEqual([false]);
 });
 
-test("the cursor moves across an embed, which stays drawn and is shown as written after it in its line while the cursor is on it", async ({ page }) => {
-  const [note] = await withVim(page, "# Laps\nTime ::stopwatch{} here\nend");
+test("the cursor moves across an embed, which stays drawn and is shown as written before it in its line while the cursor is on it", async ({ page }) => {
+  const [note] = await withVim(page, "# Laps\nTime /stopwatch() here\nend");
   await page.goto(`/note/${note!.id}`);
   await expect(statusLine(page)).toHaveText("--NORMAL--");
   // Not a click, which could land on the embed's own buttons.
@@ -398,11 +398,11 @@ test("the cursor moves across an embed, which stays drawn and is shown as writte
   await expect(page.locator(".cm-fat-cursor")).toHaveText("T");
   const drawn = await watch.elementHandle();
   await page.keyboard.press("w");
-  await expect(written).toHaveText("::stopwatch{}");
-  await expect(page.locator(".cm-fat-cursor")).toHaveText(":");
-  // The cursor is drawn where the text is: after the stopwatch, on its row.
+  await expect(written).toHaveText("/stopwatch()");
+  await expect(page.locator(".cm-fat-cursor")).toHaveText("/");
+  // The cursor is drawn where the text is: before the stopwatch, on its row.
   const [cursor, card] = [(await page.locator(".cm-fat-cursor").boundingBox())!, (await page.locator(".embed-card").boundingBox())!];
-  expect(cursor.x).toBeGreaterThanOrEqual(card.x + card.width);
+  expect(cursor.x + cursor.width).toBeLessThanOrEqual(card.x);
   expect(cursor.y).toBeLessThan(card.y + card.height);
   expect(await watch.evaluate((el, was) => el === was, drawn)).toBe(true);
   await page.keyboard.press("$");
@@ -419,8 +419,8 @@ test("the cursor moves across an embed, which stays drawn and is shown as writte
   await expect(lines(page)).toHaveCount(3);
   await expect(watch).toBeVisible();
   await keys(page, "g", "g", "j", "w", "x");
-  await expect(lines(page).nth(1)).toHaveText("Time :stopwatch{} here");
-  await expect.poll(() => text(page, note!.id)).toBe("# Laps\nTime :stopwatch{} here\nend");
+  await expect(lines(page).nth(1)).toHaveText("Time stopwatch() here");
+  await expect.poll(() => text(page, note!.id)).toBe("# Laps\nTime stopwatch() here\nend");
 });
 
 test("Escape closes what is open before it leaves insert mode, and the app's keys still run from normal mode", async ({ page }) => {

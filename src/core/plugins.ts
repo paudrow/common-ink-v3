@@ -339,7 +339,7 @@ document.body.classList.add("ink-kit");
 ink.onCommand("hello", () => ink.notify(ink.settings.greeting + " from " + ${JSON.stringify(name)}));
 
 if (ink.context.kind === "embed") {
-  // A note writes ::x-hello{to=Ada times=2}. The app draws the options beneath it and hands their values here.
+  // A note writes /x-hello(to=Ada times=2). The app draws the options beneath it and hands their values here.
   const { to, times, loud } = ink.context.options;
   const card = document.createElement("div");
   card.className = "ink-card ink-stack";

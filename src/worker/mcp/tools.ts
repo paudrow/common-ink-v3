@@ -110,6 +110,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "note.hold": "It says the member's own app has a note open in an editor, which only the app knows. You hold a blank note by making, reading or writing it.",
   "note.linkDates": "It writes as links the dates a note wrote bare before dates were links, once, as the member's own app opens the note. Write a day as [[YYYY-MM-DD]] yourself.",
   "note.convertLinks": "It writes as links the mentions and references to events notes wrote before they were links, once, as the member's own app comes in. Write a person as [[person:…]] and an event as [[event:ref]] yourself.",
+  "note.convertEmbeds": "It writes the embeds notes wrote before as /name(args), once, as the member's own app comes in. Write them that way yourself.",
   "source.connect": "Connecting a data source is the member agreeing, in their own browser, to let Common Ink into their calendar or contacts. An agent can't agree for them. It reads and changes what the member connected.",
   "source.disconnect": "Disconnecting ends the member's own agreement and cuts off every reference in their notes until they agree again. The member does that themself, in the app.",
   "email.senders": "The addresses a member's mail is recognized by are only of use for managing them, which an agent can't do. What came from them is list_email's.",
@@ -263,7 +264,7 @@ function shownLines(note: { text: string }, _origin: string, { lines, numbered }
   return { ...note, text, ...(lines === undefined ? {} : { lines: { from, to, of: all.length } }) };
 }
 const UPLOADS =
-  "A note shows an upload on a line of its own that starts with its id: ::image{<id> WIDTHxHEIGHT} or ::video{<id> WIDTHxHEIGHT}, with the room to keep for it, ::audio{<id>}, or ::file{<id>} for anything else. The upload's name is never in the note. No tool answers its bytes: GET /api/workspaces/<workspace>/uploads/<id> with the same bearer token does, and POST /api/workspaces/<workspace>/uploads takes a new file. A token limited to folders reaches only the uploads in them, there too.";
+  "A note shows an upload on a line of its own that starts with its id: /image(<id> WIDTHxHEIGHT) or /video(<id> WIDTHxHEIGHT), with the room to keep for it, /audio(<id>), or /file(<id>) for anything else. The upload's name is never in the note. No tool answers its bytes: GET /api/workspaces/<workspace>/uploads/<id> with the same bearer token does, and POST /api/workspaces/<workspace>/uploads takes a new file. A token limited to folders reaches only the uploads in them, there too.";
 const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
 const selected = (item: Record<string, unknown>, required: string[], description: string) => ({
   type: "array",
@@ -333,7 +334,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are [[person:id]] or [[person:Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. Uploads in the text are ::image{id ...}, ::video{id ...}, ::audio{id} or ::file{id}: uploads names each one's id with its name, type, kind and size, or a null upload for one that doesn't exist or that you can't see. A note in Trash is read as any other, and its state says trashed. Pass lines to read only some lines, and numbered to see each line's number: the numbers are edit_note's, counted in the revision read. Leave them out of edit_note's text.",
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are [[person:id]] or [[person:Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. Uploads in the text are /image(id ...), /video(id ...), /audio(id) or /file(id): uploads names each one's id with its name, type, kind and size, or a null upload for one that doesn't exist or that you can't see. A note in Trash is read as any other, and its state says trashed. Pass lines to read only some lines, and numbered to see each line's number: the numbers are edit_note's, counted in the revision read. Leave them out of edit_note's text.",
     inputSchema: object(
       {
         noteId,
@@ -764,7 +765,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "plan_export",
-    description: `A copy of the workspace to keep: every live and archived note and upload you can see, and nothing else, as Markdown files and the files themselves in directories named for their folders. A note is <title>.md, its text as stored, so links stay [[id]] and embeds ::image{id}; ${EXPORT_INDEX} in the first part says which id is at which path, with each title, state and time. What you can see in a folder you can't is under ${SHARED_WITH_ME}/. It comes in parts, each a zip of its own, at most partBytes of uploads (${EXPORT_PART_BYTES / 2 ** 30} GiB unless smaller is asked) and partFiles uploads (${EXPORT_PART_FILES}); a larger file is a part alone. The answer is notes, uploads, and parts: each with number, notes and uploads it holds, bytes before the zip's own, and address. GET an address with the token as Authorization: Bearer for its zip; asked again, a part holds the same uploads. Most workspaces are one part. ink export saves them all.`,
+    description: `A copy of the workspace to keep: every live and archived note and upload you can see, and nothing else, as Markdown files and the files themselves in directories named for their folders. A note is <title>.md, its text as stored, so links stay [[id]] and embeds /image(id); ${EXPORT_INDEX} in the first part says which id is at which path, with each title, state and time. What you can see in a folder you can't is under ${SHARED_WITH_ME}/. It comes in parts, each a zip of its own, at most partBytes of uploads (${EXPORT_PART_BYTES / 2 ** 30} GiB unless smaller is asked) and partFiles uploads (${EXPORT_PART_FILES}); a larger file is a part alone. The answer is notes, uploads, and parts: each with number, notes and uploads it holds, bytes before the zip's own, and address. GET an address with the token as Authorization: Bearer for its zip; asked again, a part holds the same uploads. Most workspaces are one part. ink export saves them all.`,
     inputSchema: object({
       partBytes: { type: "integer", minimum: 1, maximum: EXPORT_PART_BYTES, description: "The most bytes of uploads in one part. Left out, 1 GiB" },
       partFiles: { type: "integer", minimum: 1, maximum: EXPORT_PART_FILES, description: `The most uploads in one part. Left out, ${EXPORT_PART_FILES}` },
@@ -1073,22 +1074,22 @@ export const TOOLS: Tool[] = [
   {
     name: "refer_record",
     description:
-      `What a note writes to reference one of your member's events, contacts or emails without copying it: ref, and text to put in the note, [[event:ref]] or an embed such as ::contact{ref Sam Okafor}. Only your member is shown the record as it is now. The words after a contact's or an email's ref are plain text every reader sees, so change or drop them if they shouldn't be shared. ${SOURCES}`,
+      `What a note writes to reference one of your member's events, contacts or emails without copying it: ref, and text to put in the note: [[event:ref]], a contact's mention [[person:Name]], or /email(ref Subject). Only your member is shown the record as it is now. A contact's name and an email's subject are plain text every reader sees, so change or drop them if they shouldn't be shared. ${SOURCES}`,
     inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
     op: "record.refer",
     example: { sourceId: "google", id: "evt123" },
   },
   {
     name: "read_record",
-    description: `The event, contact or email a reference in a note stands for, as it is now. ref is in [[event:ref]], or first inside ::contact{...} or ::email{...}. A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
+    description: `The event, contact or email a reference in a note stands for, as it is now. ref is in [[event:ref]], or first inside /email(...). A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
     inputSchema: object({ ref: { type: "string", description: "The reference, from the note" } }, ["ref"]),
     op: "record.read",
     example: { ref: "r8m2k4q9x1cd" },
   },
   {
     name: "notes_about_record",
-    description: `The notes that reference one of your member's events or contacts with your member's own reference (the one refer_record answers), and for an event your member's calendar has now, another member's reference to the same event (a teammate's notes about a meeting on a shared calendar), among the notes your member can see and not in Trash, latest change first: id, title, updatedAt, and audience, who sees the note: private (only its owner), shared (its owner and the people it is shared with) or workspace (every member). ${SOURCES}`,
-    inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
+    description: `The notes that reference one of your member's events with your member's own reference (the one refer_record answers), and for an event your member's calendar has now, another member's reference to the same event (a teammate's notes about a meeting on a shared calendar), among the notes your member can see and not in Trash, latest change first: id, title, updatedAt, and audience, who sees the note: private (only its owner), shared (its owner and the people it is shared with) or workspace (every member). A contact is a mention: read_person lists the notes that mention them. ${SOURCES}`,
+    inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's id, from list_events" } }, ["sourceId", "id"]),
     op: "record.notes",
     example: { sourceId: "google", id: "evt123" },
   },

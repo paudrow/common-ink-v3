@@ -1,7 +1,7 @@
 /**
  * An embed's options declared as data: what each is called, what it holds, and what it is when the
  * note says nothing of it. The host reads and writes them as `key=value` words in the embed's config
- * (`::x-poll{question="Lunch?" votes=3}`) through `embedSchema.ts`, and draws them beneath the embed,
+ * (`/x-poll(question="Lunch?" votes=3)`) through `embedSchema.ts`, and draws them beneath the embed,
  * so a plugin that declares them writes no code for either.
  */
 
@@ -73,7 +73,7 @@ export function valueOf(option: DeclaredOption, text: string): { value: OptionVa
   const t = text.trim();
   switch (option.type) {
     case "text":
-      if (/["{}\r\n]/.test(t)) return { refused: "Quotes, braces and line breaks can't be in it." };
+      if (/["\r\n]/.test(t)) return { refused: "Quotes and line breaks can't be in it." };
       if (option.maxLength !== undefined && t.length > option.maxLength) return { refused: `At most ${option.maxLength} characters.` };
       return { value: t, words: t };
     case "number": {

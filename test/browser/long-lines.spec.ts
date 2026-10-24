@@ -27,6 +27,11 @@ async function watchStalls(page: Page) {
 }
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
+/**
+ * Whether the server's text holds `part`. A poll that compared the text itself would describe each miss
+ * with all of it, which takes seconds for a line this long, and on a slow machine outlasts the poll.
+ */
+const saved = async (page: Page, id: string, part: string) => ((await perform(page, { type: "note.read", id })) as { text: string }).text.includes(part);
 
 test("a share link's visitor reads a heading of many spaces without the page stalling", async ({ page, browser }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
@@ -42,7 +47,7 @@ test("a share link's visitor reads a heading of many spaces without the page sta
 
 test("a board whose column's heading holds many spaces is drawn, and the column coloured, without the page stalling", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  const note = await perform(page, { type: "note.create", text: `# Board\n\n:::kanban{}\n## a${" ".repeat(N)}b\n- write\n\n## Done {.green}\n:::\n` });
+  const note = await perform(page, { type: "note.create", text: `# Board\n\n/kanban()\n~~~markdown\n## a${" ".repeat(N)}b\n- write\n\n## Done {.green}\n~~~\n` });
   const longest = await watchStalls(page);
   await page.goto(`/note/${note.id}`);
   await expect(page.locator(".embed-frame-block").getByText("write")).toBeVisible();
@@ -51,7 +56,7 @@ test("a board whose column's heading holds many spaces is drawn, and the column 
   await page.evaluate(() => ((window as unknown as { longestStall: number }).longestStall = 0));
   await editor(page).getByRole("button", { name: /^Colour of a .*: no colour$/ }).click();
   await page.getByRole("dialog", { name: /^Colour of a/ }).getByRole("radio", { name: "Blue" }).click();
-  await expect.poll(async () => ((await perform(page, { type: "note.read", id: note.id })) as { text: string }).text, { timeout: 30_000 }).toContain("b {.blue}\n- write");
+  await expect.poll(() => saved(page, note.id, "b {.blue}\n- write"), { timeout: 30_000 }).toBe(true);
   expect(await longest()).toBeLessThan(1500);
 });
 
@@ -70,6 +75,6 @@ test("a cell is typed in beside a cell of many spaces without the page stalling"
   await page.keyboard.press("ControlOrMeta+a");
   await page.keyboard.type("144");
   await page.keyboard.press("Tab");
-  await expect.poll(async () => ((await perform(page, { type: "note.read", id: note.id })) as { text: string }).text, { timeout: 30_000 }).toContain("| 144 |");
+  await expect.poll(() => saved(page, note.id, "| 144 |"), { timeout: 30_000 }).toBe(true);
   expect(await longest()).toBeLessThan(1500);
 });

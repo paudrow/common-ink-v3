@@ -36,7 +36,7 @@ async function open(page: Page, text: string) {
 
 test("a timer or stopwatch running in the open note shows in the bottom bar, moves nothing when it appears, and scrolls the note to itself when pressed", async ({ page }) => {
   const filler = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} of the notes.`).join("\n\n");
-  await open(page, `# Tea\n\nSteep ::timer{5m} and lap ::stopwatch{at=5s} here.\n\n${filler}\n`);
+  await open(page, `# Tea\n\nSteep /timer(5m) and lap /stopwatch(at=5s) here.\n\n${filler}\n`);
   const inBar = bar(page).getByRole("button");
   const timer = editor(page).getByRole("button", { name: /^Timer/ });
   await expect(inBar).toHaveCount(0);
@@ -130,7 +130,7 @@ test("a quick timer is started from the command palette, runs in the bottom bar 
 });
 
 test("in focus the bottom bar is out of sight and its running clock is at the note's foot while the clock in the note runs on, and the bar is gone with every plugin that puts something in it off", async ({ page }) => {
-  await open(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
+  await open(page, `# Tea\n\nSteep /timer(5m since=${new Date().toISOString()}) now.\n`);
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
 
   await page.keyboard.press("ControlOrMeta+.");
@@ -158,7 +158,7 @@ test("in focus the bottom bar is out of sight and its running clock is at the no
 test("a member who can't change the note still sees the bar's clocks and count, and can run a quick timer of their own", async ({ page }) => {
   const writes: string[] = [];
   page.on("request", (request) => request.url().endsWith("/ops") && /"note\.write"/.test(request.postData() ?? "") && writes.push(request.postData()!));
-  const { note } = await asViewerOfNote(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
+  const { note } = await asViewerOfNote(page, `# Tea\n\nSteep /timer(5m since=${new Date().toISOString()}) now.\n`);
   await page.goto(`/note/${note.id}`);
   await expect(page.getByRole("button", { name: "Ada's workspace Viewer" })).toBeVisible();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
@@ -172,7 +172,7 @@ test("a member who can't change the note still sees the bar's clocks and count, 
   expect(writes).toEqual([]);
 });
 
-test("every embed is in the / menu after the blocks and alone in the :: menu, and every command-started widget is in the command palette", async ({ page }) => {
+test("every embed is in the / menu after the blocks, :: opens no menu, and every command-started widget is in the command palette", async ({ page }) => {
   const embeds = [/^Timer/, /^Stopwatch/, /^Kanban board/, /^Form/, /^HTML/, /^Drawing/, /^Upload an image/, /^Upload a video/, /^Upload a recording/, /^Upload a file/, /^Record your voice/, /^Insert an upload/];
   await open(page, "# Tea\n\n");
   await editor(page).focus();
@@ -181,8 +181,9 @@ test("every embed is in the / menu after the blocks and alone in the :: menu, an
   await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Heading 1/, /^Heading 2/, /^Heading 3/, /^Bulleted list/, /^Numbered list/, /^Task list/, /^Table/, /^Code block/, /^Quote/, /^Divider/, ...embeds]);
   await page.keyboard.press("Escape");
   await page.keyboard.type(" ::");
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveText(embeds);
-  await page.keyboard.press("Escape");
+  // The list is asked for on the turn after a key and drawn on the frame after that.
+  await page.evaluate(() => new Promise((done) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 50)));
+  await expect(page.getByRole("listbox")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("quick timer");

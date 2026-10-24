@@ -20,7 +20,7 @@ describe("a note's word count", () => {
     expect(counted("# Plan\n\n- [ ] write the *first* draft\n\n---\n")).toBe("5 words · 1 min read");
     expect(counted(Array(231).fill("word").join(" "))).toBe("231 words · 2 min read");
     expect(counted("naïve café 東京 2026")).toBe("4 words · 1 min read");
-    expect(counted("Steep ::timer{5m since=2026-10-10T12:00:00.000Z} now\n\n:::kanban{}\n## To do\n- write\n:::\n")).toBe("5 words · 1 min read");
+    expect(counted("Steep /timer(5m since=2026-10-10T12:00:00.000Z) now\n\n/kanban()\n~~~markdown\n## To do\n- write\n~~~\n")).toBe("5 words · 1 min read");
   });
 
   it("says the note's count and reading time, or how many of its words are selected", () => {

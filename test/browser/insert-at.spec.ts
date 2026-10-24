@@ -196,21 +196,21 @@ test("picking from @ writes what each kind's own way in writes: a mention, a lin
   await page.keyboard.type(" and @minutes");
   await expect(options(page)).toHaveText([/^minutes\.txtFile · /, "Create note “minutes”New note in Unsorted", "Create folder “minutes”New folder at the top", "Create tag #minutesNew tag"]);
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk [[person:${adaId}]] about [[${onboarding.id}]] and ::file{${minutes.id}}`);
+  await expect.poll(() => text(page, note.id)).toBe(`# Plan\n\nAsk [[person:${adaId}]] about [[${onboarding.id}]] and /file(${minutes.id})`);
 
   await page.keyboard.type(" at @lunch");
   await expect(options(page)).toHaveCount(11);
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`and ::file\\{${minutes.id}\\} at \\[\\[event:[a-z0-9]{12}\\]\\]$`));
+  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`and /file\\(${minutes.id}\\) at \\[\\[event:[a-z0-9]{12}\\]\\]$`));
 
   // A picture goes on a line of its own, as a pasted one does, and the cursor on the line after it.
   await page.keyboard.press("Enter");
   await page.keyboard.type("@portrait");
   await expect(options(page)).toHaveText([/^sam-portrait\.png/, "Create note “portrait”New note in Unsorted", "Create folder “portrait”New folder at the top", "Create tag #portraitNew tag"]);
   await page.keyboard.press("Enter");
-  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`\\[\\[event:[a-z0-9]{12}\\]\\]\\n::image\\{${portrait.id} 40x30\\}\\n$`));
+  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`\\[\\[event:[a-z0-9]{12}\\]\\]\\n/image\\(${portrait.id} 40x30\\)\\n$`));
   await page.keyboard.type("After.");
-  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`::image\\{${portrait.id} 40x30\\}\\nAfter\\.$`));
+  await expect.poll(() => text(page, note.id)).toMatch(new RegExp(`/image\\(${portrait.id} 40x30\\)\\nAfter\\.$`));
 });
 
 test("[[ lists the notes and the events, under a heading each, and none of the people or uploads @ lists", async ({ page }) => {

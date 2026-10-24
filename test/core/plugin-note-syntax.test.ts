@@ -81,7 +81,7 @@ describe("what a note can hold", () => {
     expect(readClock(inlineIn(NOTE_SYNTAX.find((row) => row.name === "stopwatch")!.example)[0]!.config, "stopwatch")).toEqual({ length: null, run: { is: "idle" } });
     expect(blocksIn(NOTE_SYNTAX.find((row) => row.name === "html")!.example)[0]!.body).toContain("<p>Hello</p>");
     expect(linksIn(NOTE_SYNTAX.find((row) => row.name === "event")!.example).map((link) => linkedEvent(link.target))).toEqual(["aaaaaaaaaaaa"]);
-    expect(writtenReference(inlineIn(NOTE_SYNTAX.find((row) => row.name === "contact")!.example)[0]!.config)).toEqual({ ref: "aaaaaaaaaaaa", label: "Ada Lovelace" });
+    expect(writtenReference(inlineIn(NOTE_SYNTAX.find((row) => row.name === "email")!.example)[0]!.config)).toEqual({ ref: "aaaaaaaaaaaa", label: "Invoice for October" });
     const math = NOTE_SYNTAX.find((row) => row.name === "math")!.example;
     expect(formulasIn(math.split("\n")[0]!)).toHaveLength(1);
     expect(mathBlocksIn(math.split("\n"))).toHaveLength(1);

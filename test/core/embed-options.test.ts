@@ -52,8 +52,9 @@ describe("an embed's declared options", () => {
   it("refuse a value their type can't take, saying what it takes", () => {
     expect(set(POLL, "", "votes", "6")).toBe("A whole number from 1 to 5.");
     expect(set(POLL, "", "votes", "2.5")).toBe("A whole number from 1 to 5.");
-    expect(set(POLL, "", "question", 'say "hi"')).toBe("Quotes, braces and line breaks can't be in it.");
-    expect(set(POLL, "", "question", "a}b")).toBe("Quotes, braces and line breaks can't be in it.");
+    expect(set(POLL, "", "question", 'say "hi"')).toBe("Quotes and line breaks can't be in it.");
+    expect(set(POLL, "", "question", "a\nb")).toBe("Quotes and line breaks can't be in it.");
+    expect(set(POLL, "", "question", "a}b (c")).toEqual({ config: 'question="a}b (c"' });
     expect(set(POLL, "", "show", "pie")).toBe("One of bars, dots.");
     expect(set(POLL, "", "for", "soon")).toBe("Write it like 25m, 1h30m or 90s.");
     expect(set(POLL, "", "until", "2026-02-30")).toBe("A day written like 2026-10-16.");

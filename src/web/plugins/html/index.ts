@@ -8,7 +8,7 @@ const START = `<p>Hello from <b>HTML</b>.</p>
 `;
 
 /**
- * HTML in a note, run in a frame shut off from the app: `:::html{}`, the HTML, then `:::`. It runs
+ * HTML in a note, run in a frame shut off from the app: `/html()`, then the HTML in a fence under it. It runs
  * by itself the first time its room is on screen, unless the member has asked to be asked first, in
  * which case it runs when Run is pressed. The frame is the body of the block's card, and stays as it
  * is while the rest of the note is written. Until it is drawn, its room shows a placeholder its size.
@@ -63,6 +63,7 @@ export const html: Plugin = {
       name: "html",
       title: "HTML",
       block: true,
+      content: "html",
       starts: { body: START },
       description: "A page of your own HTML, run in a frame shut off from the app",
       preview: { image: sketch(outline(10, 8, 180, 68, 5) + `<rect x="10" y="8" width="180" height="14" rx="5" opacity="0.18"/><circle cx="20" cy="15" r="2.5"/><circle cx="29" cy="15" r="2.5"/><circle cx="38" cy="15" r="2.5"/>` + lettering(70, 58, 26, "&lt;/&gt;", 'font-family="ui-monospace, monospace" font-weight="600"')) },

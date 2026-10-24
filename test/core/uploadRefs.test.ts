@@ -62,8 +62,8 @@ describe("an embed drawn another width", () => {
   });
 
   it("is still the same upload to the note", () => {
-    for (const share of [1 / 3, 0.42, 1]) expect(uploadIds(`::image{${withShare(`${ID} 4x3`, share)}}`)).toEqual([ID]);
-    expect(writtenUpload("image", ID, { width: 4, height: 3 })).toBe(`::image{${ID} 4x3}`);
+    for (const share of [1 / 3, 0.42, 1]) expect(uploadIds(`/image(${withShare(`${ID} 4x3`, share)})`)).toEqual([ID]);
+    expect(writtenUpload("image", ID, { width: 4, height: 3 })).toBe(`/image(${ID} 4x3)`);
   });
 });
 
@@ -120,13 +120,13 @@ describe("an embed drawing another part of its picture", () => {
     expect(resized).toBe(`${ID} 1200x800 60% crop=120,40,800,600`);
     expect(cropIn(resized)).toEqual({ x: 120, y: 40, width: 800, height: 600 });
     expect(shareIn(withCrop(resized, { x: 0, y: 0, width: 600, height: 600 }))).toBe(0.6);
-    expect(uploadIds(`::image{${resized}}`)).toEqual([ID]);
+    expect(uploadIds(`/image(${resized})`)).toEqual([ID]);
   });
 });
 
 describe("a drawing's embed", () => {
   it("refers to its upload as a picture's does, and an empty one to none", () => {
-    expect(uploadIds(`# Plan\n\n::drawing{${ID} 820x460 medium}\n\n::drawing{}\n`)).toEqual([ID]);
+    expect(uploadIds(`# Plan\n\n/drawing(${ID} 820x460 medium)\n\n/drawing()\n`)).toEqual([ID]);
   });
 
   it("names a new upload and its room in place of the one it named, keeping its width and every other word", () => {

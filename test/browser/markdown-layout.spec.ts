@@ -170,7 +170,7 @@ const NOTE = [
   "",
   "After code.",
   "",
-  "T ::timer{5m} embed here",
+  "T /timer(5m) embed here",
   "",
   LONG,
   "",
