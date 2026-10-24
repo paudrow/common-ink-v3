@@ -424,6 +424,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "contact.merge": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", mainId: "people/c1", mainEtag: "none", otherId: "people/c2", otherEtag: "none" }) },
   "contact.merges": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "contact.restore": { on: "workspace", who: EVERYONE, args: () => ({ id: "aaaaaaaaaaaa" }) },
+  "contact.addEmail": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", id: "people/c1", email: { value: "no@example.com", type: null } }) },
   // A person's mail is theirs as their contacts are. Adding and removing an address is the member's alone (NOT_FOR_AGENTS).
   "email.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "email.thread": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "email", id: "none" }) },
@@ -502,11 +503,11 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "tag.describe", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "contact.dismiss", "contact.merge", "contact.restore", "email.addSender", "email.removeSender", "record.refer", "pin.set", "plugin.install", "plugin.uninstall", "plugin.permit", "plugin.request", "plugin.decide", "draft.save", "draft.discard"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "tag.describe", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "contact.dismiss", "contact.merge", "contact.restore", "contact.addEmail", "email.addSender", "email.removeSender", "record.refer", "pin.set", "plugin.install", "plugin.uninstall", "plugin.permit", "plugin.request", "plugin.decide", "draft.save", "draft.discard"];
 /** What is the member's, and their agent's in their role, over the workspace's plugins: never a plugin's, whatever it is permitted, and nothing an agent limited to folders sees. */
 const PLUGIN_WORK = (type: OpType) => (type.startsWith("plugin.") && type !== "plugin.list") || type.startsWith("draft.");
 /** What answers from what is the asker's own and in no folder: their data sources, and how far they have read. */
-const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "contact.duplicates", "contact.dismiss", "contact.combine", "contact.merge", "contact.merges", "contact.restore", "email.list", "email.thread", "email.senders", "email.addSender", "email.removeSender", "record.refer", "record.read", "record.notes", "visit.read"];
+const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "contact.duplicates", "contact.dismiss", "contact.combine", "contact.merge", "contact.merges", "contact.restore", "contact.addEmail", "email.list", "email.thread", "email.senders", "email.addSender", "email.removeSender", "record.refer", "record.read", "record.notes", "visit.read"];
 const AGENTS = [
   "their agent",
   "their read-only agent",

@@ -947,6 +947,8 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("contact.merges") }),
   /** Makes a contact the asker merged into another a contact of its own again, from the copy kept of it. */
   z.object({ type: z.literal("contact.restore"), id: Id }),
+  /** Adds an email address to one of the asker's contacts where it is kept, after the ones it has. One it has already changes nothing. */
+  z.object({ type: z.literal("contact.addEmail"), sourceId: SourceId, id: RecordId, email: Labelled(ContactFields.emails.element.shape.value) }),
   /**
    * The asker's email threads, the latest first: what they sent, copied or forwarded to the address
    * `address` names. `query` keeps those with every word of it in a message's subject, sender,
@@ -1887,6 +1889,7 @@ export interface Results {
   "contact.merge": { contact: ContactCard; merge: ContactMerge };
   "contact.merges": { merges: ContactMerge[] };
   "contact.restore": ContactCard;
+  "contact.addEmail": ContactCard;
   /** `address` is where mail is sent to be kept; `more` when there are threads after the last. */
   "email.list": { threads: MailThread[]; sources: Source[]; more: boolean; address: string | null };
   "email.thread": MailThreadRead;

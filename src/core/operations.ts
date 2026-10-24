@@ -80,7 +80,7 @@ import { paging } from "./paging.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, addMailSender, calendarFor, calendarSettings, combineContacts, contactCards, createContact, createEvent, dismissDuplicate, listContacts, listDuplicates, listEvents, listMail, listMerges, listSources, mailSenders, mergeContacts, mergedInto, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, restoreContact, updateContact, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, addContactEmail, addMailSender, calendarFor, calendarSettings, combineContacts, contactCards, createContact, createEvent, dismissDuplicate, listContacts, listDuplicates, listEvents, listMail, listMerges, listSources, mailSenders, mergeContacts, mergedInto, photoContact, readMail, removeMailSender, readRecord, referencesTo, refer, restoreContact, updateContact, updateEvent, type Sources } from "./sources.ts";
 import { holdsOldLinks, linksConverted } from "./oldLinks.ts";
 import { referencesIn } from "./references.ts";
 import { BY_TOKEN, NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
@@ -3568,6 +3568,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "contact.merge": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { type: _, ...merging }) => mergeContacts(asker(ctx), merging) },
   "contact.merges": { needs: "view", by: "member", own: true, run: (ctx) => listMerges(asker(ctx)) },
   "contact.restore": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => restoreContact(asker(ctx), op.id) },
+  "contact.addEmail": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => addContactEmail(asker(ctx), op.sourceId, op.id, op.email) },
   // A person's mail is theirs as their calendar is, and read-only: nothing changes a message.
   "email.list": { needs: "view", own: true, run: (ctx, op) => listMail(asker(ctx), op) },
   "email.thread": { needs: "view", own: true, run: (ctx, op) => readMail(asker(ctx), op.sourceId, op.id) },

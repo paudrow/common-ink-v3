@@ -124,6 +124,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "contact.merge": CONTACTS,
   "contact.merges": "The contacts the member merged are only of use for restoring one, which only the member does, in the app.",
   "contact.restore": CONTACTS,
+  "contact.addEmail": CONTACTS,
   "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.upload": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the uploads its member can see.",

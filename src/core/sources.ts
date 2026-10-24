@@ -3,7 +3,7 @@ import { combinedContact, duplicatePairs, pairKey } from "./duplicates.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
 import { writtenEventLink } from "./links.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactMerge, type DuplicatePair, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactLine, type ContactMerge, type DuplicatePair, type EventWhen, type MailSender, type MailThread, type MailThreadRead, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -406,6 +406,18 @@ export async function createContact(asker: Asker, sourceId: string, fields: Cont
   const source = await sourceOf(asker, sourceId, "contacts");
   const changes = changesOf(source);
   return changing(source, () => changes.create(fields));
+}
+
+/**
+ * Adds an email address to one of the asker's contacts, as it is kept now: the contact is read and
+ * changed in one go, so a change made there meanwhile refuses it rather than being lost.
+ */
+export async function addContactEmail(asker: Asker, sourceId: string, id: string, email: ContactLine): Promise<ContactCard> {
+  const source = await sourceOf(asker, sourceId, "contacts");
+  const changes = changesOf(source);
+  const card = await contactOf(source, id);
+  if (card.emails.some((e) => e.value.toLowerCase() === email.value.toLowerCase())) return card;
+  return changing(source, () => changes.update(id, { emails: [...card.emails, email] }, card.etag));
 }
 
 /** How long the copy of a contact merged into another is kept to restore it. */

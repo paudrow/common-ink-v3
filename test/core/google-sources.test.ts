@@ -836,6 +836,17 @@ describe("merging Google contacts", () => {
     expect(await kept()).toEqual([]);
   });
 
+  it("adds an email address to a contact as Google holds it, once, and an agent can't", async () => {
+    const { ada, google, ask } = await twoSams();
+    const added = await ask({ type: "contact.addEmail", sourceId: "google-contacts", id: "people/c5", email: { value: "sam@okafor.example", type: "home" } });
+    expect(added.emails).toEqual([{ value: "jobs@okafor.example", type: "work" }, { value: "sam@okafor.example", type: "home" }]);
+    expect(JSON.parse(google.asked("PATCH", /c5:updateContact$/)[0]!.body)).toEqual({ etag: "%Eg", emailAddresses: [{ value: "jobs@okafor.example", type: "work" }, { value: "sam@okafor.example", type: "home" }] });
+    expect(await ask({ type: "contact.addEmail", sourceId: "google-contacts", id: "people/c5", email: { value: "SAM@okafor.example", type: null } })).toEqual(added);
+    expect(google.asked("PATCH", /updateContact$/)).toHaveLength(1);
+    const agent: Actor = { kind: "agent", agentId: "agent-1", personId: ada.personId, workspaceId: ada.workspaceId };
+    expect(await refusal(ask({ type: "contact.addEmail", sourceId: "google-contacts", id: "people/c5", email: { value: "x@example.com", type: null } }, agent))).toBe("forbidden: An agent can't contact.addEmail");
+  });
+
   it("is the member's alone: an agent can't combine, merge, list or restore", async () => {
     const { ada, ask } = await twoSams();
     const agent: Actor = { kind: "agent", agentId: "agent-1", personId: ada.personId, workspaceId: ada.workspaceId };
