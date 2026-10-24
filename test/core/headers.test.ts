@@ -8,6 +8,8 @@ const PAGE =
 const EMBED_FRAME =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 const DATA = "default-src 'none'; frame-ancestors 'none'";
+const SITE_PAGE =
+  "default-src 'none'; script-src https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src https://cloudflareinsights.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
 
 const sent = async (path: string, init?: RequestInit) => {
   const res = await SELF.fetch(`https://commonink.app${path}`, { redirect: "manual", ...init });
@@ -16,9 +18,15 @@ const sent = async (path: string, init?: RequestInit) => {
 };
 
 describe("what the Worker tells a browser about each response", () => {
-  it("gives the app's pages, the site's pages, the sign-in pages and the retiring service worker the app's policy", async () => {
-    for (const path of ["/", "/note/abcdefghijkl", "/settings", "/welcome", "/privacy", "/docs", "/docs/cli", "/sitemap.xml", "/auth/google", "/auth/nothing", "/sw.js"]) {
+  it("gives the app's pages, the sign-in pages and the retiring service worker the app's policy", async () => {
+    for (const path of ["/note/abcdefghijkl", "/settings", "/usage", "/auth/google", "/auth/nothing", "/sw.js"]) {
       expect(await sent(path)).toEqual([path, PAGE, "nosniff", "strict-origin-when-cross-origin"]);
+    }
+  });
+
+  it("gives the site's pages a policy of their own, which runs nothing of the app's and lets Cloudflare's beacon count the visit", async () => {
+    for (const path of ["/", "/welcome", "/privacy", "/terms", "/docs", "/docs/cli", "/sitemap.xml"]) {
+      expect(await sent(path)).toEqual([path, SITE_PAGE, "nosniff", "strict-origin-when-cross-origin"]);
     }
   });
 

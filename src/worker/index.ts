@@ -8,6 +8,7 @@ import { eraseWorkspaces, pruneDeletions, redoRequested } from "../core/erase.ts
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { sweepUnwritten } from "../core/discard.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
+import { count, countWith } from "../core/usage.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
 import { MAX_OP_BYTES, TooLarge, cappedJson } from "./body.ts";
 import { handleClipper, handleClipperApi } from "./clipper.ts";
@@ -27,6 +28,8 @@ import { handleEmail, logged, mailAddress } from "./mail.ts";
 import { siteResponse } from "./site/index.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
+import { usageCounter } from "./usage.ts";
+import { handleUsageApi, mayReadUsage } from "./usageReport.ts";
 import { vault } from "./vault.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
@@ -77,8 +80,11 @@ async function handleApi(req: Request, env: Env, url: URL, trace: Trace): Promis
   if (url.pathname === "/api/me" && req.method === "GET") {
     // Opening the app is arriving: a workspace of their own if they are in none, and the invites made before they had an account.
     await arrive(env.DB, personId);
-    return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
+    await count({ event: "app_open", workspaceId: null, personId, kind: "person" });
+    return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null, usage: await mayReadUsage(env, url, personId) } } satisfies MeHere);
   }
+
+  if (url.pathname === "/api/usage") return handleUsageApi(req, env, url, personId);
 
   // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
   const lookup = /^\/api\/(notes|uploads|invites)\/([a-z0-9]{12})$/.exec(url.pathname);
@@ -236,6 +242,7 @@ const unlistedPage = (page: Response) => {
 function keyLinks(env: Env): void {
   const sealer = vault(env.SESSION_SECRET);
   if (sealer) sealLinksWith(sealer);
+  countWith(usageCounter(env));
 }
 
 export default {

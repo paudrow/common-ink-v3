@@ -190,6 +190,17 @@ test("an HTML embed's document runs its own script and styles under the embed fr
   await expect.poll(() => watch.refused()).toContainEqual(expect.stringMatching(/^connect-src .*\/api\/me$/));
 });
 
+test("the site's pages draw under a policy of their own, which refuses nothing they load and lets only Cloudflare's beacon in", async ({ page }) => {
+  const watch = await watchRefusals(page);
+  for (const path of ["/welcome", "/privacy", "/docs", "/docs/cli"]) {
+    const res = await page.goto(path);
+    expect([path, res!.headers()["content-security-policy"]]).toEqual([path, expect.stringContaining("script-src https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'")]);
+    await expect(page.locator("main h1, main .hero h1").first()).toBeVisible();
+    expect([path, await page.evaluate(() => document.fonts.check("1rem 'Source Serif 4'"))]).toEqual([path, true]);
+  }
+  expect(await watch.refused()).toEqual([]);
+});
+
 test("each kind of address gets its own policy, and all of them nosniff and a referrer rule", async ({ request }) => {
   const headers = async (path: string) => (await request.get(path, { maxRedirects: 0 })).headers();
   for (const path of ["/", "/note/abcdefghijkl", "/settings", "/auth/google", "/sw.js"]) {

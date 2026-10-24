@@ -12,6 +12,7 @@ import { ASK_NOTE_SYNTAX, syntaxDescription, syntaxText as noteSyntaxText } from
 import { MAX_SEARCH_LENGTH, SCOPES, queryLanguage, type Scope } from "../../core/query.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 import { CLIPPER_TOOLS } from "../../core/clipper.ts";
+import { count } from "../../core/usage.ts";
 import type { Sources } from "../../core/sources.ts";
 
 /** What a tool call comes back with: text for the agent, and whether it failed. */
@@ -1363,6 +1364,7 @@ export async function callTool(db: D1Database, agent: Caller, name: string, args
       }
     }
     const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
+    if (agent.clipper && name === "create_note") await count({ event: "feature", detail: "clipper", workspaceId, personId: agent.personId, kind: "person" });
     return written(tool.told ? tool.told(answer as never, reached.origin, own) : answer);
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${namedAsTold(tool, err.message)}`, true);

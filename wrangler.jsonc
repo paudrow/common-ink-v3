@@ -60,12 +60,22 @@
   // minute of audio, so the dev server leaves it out unless asked (`npm run dev -- --ai`), Previews and the built Worker
   // CI tests against leave it out (scripts/preview.ts, scripts/built-worker.ts), and unit tests stand in for it.
   "ai": { "binding": "AI" },
+  // How the app is used, counted by the Worker as it happens (src/core/usage.ts, docs/adr/0020-usage-is-counted-on-the-server-not-in-the-browser.md):
+  // what happened, in which workspace, by a person or an agent, and a hash of who. Never what a note, title, tag or email says.
+  // Analytics Engine makes the dataset on the first write. The dev server, Previews and the built Worker CI tests leave it out.
+  "analytics_engine_datasets": [{ "binding": "USAGE", "dataset": "common_ink_usage" }],
+  // Reads those counts back for the Usage page (src/worker/usageReport.ts), with the account's own access: no API token.
+  // It always reads Cloudflare, so the dev server, Previews, the built Worker and tests leave it out.
+  "analytics": { "binding": "USAGE_SQL" },
   // Which version of the Worker is answering: /health says its id, and a fault sent to Sentry names it as the release,
   // the same id `wrangler versions list` and `wrangler rollback` use (docs/runbooks/rollback.md).
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // Mail is kept from notes@ at in.commonink.app, the subdomain Cloudflare Email Routing receives for: the apex's
   // MX stays with Google Workspace (docs/email.md).
-  "vars": { "MAIL_ADDRESS": "notes@in.commonink.app" },
+  // USAGE_WORKSPACE is the operator's own workspace, Audrow's: its admins, and nobody else, are offered the Usage page
+  // (src/worker/usageReport.ts). It is an id, not a secret, so it is kept here, where a deploy can't drop it. The dev
+  // server, Previews, the built Worker and tests set it empty, so there the Dev User stands for the operator.
+  "vars": { "MAIL_ADDRESS": "notes@in.commonink.app", "USAGE_WORKSPACE": "aya0dfol2jvi" },
   // The optional settings are typed in src/worker/env.d.ts.
   "secrets": { "required": ["SESSION_SECRET"] }
   // Previews run on their own Worker, common-ink-v3-previews. scripts/preview.ts writes their settings: their own D1

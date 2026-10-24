@@ -1,4 +1,5 @@
 import { NotThatPerson, sessionHolds, signIn, whoAmI } from "../core/accounts.ts";
+import { count } from "../core/usage.ts";
 import { authenticateAgent, type ConnectedAgent } from "../core/agents.ts";
 import { authenticateClipper, type ClipperGrant } from "../core/clipper.ts";
 import { authorizeUrl, covers, exchange, isGoogleSource, REACHING_SCOPES, revoke, SOURCE_SCOPES, type Asking, type GoogleConfig, type GoogleSourceId, type GoogleTokens } from "./google.ts";
@@ -22,7 +23,7 @@ const STATE_SECONDS = 600;
 export const devSignIn = (env: Env, url: URL) =>
   env.DEV_SIGN_IN === "1" && (THIS_MACHINE.test(url.hostname) || (PREVIEW_HOSTS.test(url.hostname) && !env.GOOGLE_CLIENT_ID && !env.ALLOWED_EMAILS));
 
-const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
+export const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
 
 /**
  * Who a request is from. On this machine and on Previews, nobody signed in is the dev user. A session
@@ -130,6 +131,7 @@ async function keepGrant(env: Env, personId: string, email: string, tokens: Goog
 
 async function startSession(env: Env, identity: { email: string; name: string }, next: string): Promise<Response> {
   const { personId, sessionsEnded } = await signIn(env.DB, identity);
+  await count({ event: "sign_in", workspaceId: null, personId, kind: "person" });
   const headers = new Headers({ Location: safeNext(next) });
   headers.append("Set-Cookie", setCookie(SESSION_COOKIE, await sign({ t: "session", personId, ended: sessionsEnded }, env.SESSION_SECRET, SESSION_SECONDS), SESSION_SECONDS));
   headers.append("Set-Cookie", setCookie(STATE_COOKIE, "", 0));

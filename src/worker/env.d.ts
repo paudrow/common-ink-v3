@@ -22,6 +22,10 @@ interface InkSettings {
   MAIL_ADDRESS?: string;
   /** Whose Authentication-Results header the Worker trusts on incoming mail. Without it, mx.cloudflare.net: Cloudflare Email Routing's. */
   MAIL_AUTHSERV?: string;
+  /** The site token of the Web Analytics site in Cloudflare's dashboard. With it, the site's pages (never the app's) load Cloudflare's beacon: docs/runbooks/analytics.md. */
+  WEB_ANALYTICS_TOKEN?: string;
+  /** The operator's own workspace, by id: its admins, and nobody else, read the Usage page at /usage (src/worker/usageReport.ts). */
+  USAGE_WORKSPACE?: string;
   /** A Sentry project's DSN. With it, every fault the Worker reports is also sent to Sentry; without it, faults go only to Workers Logs (src/worker/report.ts). */
   SENTRY_DSN?: string;
 }

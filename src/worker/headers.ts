@@ -35,6 +35,28 @@ export const PAGE: Policy = {
   "object-src": ["'none'"],
 };
 
+/** Where Cloudflare Web Analytics' beacon is loaded from, and where it sends what it counted. */
+export const BEACON_SCRIPT = "https://static.cloudflareinsights.com/beacon.min.js";
+const BEACON_REPORTS = "https://cloudflareinsights.com";
+
+/**
+ * The site's pages: the landing, the docs, privacy and terms. They run no script of the app's, and
+ * nothing of anyone's notes is on them, so they alone may load Cloudflare's beacon and send it its
+ * counts (site/layout.ts writes it where a site token is set). Their bar charts are inline styles.
+ */
+export const SITE_PAGE: Policy = {
+  "default-src": ["'none'"],
+  "script-src": [new URL(BEACON_SCRIPT).origin],
+  "style-src": ["'self'", "'unsafe-inline'"],
+  "img-src": ["'self'", "data:"],
+  "font-src": ["'self'"],
+  "connect-src": [BEACON_REPORTS],
+  "base-uri": ["'none'"],
+  "form-action": ["'none'"],
+  "frame-ancestors": ["'none'"],
+  "object-src": ["'none'"],
+};
+
 /**
  * The document an HTML embed runs in. `sandbox` without `allow-same-origin` gives it an origin of its
  * own, so it shares no cookies or storage with the app, and it may fetch nothing and frame nothing.

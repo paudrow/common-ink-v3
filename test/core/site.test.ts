@@ -141,6 +141,28 @@ describe("the docs", () => {
   });
 });
 
+describe("Cloudflare Web Analytics", () => {
+  const TOKEN = "0123456789abcdef0123456789abcdef";
+  const BEACON = `<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon="{&#34;token&#34;:&#34;${TOKEN}&#34;}"></script>`;
+  const counted = { ...env, SESSION_SECRET: SECRET, WEB_ANALYTICS_TOKEN: TOKEN };
+  const fetched = async (path: string, settings: Env, headers: HeadersInit = {}) => (await worker.fetch(new Request(`${ORIGIN}${path}`, { headers }) as never, settings)).text();
+
+  it("counts a visit to each of the site's pages where the Worker has a site token", async () => {
+    for (const path of ["/", "/welcome", "/privacy", "/terms", "/docs", "/docs/cli"]) expect([path, (await fetched(path, counted)).includes(BEACON)]).toEqual([path, true]);
+  });
+
+  it("counts nothing without a site token, as on this machine, in tests and in Previews", async () => {
+    for (const path of ["/", "/privacy", "/docs"]) expect([path, (await send(path)).text.includes("beacon.min.js")]).toEqual([path, false]);
+  });
+
+  it("never counts a page of the app, an HTML embed's document or a plugin's frame, token or not", async () => {
+    const cookie = await signedIn();
+    for (const [path, headers] of [["/", cookie], ["/settings", cookie], ["/note/abcdefghijkl", cookie], ["/usage", cookie], ["/embed-frame", {}], ["/embed-frame/g/abcdefghijklmnopqrstuvwxyz012345", {}], ["/s/abcdefghijklmnopqrstu", {}]] as const) {
+      expect([path, (await fetched(path, counted, headers)).includes("beacon.min.js")]).toEqual([path, false]);
+    }
+  });
+});
+
 describe("where the site's pages are", () => {
   const plugins = import.meta.glob<string>("../../src/web/plugins/**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true });
   const appPages = new Set(Object.values(plugins).flatMap((source) => [...source.matchAll(/\bpath:\s*"(\/[^"]*)"/g)].map((m) => m[1]!)));

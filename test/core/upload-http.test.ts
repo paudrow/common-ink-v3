@@ -359,9 +359,9 @@ describe("a PDF opened in a tab, from the site kept for files", () => {
     const plain = await nowhere.tab(nowhere.pdf.id);
     expect([plain.status, plain.headers.get("Content-Disposition")?.split(";")[0]]).toEqual([200, "attachment"]);
     const me = (await (await at("https://ink.test/api/me", { headers: { Cookie: nowhere.cookie } }, {})).json()) as { setup: unknown };
-    expect(me.setup).toEqual({ embedSite: false, fileSite: false });
+    expect(me.setup).toEqual({ embedSite: false, fileSite: false, usage: false });
     const meThere = (await (await at("https://ink.test/api/me", { headers: { Cookie: nowhere.cookie } })).json()) as { setup: unknown };
-    expect(meThere.setup).toEqual({ embedSite: false, fileSite: true });
+    expect(meThere.setup).toEqual({ embedSite: false, fileSite: true, usage: false });
   });
 
   it("must be an https address", async () => {

@@ -2267,6 +2267,8 @@ export interface Setup {
   embedSite: boolean;
   /** Whether files are opened in a tab from a site of their own (`FILE_ORIGIN`). Without one a PDF is downloaded. */
   fileSite: boolean;
+  /** Whether this person may read the Usage page: an admin of the operator's workspace (`USAGE_WORKSPACE`). */
+  usage: boolean;
 }
 
 /** What `/api/me` answers: who is signed in, and how the server is set up. */

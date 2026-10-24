@@ -23,7 +23,7 @@ export default defineConfig(async () => ({
       wrangler: { configPath: "./wrangler.jsonc" },
       // Workers AI only runs on Cloudflare: tests hand the core a listener of their own (test/core/transcribe.test.ts).
       remoteBindings: false,
-      miniflare: { bindings: { TEST_MIGRATIONS: await readD1Migrations("migrations"), CLIPPER_EXTENSION_IDS: unpackedExtensionId() } },
+      miniflare: { bindings: { TEST_MIGRATIONS: await readD1Migrations("migrations"), CLIPPER_EXTENSION_IDS: unpackedExtensionId(), USAGE_WORKSPACE: "" } },
     }),
   ],
   test: {

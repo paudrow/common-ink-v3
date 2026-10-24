@@ -1,4 +1,4 @@
-> **Draft, needs legal review.** Every statement about what Common Ink stores, sends or deletes was checked against the code on 19 October 2026. Text in [square brackets] is a business decision or promise the maintainer has to confirm or fill in.
+> **Draft, needs legal review.** Every statement about what Common Ink stores, sends or deletes was checked against the code on 19 October 2026, and what it counts on 23 October 2026. Text in [square brackets] is a business decision or promise the maintainer has to confirm or fill in.
 
 # Privacy policy
 
@@ -89,6 +89,14 @@ You can disconnect your calendar and contacts in Common Ink. That deletes the to
 - To read and change your calendar and contacts when you or your agent ask.
 - To keep Common Ink secure and fix problems.
 
+## What Common Ink counts
+
+Common Ink counts how it is used, so we know what to build and fix. It does this in two ways, and neither counts anything a note says.
+
+**The site's public pages** (the home page, the docs, this policy and the terms) use [Cloudflare Web Analytics](https://www.cloudflare.com/web-analytics/). It counts visits, the page visited, the site that linked to it, and the visitor's country, browser and device type, and how fast the page loaded. It sets no cookie, keeps nothing in your browser, and does not follow you to other sites. Those pages load its script from `static.cloudflareinsights.com`. The app's pages, a page a share link opens, and the frames embeds and plugins run in never load it.
+
+**The app** counts on the server, as things happen, and loads no script for it. Each count says what happened (such as signing up, opening the app, making or editing a note, adding or completing a todo, recording, transcribing, clipping a page, inserting a timer, deleting a tag, or which tool an agent called), in which workspace, whether a person, an agent or a plugin did it, and when. It names who did it only by a code made from their account with a key kept on the server: a pseudonym, the same for one person each time, which nobody without that key can turn back into a person. A count never holds what a note, a title, a tag, a file name, a folder name or an email says, and never an email address or a name. The counts are kept in Cloudflare Workers Analytics Engine and read only in aggregate, on a page only Common Ink's operators can open: how many people were active each week, how many signed up, how much people and agents each wrote, and which features are used.
+
 Common Ink sends your notes, files, calendar and contacts to no AI model of its own. The Worker has no AI service connected. An agent you connect is different, and is covered below. [We don't sell or rent your information, use it for advertising, or let anyone train AI models on it.]
 
 ## Who can see your content
@@ -103,10 +111,12 @@ Common Ink sends your notes, files, calendar and contacts to no AI model of its 
 
 ## Service providers
 
-- **Cloudflare** runs Common Ink: the Worker that answers every request, the D1 database, the R2 bucket that holds uploads, and the Worker's logs. Its data centers may be outside your country.
+- **Cloudflare** runs Common Ink: the Worker that answers every request, the D1 database, the R2 bucket that holds uploads, the Worker's logs, the counts of how the app is used (Workers Analytics Engine), and Web Analytics on the site's public pages. Its data centers may be outside your country.
 - **Google** signs you in, and holds your calendar and contacts if you connect them.
 
 The Worker sends requests to no other service. Some features make your browser talk to other sites directly:
+
+- The site's public pages load Cloudflare Web Analytics from `static.cloudflareinsights.com` and send it the visit.
 
 - Embeds of YouTube videos, posts on X, and Bluesky posts load from those services (YouTube's from `youtube-nocookie.com`).
 - The Weather plugin, when you add it to your Dashboard, sends your browser's location or a place you type to Open-Meteo and BigDataCloud.
@@ -124,7 +134,7 @@ Common Ink sets two cookies, both needed to sign in:
 - `__Host-ink_session` keeps you signed in, for 30 days.
 - `__Host-ink_google` protects the step where Google signs you in, and lasts 10 minutes.
 
-Your browser's local storage keeps preferences such as the workspace you last opened and the panels you had open, and what plugins store for you. Common Ink uses no analytics, advertising or tracking cookies. Its pages load no scripts from other sites, and an embed runs in a frame of its own.
+Your browser's local storage keeps preferences such as the workspace you last opened and the panels you had open, and what plugins store for you. Common Ink uses no analytics, advertising or tracking cookies. The app's pages load no scripts from other sites, and an embed runs in a frame of its own. The site's public pages load one, Cloudflare Web Analytics, which sets no cookie (see What Common Ink counts).
 
 ## How long Common Ink keeps it
 
@@ -137,6 +147,7 @@ Your browser's local storage keeps preferences such as the workspace you last op
 - The clipper: 90 days, then you allow it again.
 - Google tokens: until you disconnect, or until Google stops accepting them, when they are deleted.
 - Logs: 7 days.
+- Counts of how the app is used: three months, which is as long as Workers Analytics Engine keeps them. Web Analytics on the public pages is kept by Cloudflare under its own policy, with no cookie and nothing that names you.
 - Backups: the database's history (Cloudflare D1 Time Travel) goes back 30 days. Anything deleted from the database stays in that history until it is 30 days old, and then it is gone. Uploads' bytes have no backup. When Common Ink deletes them from R2, they are gone at once.
 
 ## Deleting your data
@@ -145,7 +156,7 @@ Your browser's local storage keeps preferences such as the workspace you last op
 
 **A workspace.** An admin deletes a workspace in Settings. From that moment nobody reaches it: its members, invites, grants, share links and the agents limited to it go at once. Its notes, their history, its uploads and their bytes, and its folders are then erased, most often in the same request, and otherwise by the hourly job.
 
-What a deletion removes from the database stays in the backup history until it is 30 days old.
+What a deletion removes from the database stays in the backup history until it is 30 days old. Counts of how the app was used are not deleted with an account or a workspace: they stay, under the same pseudonym and workspace id and with nothing that names you, until they are three months old.
 
 ## Getting a copy of your data
 

@@ -3,6 +3,7 @@ import { newId } from "./ids.ts";
 import { allows, folderLevel } from "./access.ts";
 import { standingIn, type Standing } from "./standing.ts";
 import { NO_SUCH_WORKSPACE, AgentEdit, ConnectOptions, MAX_AGENT_NAME, OpError, type Agent, type ExpiresIn } from "./protocol.ts";
+import { count } from "./usage.ts";
 
 export const TOKEN_PREFIX = "cink_";
 /** What an OAuth access token starts with, after TOKEN_PREFIX's `cink_`. It is looked for in `oauth_tokens`, not in `agents`. */
@@ -145,6 +146,7 @@ export async function connectAgent(db: D1Database, personId: string, rawName: st
   const token = TOKEN_PREFIX + b64url(crypto.getRandomValues(new Uint8Array(32)));
   const { id, insert } = await prepareAgent(db, personId, rawName, input, { tokenPrefix: token.slice(0, TOKEN_PREFIX.length + 4), tokenHash: await hashToken(token) }, now, ended);
   if (!(await insert.run()).meta.changes) throw new OpError("conflict", SIGNED_OUT_MEANWHILE);
+  await count({ event: "feature", detail: "agent.connect", workspaceId: input.workspaceId ?? null, personId, kind: "person" });
   const row = await db.prepare(`SELECT ${COLUMNS} FROM agents WHERE id = ?`).bind(id).first<AgentRow>();
   return { agent: toAgent(row!), token };
 }
